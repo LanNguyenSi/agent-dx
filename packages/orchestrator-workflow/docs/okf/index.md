@@ -18,8 +18,8 @@ CLI); these docs deliberately do not duplicate them.
   markers (run-base fails open, acceptance-recommendation and final-status
   fail closed) plus the findings-table header that backs them; since
   0.26.0 also the per-worktree `.ai/run` pointer and the keyed
-  `run-base[<repo-basename>]` marker line for multi-repo runs, plus explicit
-  acceptance-baseline/v1 adoption for new runs.
+  `run-base[<repo-basename>]` marker line for multi-repo runs, plus the note that
+  there is one acceptance contract and no contract-selection marker.
 - [Install fence mechanics](install-fence-mechanics.md), the marker-fence,
   hash-ledger, and manifest.json contract that makes `init`/`uninstall`
   idempotent, reversible, and safe against local edits and path traversal.
@@ -41,9 +41,8 @@ CLI); these docs deliberately do not duplicate them.
   four before it), their read-only/writable split, where each I/O
   contract is duplicated and by which tests, the
   task-slicer-output-is-a-lossless-superset invariant, and the 0.11.0
-  subagent misfire rule; its v1 acceptance records are propagated as nested
-  full records, followed by an implementer baseline/criterion-evidence index.
-  The recorded original string-list contract remains available for older runs.
+  subagent misfire rule; its single acceptance contract is a list of
+  criterion strings propagated 1:1 from slicer output to delegation.
 - [Review gate and waiver semantics](review-gate-and-waivers.md), the
   review-never-skipped invariant: severity ladder, critical/high waiver
   rules, the Decision-column legend, and the three synced surfaces (policy,

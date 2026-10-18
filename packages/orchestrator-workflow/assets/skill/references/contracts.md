@@ -25,36 +25,14 @@ open_questions:
 recommendation: ""
 ```
 
-## Contract selection
-
-Contract selection: use `acceptance-baseline/v1` only when the orchestrator
-recorded `Acceptance contract: acceptance-baseline/v1` in `00-goal.md` at run
-creation, before slicing, and communicated that selection in the delegation.
-Existing runs use their recorded original contract. Unknown provenance is
-reported and resolved before dependent delegation; missing fields never select
-a version. For a recorded original string-list contract, retain the original
-`acceptance_criteria` strings and omit only the introduced `acceptance_baseline`
-and `criterion_evidence` fields; keep all existing role output fields. This
-selection governs the rules and every YAML block below.
-
 ## Subagent input contract
-
-Use this v1 block subject to Contract selection above, retaining the complete
-input envelope and scope fields for the selected contract.
 
 ```yaml
 role: advisor | explorer | implementer | reviewer | task_slicer
 task_id: T-000
 goal: ""
-acceptance_baseline:
-  id: ""
-  revision: ""
 acceptance_criteria:
-  - id: ""
-    required: true
-    text: ""
-    verification: ""
-    negative_space: ""
+  - ""
 context:
   relevant_files: []
   relevant_docs: []
@@ -121,9 +99,7 @@ as read at the run base. A data-runbook step becomes binding without a pin
 only when the orchestrator adopts it into the task's acceptance criteria as a
 recorded decision (`02-tasks.md`, `03-decisions.md`); adoption is never
 automatic, and selection by task fit or touched paths never grants authority on
-its own. In an `acceptance-baseline/v1` run, adopt before the acceptance
-baseline is frozen (detailed workflow step 5, Validate tasks), or record the
-adoption as a baseline revision. The pins, the operator-curated declarations,
+its own. The pins, the operator-curated declarations,
 and the selected runbooks are read at the run base (the run-base marker;
 `run-base[<repo>]` in multi-repo runs), and the `## Runbooks` record names the
 AGENTS.md path and revision they were read from, each bundle as
@@ -180,19 +156,10 @@ delegation.
 
 ## Implementer output contract
 
-Use this v1 block subject to Contract selection above.
-
 ```yaml
 status: done | partial | blocked
 role: implementer
 task_id: T-000
-acceptance_baseline:
-  id: ""
-  revision: ""
-criterion_evidence:
-  - criterion_id: ""
-    evidence_refs:
-      - ""
 summary:
   - ""
 changed_files:
@@ -243,7 +210,7 @@ whole configured bundle at the head of its delta when the repository has a
 configured bundle, and the drift check over base..head when one is connected,
 and reports their outcome in `tests.executed`; an
 unavailable check is reported as a limitation, not a pass. Every claimed check
-result in `tests.executed`, `summary`, or `criterion_evidence` carries the path
+result in `tests.executed` or `summary` carries the path
 of a recorded verify envelope or the exact command plus its exit code. These
 use the existing fields; no field is added. The reviewer verifies claimed
 checks against that envelope or command output rather than the prose, and a
@@ -256,7 +223,7 @@ reports an outward action (see AGENTS.md's Outward-facing actions rule) as
 executed is invalid, whatever the task assignment said; a local commit on the
 task branch is not an outward action. If you performed one anyway, report
 it in your return (what, where, when); performing one is forbidden,
-reporting it is mandatory. Return the selected contract's YAML envelope.
+reporting it is mandatory. Return the YAML envelope above.
 `result: killed` means the probe's test
 command reacted to the mutant under the runner's pass predicate, or the
 test pass predicate declared in the task assignment or probe plan when no
@@ -286,9 +253,7 @@ runbook.
 
 ## Reviewer output contract
 
-The output shape remains the same for either selected contract. Compare the
-delegated versioned records and producer evidence under Contract selection
-above; a recommendation does not replace orchestrator acceptance. A return
+A recommendation does not replace orchestrator acceptance. A return
 that reports an outward action (see AGENTS.md's Outward-facing actions rule)
 as executed is invalid; the reviewer never performs one. If you performed
 one anyway, report it in your return (what, where, when); performing one is
@@ -390,8 +355,6 @@ Findings table) and lists it in `06-handoff.md` (Known Risks).
 
 ## Task slicer output contract
 
-Use this v1 block subject to Contract selection above for every task.
-
 ```yaml
 status: done | partial | blocked
 role: task_slicer
@@ -401,15 +364,8 @@ tasks:
   - id: T-001
     title: ""
     goal: ""
-    acceptance_baseline:
-      id: ""
-      revision: ""
     acceptance_criteria:
-      - id: ""
-        required: true
-        text: ""
-        verification: ""
-        negative_space: ""
+      - ""
     relevant_files:
       - ""
     relevant_docs:
@@ -436,14 +392,10 @@ open_questions:
   - ""
 ```
 
-For an explicitly adopted v1 run, the orchestrator copies each task's goal,
-acceptance_baseline, acceptance_criteria, relevant_files, relevant_docs,
-constraints, allowed_changes, and forbidden_changes 1:1 into the subagent
-input contract when delegating implementation, rather than inventing new field
-values. The copied criterion records retain `id`, `required`, `text`,
-`verification`, and `negative_space` unchanged. For a recorded original
-contract, preserve its original strings and the same 1:1 field mapping with
-the transformation under Contract selection above.
+The orchestrator copies each task's goal, acceptance_criteria, relevant_files,
+relevant_docs, constraints, allowed_changes, and forbidden_changes 1:1 into the
+subagent input contract when delegating implementation, rather than inventing
+new field values. The acceptance criteria stay the original strings.
 
 Knowledge bundle docs in `relevant_docs`: for each configured knowledge bundle
 (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`), every

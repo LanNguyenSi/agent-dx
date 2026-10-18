@@ -109,13 +109,6 @@ describe("safety core: a runbook stays data unless the operator vouches for it (
     pin(agentsMdSection, ADOPTION_RULE);
   });
 
-  it("places an adoption in a v1 run before the baseline is frozen, or records it as a baseline revision", () => {
-    pin(
-      agentsMdSection,
-      "In an `acceptance-baseline/v1` run, adopt before the acceptance baseline is frozen (detailed workflow step 5, Validate tasks), or record the adoption as a baseline revision.",
-    );
-  });
-
   it("reads the pins, declarations, and runbooks at the run base and records where they were read", () => {
     pin(
       agentsMdSection,

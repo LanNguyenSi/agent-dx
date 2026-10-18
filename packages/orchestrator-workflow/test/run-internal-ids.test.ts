@@ -25,7 +25,6 @@ const script = scriptFence[1];
 
 describe("run-internal identifier formats are assigned by the run templates", () => {
   it("the templates assign the ID formats the check scans for", () => {
-    expect(readAsset("templates/00-goal.md")).toMatch(/\bAC-\d{3}\b/);
     expect(readAsset("templates/02-tasks.md")).toMatch(/\bT-\d{3}\b/);
     expect(readAsset("templates/03-decisions.md")).toMatch(/\bD-\d{3}\b/);
     expect(readAsset("templates/05-review-findings.md")).toContain(

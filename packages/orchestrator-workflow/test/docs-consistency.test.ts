@@ -505,6 +505,7 @@ describe("task slicer output schema is a superset of the implementer input contr
   // contract) but is required by the 02-tasks.md template and the workflow
   // narrative, so it ships alongside the mirrored fields.
   const listShapedTaskFields = [
+    "acceptance_criteria",
     "relevant_files",
     "relevant_docs",
     "constraints",
@@ -531,10 +532,6 @@ describe("task slicer output schema is a superset of the implementer input contr
     return new RegExp(`^ {4}${field}:\\n {6}- ""$`, "m");
   }
 
-  function criterionRecordsShape(): RegExp {
-    return /^ {4}acceptance_criteria:\n {6}- id: ""\n {8}required: true\n {8}text: ""\n {8}verification: ""\n {8}negative_space: ""$/m;
-  }
-
   it("SKILL.md's task slicer output contract block carries the list-shaped task fields with the mirrored list shape", () => {
     const block = yamlBlockAfter(skillMdRaw, "## Task slicer output contract");
     for (const field of listShapedTaskFields) {
@@ -543,7 +540,6 @@ describe("task slicer output schema is a superset of the implementer input contr
         `missing "${field}:" (or wrong list shape) in SKILL.md's task slicer output contract`,
       ).toMatch(fieldWithListShape(field));
     }
-    expect(block).toMatch(criterionRecordsShape());
   });
 
   it("task-slicer.md's output structure carries the list-shaped task fields with the mirrored list shape", () => {
@@ -557,7 +553,6 @@ describe("task slicer output schema is a superset of the implementer input contr
         `missing "${field}:" (or wrong list shape) in task-slicer.md's output structure`,
       ).toMatch(fieldWithListShape(field));
     }
-    expect(block).toMatch(criterionRecordsShape());
   });
 
   // Fields only the orchestrator sets at delegation, so the task slicer's
@@ -593,7 +588,6 @@ describe("task slicer output schema is a superset of the implementer input contr
     );
     expect(requiredTaskFields(extended)).toEqual([
       "goal",
-      "acceptance_baseline",
       "acceptance_criteria",
       "verification_set",
       "constraints",
@@ -624,7 +618,6 @@ describe("task slicer output schema is a superset of the implementer input contr
     // Guard both sides of context: later scope fields must remain covered.
     for (const field of [
       "goal",
-      "acceptance_baseline",
       "acceptance_criteria",
       "relevant_files",
       "relevant_docs",
@@ -666,7 +659,6 @@ describe("task slicer output schema is a superset of the implementer input contr
       "id: T-001",
       "title:",
       "goal:",
-      "acceptance_baseline:",
       "acceptance_criteria:",
       "relevant_files:",
       "relevant_docs:",
@@ -4949,10 +4941,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 55,
     end: 57,
     anchorKey: "f3227b28",
-    paragraphLine: 70,
-    secondCitationLine: 92,
+    paragraphLine: 61,
+    secondCitationLine: 83,
     claim:
-      "the first citation attaches the byte-exact pin to the shipped marker literal; line 92 repeats it as the last item of the paragraph's closing enumeration of all three run-base pins in that file (:35, :49, :55-57), which leaves no fourth sibling test for the repeat to have named.",
+      "the first citation attaches the byte-exact pin to the shipped marker literal; line 83 repeats it as the last item of the paragraph's closing enumeration of all three run-base pins in that file (:35, :49, :55-57), which leaves no fourth sibling test for the repeat to have named.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5657,7 +5649,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 222,
+    paragraphLine: 208,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -5669,7 +5661,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 55,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 70,
+    paragraphLine: 61,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -5681,7 +5673,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 55,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 92,
+    paragraphLine: 83,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -5693,7 +5685,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 71,
     end: 73,
     anchorKey: "ea438f34",
-    paragraphLine: 192,
+    paragraphLine: 183,
     uncitedLines: [602],
     claim:
       "line 73 cites the test that 00-goal.md carries the keyed run-base placeholder line byte-exactly; uncited 602 repeats the identical marker line at a wholly separate site the citing sentence never names.",
@@ -5705,7 +5697,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 88,
     end: 95,
     anchorKey: "3cd8bcb0",
-    paragraphLine: 196,
+    paragraphLine: 187,
     uncitedLines: [602],
     claim:
       "line 95 cites the test that the keyed run-base placeholder line sits directly below the unkeyed one; uncited 602 repeats the identical marker line at a wholly separate site the citing sentence never names.",
@@ -5717,7 +5709,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 99,
     end: 100,
     anchorKey: "3c649d56",
-    paragraphLine: 199,
+    paragraphLine: 190,
     uncitedLines: [50],
     claim:
       "the sentence describes the keyed-marker-noninterference test (`the existing unkeyed run-base regex still matches exactly once...`); lines 99-100 are that test's own assertion, while uncited 50 is the byte-identical assertion inside the earlier, more general `00-goal.md has exactly one run-base marker, defaulting to TODO` test, which predates the keyed marker and does not test non-interference, a test the sentence does not name.",
@@ -5729,7 +5721,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 216,
     end: 226,
     anchorKey: "86ae35d5",
-    paragraphLine: 266,
+    paragraphLine: 257,
     uncitedLines: [251, 252],
     claim:
       'line 226 cites the `carries a header row with both Severity and Decision columns` test (`expect(cells).toContain("decision");`); uncited 251 and 252 is instead line 251 in the `invites only the reader\'s resolved Decision vocabulary in t…` test (`const decisionCell = cells[cells.indexOf("accepted/defer")];`); and line 252 in the `invites only the reader\'s resolved Decision vocabulary in t…` test (`const tokens = decisionCell`), a different site the citing sentence never names.',
@@ -5750,13 +5742,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 646,
-    end: 646,
+    start: 639,
+    end: 639,
     anchorKey: "9e1acc22",
-    paragraphLine: 269,
-    uncitedLines: [531, 609],
+    paragraphLine: 257,
+    uncitedLines: [532, 603],
     claim:
-      "line 646 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 531 is the list-shape helper's own field regex, and uncited 609 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
+      "line 639 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 532 is the list-shape helper's own field regex, and uncited 603 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
   },
 ];
 

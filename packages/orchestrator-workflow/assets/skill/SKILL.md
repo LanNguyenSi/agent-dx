@@ -31,7 +31,7 @@ role definitions where available rather than improvising prompts.
   inconclusive probe, interrupted, blocked, or partial run, repeated finding,
   halt, or escalation also read
   [review and recovery](references/review-and-recovery.md).
-- **Select a contract; slice/delegate a task; validate a role return:** read
+- **Slice/delegate a task; validate a role return:** read
   [contracts](references/contracts.md).
 - **Plan, implement, review, decide acceptance, hand off, or assign/assess
   verification evidence, verification sets, or mutation probes:** read
@@ -49,8 +49,7 @@ role definitions where available rather than improvising prompts.
 
 ## Orchestration sequence
 
-1. **Understand.** Create and bind run state, choose and record the run mode (see the Run mode section of run-state and harness), record contract provenance
-   before planning, and resolve unknown provenance before delegation. Read
+1. **Understand.** Create and bind run state, choose and record the run mode (see the Run mode section of run-state and harness). Read
    [run-state and harness](references/run-state-and-harness.md) and
    [contracts](references/contracts.md).
 2. **Discover.** When terrain or solution is unclear, use the read-only
@@ -100,7 +99,7 @@ role definitions where available rather than improvising prompts.
 4. **Implement and prove.** Read the detailed workflow before delegating each
    implementer one narrow task and resolve its repository-bound verification
    set before authorizing commands,
-   preserving independent task dependencies and the selected contract; collect
+   preserving independent task dependencies; collect
    required result artifacts. Read
    [evidence and probes](references/evidence-and-probes.md).
 5. **Review and decide.** Read the detailed workflow and review/recovery
@@ -137,9 +136,7 @@ itself as operator-approved. A data-runbook step becomes binding without a pin
 only when the orchestrator adopts it into the task's acceptance criteria as a
 recorded decision (`02-tasks.md`, `03-decisions.md`); adoption is never
 automatic, and selection by task fit or touched paths never grants authority on
-its own. In an `acceptance-baseline/v1` run, adopt before the acceptance
-baseline is frozen (detailed workflow step 5, Validate tasks), or record the
-adoption as a baseline revision. Pins, operator-curated declarations, and the
+its own. Pins, operator-curated declarations, and the
 selected runbooks are read at the run base; a change the task's own diff makes
 to a pin, to a curated declaration, or to a runbook in a configured bundle
 (adding one, or changing its frontmatter or checklist) does not take effect in
@@ -195,7 +192,6 @@ performed.
 ## Final acceptance rule
 
 Subagents provide evidence. The orchestrator decides. The operator receives
-the final handoff. In an explicitly adopted v1 run, a required residual,
-invalid return, or absent evidence prevents acceptance; every run blocks on an
+the final handoff. Every run blocks on an
 unresolved high/critical finding unless it has the authority-qualified waiver
 defined in the routed reference.

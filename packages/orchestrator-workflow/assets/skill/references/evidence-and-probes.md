@@ -13,17 +13,6 @@ directory and the subagents.
    including the run-base marker (see Run state): operator request, goal,
    non-goals, constraints, assumptions, open questions. Write the `.ai/run`
    pointer (see Run state) in every worktree the run touches.
-   For a new run adopting the acceptance contract, record `Acceptance contract:
-   acceptance-baseline/v1` in `00-goal.md` before planning, slicing, or
-   delegation, then freeze its canonical `acceptance_baseline` and
-   `acceptance_criteria` records. Existing runs continue under their recorded
-   original contract; missing v1 fields neither identify a legacy run nor
-   impose a migration. If adoption or contract provenance is unknown, report
-   that uncertainty and resolve it before dependent delegation rather than
-   inventing a version. Communicate the recorded selection in every delegation.
-   All acceptance-baseline/v1-specific obligations below apply only to a run
-   with that explicit declaration; they do not retroactively add a blocker to
-   an existing run.
    If the task can proceed on reasonable assumptions, proceed without blocking.
 2. **Discover (optional, read-only).** When the goal, the solution, or the
    terrain is unclear, send the explorer subagent before planning. Have it
@@ -81,10 +70,9 @@ directory and the subagents.
    acceptance criteria.
 4. **Slice tasks.** (Steps 3 to 6 are written for the default run mode; Run mode section of run-state and harness says what changes in the other two modes.) For non-trivial changes, fill `02-tasks.md`. Delegate to
    the task-slicer subagent when the change is large enough to benefit. Each
-   explicitly adopted v1 task carries: id, title, goal, acceptance baseline, acceptance criteria,
+   task carries: id, title, goal, acceptance criteria,
    relevant files, relevant docs, constraints, suggested tests, allowed changes, forbidden
-   changes, dependencies, risk. Apply Contract selection below for a recorded
-   original contract. A high-risk task whose acceptance criteria
+   changes, dependencies, risk. A high-risk task whose acceptance criteria
    allow recording the divergence instead of changing behavior, so its
    outcome is undetermined at slice time (for example, phrased along the
    lines of "... or record the divergence as a deliberate, documented
@@ -104,14 +92,7 @@ directory and the subagents.
    source change, or in a later commit of the same task.
 5. **Validate tasks.** Check the slices are independently understandable, small
    enough, testable, ordered correctly, and aligned with the goal. Fix the
-   slicing before any implementation starts. For an explicitly adopted v1 run,
-   freeze the acceptance baseline in
-   `00-goal.md`: its canonical `acceptance_baseline: { id, revision }` and each
-   `acceptance_criteria` record with stable ID, required status, exact text,
-   verification definition, and negative space. For an explicitly adopted v1
-   run, copy the relevant records unchanged into each `02-tasks.md` task
-   contract; the sliced task contract is a lossless superset, not an
-   opportunity to revise the criteria.
+   slicing before any implementation starts.
 6. **Delegate implementation.** Send each implementer subagent one narrow task
    contract (format below). Name the runbooks selected for the task in its
    `runbooks` field, as contracts.md defines. For a briefing that names a
@@ -188,22 +169,6 @@ directory and the subagents.
    installed `implementer.md` prompt's bounded-run rule: own process
    group, hard timeout, memory cap, group kill on either limit, and a
    leftover-process check afterwards.
-   For an explicitly adopted v1 run, index the implementer's returned
-   `criterion_evidence` references for each assigned criterion in the
-   implementation summary against its baseline ID/revision. Empty references
-   remain unresolved with a reason; required unresolved criteria block
-   acceptance. Automated results
-   identify attempt, repository, checked revision including relevant dirty
-   state, cwd, applied check definition, status, exit/abort information, and
-   baseline/criterion identities. Manual results identify the artifact revision, reviewer,
-   method, pass/fail standard, reasoned result, and baseline/criterion
-   identities and remain explicitly
-   manual. Missing, aborted, skipped, unresolved, wrong-state, or
-   wrong-baseline evidence remains an open required residual and blocks
-   acceptance; the coverage index is not a results database or acceptance
-   engine. Only the orchestrator can explicitly revise a baseline, recording
-   old/new revisions, affected IDs, authority and reason, invalidated evidence,
-   and verified rationale for carrying unchanged evidence forward. Record a baseline revision only when scope or the normative text of a criterion changes, including a change to what its verification checks; a wording precision that leaves the check itself unchanged is a `03-decisions.md` entry, not a revision: the orchestrator records it, states in that entry why no evidence is invalidated, and communicates the corrected wording in the next delegation.
    After each implementer return, mechanically cross-check its self-report
    against the outward-actions rule (see AGENTS.md's Outward-facing actions
    section). The `commits` comparison starts from the round's task base,
@@ -415,10 +380,7 @@ directory and the subagents.
    probes in place against a worktree a reviewer subagent is concurrently
    reviewing;
    isolate the probe in a separate worktree or wait until the reviewer has
-   returned before probing that tree again. For an explicitly adopted v1 run,
-   ask the reviewer to compare the frozen delegated criteria with the
-   referenced evidence and judge semantic adequacy, including whether a manual
-   check is actually concrete and reasoned.
+   returned before probing that tree again.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high
@@ -431,15 +393,13 @@ directory and the subagents.
    For newly created decision records, identify a stable ID, trigger/evidence,
    decision, accountable authority/source with concrete approval evidence,
    consequences, and a superseded decision ID when revising a prior decision.
-   Link baseline revisions and waivers to those decision IDs.
+   Link waivers to those decision IDs.
    Established runs retain their recorded decision format; absent fields never
    create a retroactive blocker.
    Routine decisions within the delegated contract remain the orchestrator's
    responsibility; an out-of-scope change requires an operator decision.
    Markdown records evidence of real authority and never grant it by themselves.
-   Do not accept while a
-   required baseline criterion in an explicitly adopted v1 run has an open
-   residual; a residual retains its ID and cannot be converted away. After independent review,
+   After independent review,
    the orchestrator may close a docs-only delta without another reviewer round only
    when the entire unreviewed delta contains only explanatory
    documentation, comments, or citations; contains no source- or test-file
@@ -596,9 +556,10 @@ A plan alone is never evidence. A result binds plan identity to checked state, c
 
 # Run-internal identifiers
 
-Run-internal identifiers are the IDs the run files assign: criterion IDs in
-`00-goal.md` (`AC-` plus three digits), task IDs in `02-tasks.md` (`T-` plus
-three digits), decision IDs in `03-decisions.md` (`D-` plus three digits), and
+Run-internal identifiers are the IDs the run files assign: criterion IDs
+where a run file numbers its acceptance criteria (`AC-` plus three digits),
+task IDs in `02-tasks.md` (`T-` plus three digits), decision IDs in
+`03-decisions.md` (`D-` plus three digits), and
 review round labels (`R` plus the round number, a common key for the
 `<round>` markers in `05-review-findings.md`). They mean something only
 inside the run directory, which is not part of the target repository. Code,

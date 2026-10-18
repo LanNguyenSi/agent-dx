@@ -12,14 +12,14 @@ implementation (see [Run modes](#run-modes)); subagents return structured YAML
 evidence, not transcripts, and every unit of work leaves an auditable run
 directory behind. See [Architecture: why this shape](docs/architecture.md) for
 the loop diagram and the reasoning, and [Run contracts](docs/run-contracts.md)
-for the optional frozen acceptance-baseline contract and the
+for the acceptance-criteria contract and the
 decision-authority record every run keeps.
 
 ## Key features
 
 - Orchestrator-led workflow: one agent plans and decides; narrow subagents implement and review.
 - Per-harness subagent definitions with preselected, pinned per-role models and effort (Claude Code, Codex, opencode).
-- An auditable `.ai/runs/` directory per unit of work, with an optional frozen acceptance-baseline contract.
+- An auditable `.ai/runs/` directory per unit of work.
 - Agent-led or manual CLI install, both idempotent and conflict-safe on re-run.
 - Operator-level install for projecting routing and profile defaults onto many repositories.
 - A `validate-review-report` CLI to structurally check reviewer YAML returns.
@@ -267,7 +267,7 @@ every flag, exit code, and fence-detection edge case.
 ## Documentation
 
 - [Architecture: why this shape](docs/architecture.md): the orchestrator/subagent loop diagram and rationale.
-- [Run contracts](docs/run-contracts.md): the acceptance-baseline contract and `03-decisions.md`'s decision-authority rules.
+- [Run contracts](docs/run-contracts.md): the acceptance-criteria contract and `03-decisions.md`'s decision-authority rules.
 - [Install reference](docs/install-reference.md): the agent-led install's conflict check, templates-only re-run rules, and the `knowledge` manifest field.
 - [Harnesses](docs/harnesses.md): the per-harness installed-file list and the honest read-only-posture writeup.
 - [Verification sets](docs/verification-sets.md): the worked `.ai/workflow/verify.json` JSON example.

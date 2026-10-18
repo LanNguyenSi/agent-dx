@@ -42,6 +42,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   part of the published package (it is not in `files` and not compiled into
   `dist`), and its tests use stubs in place of the model and guard binaries.
 
+- **BREAKING:** the `acceptance-baseline/v1` acceptance contract is retired;
+  the original string-list contract is the only one. Every role prompt loses
+  its Contract selection paragraph and the v1 rules, the implementer's return
+  loses `acceptance_baseline` and `criterion_evidence`, the task slicer's
+  output and the delegation input carry `acceptance_criteria` as a list of
+  strings again, and the reviewer no longer compares frozen records or
+  evidence references. `references/contracts.md` defines one input schema and
+  one output schema per role. The `00-goal.md` template drops its
+  `Acceptance contract:` declaration and baseline block (the run-base, mode,
+  and outward markers stay), `02-tasks.md` drops the delegated baseline
+  block, and `04-implementation-summary.md` drops the baseline coverage and
+  open-residuals tables. The instruction trust boundary's runbook-authority
+  paragraph loses its sentence about adopting a data-runbook step before a
+  baseline is frozen; the rest of that paragraph is unchanged. Migration: a
+  run whose `00-goal.md` has a filled `acceptance_baseline` either finishes on
+  0.45.x, the last version that supports v1, or continues with its criteria
+  read as the original string list (the criterion `text` becomes the string;
+  the extra record fields and the evidence references are no longer read).
+  Installed role prompts, skill files, and templates report as outdated until
+  refreshed.
+
 - Tests pin the machine contract and a small safety core instead of pinning
   prose rules at several sites. The safety core is the instruction trust
   boundary (runbook authority included), outward actions only by the

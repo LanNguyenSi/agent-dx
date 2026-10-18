@@ -1,4 +1,4 @@
-# Tasks (recorded original string-list contract)
+# Tasks
 
 ### T-001: original task
 

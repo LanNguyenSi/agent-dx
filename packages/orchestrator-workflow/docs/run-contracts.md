@@ -1,31 +1,25 @@
-# Run contracts: acceptance baseline and decision authority
+# Run contracts: acceptance criteria and decision authority
 
-Reference for the `00-goal.md` acceptance-baseline contract and the
+Reference for the acceptance-criteria contract and the
 `03-decisions.md` decision-authority record that the installed run templates
 carry. See the [package README](../README.md) for the rest of the run-state
 layout.
 
-## Acceptance-baseline adoption
+## Acceptance criteria
 
-New runs that need a frozen acceptance contract explicitly record
-`Acceptance contract: acceptance-baseline/v1` in `00-goal.md` before planning,
-slicing, or delegation. The same file then carries the canonical
-`acceptance_baseline` identity and full `acceptance_criteria` records; each
-delegated task receives its relevant records unchanged. Existing runs remain
-under their recorded contract: missing v1 fields neither trigger migration nor
-license a guess about a run's provenance. Communicate the recorded selection
-in delegation and resolve unknown provenance before dependent work. A recorded
-original string-list contract keeps its original criterion strings and omits
-only the added baseline and criterion-evidence fields.
+There is one acceptance contract. Each task carries `acceptance_criteria` as a
+plain list of strings: in the task slicer's output, in `02-tasks.md`, and in the
+delegation input the orchestrator sends an implementer or reviewer. The
+orchestrator copies them from the task unchanged. Implementers report check
+results in `tests.executed` and `summary`, each with a recorded verify envelope
+or the exact command plus its exit code; reviewers check those claims against
+the envelope or command output. Review findings and orchestrator acceptance
+stay separate from the implementer's evidence.
 
-For v1, implementers return `acceptance_baseline: { id, revision }` and one
-`criterion_evidence` entry per assigned criterion, with `criterion_id` and
-`evidence_refs`. References resolve from the owning run directory and point
-to producer artifacts with the checked state and result metadata.
-`04-implementation-summary.md` indexes those references; empty references
-remain unresolved, and required unresolved criteria block acceptance. Manual
-evidence stays explicitly manual. Review findings and orchestrator acceptance
-remain separate from this coverage index.
+The earlier frozen `acceptance-baseline/v1` contract (a baseline identity with
+structured criterion records and per-criterion evidence references) is no longer
+supported. Version 0.45.x was the last release that supports it; see the
+changelog for how to handle a run that recorded it.
 
 ## Decision authority
 
