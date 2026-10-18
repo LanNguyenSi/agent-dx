@@ -1,5 +1,20 @@
 # Bundle log
 
+- 2026-10-18T18:13:56Z, one acceptance contract: the `acceptance-baseline/v1` contract is retired and
+  the original string-list contract is the only one (0.45.x was the last release that
+  supports v1). `subagent-contracts-superset.md` now states the single `acceptance_criteria`
+  list contract and the new `acceptance-contract.test.ts` pins, `run-state-lifecycle-and-markers.md`
+  replaces its v1 adoption section with a one-contract note (no kit source reads a contract
+  marker, re-checked with a search of `src/`), `review-gate-and-waivers.md` loses the v1 residual
+  paragraph and the baseline-revision ceremony rule, and `index.md` follows. Re-verified: every
+  other claim in those docs is unchanged. Every anchored citation into the shifted files was
+  re-pointed by mapping each cited line through the diff and confirming the anchor text on the
+  last cited line; two historical log citations into the retired `acceptance-baseline.test.ts`
+  became plain prose, since that file no longer exists. The sibling-drift allowlist geometry
+  in `docs-consistency.test.ts` was re-mapped the same way. Re-stamped:
+  `install-fence-mechanics.md`, `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
 - 2026-10-18T17:58:17Z, verification-set condition worded conditionally: `contracts.md` (same line count, no
   citation moved) and `docs/verification-sets.md` now say a briefing that names a set (a
   non-empty `verification_set.reference`) carries its rules. Re-verified: the claims are
