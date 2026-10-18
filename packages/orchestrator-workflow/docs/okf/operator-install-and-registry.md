@@ -90,7 +90,7 @@ The manifest is never written directly outside of one function,
 write from `setup`, `apply`, `doctor --prune`, and `adopt` goes through it, so
 no command can bypass the lock and race another's read-modify-write. It runs
 the whole re-read, `mutate`, and write inside one locked critical section: the
-manifest handed to `mutate` is re-read _inside_ the lock, not whatever the
+manifest handed to `mutate` is re-read *inside* the lock, not whatever the
 caller read earlier (which can already be stale by the time the lock is
 granted). Returning `undefined` from `mutate` means "write nothing" and yields
 `written: false`
@@ -212,7 +212,7 @@ producing a false mismatch.
 A repo manifest can carry a kit-version pin. A plain `apply` is skipped with
 no changes when the repo's recorded pin differs from the running operator
 install's version (cli.ts:887-893#"Repository is pinned at"), unless the
-operator explicitly overrides the gate: `--force-pin` advances an _existing_
+operator explicitly overrides the gate: `--force-pin` advances an *existing*
 pin to the current kit version, with no effect on a target that has no pin
 recorded at all (cli.ts:753-755#"has no effect on a target with no pin recorded",
 cli.ts:977-982#"? PACKAGE_VERSION"); `--pin <version>` sets or replaces the
@@ -259,15 +259,15 @@ each target's status against the operator's defaults; the citation below is
 the plain path, and under `--prune` the same per-target walk runs inside
 the locked read-modify-write described further down
 (cli.ts:1086-1087#"Report each operator-registered target's status",
-doctor.ts:1054-1056#"state.manifest,").
+doctor.ts:1062-1064#"state.manifest,").
 The vocabulary is a seven-member union, `TargetStatus`
 (doctor.ts:48#"export type TargetStatus ="): `clean`, `divergent`,
 `version-lag`, `drift`, `missing`, `no-manifest`, `unverifiable`.
 Precedence is fixed: `drift` outranks `divergent`, which outranks
 `version-lag`, which outranks `clean`
-(doctor.ts:836-841#"else if (versionLag) {"); `unverifiable` is a distinct
+(doctor.ts:844-849#"else if (versionLag) {"); `unverifiable` is a distinct
 case from both `missing` and `no-manifest`: it means the target directory or
-its repo manifest could not even be _checked_ (a stat failure other than
+its repo manifest could not even be *checked* (a stat failure other than
 ENOENT, or a manifest file present but unreadable), so nothing is actually
 known about that target's real state
 (doctor.ts:31-46#"that basis would be an unrecoverable guess."). Only a
@@ -281,7 +281,7 @@ detail lines without recomputing values `inspectTarget` already worked out
 
 Exit codes: `2` when no operator manifest exists at all (nothing else is
 evaluated), whether the file is simply absent or present-but-unreadable
-(doctor.ts:939-950#"a possibly-fine targets array sitting next to the unreadable");
+(doctor.ts:947-958#"a possibly-fine targets array sitting next to the unreadable");
 also `2`, via a separate path in `cli.ts` rather than in `runDoctor` itself,
 when a `--prune` run's locked read-modify-write throws instead of returning
 a report (a foreign lock held past its timeout, or any other error
@@ -292,7 +292,7 @@ differently-shaped JSON object with `error: "operator-manifest-locked"` or
 `unvalidatedDropped` field at all (cli.ts:1113-1141#"error: doctorError,").
 Otherwise: `1` if any remaining target (after an optional prune) is
 `drift`, `missing`, `no-manifest`, or `unverifiable`; else `0`
-(doctor.ts:1063-1071#": 0;"). Outside that thrown-lock-error path, `--json`
+(doctor.ts:1071-1079#": 0;"). Outside that thrown-lock-error path, `--json`
 prints the `DoctorReport` as one JSON object with each target projected to
 its `TargetReportJson` subset
 (cli.ts:1161#"targets: report.targets.map(targetReportToJson),"), including the
@@ -313,7 +313,7 @@ form; `unverifiable` targets are never removed by it, since an unreadable
 target might still be perfectly fine and dropping its row on that basis would
 be an unrecoverable guess
 (cli.ts:1093-1095#"remove missing and no-manifest targets from the operator registry",
-doctor.ts:869#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>([").
+doctor.ts:877#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>([").
 The prune's own re-read, recompute, and write run inside
 `updateOperatorManifest`'s single locked section, the same as every other
 registry write.
@@ -343,11 +343,11 @@ test/adopt.test.ts:564-565#"maps all seven TargetStatus values to adopt").
 This three-way, per-status split is deliberately finer than `doctor`'s own
 two-way `0`/`1` aggregate exit code over all registered targets (above),
 which never derives a `2` from any individual target's status
-(doctor.ts:1063-1071#": 0;"). The same `adoptExitCodeForStatus` mapping also
+(doctor.ts:1071-1079#": 0;"). The same `adoptExitCodeForStatus` mapping also
 drives whether the success line is suppressed
 (doctor.ts:223-224#"return adoptExitCodeForStatus(status) === 2;") and
 whether the `--json` output carries an `unexpected-target-status` error key
-(doctor.ts:1097-1100#"return adoptExitCodeForStatus(status) === 2"), both
+(doctor.ts:1105-1108#"return adoptExitCodeForStatus(status) === 2"), both
 wired into `adopt`'s own action
 (cli.ts:1596-1597#"const unexpectedStatus = suppressSuccessLine(targetReport.status);").
 Every failure `adopt` can report before it has a target report to return
@@ -369,13 +369,13 @@ to clear, `undefined` to carry the previous value forward unchanged
 whitespace-only is treated as no pin at all, both on write and on read back
 (init.ts:492-496#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
 computation applies the pin rule precisely: a recorded pin suppresses
-`version-lag` only when the pin equals the repo's own _installed_ version;
+`version-lag` only when the pin equals the repo's own *installed* version;
 that is the expected, deliberate-stay state. When the pin and the installed
 version differ (someone changed the pin without reapplying, or the installed
 version drifted some other way), the target is still reported `version-lag`
 even though it carries a pin; with no pin at all, `version-lag` compares the
 installed version against the running kit version instead
-(doctor.ts:810-822#": manifest.version !== kitVersion;").
+(doctor.ts:818-830#": manifest.version !== kitVersion;").
 
 ## Uninstall does not touch the registry
 
@@ -386,7 +386,7 @@ operator manifest at all
 therefore stays registered until a `doctor` run reclassifies it: once its
 `.ai/workflow/manifest.json` is gone, `inspectTarget` reports it
 `no-manifest`, and only `doctor --prune` actually removes that row from the
-registry (doctor.ts:869#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["). A target directory removed outright reports `missing`
+registry (doctor.ts:877#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["). A target directory removed outright reports `missing`
 instead, pruned by the exact same mechanism.
 
 See [index.md](index.md) for the rest of this bundle.

@@ -111,7 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Help text and one prompt line (tracker task 4134b1e6): `init --harness` help now
   reads "default: detected plus previously installed, else claude" and `apply
---harness` ends with ", else claude"; `apply --sync` help and its doc comment
+  --harness` ends with ", else claude"; `apply --sync` help and its doc comment
   name routing among what the operator defaults override; the `setup`
   description lists routing. The implementer prompt's commit-hygiene sentence
   lists the full backup set the check refuses (`*-E`, `*-e`, `*-n`, `*-r`,
@@ -155,7 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or not Discover runs, because a runbook for a kind of work was otherwise
   only reached by an optional step or by a path match. The orchestrator
   selects the runbooks that apply (knowledge bundle docs with `type:
-runbook`) by task fit (the runbooks whose own `## When to use this` section
+  runbook`) by task fit (the runbooks whose own `## When to use this` section
   matches the goal), by touched paths (the `sources` or `applies_to` match
   `okf-kit docs-for` returns), or from an operator-pinned list kept in
   AGENTS.md outside the kit-managed markers (a pinned runbook is selected
@@ -290,12 +290,12 @@ runbook`) by task fit (the runbooks whose own `## When to use this` section
   opens on a line of three or more backticks or three or more tildes
   (indented up to 3 spaces) and closes only on a later line of the same
   fence character, at least as long, with nothing but trailing whitespace
-  after it, so a `~~~` fence, a longer fence wrapping an inner ```block, an
-indented fence, and an unclosed fence (which now runs to end of file) are
-all handled; a quoted`#`example inside any of them can no longer be
-mistaken for a real README heading. The guard's helper functions dropped
-an unused parameter and corrected two comments that misstated which docs
-are scanned. A line-wrap in`docs/install-reference.md` that split
+  after it, so a `~~~` fence, a longer fence wrapping an inner ``` block, an
+  indented fence, and an unclosed fence (which now runs to end of file) are
+  all handled; a quoted `#` example inside any of them can no longer be
+  mistaken for a real README heading. The guard's helper functions dropped
+  an unused parameter and corrected two comments that misstated which docs
+  are scanned. A line-wrap in `docs/install-reference.md` that split
   "repository-bound" across the line break is also fixed.
 - README restructured around a shorter package README standard: moved
   deep reference material (architecture rationale, run contracts, install
@@ -339,7 +339,7 @@ are scanned. A line-wrap in`docs/install-reference.md` that split
 - Hand off (evidence-and-probes.md step 9, SKILL.md step 6): documentation
   impact (none with a reason, updated paths, or a follow-up) is now named
   among what the orchestrator records and reports, so the `Documentation
-Impact` line of `06-handoff.md` is filled by rule rather than only by the
+  Impact` line of `06-handoff.md` is filled by rule rather than only by the
   template slot; `test/docs-impact.test.ts` pins both clauses (task
   b4d8f0e9).
 
@@ -376,7 +376,7 @@ Impact` line of `06-handoff.md` is filled by rule rather than only by the
   correctness, so review stays mandatory. GitHub Actions is the example host;
   the kit ships and generates no CI files (issue #354).
 - The handoff template gains a `Documentation Impact` section (`none
-(<reason>)`, `updated: <paths>`, or `follow-up: <task>`); the reviewer
+  (<reason>)`, `updated: <paths>`, or `follow-up: <task>`); the reviewer
   reports a user-visible or architectural change that updates no human-facing
   docs and gives no reason or follow-up as a medium finding (issue #355).
 - New `Outward-facing actions` rule (AGENTS.md block and SKILL.md): an
@@ -619,7 +619,7 @@ Impact` line of `06-handoff.md` is filled by rule rather than only by the
   absence with manual derivation evidence, and whether the measured
   `result` and `expectation` match the recorded fields; a mismatch is a
   finding of at least `high` and sets `matches_implementer_claim:
-mismatched`. The implementer legend renders into every implementer tier
+  mismatched`. The implementer legend renders into every implementer tier
   and Codex developer instructions; the revised test suite exercises all
   three cases and the corresponding transfer decisions. Evidence for task
   cb4ff78f-b0cb-402e-8387-f996f676f964 is recorded in the astra-old-eight
@@ -633,7 +633,7 @@ mismatched`. The implementer legend renders into every implementer tier
   one-mutation-probe-per-fixed-finding obligation. The implementer output
   contract (`assets/skill/references/contracts.md`, mirrored in
   `assets/agents/implementer.md`) gains a `class_closure` field (`kind:
-enumerated | source | not_applicable` plus `command`, `sites` and
+  enumerated | source | not_applicable` plus `command`, `sites` and
   `closed: true | false`, with an unclosed site named in `risks` with the
   reason); the subagent misfire rule now names the omission of
   `class_closure` on any round after the task's first as a misfire, the
@@ -872,7 +872,7 @@ enumerated | source | not_applicable` plus `command`, `sites` and
   reviewer return's YAML against the reviewer output contract's required
   fields and enums, printing one diagnostic per missing or invalid field and
   exiting `0`/`1`/`2` for valid/structurally-invalid/usage-error; `--format
-json` prints the same diagnostics as one JSON object. The check is
+  json` prints the same diagnostics as one JSON object. The check is
   structural only, never semantic, and never constitutes orchestrator
   acceptance. Its schema lives in `src/review-report.ts` and is pinned in
   `test/docs-consistency.test.ts` against the contract block in
@@ -901,9 +901,9 @@ json` prints the same diagnostics as one JSON object. The check is
 - `assets/agents/implementer.md` gains a pre-return rule bullet next to
   the commit-reporting ones: before committing, when slop-detector is
   available run `slop-detector check <changed file> [<changed file> ...]
---pack review-slop` over every changed file and `git log -1
---format=%B | slop-detector check --stdin-path COMMIT_MSG --pack
-review-slop` over the commit message, with the repository-vendored
+  --pack review-slop` over every changed file and `git log -1
+  --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack
+  review-slop` over the commit message, with the repository-vendored
   `node packages/slop-detector/dist/cli.js check ...` path named as the
   alternative where the CLI is not installed on PATH; fix every
   block-level finding before returning, or add a legitimate match to
@@ -979,7 +979,6 @@ review-slop` over the commit message, with the repository-vendored
   repeated findings without changing waiver authority or requiring a CLI
   schema.
 - The review template now records each reviewer's returned method in the machine-readable `method-applied[<round>]` marker directly below its `review-method` declaration. The marker is read by grounding-mcp's completeness reader; the accompanying `Method:` line remains its constrained prose fallback. The detailed workflow reference requires the orchestrator to write every returned value and resupply an omission or mismatch before acceptance. See agent-grounding #235.
-
 ## [0.34.0] - 2026-09-13
 
 - Reviewer findings now carry `introduced_by_delta: yes | no | unknown`.
@@ -995,7 +994,7 @@ review-slop` over the commit message, with the repository-vendored
 ### Changed
 
 - Implementer reports now paste non-empty commit lists from `git log --reverse
---format=%H <base>..HEAD`, and foreground verification/probe plans and
+  --format=%H <base>..HEAD`, and foreground verification/probe plans and
   repeat tallies return in the same turn as the last check; a background
   monitor does not substitute. Anchored by pandora batch48 evidence.
 
@@ -1013,14 +1012,14 @@ review-slop` over the commit message, with the repository-vendored
   the same commit. Anchored by pandora run
   `.ai/runs/2026-09-11-memory-sync-wipe`.
 - The implementer `mutation_probes` output field (`assets/agents/
-implementer.md`, mirrored in SKILL.md, and the `04-implementation-
-summary.md` template's Mutation Probes table) now carries the mutant's
+  implementer.md`, mirrored in SKILL.md, and the `04-implementation-
+  summary.md` template's Mutation Probes table) now carries the mutant's
   definition, not only its label: `file`, `anchor` (a line number or a
   unique string), `before`, and `after` alongside the existing
   `verified_applied_via`, `result`, `restored_verified`, and `replayed`
   fields, so a later round can mechanically reapply the same edit instead
   of only reading a prose description. Added `expectation: met | violated
-| not_applicable` beside `result`, reporting whether the probe's
+  | not_applicable` beside `result`, reporting whether the probe's
   `result` matched its `--expect`, scoped to a measured `killed` or
   `survived` `result` (a routine negative-control probe now reports
   `result: survived, expectation: met`, which is not a regression) and
@@ -1125,7 +1124,7 @@ summary.md` template's Mutation Probes table) now carries the mutant's
   6 lines short of the `model: opus` assertion it named
   (`model-preselection.md`); a `SKILL.md` duplicate whose first claim's
   real text sat just above the cited line (`run-state-lifecycle-and-
-markers.md`); an `init.ts` comment cited in place of the real
+  markers.md`); an `init.ts` comment cited in place of the real
   `installKitFile` call it restates (`install-fence-mechanics.md`); an
   `init.ts` range crossing from one branch of `installKitFile` into
   another branch's own record line (`install-fence-mechanics.md`); an
@@ -1391,21 +1390,22 @@ markers.md`); an `init.ts` comment cited in place of the real
   citation with a stale anchor and a wrapped continuation form are each
   pinned by their own fixture. The same helper carries the one fence
   pass, so the `log.md` guard inherits the unbalanced-fence throw the
-  round-3 hand copy had left behind (a single stray ```excused every
-citation after it), and its non-vacuity floor now carries the live
-count in its own computed test name. The unanchored-citation brake and
-the block-straddle collector take their doc set and resolver as
-parameters, like the string-anchor collector already did, so the
-"a resolved continuation survives this collector" property is pinned by
-a synthetic doc set at all three sites instead of by source text alone;
-the brake's examined count is pinned as an exact delta (one added full
-citation raises it by one, one added continuation by one more) rather
-than by a floor a dropped-continuation mutant could sink under. The`log.md`resolver rejects a cited path carrying a`..`segment and
-asserts repository containment on its on-disk fallback, and a bare
-basename that also exists at the repository root is reported ambiguous
-with both candidates named instead of silently binding to this
-package's own file; the deeper repo-wide basename ambiguity okf-kit
-reports is still bound unconditionally by`anchorScopeResolve()`'s own
+  round-3 hand copy had left behind (a single stray ``` excused every
+  citation after it), and its non-vacuity floor now carries the live
+  count in its own computed test name. The unanchored-citation brake and
+  the block-straddle collector take their doc set and resolver as
+  parameters, like the string-anchor collector already did, so the
+  "a resolved continuation survives this collector" property is pinned by
+  a synthetic doc set at all three sites instead of by source text alone;
+  the brake's examined count is pinned as an exact delta (one added full
+  citation raises it by one, one added continuation by one more) rather
+  than by a floor a dropped-continuation mutant could sink under. The
+  `log.md` resolver rejects a cited path carrying a `..` segment and
+  asserts repository containment on its on-disk fallback, and a bare
+  basename that also exists at the repository root is reported ambiguous
+  with both candidates named instead of silently binding to this
+  package's own file; the deeper repo-wide basename ambiguity okf-kit
+  reports is still bound unconditionally by `anchorScopeResolve()`'s own
   documented design, named as the residual. Convention this round
   installs (D-050): a log entry or CHANGELOG bullet writes no hand-typed
   count of what a guard found; the live figures are the guards' own
@@ -1418,7 +1418,7 @@ reports is still bound unconditionally by`anchorScopeResolve()`'s own
   `log.md` resolver's on-disk fallback is checked against an existing,
   outside-the-repository absolute path so its own containment conjunct is
   no longer redundant with the `..`-segment rejection; `extractSiblingGuard
-Citations` gets its own wrapped-citation fixture (full citation and
+  Citations` gets its own wrapped-citation fixture (full citation and
   continuation each straddling a hard line break), independent of the
   `log.md` guard's; and the previously duplicated `PATH_SHAPED_BEFORE_RE`
   path-shaped regex is now one module-scope const both call sites read,
@@ -1522,7 +1522,7 @@ Citations` gets its own wrapped-citation fixture (full citation and
 - The installed implementer and reviewer prompts now carry a checklist item
   for any diff that adds or changes a GitHub Actions `run:` step: replay it
   locally under the shell the step actually runs (`bash --noprofile --norc
--eo pipefail` when `shell: bash` is set on the step or via
+  -eo pipefail` when `shell: bash` is set on the step or via
   `defaults.run.shell`, `bash -e` otherwise on Linux and macOS runners;
   Windows runners default to pwsh) before treating it as tested, with the
   expected-success and the expected-failure inputs, replaying a job's steps
@@ -1532,7 +1532,7 @@ Citations` gets its own wrapped-citation fixture (full citation and
   compatible with its read-only Bash rule. The reviewer's `reproduction`
   field now names this replay as a second, explicitly non-probabilistic
   trigger alongside empirical/probabilistic evidence, with `sample_size:
-not_applicable` allowed. SKILL.md points to the installed implementer
+  not_applicable` allowed. SKILL.md points to the installed implementer
   prompt for the rule. Anchored by the analysis in
   `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section 7(vi).
 
@@ -1570,6 +1570,7 @@ not_applicable` allowed. SKILL.md points to the installed implementer
   explicit inline fallback for environments without native subagents. Normal
   reinstallation preserves recorded routing; model changes use explicit
   overrides or documented operator synchronization.
+
 
 ## [0.28.0] - 2026-09-04
 
@@ -1658,7 +1659,7 @@ not_applicable` allowed. SKILL.md points to the installed implementer
   spanning more than one repository, `00-goal.md` now also carries one keyed
   `run-base[<repo-basename>]` marker per repository alongside the existing
   unkeyed one, exact form `<!-- solution-acceptance: run-base[<repo-basename>]
-= <sha> -->`; the shipped template line uses the placeholder key
+  = <sha> -->`; the shipped template line uses the placeholder key
   `<repo-basename>` and value `<sha>` as a documentation example. Both are
   written for a new consumer: the `.ai/run` pointer and the keyed marker are
   read by grounding-mcp's `ow-run-completeness` reader, released as
@@ -1706,7 +1707,7 @@ not_applicable` allowed. SKILL.md points to the installed implementer
   not in the skill text. `test/docs-consistency.test.ts`'s pointer-doc
   describe block now routes six of its eight checks through one shared
   `expectPointerMention` helper that asserts the exact phrase `` `.ai/run`
-pointer `` (a bare `.ai/runs/` mention alone cannot satisfy it); the
+  pointer `` (a bare `.ai/runs/` mention alone cannot satisfy it); the
   SKILL.md Run state contract check and the exact-keyed-example check keep
   their own specific phrases instead, and a further check pins the
   grammar rule's wording ("on its own line", both deviation outcomes).
@@ -1725,13 +1726,13 @@ pointer `` (a bare `.ai/runs/` mention alone cannot satisfy it); the
   an operator home directory (default `~/.orchestrator-workflow/`,
   overridable via the `ORCHESTRATOR_WORKFLOW_HOME` environment variable)
   hold one manifest per operator (`{ kit, schemaVersion: 1, defaults: {
-harnesses, profile, tiers, models }, targets: [{ path,
-lastAppliedVersion, lastAppliedAt }], createdAt, updatedAt }`), separate
+  harnesses, profile, tiers, models }, targets: [{ path,
+  lastAppliedVersion, lastAppliedAt }], createdAt, updatedAt }`), separate
   from each repository's own `.ai/workflow/manifest.json`. Four new
   subcommands sit alongside the existing per-repository `init`/`uninstall`,
   which stay fully supported and unchanged: `setup` writes or updates the
   operator defaults without touching any repository; `apply --target
-<repo>` projects those defaults, and the target's own previously
+  <repo>` projects those defaults, and the target's own previously
   recorded settings, onto one repository through the same
   option-resolution logic `init` uses (`resolveInitInputs`, extracted for
   reuse), and registers the target, by its resolved real path, in the
@@ -1791,7 +1792,7 @@ lastAppliedVersion, lastAppliedAt }], createdAt, updatedAt }`), separate
   `templates only` instead of `installed for: ` followed by nothing.
   Motivated by friction filed 2026-08-28 while refreshing an agent-tasks
   install that had ended up in the templates-only manifest shape (`harnesses:
-[]`, produced by a 0.14.0-era install with no harness configured) with no
+  []`, produced by a 0.14.0-era install with no harness configured) with no
   supported way to reproduce or re-render that state: `--harness none`
   rejected the literal value, and `--harness ""` fell back to detection,
   which under `--yes` installed `claude` unasked. Documented in `README.md`
@@ -1819,7 +1820,7 @@ lastAppliedVersion, lastAppliedAt }], createdAt, updatedAt }`), separate
   running another round unaided, and records the choice in
   `03-decisions.md`'s new Review-round escalation section (the
   `review-round-escalation` marker: `n/a | tier_escalation | advisor |
-merge_hold`, `n/a` a deliberately fail-open default since most runs
+  merge_hold`, `n/a` a deliberately fail-open default since most runs
   never trigger the budget at all, unlike the `TODO` fail-closed sentinel
   the `solution-acceptance:` marker family uses). Which of the three is
   picked stays a judgment call; only that one is picked and recorded is
@@ -1858,7 +1859,6 @@ merge_hold`, `n/a` a deliberately fail-open default since most runs
   `implementer-low` against the default tier on a different task shape,
   not model strength, so whether a stronger model generally shortens
   these rounds remains open.
-
 - A new `okf-anchor-guard` job in `.github/workflows/ci.yml` (this repo)
   runs okf-kit's anchor check against `docs/okf` and fails the build (no
   branch-protection change; master has no required checks today) when an
@@ -1986,9 +1986,9 @@ merge_hold`, `n/a` a deliberately fail-open default since most runs
   the changelog instead, with a one-line pointer left in prose.
   - `SKILL.md` step 6 ("Delegate implementation"): the parenthetical
     `(2026-08-24 A/B measurement, n=8: implementer-low reached accept a
-median 320 seconds slower, p=0.016, with 9 high-plus-critical review
-findings against 1 and 8 fix rounds against 1)` is now `(anchored by an
-A/B measurement; see CHANGELOG 0.23.0)`. The full numbers already live
+    median 320 seconds slower, p=0.016, with 9 high-plus-critical review
+    findings against 1 and 8 fix rounds against 1)` is now `(anchored by an
+    A/B measurement; see CHANGELOG 0.23.0)`. The full numbers already live
     in the 0.23.0 entry below.
   - `agents-md-section.md`'s Scaling delegation bullet: the paragraph
     naming the A/B's `n=8`, the median slowdown, `p=0.016`, the
@@ -1998,7 +1998,7 @@ A/B measurement; see CHANGELOG 0.23.0)`. The full numbers already live
     recorded in the orchestrator-workflow CHANGELOG (0.23.0)." Same data,
     same 0.23.0 entry.
   - `SKILL.md`'s "Subagent misfire rule": the incident tally `(four so
-far)` and the whole reviewer/model-correlation passage ("So far this
+    far)` and the whole reviewer/model-correlation passage ("So far this
     signal has only been observed for the reviewer role ...", including the
     0.21.0 advisor remark and the pointer to the per-role model
     preferences) are removed. The rule itself (the signal definition, the
@@ -2407,7 +2407,7 @@ far)` and the whole reviewer/model-correlation passage ("So far this
   mandatory `acceptance_recommendation` field. Three changes, each docs/
   prompt-only:
   - Implementer output contract gains a `mutation_probes` field (`mutant,
-verified_applied_via, result, restored_verified`), mirrored
+    verified_applied_via, result, restored_verified`), mirrored
     byte-identically in `SKILL.md`'s reference copy and the installed
     `assets/agents/implementer.md` prompt. The Subagent misfire rule now
     states explicitly that an implementer return omitting this field, when
@@ -2496,11 +2496,11 @@ verified_applied_via, result, restored_verified`), mirrored
   measurement itself, not re-read the implementer's log, and record method,
   sample size, and result against the implementer's claim in a new
   `reproduction` field (`method, sample_size, result,
-matches_implementer_claim`) added to the Reviewer output contract in
+  matches_implementer_claim`) added to the Reviewer output contract in
   `SKILL.md` step 7 and to the installed `assets/agents/reviewer.md` prompt
   body (shared, byte-identical, by the Claude Code and opencode reviewer
   subagents). `matches_implementer_claim` uses `matched | mismatched |
-not_applicable` rather than `yes | no | not_applicable`: bare `yes`/`no`
+  not_applicable` rather than `yes | no | not_applicable`: bare `yes`/`no`
   are YAML 1.1 boolean synonyms, and picking unambiguous tokens up front
   costs nothing even though this field is prose a human reads, not a
   machine-parsed value. The trigger is deliberately narrow: a single deterministic
@@ -2559,7 +2559,7 @@ not_applicable` rather than `yes | no | not_applicable`: bare `yes`/`no`
   paths any bundle doc claims as sources, and if so either updates the
   affected docs (re-verify and re-stamp) or records a follow-up task, and
   runs the bundle validator when one is available (for example `okf-kit
-check`). The hook is optional guidance, never a gate: repos without a
+  check`). The hook is optional guidance, never a gate: repos without a
   bundle are unaffected. `06-handoff.md` gained a matching optional
   "Knowledge Bundle" section so the outcome (updated / not affected /
   follow-up filed) is recorded alongside the rest of the handoff. Motivated
