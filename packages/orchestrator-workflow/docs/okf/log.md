@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-10-18T17:35:36Z, sibling-drift allowlist follows the moved paragraph lines: the two allowlist entries
+  for `subagent-contracts-superset.md` in `docs-consistency.test.ts` record the paragraph lines of
+  their citations at the positions the verification-set edit moved them to; no citation or claim
+  changed. Re-stamped: `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
 - 2026-10-18T17:31:00Z, verification-set rules loaded conditionally: the role-side rules (approval, comparison, path
   rule, snapshot, reporting, outcomes) left `implementer.md` and `reviewer.md` for a new skill
   reference, `verification-set-rules.md`, which the orchestrator copies into a briefing only when
