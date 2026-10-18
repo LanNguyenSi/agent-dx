@@ -2234,10 +2234,10 @@ are filled from the probe's own inputs instead: `--file` and `-n` (a
 plan entry's file and line) and `-M`/`-w` (the entry's match/with); a
 whole-line `-r` has no `before` substring, so `before` is empty and
 `after` is the replacement text. A patch mutant (`-p`, or a plan entry's
-`patch`) has no before/after text to fill: without a `mutant` record its
-item fills only `file` (and `anchor` when the plan entry gives a line),
-because its definition is the patch file, which is what it is replayed
-from. Without that fill an item would read as "no definition recorded",
+`patch`) has no before/after text to fill: without a `mutant` record a
+plan entry's item fills only `file` (and `anchor` when the entry gives a
+line) and a bare `-p` fills none of the four, because its definition is
+the patch file, which is what it is replayed from. Without that fill an item would read as "no definition recorded",
 a non-regression, hiding the regression case the replay is for. `-m` bounds the printed array without cutting it into
 invalid JSON: when the whole array fits it prints verbatim; otherwise
 only the whole leading items that fit print (a valid array, possibly
@@ -2254,7 +2254,10 @@ exactly `target text no longer present` for every cause of that code
 original line or to the matched text, an empty `-M`, a line out of
 range, a patch that does not apply, touches other paths, or overflows
 the numstat check; the default envelope's `warnings` name the specific
-one), and any other internal reason string is carried verbatim. A field
+one), and any other internal reason string is carried verbatim. A row
+the plan never reached (or a run that stopped before any mutant ran)
+carries the run's own top-level reason, such as `baseline_failed`,
+`pre_failed` or `restore_failed`; a row's own reason always wins. A field
 whose source record is absent, and which the probe's own inputs do not
 fill either, prints as the empty string (for `restored_verified` too):
 a missing sibling record is never invented. `--replayed` prints
@@ -2354,13 +2357,16 @@ records are absent it still prints a complete item rather than inventing
 the missing records: `file`, `anchor`, `before` and `after` are filled
 from the probe's own inputs (the `--file`/`-n` and `-M`/`-w`, or plan
 entry, the run was given; an empty `before` and the replacement as
-`after` for a whole-line `-r`; a patch mutant fills only `file`, and
-`anchor` when the plan entry gives a line, and is replayed from its
-patch file), `result` and `expectation` are
+`after` for a whole-line `-r`; a patch mutant from a plan entry fills
+only `file`, and `anchor` when the entry gives a line, a bare `-p` fills
+none of the four, and either is replayed from its patch file), `result`
+and `expectation` are
 `not_applicable`, `reason` is exactly `target text no longer present`
 for an internal `mutant_not_applicable` (whatever its specific cause,
-which the default envelope's `warnings` name) and the internal reason
-string otherwise, every other field the empty string. This table and its
+which the default envelope's `warnings` name), the internal reason
+string otherwise, and the run's own top-level reason for a row the plan
+never reached (a row's own reason wins), every other field the empty
+string. This table and its
 manual mapping stay the rule for probe versions that predate the option.
 
 #### Refusal reason shape

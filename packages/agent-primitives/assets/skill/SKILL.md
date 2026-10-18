@@ -64,9 +64,9 @@ is mutually exclusive with `--summary` and `--print`; if the array does
 not fit `-m` it is cut to whole items, staying valid JSON, and one
 warning on stderr names the omitted count and the file holding the full
 result); a patch
-mutant with no `mutant` record fills only `file` (and `anchor` when the
-plan entry gives a line), so carry its patch path, which is what the
-replay applies. For an older
+mutant with no `mutant` record fills only `file` and `anchor` from a plan
+entry, and none of the four from a bare `-p`, so carry its patch path,
+which is what the replay applies. For an older
 `probe` without the option, merge the records by hand instead per the
 agent-primitives package's docs/probe.md's “Mapping a probe result into
 an implementer report” section, never inventing a missing sibling
