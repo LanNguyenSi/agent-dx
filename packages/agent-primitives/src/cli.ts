@@ -1451,6 +1451,11 @@ function emitProbe(
             unreduced.plan as { results?: unknown } | undefined,
             replayed,
             reportDefinitions,
+            // The envelope's top-level reason is the fallback for rows
+            // the stopped plan never reached: they carry no reason of
+            // their own, and the contract requires one with every
+            // `not_applicable` result.
+            typeof unreduced.reason === "string" ? unreduced.reason : undefined,
           )
         : [
             mutationProbeReportItem(

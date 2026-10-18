@@ -2233,9 +2233,12 @@ the `mutant` record, `mutant`, `verified_applied_via` and
 are filled from the probe's own inputs instead: `--file` and `-n` (a
 plan entry's file and line) and `-M`/`-w` (the entry's match/with); a
 whole-line `-r` has no `before` substring, so `before` is empty and
-`after` is the replacement text. Without that fill an item would read as
-"no definition recorded", a non-regression, hiding the regression case
-the replay is for. `-m` bounds the printed array without cutting it into
+`after` is the replacement text. A patch mutant (`-p`, or a plan entry's
+`patch`) has no before/after text to fill: without a `mutant` record its
+item fills only `file` (and `anchor` when the plan entry gives a line),
+because its definition is the patch file, which is what it is replayed
+from. Without that fill an item would read as "no definition recorded",
+a non-regression, hiding the regression case the replay is for. `-m` bounds the printed array without cutting it into
 invalid JSON: when the whole array fits it prints verbatim; otherwise
 only the whole leading items that fit print (a valid array, possibly
 empty) and one warning line on stderr names the omitted count and the
@@ -2351,7 +2354,9 @@ records are absent it still prints a complete item rather than inventing
 the missing records: `file`, `anchor`, `before` and `after` are filled
 from the probe's own inputs (the `--file`/`-n` and `-M`/`-w`, or plan
 entry, the run was given; an empty `before` and the replacement as
-`after` for a whole-line `-r`), `result` and `expectation` are
+`after` for a whole-line `-r`; a patch mutant fills only `file`, and
+`anchor` when the plan entry gives a line, and is replayed from its
+patch file), `result` and `expectation` are
 `not_applicable`, `reason` is exactly `target text no longer present`
 for an internal `mutant_not_applicable` (whatever its specific cause,
 which the default envelope's `warnings` name) and the internal reason

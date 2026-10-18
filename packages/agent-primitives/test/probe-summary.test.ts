@@ -728,6 +728,42 @@ describe("probe --report mutation-probes (CLI)", { timeout: 60000 }, () => {
     });
   });
 
+  it("--plan whose baseline fails: every never-reached row's reason is the envelope's own reason", async () => {
+    const { repo, logs } = makeRepo();
+    const plan = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      plan,
+      JSON.stringify({
+        test: 'node -e "process.exit(1)"',
+        mutants: [
+          { file: "fixture.js", line: 1, replace: "module.exports = false;" },
+          { file: "fixture.js", line: 1, replace: "module.exports = 1;" },
+        ],
+      }),
+    );
+    const base = ["-C", repo, "-l", logs, "-m", "100000", "probe"];
+    const json = await spawnCli([...base, "--plan", plan]);
+    const view = await spawnCli([
+      ...base,
+      "--report",
+      "mutation-probes",
+      "--plan",
+      plan,
+    ]);
+    const envelope = JSON.parse(json.stdout);
+    expect(envelope.status).toBe("inconclusive");
+    expect(envelope.reason).toBe("baseline_failed");
+    // The run stopped at the baseline, so both rows are never-reached
+    // `not_run` entries carrying no reason of their own; the envelope's
+    // top-level reason is what every `not_applicable` item reports.
+    const items = JSON.parse(view.stdout);
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      expect(item.result).toBe("not_applicable");
+      expect(item.reason, JSON.stringify(item)).toBe(envelope.reason);
+    }
+  });
+
   it("single probe without --replayed: one item, replayed false, every field equal to the envelope", async () => {
     const { repo, logs } = makeRepo();
     const { json, view, envelope } = await both(repo, logs, KILLED_ARGS, [
@@ -1252,6 +1288,48 @@ describe("mutationProbeReportItem (report builder)", () => {
   it("replayed is the flag's value on every item", () => {
     expect(mutationProbeReportItem(killed, true).replayed).toBe(true);
     expect(mutationProbeReportItem(killed, false).replayed).toBe(false);
+  });
+
+  it("a row's own reason always wins over the envelope fallback reason", () => {
+    const items = mutationProbeReportItems(
+      {
+        results: [
+          { index: 0, status: "inconclusive", reason: "pre_failed" },
+          {
+            index: 1,
+            status: "inconclusive",
+            reason: "restore_failed",
+            mutation_probe: { result: "not_run", reason: "aborted" },
+          },
+        ],
+      },
+      false,
+      undefined,
+      "baseline_failed",
+    );
+    expect(items[0].reason).toBe("pre_failed");
+    expect(items[1].reason).toBe("aborted");
+  });
+
+  it("a measured killed or survived row keeps an empty reason beside a fallback reason", () => {
+    const survived = {
+      ...killed,
+      mutation_probe: {
+        ...killed.mutation_probe,
+        result: "survived",
+        expectation: "violated",
+      },
+    };
+    const items = mutationProbeReportItems(
+      { results: [killed, survived] },
+      false,
+      undefined,
+      "baseline_failed",
+    );
+    expect(items[0].result).toBe("killed");
+    expect(items[0].reason).toBe("");
+    expect(items[1].result).toBe("survived");
+    expect(items[1].reason).toBe("");
   });
 
   it("mutationProbeReportItems prints one item per plan result, and none for an envelope with no plan", () => {

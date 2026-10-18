@@ -414,7 +414,11 @@ type ReportProbeRecord = {
  *   then `mutant_not_applicable` becomes the contract's canonical
  *   `target text no longer present` (that code's several causes are
  *   named by the default envelope's `warnings`), and any other internal
- *   reason string is carried verbatim;
+ *   reason string is carried verbatim. A row that carries neither a
+ *   `mutation_probe.reason` nor a row `reason` falls back to the
+ *   `fallbackReason` argument (the run envelope's own top-level
+ *   `reason`, see `mutationProbeReportItems`); a row's own reason
+ *   always wins over the fallback;
  * - `replayed` is the `--replayed` flag's value (`false` for a newly run
  *   probe, `true` when the caller says these items replay prior-round
  *   definitions).
@@ -423,6 +427,7 @@ export function mutationProbeReportItem(
   source: Record<string, unknown>,
   replayed: boolean,
   definition?: ReportItemDefinition,
+  fallbackReason?: string,
 ): MutationProbeReportItem {
   const probe = source.mutation_probe as ReportProbeRecord | undefined;
   const mutant = source.mutant as ReportMutantRecord | undefined;
@@ -439,7 +444,7 @@ export function mutationProbeReportItem(
       : probe?.expectation === "met" || probe?.expectation === "violated"
         ? probe.expectation
         : "not_applicable";
-  const internalReason = probe?.reason ?? recordReason;
+  const internalReason = probe?.reason ?? recordReason ?? fallbackReason;
   const reason =
     result === "not_applicable"
       ? internalReason === MUTANT_NOT_APPLICABLE
@@ -466,13 +471,18 @@ export function mutationProbeReportItem(
  * `not_run` entries a stopped plan never reached). `definitions` is
  * indexed by a result's own `index` (the plan file's mutants in plan
  * order) and carries each entry's replay definition for the rows whose
- * `mutant` record was never computed. An envelope with no `plan` value
- * (a run that refused before any mutant existed) reports the empty
- * array. */
+ * `mutant` record was never computed. `fallbackReason` is the run
+ * envelope's own top-level `reason` (`baseline_failed` for a plan whose
+ * baseline failed, say): the `not_run` entries a stopped plan never
+ * reached carry no reason of their own, and the contract requires a
+ * reason with every `not_applicable` result; a row's own reason always
+ * wins. An envelope with no `plan` value (a run that refused before any
+ * mutant existed) reports the empty array. */
 export function mutationProbeReportItems(
   plan: { results?: unknown } | undefined,
   replayed: boolean,
   definitions?: readonly (ReportItemDefinition | undefined)[],
+  fallbackReason?: string,
 ): MutationProbeReportItem[] {
   const rows =
     plan !== undefined && Array.isArray(plan.results) ? plan.results : [];
@@ -484,6 +494,7 @@ export function mutationProbeReportItems(
       row as Record<string, unknown>,
       replayed,
       definition,
+      fallbackReason,
     );
   });
 }

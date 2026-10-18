@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still carries its replay definition (`file`/`anchor` from
   `--file`/`-n` or the plan entry, `before`/`after` from `-M`/`-w`, from
   `-r` as an empty `before` and the replacement as `after`, or from the
-  entry's match/with/replace), while any other field whose source
+  entry's match/with/replace; a patch mutant fills only `file`, and
+  `anchor` when the plan entry gives a line, and is replayed from its
+  patch file), while any other field whose source
   record is absent prints as an empty string. An array that does not fit
   `-m` prints only the whole items that fit (always valid JSON) with one
   stderr warning naming the omitted count and the full result file.
