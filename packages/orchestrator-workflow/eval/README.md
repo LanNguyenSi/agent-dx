@@ -55,19 +55,19 @@ A dataset directory holds `index.json` and one JSON file per entry.
 An entry (validated by `eval/dataset.ts`, `validate-dataset` prints every
 violation):
 
-| field | meaning |
-|---|---|
-| `schema` | `1` |
-| `id` | `[a-z0-9-]`, unique, also the file stem |
-| `kind` | `finding` (at least one known medium-or-higher defect) or `control` (no known finding) |
-| `repo` | `name`, `path` (a local repository to fetch from; a relative path is resolved against the dataset directory, so a bare repository kept next to the entries works), `head_sha` and `base_sha` (full 40-character shas), optional `fetch_note` |
-| `setup` | list of `{cwd, argv, timeout_s?}` run inside the checkout (for example `npm ci`); `cwd` stays inside the checkout, `argv` is not a shell string |
-| `review_method` | `normal`, `rigorous` or `adversarial` |
-| `leak` | how much the briefing points at the known defect: `high`, `partial` or `none` (always `none` for a control) |
-| `brief` | the reviewer briefing text, machine paths replaced by placeholders |
-| `task_spec` | the task specification text, inlined (the session has no tracker) |
-| `known_findings` | for `finding`: `{id: "K<n>", severity, category, description, files?}`; for `control`: empty |
-| `provenance` | `{source, round, notes?}`; kept in the dataset, never given to a session or the judge |
+| field            | meaning                                                                                                                                                                                                                                      |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`         | `1`                                                                                                                                                                                                                                          |
+| `id`             | `[a-z0-9-]`, unique, also the file stem                                                                                                                                                                                                      |
+| `kind`           | `finding` (at least one known medium-or-higher defect) or `control` (no known finding)                                                                                                                                                       |
+| `repo`           | `name`, `path` (a local repository to fetch from; a relative path is resolved against the dataset directory, so a bare repository kept next to the entries works), `head_sha` and `base_sha` (full 40-character shas), optional `fetch_note` |
+| `setup`          | list of `{cwd, argv, timeout_s?}` run inside the checkout (for example `npm ci`); `cwd` stays inside the checkout, `argv` is not a shell string                                                                                              |
+| `review_method`  | `normal`, `rigorous` or `adversarial`                                                                                                                                                                                                        |
+| `leak`           | how much the briefing points at the known defect: `high`, `partial` or `none` (always `none` for a control)                                                                                                                                  |
+| `brief`          | the reviewer briefing text, machine paths replaced by placeholders                                                                                                                                                                           |
+| `task_spec`      | the task specification text, inlined (the session has no tracker)                                                                                                                                                                            |
+| `known_findings` | for `finding`: `{id: "K<n>", severity, category, description, files?}`; for `control`: empty                                                                                                                                                 |
+| `provenance`     | `{source, round, notes?}`; kept in the dataset, never given to a session or the judge                                                                                                                                                        |
 
 Placeholders in `brief` and `task_spec`: `{{WORKTREE}}`, `{{EVIDENCE_DIR}}`,
 `{{RUN_DIR}}`, `{{BASE_SHA}}`, `{{HEAD_SHA}}`. The runner replaces them with
@@ -104,10 +104,11 @@ npm run eval -- compare --dataset <dir> --out <results> --a current --b degraded
   [--exclude-leak high] [--noise-floor 1]
 ```
 
-`--scratch` (default: a directory in the system temp directory) and `--out`
-must lie outside the dataset's parent directory, and the scratch directory
-outside the home directory and outside `--out`; the commands refuse
-otherwise, since the session may read neither.
+`--scratch` and `--out` must lie outside the dataset's parent directory, and
+the scratch directory outside the home directory, outside every temp root and
+outside `--out`; the commands refuse otherwise, since the session may read
+none of them. The default scratch directory is `/Users/Shared/ow-eval` on macOS;
+on any other host `--scratch` is required.
 
 Run `canary` before every batch and after every Claude Code update (see
 Isolation). It exits 0 only when every check passed.
@@ -204,16 +205,23 @@ What contains a session:
   allowlist with no host on it, no Unix socket and no local listening port.
   They cannot read the invoking user's home, the dataset's parent tree, the
   results directory, the source repositories, the other runs' scratch
-  directories or the shared temp roots (the system temp directory and `/tmp`;
-  the run's own scratch directories are re-opened), and they write only to the checkout, the evidence directory and
+  directories or the shared temp roots (the system temp directory and `/tmp`),
+  and they write only to the checkout, the evidence directory and
   Claude Code's per-user temp directory. `CLAUDE_CODE_TMPDIR` moves that
   directory into the run's scratch; for a long scratch path Claude Code may
   use a short directory under the system temp root instead (Claude Code
   environment variable docs), so keep `--scratch` short.
-- **File tools**: Read and Edit deny rules cover the same trees and the run's
-  `meta/` directory, and reads outside the working directories (the checkout
-  and the evidence directory) are refused in every permission mode. File
-  edits, subagents, web tools and every tool that reaches another session, a
+- **Scratch location**: the file-tool deny rules below cover the home
+  directory and the temp roots, and a deny rule always wins over an allow
+  entry, so a checkout inside either would be unreadable to its own session.
+  The scratch directory therefore lives outside both: `/Users/Shared/ow-eval`
+  by default on macOS, `--scratch` elsewhere. `TMPDIR` and
+  `CLAUDE_CODE_TMPDIR` still point into the run's own scratch directory.
+- **File tools**: Read and Edit deny rules cover the same trees, the shared
+  temp roots in every path form, and the run's `meta/` directory. The
+  `permissions.blockReadsOutsideWorkingDirectories` setting is not used: with
+  the sandbox enabled it hangs Claude Code 2.1.302 before the first tool call.
+  File edits, subagents, web tools and every tool that reaches another session, a
   remote service, a schedule or a notification are disallowed; inbound
   messages from other sessions are refused, and in the default bare mode the
   session binds no inbox socket at all. No MCP server is configured.
@@ -267,7 +275,7 @@ effort and tool restrictions from the routing selection. The replay is the
 closest headless equivalent, not an identical one:
 
 - The prompt body is passed as an agent definition (`--agents <file> --agent
-  reviewer`) and runs as the main thread of its own session, with the
+reviewer`) and runs as the main thread of its own session, with the
   briefing on stdin. It is not spawned through the Agent tool of a parent
   session.
 - Model and effort come from flags (`--model`, `--effort`), not from the

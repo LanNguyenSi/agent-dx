@@ -54,6 +54,8 @@ function io(
       AGENT_TASKS_TOKEN: "agent-tasks-secret-value",
       ...extraEnv,
     },
+    // The fixture scratch lives under the system temp root; production refuses that.
+    tempRoots: [],
   };
 }
 
@@ -200,6 +202,74 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
     const inOut = await run(out, join(out, "scratch"));
     expect(inOut.code).toBe(2);
     expect(inOut.env.errors[0]).toContain("inside --out");
+  });
+
+  it("refuses a --scratch inside a temp root, with the reason", async () => {
+    const alpha = promptFile("alpha.md", "Alpha body.");
+    const env = { ...io(), tempRoots: [work] };
+    const code = await main(
+      [
+        "run",
+        ...common(),
+        "--variant",
+        `file:${alpha}`,
+        "--claude",
+        claude(),
+        ...guard,
+        "--scratch",
+        join(work, "elsewhere"),
+      ],
+      env,
+    );
+    expect(code).toBe(2);
+    expect(env.errors[0]).toContain("--scratch");
+    expect(env.errors[0]).toContain("inside a temp root");
+    expect(env.errors[0]).toContain("own checkout");
+    expect(existsSync(join(work, "elsewhere"))).toBe(false);
+  });
+
+  it("requires --scratch where the host has no default, and uses the default where it has one", async () => {
+    const alpha = promptFile("alpha.md", "Alpha body.");
+    const args = (): string[] => [
+      "canary",
+      ...common(),
+      "--claude",
+      claude(),
+      ...guard,
+    ];
+    const none = { ...io(), defaultScratch: null };
+    expect(await main(args(), none)).toBe(2);
+    expect(none.errors[0]).toContain("--scratch is required");
+
+    // With a default and no flag, the sessions' directories are created under it.
+    const records = join(work, "rec-default");
+    mkdirSync(records, { recursive: true });
+    const withDefault = { ...io(), defaultScratch: join(work, "default-root") };
+    await main(
+      [
+        "run",
+        "--dataset",
+        dataset,
+        "--out",
+        join(work, "out-default"),
+        "--variant",
+        `file:${alpha}`,
+        "--claude",
+        claude(
+          { STUB_FINAL_TEXT_FILE: textFile("clean-d.txt", reviewerReturn()) },
+          records,
+        ),
+        ...guard,
+        "--only",
+        "entry-c",
+      ],
+      withDefault,
+    );
+    const session = calls(records).at(-1)!;
+    expect(
+      session.env.TMPDIR.startsWith(join(work, "default-root") + "/"),
+    ).toBe(true);
+    expect(session.env.CLAUDE_CODE_TMPDIR).toBe(session.env.TMPDIR);
   });
 
   it("runs, judges, scores and compares two variants", async () => {

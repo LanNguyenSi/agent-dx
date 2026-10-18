@@ -17,6 +17,7 @@ import {
   DISALLOWED_TOOLS,
   checkPlacement,
   createRunScratch,
+  defaultScratchRoot,
   hostGitEnv,
   isInside,
   pathForms,
@@ -62,14 +63,38 @@ describe("run scratch", () => {
 
 describe("placement of scratch and results", () => {
   const base = {
-    scratchRoot: "/tmp/eval-scratch",
+    scratchRoot: "/srv/scratch",
     outDir: "/srv/results",
     datasetDir: "/srv/data/dataset",
     home: "/home/someone",
+    tempRoots: ["/tmp", "/private/tmp"],
   };
 
-  it("accepts directories outside the dataset tree and the home", () => {
+  it("accepts directories outside the dataset tree, the home and the temp roots", () => {
     expect(checkPlacement(base)).toBeNull();
+  });
+
+  it("refuses a scratch directory inside a temp root, in any form of it, and says why", () => {
+    for (const scratchRoot of ["/tmp/eval-scratch", "/private/tmp/a/b"]) {
+      const message = checkPlacement({ ...base, scratchRoot });
+      expect(message, scratchRoot).toContain("--scratch");
+      expect(message, scratchRoot).toContain("inside a temp root");
+      expect(message, scratchRoot).toContain("own checkout");
+    }
+    // The host's own temp roots apply when none are passed.
+    expect(
+      checkPlacement({
+        scratchRoot: join(tmpdir(), "eval-scratch"),
+        outDir: "/srv/results",
+        datasetDir: "/srv/data/dataset",
+        home: "/home/someone",
+      }),
+    ).toContain("inside a temp root");
+    // The temp root itself is refused; a sibling with the same prefix is not.
+    expect(checkPlacement({ ...base, scratchRoot: "/tmp" })).toContain(
+      "inside a temp root",
+    );
+    expect(checkPlacement({ ...base, scratchRoot: "/tmpfoo/x" })).toBeNull();
   });
 
   it("refuses a results or scratch directory in the dataset's parent tree", () => {
@@ -87,6 +112,9 @@ describe("placement of scratch and results", () => {
       checkPlacement({ ...base, scratchRoot: "/home/someone/tmp" }),
     ).toContain("inside the home directory");
     expect(
+      checkPlacement({ ...base, scratchRoot: "/home/someone/tmp" }),
+    ).toContain("own checkout");
+    expect(
       checkPlacement({ ...base, scratchRoot: "/srv/results/scratch" }),
     ).toContain("inside --out");
   });
@@ -102,6 +130,33 @@ describe("placement of scratch and results", () => {
     expect(isInside("/a", "/a")).toBe(true);
     expect(isInside("/ab", "/a")).toBe(false);
     expect(isInside("/a/../b", "/a")).toBe(false);
+  });
+});
+
+describe("default scratch root", () => {
+  it("is /Users/Shared/ow-eval on macOS when /Users/Shared exists", () => {
+    expect(defaultScratchRoot("darwin", () => true)).toBe(
+      "/Users/Shared/ow-eval",
+    );
+  });
+
+  it("is absent elsewhere, so --scratch is required", () => {
+    expect(defaultScratchRoot("darwin", () => false)).toBeNull();
+    expect(defaultScratchRoot("linux", () => true)).toBeNull();
+    expect(defaultScratchRoot("win32", () => true)).toBeNull();
+  });
+
+  it("lies outside the home and every temp root", () => {
+    const root = defaultScratchRoot("darwin", () => true)!;
+    expect(
+      checkPlacement({
+        scratchRoot: root,
+        outDir: "/srv/results",
+        datasetDir: "/srv/data/dataset",
+        home: "/Users/someone",
+        tempRoots: ["/tmp", "/private/tmp", "/private/var/folders/xx/T"],
+      }),
+    ).toBeNull();
   });
 });
 
@@ -191,9 +246,31 @@ describe("session settings", () => {
     expect(
       deny.some((r) => r.startsWith("Glob(") || r.startsWith("Grep(")),
     ).toBe(false);
-    expect(settings.permissions.blockReadsOutsideWorkingDirectories).toBe(true);
+    // Measured: with the sandbox enabled this key hangs claude 2.1.302 before its first tool call.
+    expect(settings.permissions).not.toHaveProperty(
+      "blockReadsOutsideWorkingDirectories",
+    );
+    expect(JSON.stringify(settings)).not.toContain(
+      "blockReadsOutsideWorkingDirectories",
+    );
     expect(settings.crossSessionInbound).toBe("refuse");
     expect(settings.isolatePeerMachines).toBe(true);
+  });
+
+  it("denies Read and Edit on every form of every temp root, bare and recursive", () => {
+    const deny: string[] = settings.permissions.deny;
+    const roots = systemTempRoots();
+    expect(roots.length).toBeGreaterThan(0);
+    for (const root of roots) {
+      for (const tool of ["Read", "Edit"]) {
+        expect(deny, `${tool} ${root}`).toContain(`${tool}(/${root})`);
+        expect(deny, `${tool} ${root}`).toContain(`${tool}(/${root}/**)`);
+      }
+    }
+    if (process.platform === "darwin") {
+      for (const root of ["/tmp", "/private/tmp"])
+        expect(deny).toContain(`Read(/${root}/**)`);
+    }
   });
 
   it("disallows every tool that reaches another session or a remote service", () => {

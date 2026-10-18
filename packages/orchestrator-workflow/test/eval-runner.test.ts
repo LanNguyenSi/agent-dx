@@ -367,7 +367,19 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
         "ListAgents",
       ]),
     );
-    expect(settings.permissions.blockReadsOutsideWorkingDirectories).toBe(true);
+    // Read and Edit are denied on the temp roots, in the production run's settings.
+    const realTmp = realpathSync(tmpdir());
+    expect(settings.permissions.deny).toEqual(
+      expect.arrayContaining([
+        `Read(/${realTmp})`,
+        `Read(/${realTmp}/**)`,
+        `Edit(/${realTmp})`,
+        `Edit(/${realTmp}/**)`,
+      ]),
+    );
+    expect(settings.permissions).not.toHaveProperty(
+      "blockReadsOutsideWorkingDirectories",
+    );
     expect(settings.crossSessionInbound).toBe("refuse");
     // The settings file is kept with the run record.
     expect(

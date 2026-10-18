@@ -75,6 +75,22 @@ export function createRunScratch(scratchRoot: string): RunScratch {
   }
 }
 
+/**
+ * Default scratch root: a directory outside the home directory and outside
+ * every temp root, because the session's file-tool deny rules cover both (a
+ * checkout inside either would be unreadable to its own session). Only macOS
+ * has such a place without configuration (`/Users/Shared`); elsewhere the
+ * caller must pass `--scratch`, and this returns null.
+ */
+export function defaultScratchRoot(
+  platform: NodeJS.Platform = process.platform,
+  exists: (path: string) => boolean = existsSync,
+): string | null {
+  if (platform === "darwin" && exists("/Users/Shared"))
+    return "/Users/Shared/ow-eval";
+  return null;
+}
+
 /** Shared npm cache of the setup commands, under the scratch root. */
 export function setupNpmCache(scratchRoot: string): string {
   return join(scratchRoot, "npm-cache");
@@ -220,11 +236,16 @@ export function checkPlacement(options: {
   outDir: string;
   datasetDir: string;
   home: string;
+  /** Shared temp roots; defaults to `systemTempRoots()`. */
+  tempRoots?: string[];
 }): string | null {
   const scratch = pathForms(options.scratchRoot);
   const out = pathForms(options.outDir);
   const datasetParent = pathForms(dirname(resolve(options.datasetDir)));
   const home = pathForms(options.home);
+  const tempRoots = uniq(
+    (options.tempRoots ?? systemTempRoots()).flatMap(pathForms),
+  );
   const inside = (a: string[], b: string[]): boolean =>
     a.some((x) => b.some((y) => isInside(x, y)));
   if (inside(scratch, datasetParent))
@@ -232,7 +253,9 @@ export function checkPlacement(options: {
   if (inside(out, datasetParent))
     return `--out ${options.outDir} is inside the dataset's parent directory; choose a directory outside it`;
   if (inside(scratch, home))
-    return `--scratch ${options.scratchRoot} is inside the home directory, which the session may not read; choose a directory outside it (the system temp directory is the default)`;
+    return `--scratch ${options.scratchRoot} is inside the home directory, which the file-tool deny rules cover, so the session could not read its own checkout; choose a directory outside the home directory and the temp roots`;
+  if (inside(scratch, tempRoots))
+    return `--scratch ${options.scratchRoot} is inside a temp root (${tempRoots.join(", ")}), which the file-tool deny rules cover, so the session could not read its own checkout; choose a directory outside the home directory and the temp roots`;
   if (inside(scratch, out))
     return `--scratch ${options.scratchRoot} is inside --out, which the session may not read`;
   for (const path of [...scratch, ...out, ...datasetParent, ...home]) {
@@ -332,12 +355,18 @@ export function sessionSettings(
     scratch.home,
     scratch.tmp,
   ];
-  const fileRules = uniq([...denied, scratch.meta]).flatMap((path) => [
-    `Read(${rulePath(path)})`,
-    `Read(${rulePath(path)}/**)`,
-    `Edit(${rulePath(path)})`,
-    `Edit(${rulePath(path)}/**)`,
-  ]);
+  // The temp roots get the same file-tool denial as the home: other sessions keep their task
+  // output there, and Read/Edit are not covered by the sandbox's denyRead. The run's own
+  // scratch must therefore lie outside them (`checkPlacement`).
+  const tempDenied = uniq(input.tempRoots.flatMap(pathForms));
+  const fileRules = uniq([...denied, ...tempDenied, scratch.meta]).flatMap(
+    (path) => [
+      `Read(${rulePath(path)})`,
+      `Read(${rulePath(path)}/**)`,
+      `Edit(${rulePath(path)})`,
+      `Edit(${rulePath(path)}/**)`,
+    ],
+  );
   return {
     sandbox: {
       // settings-reference#sandbox-enabled: sandbox Bash commands.
@@ -392,10 +421,10 @@ export function sessionSettings(
       // (permissions docs, "Read and Edit"); a Glob(...) or Grep(...) path rule is accepted but
       // never consulted, so none is written.
       deny: [...fileRules, "SendMessage", "ListAgents"],
-      // settings-reference#permissions-blockreadsoutsideworkingdirectories: the file tools refuse
-      // reads outside the working directories (the checkout and the --add-dir evidence directory)
-      // in every mode, and sandboxed commands lose the user-file roots such as /Users and /home.
-      blockReadsOutsideWorkingDirectories: true,
+      // permissions.blockReadsOutsideWorkingDirectories is deliberately not set: together with the
+      // enabled sandbox it hangs the session before its first tool call, with no output, 0 % CPU
+      // and SIGTERM ignored (measured on Claude Code 2.1.302, one-line prompt on a small model).
+      // The file tools' reach is limited by the Read/Edit deny rules above instead.
     },
     // cross-session-messaging docs, "Control inbound messages": drop every inbound peer message.
     crossSessionInbound: "refuse",

@@ -24,6 +24,7 @@ import type { Dataset, DatasetEntry, LeakTag } from "./dataset.js";
 import {
   checkPlacement,
   createRunScratch,
+  defaultScratchRoot,
   hostGitEnv,
   protectedHome,
   redactPaths,
@@ -53,6 +54,10 @@ export interface Io {
   out: (line: string) => void;
   err: (line: string) => void;
   env: NodeJS.ProcessEnv;
+  /** Test seam: the shared temp roots the scratch placement check refuses; defaults to the host's. */
+  tempRoots?: string[];
+  /** Test seam: the scratch root used without `--scratch` (null: none); defaults to the host's. */
+  defaultScratch?: string | null;
 }
 
 const USAGE = `Usage: eval <command> [options]
@@ -262,8 +267,18 @@ function sessionOptions(
   const apiKeyEnv = values["api-key-env"] ?? "ANTHROPIC_API_KEY";
   if (!requireKey(io, apiKeyEnv)) return null;
   const outDir = resolve(values.out);
-  const scratchRoot = resolve(values.scratch ?? join(tmpdir(), "ow-eval"));
+  const scratchDefault =
+    io.defaultScratch === undefined ? defaultScratchRoot() : io.defaultScratch;
+  const scratchChoice = values.scratch ?? scratchDefault;
+  if (scratchChoice === null) {
+    io.err(
+      "--scratch is required: there is no default scratch directory on this host. Choose a directory outside the home directory and the temp roots; the session's file-tool deny rules cover both.",
+    );
+    return null;
+  }
+  const scratchRoot = resolve(scratchChoice);
   const placement = checkPlacement({
+    tempRoots: io.tempRoots,
     scratchRoot,
     outDir,
     datasetDir: dataset.dir,
