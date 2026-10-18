@@ -1,6 +1,6 @@
 {
   "name": "agent-primitives",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "Agent-first CLI primitives (bounded JSON envelopes, a mutation-probe runner, a verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, an exact-text patcher, checkout snapshot/delta, and a skill installer) for narrow subagents",
   "type": "module",
   "bin": {
