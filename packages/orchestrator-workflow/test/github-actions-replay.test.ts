@@ -6,8 +6,9 @@ import { readAsset } from "../src/assets.js";
 // workflow or action files. The rule text lives in one skill reference, the
 // orchestrator-side trigger and copy instruction is stated once in
 // evidence-and-probes.md, and the reviewer flags a diff that matches the
-// trigger when its briefing lacks the reference. The reference's own wording
-// beyond its scratch-copy requirement is covered by review, not pinned here.
+// trigger when its briefing lacks the reference. The reference's applicability
+// line, shell choice, inputs and scratch-copy requirement are pinned; its other
+// clauses are covered by review.
 
 const unwrap = (text: string) => text.replace(/\s+/g, " ");
 const reference = () =>
@@ -40,6 +41,9 @@ describe("GitHub Actions replay rules", () => {
       readAsset("skill/references/evidence-and-probes.md"),
     );
     expect(evidence.split(rule)).toHaveLength(2);
+    expect(evidence).toContain(
+      "In run mode `single`, where no implementer briefing exists, the orchestrator applies the implementer part of those rules itself to such a diff before it records the change as tested.",
+    );
     expect(evidence.split(TRIGGER_GLOBS)).toHaveLength(2);
     for (const other of [
       "skill/SKILL.md",
@@ -53,7 +57,7 @@ describe("GitHub Actions replay rules", () => {
 
   it("has the reviewer flag a trigger-matching diff whose briefing lacks the replay rules", () => {
     expect(unwrap(readAsset("agents/reviewer.md"))).toContain(
-      "- GitHub Actions shell replay: when the briefing carries the GitHub Actions replay rules, follow them; a diff that touches `.github/workflows/**`, `action.yml` or `action.yaml` while the briefing lacks them is a finding.",
+      "- GitHub Actions shell replay: when the briefing carries the GitHub Actions replay rules, follow them; a diff that touches `.github/workflows/**`, or an `action.yml` or `action.yaml` at any depth, while the briefing lacks them is a finding.",
     );
   });
 

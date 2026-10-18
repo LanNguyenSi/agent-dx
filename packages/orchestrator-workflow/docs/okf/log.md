@@ -2443,8 +2443,8 @@
   its current line, 329. Two further citations surfaced by the same
   ambiguity-clearing effect, both into `docs/okf/subagent-contracts-
   superset.md` itself
-  (`docs/okf/subagent-contracts-superset.md:383#"second, explicitly non-probabilistic trigger for the same field, with"`
-  and `docs/okf/subagent-contracts-superset.md:505#"reports as killed together with their"`),
+  (`docs/okf/subagent-contracts-superset.md:384#"second, explicitly non-probabilistic trigger for the same field, with"`
+  and `docs/okf/subagent-contracts-superset.md:506#"reports as killed together with their"`),
   were re-pointed to their current lines by the same anchor-text search
   as the rest of this round's re-pointing.
   A fifth, unrelated warning (not from the ambiguity-clearing effect: a
@@ -3815,8 +3815,8 @@
   "...reports as killed together with their...") were re-anchored to a
   shorter quote sitting wholly on the anchor's own last line instead of a
   two-line span, per this bundle's own single-line-anchor convention
-  (`docs/okf/subagent-contracts-superset.md:383#"second, explicitly non-probabilistic trigger for the same field, with"`,
-  `docs/okf/subagent-contracts-superset.md:505#"reports as killed together with their"`).
+  (`docs/okf/subagent-contracts-superset.md:384#"second, explicitly non-probabilistic trigger for the same field, with"`,
+  `docs/okf/subagent-contracts-superset.md:506#"reports as killed together with their"`).
   `okf-kit check --json packages/orchestrator-workflow/docs/okf` went from
   0 errors/0 warnings/23 notices at round-1 HEAD, to warnings introduced
   by this round's own edits (all resolved by the re-derivation pass

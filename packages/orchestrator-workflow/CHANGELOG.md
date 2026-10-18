@@ -81,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hold without the block; the scratchpad allowance of the read-only rule stands
   on its own terms. The replay rules themselves, including the reviewer's
   scratch-copy requirement, are unchanged, so a briefing that carries them
-  behaves as before. The process-group and memory-cap rule, the byte-count
+  behaves as before; in run mode `single` the orchestrator applies the implementer part itself. The process-group and memory-cap rule, the byte-count
   ceiling rule, the coverage-percentage rule, and the BSD `sed -i` rule stay in
   the prompts. The installed implementer, reviewer, and skill files report as
   outdated until refreshed.

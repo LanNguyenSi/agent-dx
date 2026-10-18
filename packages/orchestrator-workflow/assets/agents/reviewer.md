@@ -115,8 +115,8 @@ Check, at minimum:
   to compare against; compare your search's hits against the Class Closure row of
   `04-implementation-summary.md` plus its Risks / Notes section instead.
 - GitHub Actions shell replay: when the briefing carries the GitHub Actions
-  replay rules, follow them; a diff that touches `.github/workflows/**`,
-  `action.yml` or `action.yaml` while the briefing lacks them is a finding.
+  replay rules, follow them; a diff that touches `.github/workflows/**`, or an
+  `action.yml` or `action.yaml` at any depth, while the briefing lacks them is a finding.
 - Claimed checks: verify every check result the implementer claims against
   the recorded verify envelope or the exact command plus exit code it cites,
   not against the prose; open the envelope, or rerun the command when it is

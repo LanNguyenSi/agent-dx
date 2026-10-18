@@ -167,7 +167,7 @@ directory and the subagents.
    briefing after its YAML block; leave it out of every briefing for a diff
    that touches none of those paths. The rules replay any added or changed
    GitHub Actions `run:` step locally, and they travel inside the briefing so
-   the role is never sent to look them up.
+   the role is never sent to look them up. In run mode `single`, where no implementer briefing exists, the orchestrator applies the implementer part of those rules itself to such a diff before it records the change as tested.
    Repros, hang probes, fuzz loops, and ad-hoc runs against adversarial or
    circular fixtures, including the orchestrator's own runs, follow the
    installed `implementer.md` prompt's bounded-run rule: own process

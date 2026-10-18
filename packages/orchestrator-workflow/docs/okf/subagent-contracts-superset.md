@@ -23,6 +23,7 @@ sources:
   - packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md
   - packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md
   - packages/orchestrator-workflow/assets/skill/references/verification-set-rules.md
+  - packages/orchestrator-workflow/assets/skill/references/github-actions-replay.md
   - packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md
   - packages/orchestrator-workflow/README.md
   - packages/orchestrator-workflow/docs/verification-sets.md
@@ -383,7 +384,7 @@ no meaningful sample size
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:337#"second, explicitly non-probabilistic trigger for the same field, with"`;
 `packages/orchestrator-workflow/assets/agents/reviewer.md:315#"carries them, is a second, explicitly non-probabilistic trigger for the"`). The
 installed `packages/orchestrator-workflow/assets/agents/reviewer.md:212#"lint) do not trigger this."`
-prompt keeps the trigger in its `reproduction` field note and the replay rules in the reference. Both output
+prompt keeps the trigger in its `reproduction` field note and the replay rules in the `github-actions-replay.md` skill reference. Both output
 contracts gained a matching `reproduction` field
 (`method, sample_size, result, matches_implementer_claim`,
 `packages/orchestrator-workflow/assets/skill/references/contracts.md:283#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:276#"residual_risks:"`); `matches_implementer_claim`
