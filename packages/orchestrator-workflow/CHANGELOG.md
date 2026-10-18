@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Structure-only tightening of the implementer and reviewer prompts and the
+  evidence-and-probes reference; no rule changes meaning. The verification-set
+  rule in each prompt is a short list (approval, comparison, path rule,
+  snapshot, reporting, outcomes, bundle check) instead of one paragraph, and
+  its revision-or-dirty-state clause no longer restates the revision half that
+  the repository path rule already carries. The return-field semantics that sat
+  as rule bullets far above the output structure (`mutation_probes`,
+  `class_closure`, `commits`, `runbooks_consulted`, `recurrence`,
+  `introduced_by_delta`, `reproduction`, `runbook_notes`, and the others) now
+  sit in field notes directly under the YAML they define, and the `expectation`
+  semantics are stated once in the implementer prompt. Three long paragraphs in
+  the evidence-and-probes reference are split into short sentences. Installed
+  implementer and reviewer files report as outdated until refreshed.
+
 - The reviewer prompt's single-mode probe duty names the mismatch consequence
   once instead of twice, and the implementer prompt keeps its foreground rule
   for verification plans, probe plans, and repeat tallies in the same bullet

@@ -125,8 +125,8 @@ describe("documented verification sets", () => {
       expect(role).toContain("`(kind, name, occurrence)`");
       expect(compact(role)).toContain("limitation");
       expect(role).toContain("`skip`, `acknowledged`");
-      expect(role).toContain(
-        "each configured knowledge bundle (`knowledge` in\n  `.ai/workflow/manifest.json`; default `docs/okf/`)",
+      expect(compact(role)).toContain(
+        "each configured knowledge bundle (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`)",
       );
     }
     expect(compact(skill)).toContain(
@@ -235,7 +235,7 @@ describe("documented verification sets", () => {
   it("identifies the approved set via the frozen snapshot and binds each result to the checked revision and dirty state, in implementer.md and reviewer.md (issue #335)", () => {
     const reviewer = readRawAsset("agents/reviewer.md");
     const bindingClause =
-      "Use the frozen run-local snapshot (set path/digest, repository identity/revision and dirty state, effective config/scripts, and preflight executable identity/definition) to identify the approved set behind every reported result, and bind each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval.";
+      "Use the frozen run-local snapshot (set path/digest, repository identity/revision and dirty state, effective config/scripts, and preflight executable identity/definition) to identify the approved set behind every reported result, and bind each result to the revision and dirty state actually checked; a dirty-state difference from the snapshot alone does not withdraw the approval.";
     expect(compact(reviewer)).toContain(compact(bindingClause));
     expect(compact(readRawAsset("agents/implementer.md"))).toContain(
       compact(bindingClause),

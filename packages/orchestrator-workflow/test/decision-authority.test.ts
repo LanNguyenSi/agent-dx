@@ -178,8 +178,8 @@ describe("decision authority contract", () => {
 
   it("pins role separation in the skill and every generated reviewer prompt", () => {
     const skill = readAsset("skill/SKILL.md");
-    expect(skill).toContain(authorityPin);
-    expect(skill).toContain(
+    expect(skill.replace(/\s+/g, " ")).toContain(authorityPin);
+    expect(skill.replace(/\s+/g, " ")).toContain(
       "Markdown records evidence of real authority and never grant it by themselves.",
     );
     expect(skill.replace(/\s+/g, " ")).toContain(

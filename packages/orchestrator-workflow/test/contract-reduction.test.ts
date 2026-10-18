@@ -30,8 +30,8 @@ it("routes implementer execution to step 6 and commit reporting to the installed
 
   for (const rule of [
     "Verification plans, probe plans, and repeat tallies run in the foreground",
-    "Report the full sha of every commit you produced on the task branch",
+    "report the full sha of every commit you produced on the task branch",
   ]) {
-    expect(implementer).toContain(rule);
+    expect(implementer.replace(/\s+/g, " ")).toContain(rule);
   }
 });
