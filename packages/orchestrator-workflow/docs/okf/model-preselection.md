@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-10-18T20:24:28Z
+timestamp: 2026-10-18T20:45:26Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
