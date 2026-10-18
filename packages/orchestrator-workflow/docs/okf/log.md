@@ -1,5 +1,25 @@
 # Bundle log
 
+- 2026-10-18T16:44:54Z, doctor reports what its TOML 0.5 parser cannot know: `doctor.ts`,
+  `doctor.test.ts`, the `CHANGELOG.md` bullet and `operator-install.md` changed.
+  A Codex config file that `@iarna/toml` (TOML 0.5) cannot read, or an integer
+  it returns as a narrowed `BigInt`, is now reported as a layer whose budget is
+  unknown (Codex reads TOML 1.1 and may load the file), with the AGENTS.md
+  size and the default budget for context and no size comparison; it is no
+  longer called a Codex rejection. Values Codex rejects that the parser reads
+  exactly (a string, a negative or fractional number) are unchanged, and the
+  integer-valued float mismatch stays documented. The `codexWarnings`
+  paragraph in `operator-install-and-registry.md` was re-verified against the
+  code and rewritten, its `doctor.ts` citations were re-pointed by locating
+  each anchor on its new line (a uniform +8 below the budget code), the two
+  `doctor.ts:1071-1079` allowlist entries in `docs-consistency.test.ts`
+  followed, and this log's `CHANGELOG.md` self-citations moved by the
+  bullet's +3 lines to `CHANGELOG.md:1001#"The implementer"` and
+  `CHANGELOG.md:1378#"Citation scanning is paragraph-joined"`. Re-stamped:
+  `install-fence-mechanics.md`, `model-preselection.md`,
+  `operator-install-and-registry.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
 - 2026-10-18T16:11:58Z, doctor parses Codex config files with a TOML parser: `doctor.ts` and
   `doctor.test.ts` changed, the `CHANGELOG.md` bullet was reworded and the sibling-drift
   allowlist geometry in `docs-consistency.test.ts` followed. Re-verified against the change:
