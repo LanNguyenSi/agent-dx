@@ -213,7 +213,7 @@ opencode agent frontmatter, to the install `profile`, and to a briefing's
 
 - `single`: one coherent workstream that the orchestrator implements itself,
   with its own verification set and mutation probes. The orchestrator takes
-  over the implementer's obligations and evidence fields for that work.
+  over the implementer's obligations and evidence fields for that work. The conditional rules a briefing would carry for that work, the [verification set rules](verification-set-rules.md) for its verification set and the [GitHub Actions replay rules](github-actions-replay.md) for a diff that touches the paths step 6 of [evidence and probes](evidence-and-probes.md) names, apply to the orchestrator directly.
 - `delegated`: the orchestrator plans and slices, then assigns one implementer
   per slice, sequentially. This is the default and the flow the rest of this
   skill describes.
