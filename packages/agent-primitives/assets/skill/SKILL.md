@@ -60,7 +60,10 @@ hash. An implementer report needs eleven fields per probe: add
 `--report mutation-probes` to the probe run and paste its printed items
 (one per mutant, all eleven fields merged for you, exit codes unchanged;
 `--replayed` prints `replayed: true` for replayed definitions; the option
-is mutually exclusive with `--summary` and `--print`). For an older
+is mutually exclusive with `--summary` and `--print`; if the array does
+not fit `-m` it is cut to whole items, staying valid JSON, and one
+warning on stderr names the omitted count and the file holding the full
+result). For an older
 `probe` without the option, merge the records by hand instead per the
 agent-primitives package's docs/probe.md's “Mapping a probe result into
 an implementer report” section, never inventing a missing sibling

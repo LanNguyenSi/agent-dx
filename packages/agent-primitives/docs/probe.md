@@ -32,8 +32,10 @@ every command.
 | `--plan <path>` | JSON file with one test command and a list of mutants, run against one shared baseline | none |
 | `--link <dirs>` | comma-separated extra directories to link into the `-i worktree` copy | none |
 | `--allow-outside` | allow `--file`/`--link` to resolve outside the containment root | off |
-| `--summary` | print one line per mutant and a totals line instead of the JSON envelope; see [Compact views](#compact-views---summary-and---print) | off |
-| `--print <fields>` | print only these comma-separated envelope fields as one JSON object; see [Compact views](#compact-views---summary-and---print) | off |
+| `--summary` | print one line per mutant and a totals line instead of the JSON envelope; see [Compact views](#compact-views---summary---print-and---report) | off |
+| `--print <fields>` | print only these comma-separated envelope fields as one JSON object; see [Compact views](#compact-views---summary---print-and---report) | off |
+| `--report <kind>` | print a ready-to-paste report (only `mutation-probes`) instead of the JSON envelope; see [Compact views](#compact-views---summary---print-and---report) | none |
+| `--replayed` | with `--report`, print `replayed: true` on the items; without `--report` a usage error; see [Compact views](#compact-views---summary---print-and---report) | off |
 
 ## Verdicts and --expect
 
@@ -2214,30 +2216,47 @@ that does not resolve.
 envelope; `mutation-probes` is the only kind, and an unknown kind is a
 `usage_error` raised before the probe runs, like an unknown `--print`
 field. It prints the orchestrator implementer contract's
-`mutation_probes` items as one JSON array (pretty-printed, bounded by
-`-m` like the other views, exit code unchanged): one item per mutant,
-each carrying exactly the eleven contract fields in contract order
-(`mutant`, `file`, `anchor`, `before`, `after`, `verified_applied_via`,
-`result`, `expectation`, `reason`, `restored_verified`, `replayed`), so
-a caller pastes the items instead of merging the sibling `mutant` record
-into `mutation_probe` by hand. The field rules are the mapping table in
+`mutation_probes` items as one JSON array (pretty-printed, exit code
+unchanged): one item per mutant, each carrying exactly the eleven
+contract fields in contract order (`mutant`, `file`, `anchor`, `before`,
+`after`, `verified_applied_via`, `result`, `expectation`, `reason`,
+`restored_verified`, `replayed`), so a caller pastes the items instead of
+merging the sibling `mutant` record into `mutation_probe` by hand. The
+field rules are the mapping table in
 [Mapping a probe result into an implementer report](#mapping-a-probe-result-into-an-implementer-report)
 below, and each item's printed values are the full result's own values
 (read like `--print`, not from the `-m`-reduced envelope): `file`,
 `anchor` (the `mutant` record's line), `before` and `after` come from
 the `mutant` record, `mutant`, `verified_applied_via` and
-`restored_verified` from `mutation_probe`. `result` is `killed` or
-`survived` as measured, and every other internal value (`not_run`,
-`inconclusive`, an absent record) maps to `not_applicable`; `expectation`
-is `not_applicable` whenever `result` is, and the `met`/`violated` value
+`restored_verified` from `mutation_probe`. When a probe never computed a
+`mutant` record (a missing target, say), these four definition fields
+are filled from the probe's own inputs instead: `--file` and `-n` (a
+plan entry's file and line) and `-M`/`-w` (the entry's match/with); a
+whole-line `-r` has no `before` substring, so `before` is empty and
+`after` is the replacement text. Without that fill an item would read as
+"no definition recorded", a non-regression, hiding the regression case
+the replay is for. `-m` bounds the printed array without cutting it into
+invalid JSON: when the whole array fits it prints verbatim; otherwise
+only the whole leading items that fit print (a valid array, possibly
+empty) and one warning line on stderr names the omitted count and the
+path of the full, untruncated result (`result-full-*.json`). `result` is
+`killed` or `survived` as measured, and nothing else is ever measured:
+every other internal value (`not_run`, `inconclusive`) and an absent
+`mutation_probe` map to `not_applicable`; `expectation` is
+`not_applicable` whenever `result` is, and the `met`/`violated` value
 otherwise. `reason` is the empty string unless `result` is
-`not_applicable`; then the internal `mutant_not_applicable` (the target
-text can no longer be found in the file) prints exactly `target text no
-longer present`, and any other internal reason string is carried
-verbatim. A field whose source record is absent prints as the empty
-string (for `restored_verified` too): a missing sibling record is never
-invented. `--replayed` prints `replayed: true` on every item (replays of
-prior-round definitions); without it every item says `false`.
+`not_applicable`; then the internal `mutant_not_applicable` prints
+exactly `target text no longer present` for every cause of that code
+(the target text no longer in the file, a replacement identical to the
+original line or to the matched text, an empty `-M`, a line out of
+range, a patch that does not apply, touches other paths, or overflows
+the numstat check; the default envelope's `warnings` name the specific
+one), and any other internal reason string is carried verbatim. A field
+whose source record is absent, and which the probe's own inputs do not
+fill either, prints as the empty string (for `restored_verified` too):
+a missing sibling record is never invented. `--replayed` prints
+`replayed: true` on every item (replays of prior-round definitions);
+without it every item says `false`.
 
 ## Result shape
 
@@ -2329,9 +2348,13 @@ report the incomplete evidence and resolve it before claiming the probe.
 mapping mechanically and prints the items as one JSON array, one item
 per mutant, in the contract's field order. For a mutant whose sibling
 records are absent it still prints a complete item rather than inventing
-the missing records: `file` where the run recorded it, `result` and
-`expectation` `not_applicable`, `reason` exactly `target text no longer
-present` for an internal `mutant_not_applicable` and the internal reason
+the missing records: `file`, `anchor`, `before` and `after` are filled
+from the probe's own inputs (the `--file`/`-n` and `-M`/`-w`, or plan
+entry, the run was given; an empty `before` and the replacement as
+`after` for a whole-line `-r`), `result` and `expectation` are
+`not_applicable`, `reason` is exactly `target text no longer present`
+for an internal `mutant_not_applicable` (whatever its specific cause,
+which the default envelope's `warnings` name) and the internal reason
 string otherwise, every other field the empty string. This table and its
 manual mapping stay the rule for probe versions that predate the option.
 

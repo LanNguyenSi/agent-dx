@@ -708,15 +708,17 @@ describe("probe --report mutation-probes (CLI)", { timeout: 60000 }, () => {
     expect(items[1].expectation).toBe("violated");
     // The missing-target mutant: the envelope records `status:
     // "inconclusive"`, `reason: "mutant_not_applicable"` and the file,
-    // and no mutant/mutation_probe records to merge.
+    // and no mutant/mutation_probe records to merge; the replay
+    // definition is filled from the plan entry's own file, line, match
+    // and with, so the item says what was probed.
     expect(rows[2].status).toBe("inconclusive");
     expect(rows[2].reason).toBe("mutant_not_applicable");
     expect(items[2]).toEqual({
       mutant: "",
       file: rows[2].file,
-      anchor: "",
-      before: "",
-      after: "",
+      anchor: 1,
+      before: "nonexistent text",
+      after: "x",
       verified_applied_via: "",
       result: "not_applicable",
       expectation: "not_applicable",
@@ -812,6 +814,159 @@ describe("probe --report mutation-probes (CLI)", { timeout: 60000 }, () => {
     const items = JSON.parse(run.stdout);
     expect(items).toHaveLength(2);
     for (const item of items) expect(item.replayed).toBe(true);
+  });
+
+  it("a --plan whose report exceeds the default -m prints a valid array of whole items and one stderr warning naming the omitted count and the full result file", async () => {
+    const { repo, logs } = makeRepo();
+    const pad = "x".repeat(300);
+    fs.writeFileSync(
+      path.join(repo, "long.js"),
+      `const PAD = "${pad}";\nmodule.exports = true;\n`,
+    );
+    const plan = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      plan,
+      JSON.stringify({
+        test: "node -e \"if (!require('./long.js')) process.exit(1)\"",
+        mutants: Array.from({ length: 12 }, (_, i) => ({
+          file: "long.js",
+          line: 1,
+          replace: `const PAD = "${pad}${i}";`,
+        })),
+      }),
+    );
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--report",
+      "mutation-probes",
+      "--plan",
+      plan,
+    ]);
+    // The exit code is the run's own (every mutant survived), unchanged
+    // by the report being cut.
+    expect(run.code).toBe(1);
+    // The printed report is valid JSON of whole items, bounded, not a
+    // mid-string cut of the full array.
+    const items = JSON.parse(run.stdout);
+    expect(items.length).toBeGreaterThanOrEqual(1);
+    expect(items.length).toBeLessThan(12);
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    for (const item of items) expect(Object.keys(item)).toEqual(REPORT_KEYS);
+    // One warning line, naming how many items fell out and the path of
+    // the full, untruncated result, which carries all twelve.
+    const warning = run.stderr.trimEnd().split("\n");
+    expect(warning).toHaveLength(1);
+    const omitted = warning[0].match(/(\d+) items omitted/);
+    expect(omitted, run.stderr).not.toBeNull();
+    expect(items.length + Number(omitted![1])).toBe(12);
+    const named = warning[0].match(/full result: (.+)\)$/);
+    expect(named, run.stderr).not.toBeNull();
+    const full = JSON.parse(fs.readFileSync(named![1], "utf8"));
+    expect(full.plan.results).toHaveLength(12);
+  });
+
+  it("a small --plan report at the default -m prints whole with no stderr warning", async () => {
+    const { repo, logs } = makeRepo();
+    const plan = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      plan,
+      JSON.stringify({
+        test: TEST_CMD,
+        mutants: [
+          { file: "fixture.js", line: 1, replace: "module.exports = false;" },
+        ],
+      }),
+    );
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--report",
+      "mutation-probes",
+      "--plan",
+      plan,
+    ]);
+    expect(run.code).toBe(0);
+    const items = JSON.parse(run.stdout);
+    expect(items).toHaveLength(1);
+    expect(items[0].result).toBe("killed");
+    expect(run.stderr).toBe("");
+  });
+
+  it("single probe whose -M target is missing: the item carries the definition from --file, -n, -M and -w", async () => {
+    const { repo, logs } = makeRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--report",
+      "mutation-probes",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-M",
+      "nonexistent text",
+      "-w",
+      "x",
+      "-t",
+      TEST_CMD,
+    ]);
+    expect(run.code).toBe(2);
+    const items = JSON.parse(run.stdout);
+    expect(items).toHaveLength(1);
+    const item = items[0];
+    expect(Object.keys(item)).toEqual(REPORT_KEYS);
+    expect(item.file).toBe("fixture.js");
+    expect(item.anchor).toBe(1);
+    expect(item.before).toBe("nonexistent text");
+    expect(item.after).toBe("x");
+    expect(item.mutant).toBe("");
+    expect(item.verified_applied_via).toBe("");
+    expect(item.restored_verified).toBe("");
+    expect(item.result).toBe("not_applicable");
+    expect(item.expectation).toBe("not_applicable");
+    expect(item.reason).toBe("target text no longer present");
+    expect(item.replayed).toBe(false);
+  });
+
+  it("single probe with -r on a line out of range: empty before (a whole-line replacement has no substring) and the replacement as after", async () => {
+    const { repo, logs } = makeRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--report",
+      "mutation-probes",
+      "--file",
+      "fixture.js",
+      "-n",
+      "99",
+      "-r",
+      "x",
+      "-t",
+      TEST_CMD,
+    ]);
+    expect(run.code).toBe(2);
+    const items = JSON.parse(run.stdout);
+    expect(items).toHaveLength(1);
+    const item = items[0];
+    expect(item.file).toBe("fixture.js");
+    expect(item.anchor).toBe(99);
+    expect(item.before).toBe("");
+    expect(item.after).toBe("x");
+    expect(item.result).toBe("not_applicable");
+    expect(item.reason).toBe("target text no longer present");
   });
 
   it("--report together with --summary is a usage error and no probe runs", async () => {
@@ -1023,6 +1178,75 @@ describe("mutationProbeReportItem (report builder)", () => {
     expect(item.after).toBe("");
     expect(item.verified_applied_via).toBe("");
     expect(item.restored_verified).toBe("");
+  });
+
+  it("a record without mutation_probe is not_applicable even when the run's own status says killed", () => {
+    const item = mutationProbeReportItem(
+      { status: "killed", mutant: killed.mutant },
+      false,
+    );
+    expect(item.result).toBe("not_applicable");
+    expect(item.expectation).toBe("not_applicable");
+  });
+
+  it("fills the replay definition from the probe's own inputs when no mutant record exists", () => {
+    const item = mutationProbeReportItem(
+      { status: "inconclusive", reason: "mutant_not_applicable" },
+      false,
+      {
+        file: "src/a.ts",
+        line: 12,
+        before: "return a + b;",
+        after: "return a - b;",
+      },
+    );
+    expect(item.file).toBe("src/a.ts");
+    expect(item.anchor).toBe(12);
+    expect(item.before).toBe("return a + b;");
+    expect(item.after).toBe("return a - b;");
+    const wholeLine = mutationProbeReportItem(
+      { status: "inconclusive", reason: "mutant_not_applicable" },
+      false,
+      { file: "src/a.ts", line: 99, after: "module.exports = 1;" },
+    );
+    expect(wholeLine.before).toBe("");
+    expect(wholeLine.after).toBe("module.exports = 1;");
+  });
+
+  it("a computed mutant record wins over the definition fallback", () => {
+    const item = mutationProbeReportItem(killed, false, {
+      file: "other.ts",
+      line: 99,
+      before: "old",
+      after: "new",
+    });
+    expect(item.file).toBe("/repo/src/a.ts");
+    expect(item.anchor).toBe(12);
+    expect(item.before).toBe("return a + b;");
+    expect(item.after).toBe("return a - b;");
+  });
+
+  it("mutationProbeReportItems fills each row's definition by its own index", () => {
+    const items = mutationProbeReportItems(
+      {
+        results: [
+          { index: 0, ...killed },
+          { index: 1, status: "inconclusive", reason: "mutant_not_applicable" },
+        ],
+      },
+      false,
+      [
+        { file: "a.ts", line: 1, after: "r" },
+        { file: "b.ts", line: 7, before: "m", after: "w" },
+      ],
+    );
+    expect(items[0].file).toBe("/repo/src/a.ts");
+    expect(items[0].anchor).toBe(12);
+    expect(items[1].file).toBe("b.ts");
+    expect(items[1].anchor).toBe(7);
+    expect(items[1].before).toBe("m");
+    expect(items[1].after).toBe("w");
+    expect(items[1].result).toBe("not_applicable");
   });
 
   it("replayed is the flag's value on every item", () => {

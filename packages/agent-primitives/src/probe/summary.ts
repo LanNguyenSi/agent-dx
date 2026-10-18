@@ -310,16 +310,23 @@ export function renderProbeSummary(
   return [...out, ...tail].join("\n") + "\n";
 }
 
-/** The internal refusal reason that says the mutant's target text can no
- * longer be found in the file: `MutantNotApplicable.reasonCode` in
+/** The internal refusal reason that says the dry run found the mutant
+ * cannot be applied at all: `MutantNotApplicable.reasonCode` in
  * `src/probe/mutant.ts`, reported verbatim as the result's own `reason`
- * (and as `mutation_probe.reason` at the mutant-phase site). The report
- * spells it in the implementer contract's own words instead. */
+ * (and as `mutation_probe.reason` at the mutant-phase site). Target text
+ * that can no longer be found is only ONE of its causes: the same code
+ * covers a replacement identical to the original line or to the matched
+ * text, an empty `-M`, a line out of range, and a patch that does not
+ * apply, touches other paths, or overflows the numstat check; the
+ * default envelope's `warnings` name the specific cause
+ * (`MutantNotApplicable.reason`). The report spells every cause in the
+ * implementer contract's own words instead. */
 const MUTANT_NOT_APPLICABLE = "mutant_not_applicable";
 
 /** The contract's canonical reason for that case (see the orchestrator
  * implementer contract: `reason` carries `target text no longer present`
- * for a probe whose mutant can no longer be applied). */
+ * for a probe whose mutant can no longer be applied, whatever the
+ * internal cause named in the default envelope's `warnings`). */
 export const TARGET_TEXT_NO_LONGER_PRESENT = "target text no longer present";
 
 /** One item of the `--report mutation-probes` array: the eleven fields
@@ -327,9 +334,12 @@ export const TARGET_TEXT_NO_LONGER_PRESENT = "target text no longer present";
  * the mutant record and the `mutation_probe` object, so a caller pastes
  * the printed item instead of merging the two sibling records by hand.
  * A field whose source record is absent prints as the empty string (a
- * missing sibling record is never invented); `restored_verified` is then
- * `""` too, the contract's own not-recorded spelling, never a boolean
- * the probe did not measure. Key order is the contract order. */
+ * missing sibling record is never invented), except for the four replay
+ * definition fields (`file`, `anchor`, `before`, `after`), which fall
+ * back to the probe's own inputs when no `mutant` record exists (see
+ * `ReportItemDefinition`); `restored_verified` is then `""` too, the
+ * contract's own not-recorded spelling, never a boolean the probe did
+ * not measure. Key order is the contract order. */
 export interface MutationProbeReportItem {
   mutant: string;
   file: string;
@@ -342,6 +352,21 @@ export interface MutationProbeReportItem {
   reason: string;
   restored_verified: boolean | string;
   replayed: boolean;
+}
+
+/** The replay definition as the probe received it, used to fill `file`,
+ * `anchor`, `before` and `after` of an item whose `mutant` record was
+ * never computed: `--file` and `-n` (or the plan entry's file and line),
+ * with `before`/`after` from `-M`/`-w` (or the entry's match/with). A
+ * whole-line replacement (`-r`, an entry's `replace`) has no `before`
+ * substring: `before` stays empty and `after` is the replacement text.
+ * Without this fill an item would read as "no definition recorded", a
+ * non-regression, hiding the very case the replay is for. */
+export interface ReportItemDefinition {
+  file?: string;
+  line?: number;
+  before?: string;
+  after?: string;
 }
 
 /** The `mutant` record of one mutant's envelope record, as far as the
@@ -368,21 +393,28 @@ type ReportProbeRecord = {
  * One `mutation_probes` item from one mutant's record:
  *
  * - `file`, `anchor`, `before`, `after` come from the `mutant` record
- *   (`anchor` is the line number the record carries), falling back to the
- *   run record's own `file` for a plan entry whose mutant was never
- *   computed;
+ *   (`anchor` is the line number the record carries), a plan entry whose
+ *   mutant was never computed falling back to the run record's own
+ *   `file`, and a probe with no `mutant` record at all falling back to
+ *   the definition it was given (`definition`, see its own docblock:
+ *   `--file`/`-n` or the entry's file and line, `-M`/`-w` or the entry's
+ *   match/with, an empty `before` with `-r`'s replacement as `after`);
  * - `mutant`, `verified_applied_via`, `restored_verified` come from
  *   `mutation_probe`;
- * - `result` is `killed`/`survived` from `mutation_probe.result` (or the
- *   entry's own status once no probe exists to report one), every other
- *   internal value (`not_run`, `inconclusive`, an absent record) mapping
- *   to `not_applicable`;
+ * - `result` is the `killed`/`survived` verdict read ONLY from
+ *   `mutation_probe.result`: every other internal value (`not_run`,
+ *   `inconclusive`) and an absent `mutation_probe` map to
+ *   `not_applicable`, because a real record never carries a measured
+ *   result without the probe that measured it, and reading the run's
+ *   own `status` in its place would invent one;
  * - `expectation` is the probe's `met`/`violated`, and always
  *   `not_applicable` when `result` is `not_applicable` (nothing was
  *   measured to compare against an expectation);
  * - `reason` is the empty string unless `result` is `not_applicable`;
- *   then `mutant_not_applicable` becomes `target text no longer present`
- *   and any other internal reason string is carried verbatim;
+ *   then `mutant_not_applicable` becomes the contract's canonical
+ *   `target text no longer present` (that code's several causes are
+ *   named by the default envelope's `warnings`), and any other internal
+ *   reason string is carried verbatim;
  * - `replayed` is the `--replayed` flag's value (`false` for a newly run
  *   probe, `true` when the caller says these items replay prior-round
  *   definitions).
@@ -390,13 +422,13 @@ type ReportProbeRecord = {
 export function mutationProbeReportItem(
   source: Record<string, unknown>,
   replayed: boolean,
+  definition?: ReportItemDefinition,
 ): MutationProbeReportItem {
   const probe = source.mutation_probe as ReportProbeRecord | undefined;
   const mutant = source.mutant as ReportMutantRecord | undefined;
-  const status = source.status as string | undefined;
   const file = source.file as string | undefined;
   const recordReason = source.reason as string | undefined;
-  const measured = probe?.result ?? status;
+  const measured = probe?.result;
   const result: MutationProbeReportItem["result"] =
     measured === "killed" || measured === "survived"
       ? measured
@@ -416,10 +448,10 @@ export function mutationProbeReportItem(
       : "";
   return {
     mutant: probe?.mutant ?? "",
-    file: mutant?.file ?? file ?? "",
-    anchor: mutant?.line ?? "",
-    before: mutant?.before ?? "",
-    after: mutant?.after ?? "",
+    file: mutant?.file ?? file ?? definition?.file ?? "",
+    anchor: mutant?.line ?? definition?.line ?? "",
+    before: mutant?.before ?? definition?.before ?? "",
+    after: mutant?.after ?? definition?.after ?? "",
     verified_applied_via: probe?.verified_applied_via ?? "",
     result,
     expectation,
@@ -431,16 +463,27 @@ export function mutationProbeReportItem(
 
 /** The `--report mutation-probes` array for a `--plan` run: one item per
  * `plan.results[]` entry, in plan order (one per mutant, including the
- * `not_run` entries a stopped plan never reached). An envelope with no
- * `plan` value (a run that refused before any mutant existed) reports
- * the empty array. */
+ * `not_run` entries a stopped plan never reached). `definitions` is
+ * indexed by a result's own `index` (the plan file's mutants in plan
+ * order) and carries each entry's replay definition for the rows whose
+ * `mutant` record was never computed. An envelope with no `plan` value
+ * (a run that refused before any mutant existed) reports the empty
+ * array. */
 export function mutationProbeReportItems(
   plan: { results?: unknown } | undefined,
   replayed: boolean,
+  definitions?: readonly (ReportItemDefinition | undefined)[],
 ): MutationProbeReportItem[] {
   const rows =
     plan !== undefined && Array.isArray(plan.results) ? plan.results : [];
-  return rows.map((row) =>
-    mutationProbeReportItem(row as Record<string, unknown>, replayed),
-  );
+  return rows.map((row) => {
+    const index = (row as { index?: unknown }).index;
+    const definition =
+      typeof index === "number" ? definitions?.[index] : undefined;
+    return mutationProbeReportItem(
+      row as Record<string, unknown>,
+      replayed,
+      definition,
+    );
+  });
 }
