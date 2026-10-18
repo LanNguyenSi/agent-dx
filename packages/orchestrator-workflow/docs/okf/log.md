@@ -1,5 +1,13 @@
 # Bundle log
 
+- 2026-10-18T15:22:09Z, reviewer prompt replay evaluation, permission mode and canary fix, re-stamp:
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md` list `CHANGELOG.md` as a source and went stale on the
+  reworded `[Unreleased]` bullet (reviewer and canary sessions sandboxed, the judge without
+  tools; same line count). Their `CHANGELOG.md` citations all name released entries by heading
+  and anchor, which still resolve, and the bullet adds no rule the three docs describe, so the
+  claims are unchanged and only the timestamps move.
+
 - 2026-10-18T12:47:41Z, reviewer prompt replay evaluation, isolation rework, re-stamp:
   `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
   `subagent-contracts-superset.md` list `CHANGELOG.md` as a source and went stale on the
