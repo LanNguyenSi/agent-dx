@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The package's runbook-sentence guard keeps its wording, and its segmenter
+  closes three CommonMark gaps in `test/runbook-sentences.ts`: a fence line
+  with an info string no longer closes a fence (only trailing whitespace may
+  follow a closing fence), an opening or closing fence may be indented by up
+  to three spaces while a four-space indented fence-looking line is never a
+  fence, and `1)` joins `1.` as an ordered-list marker. Test-only (no asset
+  text changes); three new segmentation tests cover the gaps.
+
 - Structure-only tightening of the implementer and reviewer prompts and the
   evidence-and-probes reference; no rule changes meaning. The verification-set
   rule in each prompt is a short list (approval, comparison, path rule,

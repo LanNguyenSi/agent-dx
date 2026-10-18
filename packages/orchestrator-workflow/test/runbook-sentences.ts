@@ -15,9 +15,11 @@
  * sentence of the previous paragraph or list item (a heading does not count
  * as one, and a heading never opens this window), which can be a lead-in line
  * ending in a colon above a list ("Every step below is mandatory:").
- * Fenced code (backtick or tilde fences) is skipped, HTML comment delimiters
- * are dropped, and headings, list items (`-`, `*`, `+`, or a number and a
- * period), and table rows each start a new paragraph. A sentence ends at a
+ * Fenced code (backtick or tilde fences, opened and closed by a line indented
+ * by at most three spaces, and closed only by a line carrying no info string)
+ * is skipped, HTML comment delimiters are dropped, and headings, list items
+ * (`-`, `*`, `+`, or a number and a period or a parenthesis), and table rows
+ * each start a new paragraph. A sentence ends at a
  * period or a question mark followed by white space; a colon does not end one,
  * since `authority: data` and a `key: value` pair contain one.
  *
@@ -66,19 +68,24 @@ export function proseUnits(doc: string): string[] {
   };
   for (const raw of doc.split(/\r?\n/)) {
     const line = raw.trim();
-    const opening = line.match(/^(`{3,}|~{3,})/);
+    // A fence line is indented by at most three spaces; four or more makes
+    // the line indented code, not a fence.
+    const fenceLine = raw.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
     if (fence === "") {
-      if (opening) {
+      if (fenceLine) {
         flush();
-        fence = opening[1];
+        fence = fenceLine[1];
         continue;
       }
     } else {
-      // A fence closes with the same character, at least as long as the opener.
+      // A fence closes with the same character, at least as long as the
+      // opener, followed by nothing but trailing whitespace (an info string
+      // may only ride an opening fence).
       if (
-        opening &&
-        opening[1][0] === fence[0] &&
-        opening[1].length >= fence.length
+        fenceLine &&
+        fenceLine[1][0] === fence[0] &&
+        fenceLine[1].length >= fence.length &&
+        fenceLine[2].trim() === ""
       ) {
         fence = "";
       }
@@ -89,7 +96,7 @@ export function proseUnits(doc: string): string[] {
       continue;
     }
     const standalone = /^#{1,6} /.test(line) || line.startsWith("|");
-    if (standalone || /^([-*+]|\d+\.) /.test(line)) flush();
+    if (standalone || /^([-*+]|\d+[.)] )/.test(line)) flush();
     current.push(line);
     if (standalone) flush();
   }
@@ -99,7 +106,7 @@ export function proseUnits(doc: string): string[] {
       unit
         .replace(/<!--|-->/g, " ")
         .replace(/\s+/g, " ")
-        .replace(/^\s*([-*+]|\d+\.)\s+/, "")
+        .replace(/^\s*([-*+]|\d+[.)])\s+/, "")
         .trim(),
     )
     .filter((unit) => unit.length > 0);

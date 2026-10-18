@@ -3191,11 +3191,11 @@ function anchorScopeResolve(): Record<string, string> {
 }
 
 // Same shape as okf-kit's own CITATION_RE (packages/okf-kit/src/rules/
-// citations-resolve.ts): a full citation is `path.ext:N` or `path.ext:N-M`,
-// optionally followed by `#anchor` (bare/bracketed heading form, or a
-// double-quoted string form). No backtick requirement: okf-kit checks a
-// bare `path:N` in running prose exactly the same as a backtick-wrapped
-// one, so this test does too.
+// citations-resolve.ts) except for its extension set: okf-kit's also accepts
+// `.prisma`, which this test's does not. A full citation here is `path.ext:N`
+// or `path.ext:N-M`, optionally followed by `#anchor` (bare/bracketed heading
+// form, or a double-quoted string form). No backtick requirement: okf-kit
+// checks a bare `path:N` in prose exactly as a backtick-wrapped one, so this does too.
 const ANCHOR_CITATION_RE =
   /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
 
