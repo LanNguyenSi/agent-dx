@@ -349,8 +349,8 @@ its fields hold.
     matches the expected result declared in the task assignment or probe plan,
     and `violated` means it does not; both fields are `not_applicable` when no
     result was measured.
-  - `expectation` is independent of `result` itself; for example, when the
-    mutant could not be applied and no `result` was measured, it is
+  - `expectation` needs a measured `result`: when none was measured, for
+    example because the mutant could not be applied, it is
     `not_applicable`.
   - `reason` is free text, required when `result` is `not_applicable`, empty
     otherwise, carrying one of two canonical strings that distinguish a

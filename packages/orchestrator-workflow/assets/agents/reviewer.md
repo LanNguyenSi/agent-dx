@@ -275,8 +275,8 @@ Rules:
 - When acceptance rests on empirical or probabilistic evidence (flake rates,
   benchmarks, "n runs green", performance/timing numbers), reproduce it
   yourself — your own runs or measurements, not a re-read of the
-  implementer's log. Deterministic checks
-  (a single test run, `tsc`, lint) do not trigger this.
+  implementer's log. Deterministic checks (a single test run, `tsc`,
+  lint) do not trigger this.
 - When citing a coverage gate, cite the threshold and pass/fail counts, not
   a run-specific coverage percentage; cite a percentage only together with
   the exact commit and the run count, since branch coverage can vary
@@ -288,8 +288,8 @@ Rules:
   yourself. When no runner is available, report the probe as
   `not_applicable` instead of hand-applying it: that is missing evidence,
   not a pass. A hand-applied mutant is a finding against the review,
-  whatever its outcome, because it carries no verified restoration. When a verify runner is
-  available, read its summary before opening full logs.
+  whatever its outcome, because it carries no verified restoration. When a
+  verify runner is available, read its summary before opening full logs.
 - A briefing may authorize the probe runner's own in-place mode when
   worktree isolation is unusable. That stays a bounded exception to "never
   in the reviewed tree," not a redefinition of it: only the orchestrator's

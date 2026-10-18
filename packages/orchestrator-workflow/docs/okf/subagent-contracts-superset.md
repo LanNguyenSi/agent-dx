@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-10-18T05:49:56Z
+timestamp: 2026-10-18T06:11:00Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -412,7 +412,7 @@ no meaningful sample size
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:362#"The GitHub Actions shell replay named in step 6 is a second, explicitly"`;
 `packages/orchestrator-workflow/assets/agents/reviewer.md:381#"shell replay is a second, explicitly non-probabilistic"`). The
 installed `packages/orchestrator-workflow/assets/agents/reviewer.md:279#"lint) do not trigger this."`
-prompt carries the same rule verbatim (second-person voice). Both output
+prompt splits it (Rules bullet, `reproduction` field note). Both output
 contracts gained a matching `reproduction` field
 (`method, sample_size, result, matches_implementer_claim`,
 `packages/orchestrator-workflow/assets/skill/references/contracts.md:310#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:343#"residual_risks:"`); `matches_implementer_claim`
@@ -596,7 +596,7 @@ instead of only reading a prose description
 `result` (`killed` or `survived`) matched what the probe was expected to
 do; it is `not_applicable` otherwise, for example when the mutant could
 not be applied and no `result` was measured at all
-(`implementer.md:352#"for example, when the"`).
+(`implementer.md:352#"needs a measured"`).
 A routine negative-control probe reports `result: survived, expectation:
 met`, which is not a regression.
 
@@ -775,8 +775,8 @@ under the output structure): before committing, run `slop-detector`'s `review-sl
 over every changed file and the commit message and fix every block-level
 finding first
 (`packages/orchestrator-workflow/assets/agents/implementer.md:191#"Before committing, when slop-detector is available run"`),
-worded the same "misfire, not evidence" way as the `commits` field rule
-just above it (see [Subagent misfire rule](#subagent-misfire-rule-0110-evidence-relocated-0240)).
+worded the same "misfire, not evidence" way as the `commits` field note
+under the return structure (see [Subagent misfire rule](#subagent-misfire-rule-0110-evidence-relocated-0240)).
 Reworded to name a `check` invocation that takes one-or-more paths
 (`<changed file> [<changed file> ...]`) rather than a single
 `<changed files>` placeholder the CLI silently only scanned the first of,

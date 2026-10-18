@@ -1174,7 +1174,7 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
 
   it("the installed prompt scopes expectation's met/violated values to a measured result and reserves not_applicable otherwise", () => {
     const expectationScopeClause =
-      "and `violated` means it does not; both fields are `not_applicable` when no result was measured. - `expectation` is independent of `result` itself; for example, when the mutant could not be applied and no `result` was measured, it is `not_applicable`.";
+      "and `violated` means it does not; both fields are `not_applicable` when no result was measured. - `expectation` needs a measured `result`: when none was measured, for example because the mutant could not be applied, it is `not_applicable`.";
     expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
     expect(implementerMd).toContain(expectationScopeClause);
   });

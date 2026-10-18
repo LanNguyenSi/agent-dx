@@ -1,5 +1,17 @@
 # Bundle log
 
+- 2026-10-18T06:11:00Z, review follow-up to the prompt structure entry below: the implementer's `expectation`
+  field note now says it needs a measured `result` (not_applicable otherwise), replacing a sentence
+  whose example read as a non-sequitur; the older "matched what the probe was expected to do"
+  wording now lives only in the legend's "matches the expected result declared" sentence, and the
+  older entries that cited it are re-anchored on the new line. `subagent-contracts-superset.md` now
+  says the reviewer prompt splits the empirical-evidence rule between a Rules bullet and the
+  `reproduction` field note, and that the slop-detector bullet matches the `commits` field note under
+  the return structure. Two reviewer prompt lines re-wrapped, words unchanged. Re-stamped with no
+  claim change: `subagent-contracts-superset.md`, and `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` (their cited lines and anchors in
+  `reviewer.md` and `docs-consistency.test.ts` are unchanged; only the `expectation` pin text moved).
+
 - 2026-10-18T05:49:56Z, prompt structure tightening: `implementer.md` and `reviewer.md` list the
   verification-set rule as labelled sub-bullets (approval, comparison, path rule, snapshot, reporting,
   outcomes, bundle check) and define each return field in "Field notes" directly under the output
@@ -2370,8 +2382,8 @@
   agent-primitives flag name); both copies now say "matched what the
   probe was expected to do", tool-agnostic like the rest of the prompt
   (the flag pointer stays only in `CHANGELOG.md`'s own prose)
-  (`implementer.md:352#"itself; for example, when the"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:352#"itself; for example, when the"`). The verify/mutation-
+  (`implementer.md:352#"needs a measured"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:352#"needs a measured"`). The verify/mutation-
   probe-runner bullet (`implementer.md` only, no SKILL.md mirror) now
   says where the definition fields come from when a runner reports a
   probe's mutant record separately from its result fields
@@ -2503,7 +2515,7 @@
   implementer.md): a replayed probe whose `expectation` is now `violated`,
   or which can no longer be applied, is the regression signal; `result`
   alone is not
-  (`implementer.md:352#"itself; for example, when the"`,
+  (`implementer.md:352#"needs a measured"`,
   `packages/orchestrator-workflow/assets/agents/implementer.md:342#"are the exact text swapped there"`). The
   `04-implementation-summary.md` template's Mutation Probes table gained
   matching columns
