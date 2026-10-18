@@ -5741,7 +5741,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 80,
     end: 85,
     anchorKey: "5633dd3c",
-    paragraphLine: 72,
+    paragraphLine: 73,
     uncitedLines: [174, 187],
     claim:
       'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
@@ -5753,7 +5753,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 646,
     end: 646,
     anchorKey: "9e1acc22",
-    paragraphLine: 262,
+    paragraphLine: 268,
     uncitedLines: [531, 609],
     claim:
       "line 646 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 531 is the list-shape helper's own field regex, and uncited 609 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
