@@ -37,6 +37,8 @@ import { parsePlanFile, type ProbePlanSpec } from "./probe/plan.js";
 import { compilePassRegex } from "./pass-regex.js";
 import { reconcileEnvelopeDiffTruncation } from "./probe/mutant.js";
 import {
+  mutationProbeReportItem,
+  mutationProbeReportItems,
   parsePrintFields,
   renderPrint,
   renderProbeSummary,
@@ -1299,6 +1301,13 @@ interface ProbeCliOptions {
   passRegex?: RegExp;
   summary?: boolean;
   print?: string[];
+  /** The selected `--report` kind (validated while the options are
+   * parsed; `REPORT_KINDS` is the only accepted vocabulary). */
+  report?: string;
+  /** `--replayed`: the `--report mutation-probes` items describe replays
+   * of prior-round definitions (`replayed: true`) rather than newly run
+   * probes (`replayed: false`, the default). */
+  replayed?: boolean;
 }
 
 /** `--print` value: validated while the options are parsed, so an unknown
@@ -1311,9 +1320,52 @@ function parsePrintOption(value: string): string[] {
   }
 }
 
-/** Emits a probe envelope, or, with `--summary` / `--print`, the compact
- * view of it instead. The exit code is the one already computed for the
- * envelope; the envelope itself is built unchanged either way. */
+/** The report kinds `--report` accepts, in the option's own vocabulary.
+ * `mutation-probes` prints the orchestrator implementer contract's
+ * `mutation_probes` items, one per mutant. */
+const REPORT_KINDS: readonly string[] = ["mutation-probes"];
+
+/** `--report` value: validated while the options are parsed, so an
+ * unknown kind is a usage error before the probe spends a run (the same
+ * rule `--print` applies to an unknown field). */
+function parseReportOption(value: string): string {
+  if (!REPORT_KINDS.includes(value)) {
+    throw new InvalidArgumentError(
+      `--report: unknown report "${value}" (known reports: ${REPORT_KINDS.join(", ")})`,
+    );
+  }
+  return value;
+}
+
+/** The view options `probe` accepts together, checked once the whole
+ * option set is in: `--summary`, `--print` and `--report` are three
+ * renderings of one result, so naming more than one has no honest
+ * winner (a usage error, exactly as `--summary` with `--print` already
+ * was); `--replayed` shapes only the `--report mutation-probes` items,
+ * so it is refused outright rather than silently ignored without them. */
+function requireExclusiveViews(opts: ProbeCliOptions): void {
+  if (opts.summary && opts.print !== undefined) {
+    throw new UsageError("probe: --summary and --print are mutually exclusive");
+  }
+  if (opts.report !== undefined && (opts.summary || opts.print !== undefined)) {
+    throw new UsageError(
+      "probe: --report is mutually exclusive with --summary and --print",
+    );
+  }
+  if (opts.replayed && opts.report === undefined) {
+    throw new UsageError(
+      "probe: --replayed requires --report (it only shapes the printed " +
+        "report items; the JSON envelope and the other views are unchanged " +
+        "by it)",
+    );
+  }
+}
+
+/** Emits a probe envelope, or, with `--summary` / `--print` / `--report`,
+ * the selected view of it instead. The exit code is the one already
+ * computed for the envelope; the envelope itself is built unchanged
+ * either way. The three views are mutually exclusive (checked by
+ * `requireExclusiveViews` before any run starts). */
 function emitProbe(
   opts: ProbeCliOptions,
   envelope: Record<string, unknown>,
@@ -1322,6 +1374,30 @@ function emitProbe(
   summary: SummaryInput,
   envelopeInput: EnvelopeInput,
 ): void {
+  if (opts.report === "mutation-probes") {
+    // The same full-result source `--print` reads, so a field the `-m`
+    // reduction cut from the JSON view still reports whole here: the
+    // report is evidence meant to be pasted, not a summary of it. Only
+    // the printed text is bounded.
+    const unreduced = buildEnvelope({
+      ...envelopeInput,
+      persistFullResult: false,
+      maxChars: Number.MAX_SAFE_INTEGER,
+    }).envelope;
+    const replayed = opts.replayed === true;
+    const items =
+      opts.plan !== undefined
+        ? mutationProbeReportItems(
+            unreduced.plan as { results?: unknown } | undefined,
+            replayed,
+          )
+        : [mutationProbeReportItem(unreduced, replayed)];
+    writeAndExit(
+      boundText(JSON.stringify(items, null, 2) + "\n", global.maxChars),
+      exitCode,
+    );
+    return;
+  }
   if (opts.print !== undefined) {
     // The same payload the result-full file carries, not the `-m`-reduced
     // envelope: a field that exists must not print as null or shortened
@@ -1815,14 +1891,19 @@ program
     "print only these comma-separated top-level envelope fields (dotted paths descend, e.g. mutation_probe.result) as one JSON object instead of the envelope; an unknown field is a usage error; exit codes unchanged",
     parsePrintOption,
   )
+  .option(
+    "--report <kind>",
+    "print a ready-to-paste report instead of the envelope: mutation-probes prints the orchestrator implementer contract's mutation_probes items as one JSON array (one item per mutant, the eleven fields merged from the mutant record and mutation_probe; --replayed marks them replays); mutually exclusive with --summary and --print; an unknown kind is a usage error; exit codes unchanged",
+    parseReportOption,
+  )
+  .option(
+    "--replayed",
+    "with --report: print replayed: true (replays of prior-round definitions) instead of the default false; without --report it is a usage error",
+  )
   .action(async (opts: ProbeCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
-    if (opts.summary && opts.print !== undefined) {
-      throw new UsageError(
-        "probe: --summary and --print are mutually exclusive",
-      );
-    }
+    requireExclusiveViews(opts);
     if (opts.plan !== undefined) {
       await runProbePlanCommand(opts, command, global, start);
       return;

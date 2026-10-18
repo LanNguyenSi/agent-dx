@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe --report mutation-probes` prints the orchestrator implementer
+  contract's `mutation_probes` items as one JSON array (one item per
+  mutant, all eleven fields merged from the sibling `mutant` record and
+  `mutation_probe`, exit codes unchanged) instead of the JSON envelope:
+  `result` maps every internal value that is not a measured verdict to
+  `not_applicable`, a mutant whose target text is no longer in the file
+  reports `reason: target text no longer present`, and fields whose
+  source record is absent print as empty strings. `--replayed` prints
+  `replayed: true` on the items. `--report` is mutually exclusive with
+  `--summary` and `--print`, and `--replayed` requires `--report`.
+
 ## [0.15.1] - 2026-10-18
 
 ### Fixed
