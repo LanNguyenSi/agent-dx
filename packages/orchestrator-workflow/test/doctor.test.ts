@@ -1867,9 +1867,16 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
     expect(report.exitCode).toBe(0);
   });
 
-  it("the first integer above the safe JS range (9007199254740993, which Codex accepts) is reported as unknown because doctor cannot read it exactly", () => {
+  it("an integer just above the safe JS range (9007199254740993, which Codex accepts) is reported as unknown because doctor cannot read it exactly", () => {
     expectUserBudgetUnknown(
       "project_doc_max_bytes = 9007199254740993\n",
+      "outside the range doctor can read exactly; Codex accepts up to 9223372036854775807",
+    );
+  });
+
+  it("a literal whose 64-bit narrowing is negative (9223372036854775808, which Codex rejects) is reported as unknown, never as a rejection, because doctor cannot read it exactly", () => {
+    expectUserBudgetUnknown(
+      "project_doc_max_bytes = 9223372036854775808\n",
       "outside the range doctor can read exactly; Codex accepts up to 9223372036854775807",
     );
   });

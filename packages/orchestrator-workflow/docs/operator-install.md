@@ -141,9 +141,11 @@ cannot read (a syntax error, a key set twice, or a form newer than TOML
 which Codex may load) and an integer outside the range doctor can read
 exactly (Codex accepts up to 9223372036854775807) are each reported as
 a layer whose budget is unknown, with the file's size and the default
-budget for context and no size comparison. One known mismatch is not
+budget for context and no size comparison. Two known mismatches are not
 detected: an integer-valued float (`65536.0`, `1e2`) is read as that
-integer although Codex rejects it. The check assumes Codex trusts the project; for a
+integer although Codex rejects it, and a file the TOML 0.5 parser accepts
+but Codex rejects whole (stricter TOML 1.x rules, a wrong-typed other
+key) still yields its budget. The check assumes Codex trusts the project; for a
 project it does not trust, Codex loads neither the project config nor
 any project instruction file. Codex layers profiles, a system file, managed layers
 and `-c key=value` session flags over that resolution; this check

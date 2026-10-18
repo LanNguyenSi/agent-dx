@@ -466,16 +466,16 @@ function parseTomlFirstLine(error: unknown): string {
  * load no project instruction file at all, a positive integer is the
  * byte budget, and a negative integer, a float, a string, a boolean, an
  * array or a table makes it reject the whole file. Doctor cannot match
- * Codex in three known places, and says what it does not know instead of
- * claiming a rejection: (1) the parser reads TOML 0.5 and Codex reads
- * TOML 1.1, so a file the parser refuses may still load in Codex (see
- * {@link readCodexProjectDocMaxBytes}); (2) the parser returns an
- * integer outside the safe JS range as `BigInt.asIntN(64, literal)`,
- * which drops the high bits, so a `BigInt` is a literal outside the
- * range doctor can read exactly and its budget is unknown; (3) the
- * parser returns an integer-valued float (`65536.0`, `1e2`) as the plain
- * number, indistinguishable from the integer, so doctor reads it as that
- * integer although Codex rejects it. */
+ * Codex in four known places and says what it does not know rather than
+ * claim a rejection: (1) the parser reads TOML 0.5, Codex TOML 1.1, so a
+ * file the parser refuses may still load in Codex (see
+ * {@link readCodexProjectDocMaxBytes}); (2) an integer outside the safe JS
+ * range comes back as `BigInt.asIntN(64, literal)` with its high bits
+ * dropped, so a `BigInt` budget is unknown; (3) an integer-valued float
+ * (`65536.0`, `1e2`) comes back as the plain number and reads as that
+ * integer although Codex rejects it; (4) a file the parser accepts but
+ * Codex rejects whole (stricter TOML 1.x rules, a wrong-typed other key)
+ * still yields its budget although Codex refuses to load it. */
 function decideCodexBudgetValue(
   value: unknown,
   configFile: string,
