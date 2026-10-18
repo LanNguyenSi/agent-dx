@@ -51,3 +51,12 @@ every result. Preflight JSON reports check results, not the underlying shell
 commands it discovered. A repository with a configured knowledge bundle
 (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`) includes
 its bundle check in every set, even when the task did not edit documentation.
+
+The role-side rules for running and reporting a set (approval, comparison,
+path rule, snapshot, reporting, outcomes) are not part of the installed
+implementer and reviewer prompts. They ship as the skill reference
+`verification-set-rules.md`, installed beside `SKILL.md`, and the orchestrator
+copies it into a briefing only when that briefing names a `verification_set`.
+A briefing without a set carries none of this text, and a reviewer flags a
+briefing that names a set without its rules. The knowledge-bundle check
+obligation stays in both role prompts and applies to every briefing.

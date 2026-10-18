@@ -88,6 +88,7 @@ describe("packaged skill references", () => {
       "evidence-and-probes.md",
       "review-and-recovery.md",
       "run-state-and-harness.md",
+      "verification-set-rules.md",
     ]);
 
     const manifest = JSON.parse(

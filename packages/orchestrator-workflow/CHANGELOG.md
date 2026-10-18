@@ -30,6 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes, and the installed copy of that reference reports as outdated
   until refreshed.
 
+- The role-side verification-set rules (approval, comparison, path rule,
+  snapshot, reporting, outcomes) move out of the implementer and reviewer
+  prompts into a new skill reference, `verification-set-rules.md`, installed
+  beside `SKILL.md`. The orchestrator copies it into a briefing only when the
+  briefing names a `verification_set`, so a briefing without a set no longer
+  carries the roughly 380 words per role it never uses; each role prompt keeps one
+  sentence about sets, and the reviewer flags a briefing that names a set
+  without its rules. The knowledge-bundle check obligation stays in both role
+  prompts as its own bullet and applies to every briefing. The task slicer
+  names a `verification_set` only when the repository has a resolved set. The
+  `verification_set` field shape and the set rules themselves are unchanged, so
+  a briefing that carries a set behaves as before. The installed implementer,
+  reviewer, task slicer, and skill files report as outdated until refreshed.
+
 ## [0.45.0] - 2026-10-18
 
 - The package's runbook-sentence guard keeps its wording, and its segmenter
