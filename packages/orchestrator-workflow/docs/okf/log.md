@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-10-18T12:21:28Z, reviewer read-only pin completed: the in-place exception bullet of `reviewer.md`
+  was pinned only by two clause fragments, so both of its sentences are now pinned whole in a
+  new block appended at the end of `docs-consistency.test.ts`, below every cited line, so no
+  citation moved. The docs' claims are unchanged. Re-stamped: `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
 - 2026-10-18T11:53:41Z, pin gap fixes after review of the test pin model: the trust-boundary,
   review-gate and reviewer read-only sentences, the operator-pin and run-base
   sentences of the runbook paragraph and the docs-only closing rule are now pinned whole;
