@@ -79,8 +79,8 @@ The install creates or touches only these paths:
   different directory, gains or updates its record of this repository,
   guarded by a transient `.manifest.lock` directory held only for the
   duration of that write. Neither path lives inside the target repository.
-- `AGENTS.md`: the marker-fenced workflow section is appended (file created
-  when missing); content outside the
+- `AGENTS.md`: the marker-fenced workflow charter (at most 800 words) is
+  appended (file created when missing); content outside the
   `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:end -->`
   markers is never modified
 - `CLAUDE.md`: one `@AGENTS.md` import line appended when missing; the file
@@ -179,7 +179,7 @@ steps in the repository you were asked to install into.
    `--force` only when authority or scope remains unresolved.
    The conflict check covers the compact core and the complete required
    `references/` set before replacing either, so a non-forced re-run preserves
-   the current coherent bundle.
+   the current coherent bundle. The workflow charter in `AGENTS.md` points into those references, so resolve a conflicted skill bundle (or re-run with `--force`) in the same refresh that updates the charter; a held-back bundle does not install the references the new charter points to.
 
    **Operator path**: before running `init`, check whether an operator
    manifest already exists on this machine, at

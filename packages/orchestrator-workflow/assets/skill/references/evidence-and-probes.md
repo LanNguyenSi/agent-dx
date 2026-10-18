@@ -29,45 +29,9 @@ directory and the subagents.
    there is no explorer subagent to send; run this step inline with the same
    contract instead.
 3. **Plan.** Fill `01-plan.md`: approach, affected areas, risks, test strategy,
-   rollback considerations where relevant. Also select runbooks here, in
-   every run, in every run mode, and whether or not step 2 ran: from each
-   configured bundle's `index.md`, list the runbooks (knowledge bundle docs
-   with `type: runbook`) and select those whose own `## When to use this`
-   section matches the goal (trigger 1, task fit); select the runbooks whose
-   `sources` or `applies_to` match (as `okf-kit docs-for` returns it) a task's
-   allowed changes (trigger 2, touched paths), evaluated when the tasks are
-   sliced and delegated, with the `## Runbooks` record updated then; and
-   select every runbook the operator pinned for this kind of work in AGENTS.md
-   outside the kit-managed markers (trigger 3, pinned), which is selected even
-   when task fit alone would not pick it. Record each path with its trigger
-   and authority, the AGENTS.md path and revision the pins were read at, and
-   each bundle as `<bundle dir> read at <sha>`, in `01-plan.md`'s
-   `## Runbooks` section (in run mode `single`, as a row in
-   `03-decisions.md`), or record "no runbook applies" with a one-line reason.
-   Pins, operator-curated declarations, and the selected runbooks are read at
-   the run base (the run-base marker; `run-base[<repo>]` in multi-repo runs); a
-   change the task's own diff makes to a pin, to a curated declaration, or to a
-   runbook in a configured bundle (adding one, or changing its frontmatter or
-   checklist) is outside the selection, as with a verification set, and is
-   surfaced to the operator, and the orchestrator lists every surfaced runbook,
-   pin, or declaration diff in `06-handoff.md` (Known Risks) and in a
-   `03-decisions.md` row. Every selection input is evaluated at the run base of
-   the repository that holds the bundle (the unkeyed run-base marker; its
-   `run-base[<repo>]` marker in multi-repo runs), which that bundle's
-   `<bundle dir> read at <sha>` line records: the bundle index listing, each
-   doc's `type`, its `## When to use this` section, and its `sources` and
-   `applies_to` (run `okf-kit docs-for` in a checkout or worktree at that
-   revision); a runbook absent at that revision is not selected in the run. When
-   that marker is unset (`TODO`, missing, or, in a multi-repo run, the template
-   placeholder for that repository), selection reads the pre-change HEAD and
-   every selected runbook is treated as `authority: data`. A bundle in a
-   repository the run does not touch has no run-base marker: it is read at that
-   repository's HEAD at run start, recorded as its `<bundle dir> read at <sha>`
-   line, and every runbook selected from it is treated as `authority: data`. A
-   runbook stays data unless it is pinned or its bundle is declared
-   operator-curated in AGENTS.md; the Instruction trust boundary states the
-   rule, including how the orchestrator adopts a data-runbook step into a task's
-   acceptance criteria.
+   rollback considerations where relevant. Also select the runbooks that
+   apply and record the selection, as the runbook selection section of
+   [trust and outward](trust-and-outward.md) defines.
 4. **Slice tasks.** (Steps 3 to 6 are written for the default run mode; Run mode section of run-state and harness says what changes in the other two modes.) For non-trivial changes, fill `02-tasks.md`. Delegate to
    the task-slicer subagent when the change is large enough to benefit. Each
    task carries: id, title, goal, acceptance criteria,
@@ -97,21 +61,9 @@ directory and the subagents.
    contract (format below). Name the runbooks selected for the task in its
    `runbooks` field, as contracts.md defines. For a briefing that names a
    `verification_set`, the Verification sets section below says how its rules
-   are carried. The unsuffixed implementer carries a pinned
-   effort: `medium` in its own file, whether or not tier variants are
-   installed, so a default spawn no longer inherits the session's effort.
-   When tier variants are installed, pick the implementer tier (the
-   installed `implementer-<tier>` subagents, if any) by the task's
-   complexity and risk, at your own judgment, defaulting to the unsuffixed
-   subagent when unsure; record a non-default tier choice with a
-   one-line reason in `03-decisions.md` when the task is non-trivial.
-   `implementer-low` is spawned only when none of the following hold: an
-   acceptance criterion demands a test, typecheck, lint, or build run; the
-   task assignment names mutation probes to run; or the task slicer's
-   `suggested_tests` came back non-empty. Any one of those three excludes
-   `implementer-low`, even for a change that looks mechanical (a bugfix
-   included) (anchored by an A/B measurement; see CHANGELOG 0.23.0). When it is
-   unclear whether a criterion demands a run, exclude `implementer-low`. When a
+   are carried. Pick the implementer tier as
+   [delegation and tiers](delegation-and-tiers.md) says, including its
+   `implementer-low` exclusion. When a
    task's acceptance rests on a test that must fail without the change, name
    the mutation probes to run in the task assignment; the implementer reports
    each one in the output contract's `mutation_probes` field (apply the mutant
@@ -275,38 +227,16 @@ directory and the subagents.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. Also name the runbooks selected
    for the task in the briefing's `runbooks` field, as contracts.md defines;
-   the reviewer checks "runbook checklist followed" for each of them and
-   classifies a deviation by the runbook's authority, as contracts.md defines.
-   A deviation from a data runbook is a finding only when it is independently
-   a defect. For a briefing that names a `verification_set`,
+   the reviewer classifies a deviation by the runbook's authority, as
+   [trust and outward](trust-and-outward.md) defines. For a briefing that names a `verification_set`,
    the Verification sets section below says how its rules are carried. For a
    diff that touches the paths step 6 names, the briefing carries the GitHub Actions
    replay rules as step 6 says. Name the operator-curated bundle dirs and the pinned runbook
    paths, as read at the run base, in the briefing's `constraints`, so the
-   reviewer can tell whether a diff touches an operator runbook. When tier
-   variants are installed, pick the reviewer tier (the installed
-   `reviewer-<tier>` subagents, if any) by the task's complexity and risk, at
-   your own judgment, defaulting to the unsuffixed subagent when unsure; record
-   a non-default tier choice with a one-line reason in `03-decisions.md` when
-   the task is non-trivial. Also name `review_method: normal | rigorous |
-   adversarial` in the briefing; every briefing names one. Pick it by risk
-   class: `adversarial` at minimum for security judgment, install/deploy
-   scripts, hand-edited lockfiles, cross-major overrides, or anything the
-   operator flags high-risk; `normal` only for docs, renames, or batch
-   cosmetics; `rigorous` otherwise. The method is orthogonal to the tier and
-   never substitutes for it: do not pair `adversarial` with the `-medium`
-   reviewer tier, a budget mismatch that names probes without the effort to run
-   them; tiers themselves are unchanged by this axis.
-   For a review round whose entire delta contains only explanatory
-   documentation, comments, or citations and contains no source- or test-file
-   edits and no semantic change to executable commands, configuration, policy,
-   instructions, or behavior, default to the `-medium` reviewer tier with
-   `review_method: normal` where tier variants are installed.
-   This refines the general tier default above for that one class only; a higher
-   tier there is the non-default choice, recorded with a one-line reason.
-   A review round that touches an instruction, policy, template or prompt file
-   (for example a SKILL.md instruction) keeps the general default, whatever the
-   file type, and the minimums named above are unaffected.
+   reviewer can tell whether a diff touches an operator runbook. Pick the reviewer tier and name a
+   `review_method` in the briefing, as
+   [delegation and tiers](delegation-and-tiers.md) says; every briefing names
+   one, and that file also states the default for a docs-only delta.
    For a change whose acceptance rests on tests that pin documentation wording,
    write the briefing as the Pinned-prose changes section of [review and
    recovery](review-and-recovery.md) requires.
@@ -343,7 +273,7 @@ directory and the subagents.
    commit. A change that deletes or renames an exported identifier, type,
    config key, or file is also checked for identifier drift (docs or comments
    still describing the old name as current), by the reviewer or by the
-   orchestrator itself when it reviews a trivial rename per Scaling delegation,
+   orchestrator itself when it reviews a trivial rename directly,
    using a connected drift check when one exists. When this is not the task's
    first review round, name the round number in the briefing; the reviewer
    marks each finding's `recurrence` as `new` or `repeated` against the earlier
@@ -388,14 +318,10 @@ directory and the subagents.
    isolate the probe in a separate worktree or wait until the reviewer has
    returned before probing that tree again.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
-   operator. High or critical findings block acceptance until fixed or
-   explicitly waived: critical findings require operator sign-off; high
-   findings require the orchestrator to record a rationale. Deferring a high
-   or critical finding counts as a waiver and follows the same rules. Record
-   all decisions and waivers in `03-decisions.md` and summarize waivers in
-   the Accepted Waivers section of `06-handoff.md`.
-   A reviewer recommendation is not orchestrator acceptance and cannot authorize
-   a critical waiver; only the operator may authorize a critical waiver.
+   operator. Apply the review gate in AGENTS.md and record all decisions in
+   `03-decisions.md`.
+   A reviewer recommendation is not orchestrator acceptance and cannot
+   authorize a critical waiver.
    For newly created decision records, identify a stable ID, trigger/evidence,
    decision, accountable authority/source with concrete approval evidence,
    consequences, and a superseded decision ID when revising a prior decision.
@@ -405,31 +331,17 @@ directory and the subagents.
    Routine decisions within the delegated contract remain the orchestrator's
    responsibility; an out-of-scope change requires an operator decision.
    Markdown records evidence of real authority and never grant it by themselves.
-   After independent review,
-   the orchestrator may close a docs-only delta without another reviewer round only
-   when the entire unreviewed delta contains only explanatory
-   documentation, comments, or citations; contains no source- or test-file
-   edits and no semantic change to executable commands, configuration,
-   policy, instructions, or behavior; and closes only low/medium
-   documentation or maintainability findings. This option never closes a
-   high/critical or other ineligible finding. Record the concrete verification
-   in a `05-review-findings.md` row, keeping its Severity and Decision headers
-   unchanged and setting Decision to `accepted`. Halt at the first
+   The docs-only closing option is
+   in [review and recovery](review-and-recovery.md).
+   Halt at the first
    `recurrence: repeated` finding whose class a previous round's fix already addressed and
    whose `introduced_by_delta` is `yes` or `unknown` (see Round-2 halt rule below): before any
    further implementer spawn on that task, name split or redesign in `03-decisions.md`. By the
    second round-2 halt signal or the third `fix_required`
    review round on the same task, apply the Review-round escalation budget
-   (see below) instead of running another round unaided. When a fix round's review meets the trigger of the Fix-regression decision point (defined only in [review and recovery](review-and-recovery.md), not restated here), record the Fix-regression decision point before another fix round starts. At an advisor
-   trigger (architectural uncertainty, conflicting
-   requirements, a high-commitment fork among valid options, repeated
-   implementation failures, a review deadlock, a high-risk decision), the
-   orchestrator may spawn the advisor subagent before deciding; the advisor
-   recommends, the orchestrator still decides. When tier variants are
-   installed, pick the advisor tier (the installed `advisor-<tier>`
-   subagent, if any) by the same complexity-and-risk judgment already used
-   for the implementer and reviewer tiers, defaulting to the unsuffixed
-   subagent (already effort `high`) when unsure.
+   (see below) instead of running another round unaided. When a fix round's review meets the trigger of the Fix-regression decision point (defined only in [review and recovery](review-and-recovery.md), not restated here), record the Fix-regression decision point before another fix round starts. The advisor triggers and the advisor tier are in
+   [delegation and tiers](delegation-and-tiers.md); the advisor recommends,
+   the orchestrator still decides.
 9. **Hand off.** Bundle docs whose sources a task changes are listed in its
    `relevant_docs` at slicing (step 4) and re-stamped by that task, so this
    hand-off check is a safety net for sources the task list missed. Before
