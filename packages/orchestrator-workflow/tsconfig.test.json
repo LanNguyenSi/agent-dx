@@ -5,6 +5,6 @@
     "noEmit": true,
     "declaration": false
   },
-  "include": ["src/**/*", "test/**/*"],
+  "include": ["src/**/*", "test/**/*", "eval/**/*"],
   "exclude": ["node_modules", "dist"]
 }

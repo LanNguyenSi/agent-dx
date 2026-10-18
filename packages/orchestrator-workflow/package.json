@@ -21,9 +21,10 @@
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "dev": "node --import tsx src/cli.ts",
+    "eval": "node --import tsx eval/cli.ts",
     "test": "vitest run",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"eval/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"eval/**/*.ts\""
   },
   "keywords": [
     "ai",
@@ -47,12 +48,12 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "commander": "^12.0.0",
     "inquirer": "^9.2.0",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@iarna/toml": "^2.2.5",
     "@types/inquirer": "^9.0.7",
     "@types/node": "^20.11.0",
     "prettier": "^3.8.1",

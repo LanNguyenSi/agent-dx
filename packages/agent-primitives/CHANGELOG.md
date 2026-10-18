@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe --report mutation-probes` prints the orchestrator implementer
+  contract's `mutation_probes` items as one JSON array (one item per
+  mutant, all eleven fields merged from the sibling `mutant` record and
+  `mutation_probe`, exit codes unchanged) instead of the JSON envelope:
+  `result` comes only from `mutation_probe` (no measured verdict, and
+  no probe record at all, is `not_applicable`), a mutant the dry run
+  could not apply reports `reason: target text no longer present` for
+  every cause of that code (the default envelope's `warnings` name the
+  specific one), and a probe whose `mutant` record was never computed
+  still carries its replay definition (`file`/`anchor` from
+  `--file`/`-n` or the plan entry, `before`/`after` from `-M`/`-w`, from
+  `-r` as an empty `before` and the replacement as `after`, or from the
+  entry's match/with/replace; a patch mutant from a plan entry fills only
+  `file`, and `anchor` when the entry gives a line, a bare `-p` fills
+  none of the four, and either is replayed from its patch file), a row
+  the plan never reached carries the run's own top-level reason (a row's
+  own reason wins), while any other field whose source
+  record is absent prints as an empty string. An array that does not fit
+  `-m` prints only the whole items that fit (always valid JSON) with one
+  stderr warning naming the omitted count and the full result file.
+  `--replayed` prints `replayed: true` on the items. `--report` is
+  mutually exclusive with `--summary` and `--print`, and `--replayed`
+  requires `--report`.
+
 ## [0.15.1] - 2026-10-18
 
 ### Fixed

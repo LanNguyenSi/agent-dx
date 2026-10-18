@@ -117,6 +117,40 @@ For a legacy opencode leaf without a recorded provider-qualified model id,
 doctor reports `Routing comparison incomplete` and includes
 `routingComparisonGaps` in JSON instead of declaring a false routing
 divergence. The gap alone does not change the target status.
+For a target whose manifest selects the `codex` harness, doctor also
+checks the Codex instruction budget: when the root instruction file Codex
+loads (`AGENTS.override.md` when it is a regular file, else `AGENTS.md`)
+is larger than the `project_doc_max_bytes` budget Codex reads it under,
+doctor adds one `codex:` warning (`codexWarnings` in JSON) naming the
+file, its size in bytes, the budget, where the budget came from (project
+config `<target>/.codex/config.toml`, user config
+`$CODEX_HOME/config.toml` falling back to `~/.codex/config.toml`, or the
+default 32768), and the first heading that is lost entirely, because
+Codex silently truncates the file at the budget. The highest layer that
+sets the key decides, and a lower layer never applies because a higher
+layer's file is unusable: a value of `0` warns that Codex loads no
+project instruction file at all (naming that layer's file), and a
+top-level `project_doc_max_bytes` value Codex cannot use (a string, a
+boolean, an array, a table, a negative or fractional number) warns that
+Codex refuses to load that configuration file (naming the file and the
+reason); neither does a size comparison. doctor reads the config file
+with a TOML 0.5 parser, while Codex reads TOML 1.1, so doctor says what
+it does not know instead of claiming a rejection: a file the parser
+cannot read (a syntax error, a key set twice, or a form newer than TOML
+0.5 such as a mixed-type array or an inline table over several lines,
+which Codex may load) and an integer outside the range doctor can read
+exactly (Codex accepts up to 9223372036854775807) are each reported as
+a layer whose budget is unknown, with the file's size and the default
+budget for context and no size comparison. Two known mismatches are not
+detected: an integer-valued float (`65536.0`, `1e2`) is read as that
+integer although Codex rejects it, and a file the TOML 0.5 parser accepts
+but Codex rejects whole (stricter TOML 1.x rules, a wrong-typed other
+key) still yields its budget. The check assumes Codex trusts the project; for a
+project it does not trust, Codex loads neither the project config nor
+any project instruction file. Codex layers profiles, a system file, managed layers
+and `-c key=value` session flags over that resolution; this check
+considers none of them. Like the routing gap, such a warning never
+changes the target status or the doctor exit code.
 
 **`adopt [dir] [--json]`** brings a repository that already has the kit installed,
 by hand or by an earlier `init`, under the operator's management without
