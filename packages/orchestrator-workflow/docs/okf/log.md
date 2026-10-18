@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-10-18T16:55:56Z, doctor mismatch list completed: the `doctor.ts` comment (same line count, no
+  citation moved) and `operator-install-and-registry.md` now name the fourth known mismatch
+  (a file the TOML 0.5 parser accepts but Codex rejects whole still yields its budget), and
+  `doctor.test.ts` pins a negative-narrowed BigInt as unknown. Re-stamped:
+  `install-fence-mechanics.md` (claims unchanged) and `operator-install-and-registry.md`.
+
 - 2026-10-18T16:44:54Z, doctor reports what its TOML 0.5 parser cannot know: `doctor.ts`,
   `doctor.test.ts`, the `CHANGELOG.md` bullet and `operator-install.md` changed.
   A Codex config file that `@iarna/toml` (TOML 0.5) cannot read, or an integer
