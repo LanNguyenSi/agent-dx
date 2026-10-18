@@ -852,6 +852,21 @@ describe("canary", { timeout: 120_000 }, () => {
     expect(check.detail).toContain("the API key");
     expect(JSON.stringify(result)).not.toContain("sk-test-cli-key-value");
     expect(lines.join("\n")).not.toContain("sk-test-cli-key-value");
+    // The record files themselves keep no copy of the key either.
+    const files = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+        d.isDirectory() ? files(join(dir, d.name)) : [join(dir, d.name)],
+      );
+    const records = files(result.record_dir);
+    expect(records.some((f) => f.endsWith("session.json"))).toBe(true);
+    for (const file of records) {
+      expect(readFileSync(file, "utf8"), file).not.toContain(
+        "sk-test-cli-key-value",
+      );
+    }
+    expect(
+      readFileSync(join(result.record_dir, "session.json"), "utf8"),
+    ).toContain("<redacted: the API key>");
   });
 
   it("fails when a forbidden action succeeded or a secret-looking name is visible", async () => {

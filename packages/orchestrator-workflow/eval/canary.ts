@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -443,8 +444,13 @@ export async function runCanary(
       : "the touch target does not exist",
   });
   const written = join(scratch.checkout, targets.checkoutFile);
+  // lstat first: a FIFO or a symlink in its place is not read (and not a pass).
+  const writtenStat = existsSync(written) ? lstatSync(written) : null;
   const wroteOk =
-    existsSync(written) && readFileSync(written, "utf8") === token;
+    writtenStat !== null &&
+    writtenStat.isFile() &&
+    writtenStat.size === token.length &&
+    readFileSync(written, "utf8") === token;
   checks.push({
     id: "host:checkout_file_written",
     expect: "host",
