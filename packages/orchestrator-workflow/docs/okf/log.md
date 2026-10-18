@@ -1,5 +1,30 @@
 # Bundle log
 
+- 2026-10-18T19:08:18Z, AGENTS.md section became a short charter: the always-loaded section keeps roles and run
+  modes, the review gate, the instruction trust boundary, the outward-facing actions rule and the
+  definition of done, and a test bounds it at 800 words. Runbook selection and authority and the
+  outward-action examples and records moved to the new `trust-and-outward.md` skill reference,
+  effort tiers, the review method, the advisor and the model rules to `delegation-and-tiers.md`,
+  and the docs-only closure rule to `review-and-recovery.md`; `SKILL.md`, the detailed workflow,
+  `contracts.md` and `run-state-and-harness.md` now point to those single sites. Re-verified in
+  the re-stamped docs: the review-gate sentences still sit in the charter and the docs-only
+  closing delta now sits in the review and recovery reference, so `review-gate-and-waivers.md`
+  names both and drops its claims that the detailed workflow and the charter restate the escalation
+  budget and the waiver rules; `run-state-lifecycle-and-markers.md` no longer claims the charter
+  carries the run-state pointer and keyed marker, and cites the charter for the outward grant
+  rules and the new reference for the examples, provenance and runbook run-base reading;
+  `model-preselection.md` cites the Models section of `delegation-and-tiers.md` and no longer
+  claims the charter carries Models or the Codex dispatch paths; `subagent-contracts-superset.md`
+  cites the review method rule at its new site; `install-fence-mechanics.md` gained one sentence
+  on the charter bound. No kit source under `src/` reads the section's headings (re-checked with a
+  search of `src/`). Every anchored citation into shifted files was re-pointed by locating the
+  anchor text on exactly one line of its file and keeping the range length, then checked by the
+  docs-consistency guard; one citation whose range ends on a closing line was left at its
+  original lines. The sibling-drift allowlist geometry was re-mapped by aligning each doc against
+  its previous version. Re-stamped: `install-fence-mechanics.md`, `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
 - 2026-10-18T18:50:44Z, GitHub Actions replay in run mode single: the trigger site in `evidence-and-probes.md`
   step 6 now says the orchestrator applies the implementer part of the replay rules itself to a
   workflow or action diff in run mode `single` (the sentence was appended to the paragraph's last
