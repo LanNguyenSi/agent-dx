@@ -1278,6 +1278,11 @@ function printTargetDetail(
   for (const warning of target.knowledgeWarnings ?? []) {
     console.log(`  knowledge: ${warning}`);
   }
+  // Codex instruction-budget warnings likewise print for every status,
+  // for the same reason.
+  for (const warning of target.codexWarnings ?? []) {
+    console.log(`  codex: ${warning}`);
+  }
   const showsVersionLagDetail =
     (target.status === "version-lag" ||
       ((target.status === "divergent" || target.status === "drift") &&

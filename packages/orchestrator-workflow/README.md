@@ -218,7 +218,10 @@ An operator who maintains many repositories can set defaults once with
 `setup` and project them onto each target with `apply --target <repo>`,
 instead of re-answering the same `init` prompts per repo; `doctor` reports
 each registered target's status and `adopt` brings an already-installed
-repository under management without changing it. `init`/`uninstall` remain
+repository under management without changing it. A `codex:` warning tells
+you when a codex target's root instruction file exceeds Codex's
+`project_doc_max_bytes` instruction budget, as described in
+[Operator-level install](docs/operator-install.md). `init`/`uninstall` remain
 fully supported and unchanged for a single-repository install. See
 [Operator-level install](docs/operator-install.md) for the full command
 reference (every flag, the `--sync` precedence inversion, the kit-version
