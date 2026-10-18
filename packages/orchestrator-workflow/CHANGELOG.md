@@ -100,8 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outward rule shrink to a pointer. The detailed workflow, `contracts.md`, and
   `run-state-and-harness.md` point to these sites instead of restating the rules.
   Safety-core sentences (trust boundary, outward actions, review gate) keep their
-  meaning; the few that were split or reworded are listed in the clause map that
-  accompanies this change, and each half stays whole at one site. The always-loaded
+  meaning; a sentence that was split keeps each half whole at one site, and a
+  reworded one states the same condition as before. The always-loaded
   section matters most for Codex, which truncates project docs at 32 KiB, and for every
   session that loads it. Not breaking for a consumer's own content: the installer
   replaces only the fenced section and the skill files, and leaves everything outside the
