@@ -1,6 +1,8 @@
+import { parse as parseToml } from "@iarna/toml";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { Stats } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { PACKAGE_VERSION } from "./assets.js";
@@ -88,6 +90,22 @@ export interface TargetReport {
    * a documentation-locator drift, not a kit-file install drift.
    */
   knowledgeWarnings?: string[];
+  /**
+   * Codex instruction-budget warnings against this target's own filesystem:
+   * the target's manifest selects the `codex` harness and the root
+   * instruction file Codex would load (`AGENTS.override.md` when it is a
+   * regular file, else `AGENTS.md`) is affected by the decided
+   * `project_doc_max_bytes` budget: the file is larger than a
+   * positive-integer budget Codex would silently truncate it to (naming
+   * the file, its size, the budget, its source and the first heading
+   * lost); or that budget is `0`, which makes Codex load no project
+   * instruction file at all; or the value is invalid, and Codex refuses
+   * to load that config file. Omitted when there is none. Printed as
+   * `codex:` detail lines in the human output. Like the knowledge
+   * warnings, these never change `status` or the doctor exit code -- they
+   * surface an instruction-file truncation, not a kit-file install drift.
+   */
+  codexWarnings?: string[];
   /** Human-output-only: the repo's own profile, or null when unknown. */
   repoProfile: Profile | null;
   /** Human-output-only: the operator default profile, for the comparison line. */
@@ -134,6 +152,8 @@ export interface TargetReportJson {
   routingComparisonGaps?: string[];
   /** See {@link TargetReport.knowledgeWarnings}. */
   knowledgeWarnings?: string[];
+  /** See {@link TargetReport.codexWarnings}. */
+  codexWarnings?: string[];
   versionLag: boolean;
   reason: string | null;
 }
@@ -151,6 +171,9 @@ export function targetReportToJson(report: TargetReport): TargetReportJson {
       : {}),
     ...(report.knowledgeWarnings?.length
       ? { knowledgeWarnings: report.knowledgeWarnings }
+      : {}),
+    ...(report.codexWarnings?.length
+      ? { codexWarnings: report.codexWarnings }
       : {}),
     versionLag: report.versionLag,
     reason: report.reason,
@@ -356,6 +379,322 @@ function computeKnowledgeWarnings(
   return warnings;
 }
 
+/**
+ * The one byte budget Codex gives every project instruction file it loads.
+ * Read from the Codex source at codex-cli 0.163.0 (as were the layering and
+ * truncation facts below): the top-level `project_doc_max_bytes` key of a
+ * Codex `config.toml`, default `32 * 1024`. Codex loads project instruction
+ * files per directory from the project root (the directory with `.git`)
+ * down to the working directory, taking `AGENTS.override.md` over
+ * `AGENTS.md` in each directory; all of them share this one budget, and
+ * content past it is cut off with only a log warning. Codex keeps the
+ * value of the highest layer that sets the key: `0` is accepted and makes
+ * it load no project instruction file at all, and a value that is not an
+ * integer from 0 up to 9223372036854775807 makes it refuse to load that
+ * configuration; none of these falls back to a lower layer. For a project
+ * Codex does not trust it loads neither the project config nor any
+ * instruction file; this check assumes a trusted project.
+ */
+const CODEX_PROJECT_DOC_MAX_BYTES_DEFAULT = 32 * 1024;
+
+/** Where a resolved Codex instruction budget came from. The profiles, the
+ * system layer, managed layers and `-c` session flags are config layers
+ * Codex itself consults but are not considered here; only these three are. */
+type CodexBudgetSource = "project config" | "user config" | "default";
+
+/**
+ * The injectable filesystem inputs of the Codex user-config layer, so a
+ * test never reads the real home directory or the real `process.env`
+ * (defaults: {@link homedir} and `process.env`).
+ */
+export interface CodexBudgetInputs {
+  /** The user home directory, the fallback root when `env` has no
+   * `CODEX_HOME`: the user file is then `<homeDir>/.codex/config.toml`. */
+  homeDir: string;
+  /** The environment, read for `CODEX_HOME`. */
+  env: Record<string, string | undefined>;
+}
+
+/** One layer's read of its Codex `config.toml`: `{ parseError }` when the
+ * file is present but doctor's TOML 0.5 parser cannot read it (a syntax
+ * error, a key set twice, or a TOML 1.0 / 1.1 form Codex may accept);
+ * `{ value }` when it
+ * parses and the top-level `project_doc_max_bytes` key is set (a key
+ * inside a `[table]` header is a different key and does not count);
+ * `undefined` when the file is absent or sets no top-level key. */
+type CodexConfigRead = { value: unknown } | { parseError: string } | undefined;
+
+/**
+ * Reads one Codex `config.toml` with a TOML parser ({@link parseToml},
+ * `@iarna/toml`, which implements TOML 0.5 while Codex reads TOML 1.1):
+ * quoted keys, inline comments, multi-line strings and every integer
+ * form 0.5 knows are understood in full. A file the parser cannot read
+ * is reported with its first message line and is not claimed to be
+ * rejected by Codex, which may load it. Only the top-level
+ * `project_doc_max_bytes` key counts; its parsed value is returned
+ * untouched and what Codex makes of it is decided in
+ * {@link decideCodexBudgetValue}. A file that cannot be read at all is
+ * treated as absent.
+ */
+function readCodexProjectDocMaxBytes(configFile: string): CodexConfigRead {
+  let text: string;
+  try {
+    text = readFileSync(configFile, "utf8");
+  } catch {
+    return undefined;
+  }
+  try {
+    const parsed: Record<string, unknown> = parseToml(text);
+    return Object.hasOwn(parsed, "project_doc_max_bytes")
+      ? { value: parsed["project_doc_max_bytes"] }
+      : undefined;
+  } catch (error) {
+    return { parseError: parseTomlFirstLine(error) };
+  }
+}
+
+/** The first line of a TOML parser error, without the source excerpt the
+ * rest of the `@iarna/toml` message quotes back. */
+function parseTomlFirstLine(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return (message.split("\n", 1)[0] ?? "").replace(/:$/, "");
+}
+
+/** What doctor makes of the parsed value of the top-level
+ * `project_doc_max_bytes` key. Codex accepts integers from 0 up to
+ * 9223372036854775807: `0` (TOML spells `-0` that same value) makes it
+ * load no project instruction file at all, a positive integer is the
+ * byte budget, and a negative integer, a float, a string, a boolean, an
+ * array or a table makes it reject the whole file. Doctor cannot match
+ * Codex in four known places and says what it does not know rather than
+ * claim a rejection: (1) the parser reads TOML 0.5, Codex TOML 1.1, so a
+ * file the parser refuses may still load in Codex (see
+ * {@link readCodexProjectDocMaxBytes}); (2) an integer outside the safe JS
+ * range comes back as `BigInt.asIntN(64, literal)` with its high bits
+ * dropped, so a `BigInt` budget is unknown; (3) an integer-valued float
+ * (`65536.0`, `1e2`) comes back as the plain number and reads as that
+ * integer although Codex rejects it; (4) a file the parser accepts but
+ * Codex rejects whole (stricter TOML 1.x rules, a wrong-typed other key)
+ * still yields its budget although Codex refuses to load it. */
+function decideCodexBudgetValue(
+  value: unknown,
+  configFile: string,
+  source: CodexBudgetSource,
+): CodexBudgetDecision {
+  if (typeof value === "bigint") {
+    return {
+      kind: "unknown",
+      source,
+      reason: `project_doc_max_bytes in the ${source} file ${configFile} is outside the range doctor can read exactly; Codex accepts up to 9223372036854775807`,
+    };
+  }
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value === 0
+      ? { kind: "zero", configFile, source }
+      : { kind: "budget", bytes: value, source };
+  }
+  return {
+    kind: "reject",
+    configFile,
+    source,
+    reason: `project_doc_max_bytes = ${describeCodexValue(value)} is not a non-negative integer`,
+  };
+}
+
+/** How an unusable config value is quoted in a warning: a string keeps
+ * the quotes it has in the file, a number prints as itself, and
+ * anything else prints best effort. */
+function describeCodexValue(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value !== "object" || value === null) return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/** What the config layers decide about the instruction budget. The
+ * highest layer that sets the key decides and no lower layer ever
+ * applies: `budget` is a winning positive byte count and its layer;
+ * `zero` means the winning value is `0`, and Codex then loads no project
+ * instruction file at all; `unknown` means doctor cannot tell the budget
+ * of the winning layer (its TOML 0.5 parser cannot read the file, or the
+ * value is outside the integer range doctor reads exactly), `reason`
+ * says why, and no size comparison is made; `reject` means Codex refuses
+ * to load that config file because of its unusable value, and `reason`
+ * says why. */
+type CodexBudgetDecision =
+  | { kind: "budget"; bytes: number; source: CodexBudgetSource }
+  | { kind: "zero"; configFile: string; source: CodexBudgetSource }
+  | { kind: "unknown"; source: CodexBudgetSource; reason: string }
+  | {
+      kind: "reject";
+      configFile: string;
+      source: CodexBudgetSource;
+      reason: string;
+    };
+
+/**
+ * Resolves the instruction budget for one target across the layers this
+ * kit considers, highest first: the project file
+ * `<target>/.codex/config.toml`, then the user file `$CODEX_HOME/
+ * config.toml` (`<homeDir>/.codex/config.toml` when the environment does
+ * not set `CODEX_HOME`), then the default. The highest layer that sets
+ * the key decides: its positive integer value is the budget, its `0`
+ * means Codex loads no project instruction file at all, a value Codex
+ * cannot use means Codex rejects that file, and a file doctor cannot
+ * parse or a value outside its exact integer range leaves the budget
+ * unknown; none of these falls back to a lower layer, so a file doctor
+ * cannot parse is reported whatever the other file says.
+ */
+function resolveCodexBudget(
+  targetPath: string,
+  inputs: CodexBudgetInputs,
+): CodexBudgetDecision {
+  const codexHome = inputs.env["CODEX_HOME"];
+  const layers: Array<{ configFile: string; source: CodexBudgetSource }> = [
+    {
+      configFile: join(targetPath, ".codex", "config.toml"),
+      source: "project config",
+    },
+    {
+      configFile: join(
+        codexHome ? codexHome : join(inputs.homeDir, ".codex"),
+        "config.toml",
+      ),
+      source: "user config",
+    },
+  ];
+  for (const layer of layers) {
+    const read = readCodexProjectDocMaxBytes(layer.configFile);
+    if (read === undefined) continue;
+    if ("parseError" in read) {
+      return {
+        kind: "unknown",
+        source: layer.source,
+        reason: `doctor could not read the ${layer.source} file ${layer.configFile} with its TOML 0.5 parser (${read.parseError}); Codex reads TOML 1.1 and may load the file`,
+      };
+    }
+    return decideCodexBudgetValue(read.value, layer.configFile, layer.source);
+  }
+  return {
+    kind: "budget",
+    bytes: CODEX_PROJECT_DOC_MAX_BYTES_DEFAULT,
+    source: "default",
+  };
+}
+
+const ATX_HEADING_LINE = /^ {0,3}#{1,6}( |\t|$)/;
+const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})/;
+
+/**
+ * The text of the first Markdown heading line that starts at or after
+ * `budget` bytes into `content` -- the first heading Codex loses entirely
+ * -- or `null` when no heading starts at or after the budget. Lines
+ * inside a fenced code block (```` or ~~~) are not headings; a line is
+ * taken as opening or closing a fence by its marker alone.
+ */
+function firstLostHeading(content: string, budget: number): string | null {
+  let offset = 0;
+  let openFence: string | undefined;
+  for (const line of content.split("\n")) {
+    const fence = FENCE_LINE.exec(line);
+    if (fence) {
+      if (openFence === undefined) openFence = fence[1][0];
+      else if (fence[1][0] === openFence) openFence = undefined;
+    } else if (
+      openFence === undefined &&
+      offset >= budget &&
+      ATX_HEADING_LINE.test(line)
+    ) {
+      return line.trim();
+    }
+    offset += Buffer.byteLength(line, "utf8") + 1;
+  }
+  return null;
+}
+
+/** Whether `path` names a regular file, like Codex's own per-directory
+ * `is_file` check: anything else (no entry, a directory, ...) is not an
+ * instruction file. */
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One warning per target whose manifest selects the `codex` harness and
+ * whose root Codex instruction file -- `AGENTS.override.md` when it is a
+ * regular file, else `AGENTS.md` -- is affected by the instruction budget
+ * decided in {@link resolveCodexBudget}. Three outcomes: the deciding
+ * positive-integer budget is below the file's size, and the warning names
+ * the file, its size in bytes, the budget, where the budget came from
+ * (project config, user config, or default) and the first heading that is
+ * lost entirely (or says none is); the deciding value is `0`, and the
+ * warning says Codex loads no project instruction file at all (no size
+ * comparison); the deciding file holds a value Codex rejects, and the
+ * warning says so, naming the file and the reason (no size comparison);
+ * the deciding layer's budget is unknown to doctor (its TOML 0.5 parser
+ * cannot read the file, which Codex's TOML 1.1 reader may load, or the
+ * value is outside the integer range doctor reads exactly), and the
+ * warning says so, with the file's size and the default budget for
+ * context and no size comparison. Absent file, other harnesses and files
+ * within the budget warn nothing; like the knowledge warnings this never changes
+ * `status` or the doctor exit code. The check assumes Codex trusts the
+ * project. Profiles, the system layer, managed layers and `-c` session
+ * flags are config layers Codex itself consults that this check does not
+ * consider.
+ */
+function computeCodexBudgetWarnings(
+  targetPath: string,
+  manifest: Manifest,
+  inputs: CodexBudgetInputs,
+): string[] {
+  if (!manifest.harnesses.includes("codex")) return [];
+  const overrideFile = join(targetPath, "AGENTS.override.md");
+  const hasOverride = isRegularFile(overrideFile);
+  const instructionFile = hasOverride
+    ? overrideFile
+    : join(targetPath, "AGENTS.md");
+  let content: Buffer;
+  try {
+    content = readFileSync(instructionFile);
+  } catch {
+    return [];
+  }
+  const decision = resolveCodexBudget(targetPath, inputs);
+  if (decision.kind === "unknown") {
+    return [
+      `codex budget: ${decision.reason}; the budget from this layer is unknown, so no size comparison is made (${hasOverride ? "AGENTS.override.md" : "AGENTS.md"} is ${content.length} bytes, the default budget is ${CODEX_PROJECT_DOC_MAX_BYTES_DEFAULT} bytes)`,
+    ];
+  }
+  if (decision.kind === "reject") {
+    return [
+      `codex budget: Codex rejects the ${decision.source} file ${decision.configFile}: ${decision.reason}, so Codex refuses to load that configuration`,
+    ];
+  }
+  if (decision.kind === "zero") {
+    return [
+      `codex budget: ${hasOverride ? "AGENTS.override.md" : "AGENTS.md"} is never loaded: the ${decision.source} file ${decision.configFile} sets project_doc_max_bytes = 0, and Codex loads no project instruction file at all`,
+    ];
+  }
+  const size = content.length;
+  if (size <= decision.bytes) return [];
+  const lost = firstLostHeading(content.toString("utf8"), decision.bytes);
+  return [
+    [
+      `codex budget: ${hasOverride ? "AGENTS.override.md" : "AGENTS.md"} is ${size} bytes, over the ${decision.bytes}-byte project_doc_max_bytes budget from ${decision.source}`,
+      lost === null
+        ? "Codex silently truncates the file and no heading starts at or after the budget, so no heading is lost entirely"
+        : `Codex silently truncates the file; first heading lost entirely: "${lost}"`,
+    ].join("; "),
+  ];
+}
+
 function baseReport(
   target: OperatorTarget,
   operator: OperatorManifest,
@@ -404,12 +743,15 @@ export function statOrClassify(
  * read-only I/O (existence checks, file hashing, reading the target's own
  * repo manifest); no printing, no `process.exit`. Exported standalone so a
  * later `adopt` command can reuse the same per-target computation `doctor`
- * uses.
+ * uses. `codexInputs` overrides the home directory and environment the
+ * Codex budget check reads (it defaults to the real {@link homedir} and
+ * `process.env`); `runDoctor` threads its own test-only option through.
  */
 export function inspectTarget(
   target: OperatorTarget,
   operator: OperatorManifest,
   kitVersion: string,
+  codexInputs?: CodexBudgetInputs,
 ): TargetReport {
   const dirStat = statOrClassify(target.path);
   if (dirStat.kind === "enoent") {
@@ -488,6 +830,11 @@ export function inspectTarget(
     : manifest.version !== kitVersion;
 
   const knowledgeWarnings = computeKnowledgeWarnings(target.path, manifest);
+  const codexWarnings = computeCodexBudgetWarnings(
+    target.path,
+    manifest,
+    codexInputs ?? { homeDir: homedir(), env: process.env },
+  );
 
   let status: TargetStatus;
   if (driftFiles.length > 0) {
@@ -516,6 +863,7 @@ export function inspectTarget(
       ? { routingComparisonGaps: routingComparison.gaps }
       : {}),
     ...(knowledgeWarnings.length > 0 ? { knowledgeWarnings } : {}),
+    ...(codexWarnings.length > 0 ? { codexWarnings } : {}),
     repoProfile: manifest.profile,
     operatorProfile: operator.defaults.profile,
     repoTiers: manifest.tiers,
@@ -579,7 +927,10 @@ function countRawTargets(home: string): number | null {
  * `options.lockOptions` is exposed only so tests can shrink
  * `updateOperatorManifest`'s lock-acquire timeout/staleness/poll windows
  * below their production defaults (see `OperatorManifestLockOptions`);
- * production callers should omit it entirely. `updateOperatorManifest`
+ * production callers should omit it entirely. `options.codexInputs` is
+ * likewise test-only: it replaces the real home directory and `process.env`
+ * the Codex user-config layer of {@link TargetReport.codexWarnings} reads.
+ * `updateOperatorManifest`
  * (via `withOperatorManifestLock`) can itself throw rather than return,
  * most commonly `OperatorManifestLockTimeoutError` (another
  * orchestrator-workflow command holds the lock past the timeout) or any
@@ -591,7 +942,11 @@ function countRawTargets(home: string): number | null {
  */
 export function runDoctor(
   home: string,
-  options: { prune?: boolean; lockOptions?: OperatorManifestLockOptions } = {},
+  options: {
+    prune?: boolean;
+    lockOptions?: OperatorManifestLockOptions;
+    codexInputs?: CodexBudgetInputs;
+  } = {},
 ): DoctorReport {
   const state: OperatorManifestState = operatorManifestState(home);
   if (state.kind !== "ok") {
@@ -637,7 +992,7 @@ export function runDoctor(
           return undefined;
         }
         const reports = current.targets.map((target) =>
-          inspectTarget(target, current, PACKAGE_VERSION),
+          inspectTarget(target, current, PACKAGE_VERSION, options.codexInputs),
         );
         computedReports = reports;
 
@@ -704,7 +1059,12 @@ export function runDoctor(
     );
   } else {
     targets = state.manifest.targets.map((target) =>
-      inspectTarget(target, state.manifest, PACKAGE_VERSION),
+      inspectTarget(
+        target,
+        state.manifest,
+        PACKAGE_VERSION,
+        options.codexInputs,
+      ),
     );
   }
 

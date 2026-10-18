@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `doctor` now warns when a target that selects the codex harness has a
+  root instruction file (`AGENTS.override.md` when it is a regular file,
+  else `AGENTS.md`) larger than Codex's `project_doc_max_bytes`
+  instruction budget, which Codex silently truncates. One warning per
+  such target names the file, its size, the budget and its source
+  (project config, user config, or the default 32768), and the first
+  heading lost entirely. The highest layer that sets the key decides: a
+  value of `0` warns that Codex loads no project instruction file at all,
+  and a value Codex cannot use (a string, a negative or fractional
+  number, and so on) warns that it refuses to load that configuration
+  file; neither falls back to a lower layer. The config file is read with
+  a TOML 0.5 parser (`@iarna/toml`, now a runtime dependency) while Codex
+  reads TOML 1.1, so a file the parser cannot read, or an integer outside
+  the range it reads exactly, is reported as a budget doctor does not
+  know instead of as a Codex rejection; an integer-valued float such as
+  `65536.0` is read as that integer although Codex rejects it.
+  The check assumes Codex trusts the project and does not consider
+  profiles, the system layer, managed layers or `-c` session flags; it is
+  a warning only, and the doctor exit code is unchanged.
+
+- Added a replay evaluation for the reviewer prompt under `eval/`, run with
+  `npm run eval`. It starts a headless reviewer session per dataset entry on an
+  isolated checkout of the reviewed commit, scores return validity
+  deterministically, scores recall of known defects with a blind judge session
+  and counts false positives on controls, and reports run-to-run noise and a
+  paired comparison of two prompt variants (the shipped prompt, a degraded
+  negative control, or any prompt file). Reviewer and canary sessions run in the
+  Claude Code sandbox, the judge without tools, all with an environment
+  allowlist and under `agent-primitives guard`; a `canary` command checks that
+  isolation before a batch. The dataset stays private to whoever builds it;
+  `eval/README.md` documents its format, what the isolation contains and what it
+  does not, and the deviations from the production route. The tooling is not
+  part of the published package (it is not in `files` and not compiled into
+  `dist`), and its tests use stubs in place of the model and guard binaries.
+
 - **BREAKING:** the `acceptance-baseline/v1` acceptance contract is retired;
   the original string-list contract is the only one. Every role prompt loses
   its Contract selection paragraph and the v1 rules, the implementer's return
