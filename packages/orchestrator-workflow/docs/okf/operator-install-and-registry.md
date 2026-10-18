@@ -3,7 +3,7 @@ type: module
 title: Operator install and target registry
 description: The operator-level home, manifest schema, locked write API, target registry, and the setup/apply/doctor/adopt commands built on top of it.
 tags: [operator, manifest, registry, lock, doctor, adopt, pin, cli]
-timestamp: 2026-10-18T12:58:16Z
+timestamp: 2026-10-18T14:08:01Z
 sources:
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -259,13 +259,13 @@ each target's status against the operator's defaults; the citation below is
 the plain path, and under `--prune` the same per-target walk runs inside
 the locked read-modify-write described further down
 (cli.ts:1086-1087#"Report each operator-registered target's status",
-doctor.ts:923-925#"state.manifest,").
+doctor.ts:998-1000#"state.manifest,").
 The vocabulary is a seven-member union, `TargetStatus`
 (doctor.ts:47#"export type TargetStatus ="): `clean`, `divergent`,
 `version-lag`, `drift`, `missing`, `no-manifest`, `unverifiable`.
 Precedence is fixed: `drift` outranks `divergent`, which outranks
 `version-lag`, which outranks `clean`
-(doctor.ts:705-710#"else if (versionLag) {"); `unverifiable` is a distinct
+(doctor.ts:780-785#"else if (versionLag) {"); `unverifiable` is a distinct
 case from both `missing` and `no-manifest`: it means the target directory or
 its repo manifest could not even be *checked* (a stat failure other than
 ENOENT, or a manifest file present but unreadable), so nothing is actually
@@ -273,15 +273,15 @@ known about that target's real state
 (doctor.ts:30-45#"that basis would be an unrecoverable guess."). Only a
 subset of `TargetReport`'s fields is part of the `--json` contract,
 `TargetReportJson`
-(doctor.ts:145-155#"reason: string | null;",
-doctor.ts:164-176#"reason: report.reason,"); the fields outside that
+(doctor.ts:147-157#"reason: string | null;",
+doctor.ts:166-178#"reason: report.reason,"); the fields outside that
 contract exist only for the human-output printer in `cli.ts`, to render
 detail lines without recomputing values `inspectTarget` already worked out
-(doctor.ts:64-69#"render detail lines without recomputing values"). The contract's optional `knowledgeWarnings` key carries the knowledge-bundle warnings (a configured `path` or `repoRoot` that is not a directory, a malformed manifest `knowledge` entry ignored on read, a non-empty list omitting an existing `docs/okf/`) and is omitted when there is none (doctor.ts:170#"? { knowledgeWarnings: report.knowledgeWarnings }"); the human output prints each one as a `knowledge:` detail line under any status (cli.ts:1279#"knowledge: ${warning}"), and they never change the status or the exit code. The contract's optional `codexWarnings` key (doctor.ts:173#"? { codexWarnings: report.codexWarnings }") likewise carries at most one Codex instruction-budget warning per codex-selecting target: its root instruction file (`AGENTS.override.md` when present, else `AGENTS.md`) is larger than the `project_doc_max_bytes` budget Codex silently truncates it to, read from the project config, the user config, or the 32768 default, with profiles, the system layer, managed layers and `-c` session flags not considered; it prints as a `codex:` detail line (cli.ts:1284#"codex: ${warning}") and never changes the status or the exit code either.
+(doctor.ts:64-69#"render detail lines without recomputing values"). The contract's optional `knowledgeWarnings` key carries the knowledge-bundle warnings (a configured `path` or `repoRoot` that is not a directory, a malformed manifest `knowledge` entry ignored on read, a non-empty list omitting an existing `docs/okf/`) and is omitted when there is none (doctor.ts:172#"? { knowledgeWarnings: report.knowledgeWarnings }"); the human output prints each one as a `knowledge:` detail line under any status (cli.ts:1279#"knowledge: ${warning}"), and they never change the status or the exit code. The contract's optional `codexWarnings` key (doctor.ts:175#"? { codexWarnings: report.codexWarnings }") likewise carries at most one Codex instruction-budget warning per codex-selecting target, decided without fall-through by the highest config layer that sets `project_doc_max_bytes` (the project config, the user config, or the 32768 default): the file (`AGENTS.override.md` when it is a regular file, else `AGENTS.md`) is larger than that positive-integer budget, which Codex silently truncates it to; or the deciding value is `0`, and the warning says Codex loads no project instruction file at all; or the deciding value is invalid, and the warning says Codex refuses to load that config file -- the last two with no size comparison, and the check assumes Codex trusts the project. With profiles, the system layer, managed layers and `-c` session flags not considered, it prints as a `codex:` detail line (cli.ts:1284#"codex: ${warning}") and never changes the status or the exit code either.
 
 Exit codes: `2` when no operator manifest exists at all (nothing else is
 evaluated), whether the file is simply absent or present-but-unreadable
-(doctor.ts:808-819#"a possibly-fine targets array sitting next to the unreadable");
+(doctor.ts:883-894#"a possibly-fine targets array sitting next to the unreadable");
 also `2`, via a separate path in `cli.ts` rather than in `runDoctor` itself,
 when a `--prune` run's locked read-modify-write throws instead of returning
 a report (a foreign lock held past its timeout, or any other error
@@ -292,17 +292,17 @@ differently-shaped JSON object with `error: "operator-manifest-locked"` or
 `unvalidatedDropped` field at all (cli.ts:1113-1141#"error: doctorError,").
 Otherwise: `1` if any remaining target (after an optional prune) is
 `drift`, `missing`, `no-manifest`, or `unverifiable`; else `0`
-(doctor.ts:932-940#": 0;"). Outside that thrown-lock-error path, `--json`
+(doctor.ts:1007-1015#": 0;"). Outside that thrown-lock-error path, `--json`
 prints the `DoctorReport` as one JSON object with each target projected to
 its `TargetReportJson` subset
 (cli.ts:1161#"targets: report.targets.map(targetReportToJson),"), including the
 report-level `unvalidatedDropped`
-(doctor.ts:242#"unvalidatedDropped: number;") and `pruned`
-(doctor.ts:228#"pruned: string[];")
+(doctor.ts:244#"unvalidatedDropped: number;") and `pruned`
+(doctor.ts:230#"pruned: string[];")
 (cli.ts:1156-1165#"report.error ? { error: report.error }"); within that
 object, `error` is set only when no manifest was evaluated, distinguishing
 "never ran `setup`" from "manifest exists but does not parse or validate"
-(doctor.ts:243-248#"(corrupt JSON, or an envelope that does not match this kit)."). That
+(doctor.ts:245-250#"(corrupt JSON, or an envelope that does not match this kit)."). That
 lock-failure JSON object above is assembled directly by `cli.ts`'s `catch`
 block, not by `runDoctor`, and carries its own, differently-named `error`
 values outside `DoctorReport`'s error contract entirely.
@@ -313,7 +313,7 @@ form; `unverifiable` targets are never removed by it, since an unreadable
 target might still be perfectly fine and dropping its row on that basis would
 be an unrecoverable guess
 (cli.ts:1093-1095#"remove missing and no-manifest targets from the operator registry",
-doctor.ts:738#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>([").
+doctor.ts:813#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>([").
 The prune's own re-read, recompute, and write run inside
 `updateOperatorManifest`'s single locked section, the same as every other
 registry write.
@@ -334,20 +334,20 @@ cli.ts:1320-1327#"models: { ...repoManifest.models },",
 cli.ts:1514-1525#"bootstrapped = !current;"). It then prints the one
 target's doctor report and exits with `adoptExitCodeForStatus`'s own
 single-target mapping, a function scoped to `adopt`'s contract
-(doctor.ts:180-181#"single-target exit-code") and not something `doctor`'s
+(doctor.ts:182-183#"single-target exit-code") and not something `doctor`'s
 own multi-target exit code is built from: `0` for
 `clean`/`divergent`/`version-lag`, `1` for `drift`, `2` for
 `missing`/`no-manifest`/`unverifiable`
-(doctor.ts:192-203#"return 0;",
+(doctor.ts:194-205#"return 0;",
 test/adopt.test.ts:564-565#"maps all seven TargetStatus values to adopt").
 This three-way, per-status split is deliberately finer than `doctor`'s own
 two-way `0`/`1` aggregate exit code over all registered targets (above),
 which never derives a `2` from any individual target's status
-(doctor.ts:932-940#": 0;"). The same `adoptExitCodeForStatus` mapping also
+(doctor.ts:1007-1015#": 0;"). The same `adoptExitCodeForStatus` mapping also
 drives whether the success line is suppressed
-(doctor.ts:220-221#"return adoptExitCodeForStatus(status) === 2;") and
+(doctor.ts:222-223#"return adoptExitCodeForStatus(status) === 2;") and
 whether the `--json` output carries an `unexpected-target-status` error key
-(doctor.ts:966-969#"return adoptExitCodeForStatus(status) === 2"), both
+(doctor.ts:1041-1044#"return adoptExitCodeForStatus(status) === 2"), both
 wired into `adopt`'s own action
 (cli.ts:1596-1597#"const unexpectedStatus = suppressSuccessLine(targetReport.status);").
 Every failure `adopt` can report before it has a target report to return
@@ -375,7 +375,7 @@ version differ (someone changed the pin without reapplying, or the installed
 version drifted some other way), the target is still reported `version-lag`
 even though it carries a pin; with no pin at all, `version-lag` compares the
 installed version against the running kit version instead
-(doctor.ts:679-691#": manifest.version !== kitVersion;").
+(doctor.ts:754-766#": manifest.version !== kitVersion;").
 
 ## Uninstall does not touch the registry
 
@@ -386,7 +386,7 @@ operator manifest at all
 therefore stays registered until a `doctor` run reclassifies it: once its
 `.ai/workflow/manifest.json` is gone, `inspectTarget` reports it
 `no-manifest`, and only `doctor --prune` actually removes that row from the
-registry (doctor.ts:738#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["). A target directory removed outright reports `missing`
+registry (doctor.ts:813#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["). A target directory removed outright reports `missing`
 instead, pruned by the exact same mechanism.
 
 See [index.md](index.md) for the rest of this bundle.

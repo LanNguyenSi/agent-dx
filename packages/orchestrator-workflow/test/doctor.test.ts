@@ -1372,7 +1372,7 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
       "utf8",
     );
     writeCodexConfigAt(
-      join(home, "fake-user-home", ".codex"),
+      join(home, "user-larger", ".codex"),
       "project_doc_max_bytes = 65536\n",
     );
     writeCodexConfigAt(
@@ -1386,22 +1386,28 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
       "utf8",
     );
     writeCodexConfigAt(
+      join(home, "user-smaller", ".codex"),
+      "project_doc_max_bytes = 16384\n",
+    );
+    writeCodexConfigAt(
       join(largerProjectRepo, ".codex"),
       "project_doc_max_bytes = 65536\n",
     );
     registerHome(defaults(), [smallerProjectRepo, largerProjectRepo]);
-    const report = runDoctor(home, codexRun());
-    const smaller = report.targets.find(
+    const smallerRun = runDoctor(home, codexRun(join(home, "user-larger")));
+    const smaller = smallerRun.targets.find(
       (target) => target.path === smallerProjectRepo,
     );
     expect(smaller?.codexWarnings?.[0]).toContain(
       "over the 16384-byte project_doc_max_bytes budget from project config",
     );
-    const larger = report.targets.find(
+    expect(smallerRun.exitCode).toBe(0);
+    const largerRun = runDoctor(home, codexRun(join(home, "user-smaller")));
+    const larger = largerRun.targets.find(
       (target) => target.path === largerProjectRepo,
     );
     expect(larger?.codexWarnings).toBeUndefined();
-    expect(report.exitCode).toBe(0);
+    expect(largerRun.exitCode).toBe(0);
   });
 
   it("the default budget applies when the user config file is present but sets no project_doc_max_bytes", () => {
@@ -1474,32 +1480,91 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
     expect(report.exitCode).toBe(0);
   });
 
-  for (const [label, raw] of [
-    ["a quoted string", '"abc"'],
-    ["zero", "0"],
-    ["a negative number", "-5"],
-  ] as const) {
-    it(`an invalid user value (${label}) is ignored and the next layer, the default, applies`, () => {
-      const repo = makeCodexRepo();
-      writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
-      writeCodexConfigAt(
-        join(home, "fake-user-home", ".codex"),
-        `project_doc_max_bytes = ${raw}\n`,
-      );
-      registerHome(defaults(), [repo]);
-      const report = runDoctor(home, codexRun());
-      expect(report.targets[0].codexWarnings).toEqual([
-        "codex budget: AGENTS.md is 33000 bytes, over the 32768-byte " +
-          "project_doc_max_bytes budget from default; Codex silently " +
-          "truncates the file and no heading starts at or after the " +
-          `budget, so no heading is lost entirely; ignored user config: ` +
-          `${raw} (not a positive integer)`,
-      ]);
-      expect(report.exitCode).toBe(0);
-    });
-  }
+  it("a user config project_doc_max_bytes of 0 makes Codex load no project instruction file at all", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "small\n", "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      "project_doc_max_bytes = 0\n",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings).toEqual([
+      "codex budget: AGENTS.md is never loaded: the user config file " +
+        join(home, "fake-user-home", ".codex", "config.toml") +
+        " sets project_doc_max_bytes = 0, and Codex loads no project " +
+        "instruction file at all",
+    ]);
+    expect(report.exitCode).toBe(0);
+  });
 
-  it("an invalid project value is ignored and the user value applies", () => {
+  it("a project config project_doc_max_bytes of 0 makes Codex load no project instruction file at all", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "small\n", "utf8");
+    writeCodexConfigAt(join(repo, ".codex"), "project_doc_max_bytes = 0\n");
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings).toEqual([
+      "codex budget: AGENTS.md is never loaded: the project config file " +
+        join(repo, ".codex", "config.toml") +
+        " sets project_doc_max_bytes = 0, and Codex loads no project " +
+        "instruction file at all",
+    ]);
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("a quoted string in the user config makes Codex refuse to load that configuration", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "small\n", "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      'project_doc_max_bytes = "abc"\n',
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings).toEqual([
+      "codex budget: Codex rejects the user config file " +
+        join(home, "fake-user-home", ".codex", "config.toml") +
+        ': project_doc_max_bytes = "abc" is not a non-negative integer, ' +
+        "so Codex refuses to load that configuration",
+    ]);
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("a negative number in the user config makes Codex refuse to load that configuration", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "small\n", "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      "project_doc_max_bytes = -5\n",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings).toEqual([
+      "codex budget: Codex rejects the user config file " +
+        join(home, "fake-user-home", ".codex", "config.toml") +
+        ": project_doc_max_bytes = -5 is not a non-negative integer, " +
+        "so Codex refuses to load that configuration",
+    ]);
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("a quoted string in the project config makes Codex refuse to load that configuration", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "small\n", "utf8");
+    writeCodexConfigAt(join(repo, ".codex"), 'project_doc_max_bytes = "abc"\n');
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings).toEqual([
+      "codex budget: Codex rejects the project config file " +
+        join(repo, ".codex", "config.toml") +
+        ': project_doc_max_bytes = "abc" is not a non-negative integer, ' +
+        "so Codex refuses to load that configuration",
+    ]);
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("a valid user value does not rescue an invalid project config value: Codex rejects the project config", () => {
     const repo = makeCodexRepo();
     writeFileSync(
       join(repo, "AGENTS.md"),
@@ -1515,9 +1580,118 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
     const report = runDoctor(home, codexRun());
     const warning = report.targets[0].codexWarnings?.[0];
     expect(warning).toContain(
+      "Codex rejects the project config file " +
+        join(repo, ".codex", "config.toml"),
+    );
+    expect(warning).toContain('project_doc_max_bytes = "abc"');
+    expect(warning).not.toContain("16384");
+    expect(warning).not.toContain("user config");
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("a value above Number.MAX_SAFE_INTEGER makes Codex refuse to load that configuration", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "small\n", "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      "project_doc_max_bytes = 99999999999999999999\n",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
+      "project_doc_max_bytes = 99999999999999999999 is not a " +
+        "non-negative integer, so Codex refuses to load that configuration",
+    );
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("a project_doc_max_bytes line under a [table] header is not a top-level value, so the default budget applies", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      "[profiles.x]\nproject_doc_max_bytes = 16384\n",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
+      "over the 32768-byte project_doc_max_bytes budget from default",
+    );
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("an inline comment after the value is stripped and the value applies", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(
+      join(repo, "AGENTS.md"),
+      agentsWithHeadingAt(20000, 16384, "## Lost\n"),
+      "utf8",
+    );
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      "project_doc_max_bytes = 16384 # note\n",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
       "over the 16384-byte project_doc_max_bytes budget from user config",
     );
-    expect(warning).toContain('ignored project config: "abc"');
+    expect(report.exitCode).toBe(0);
+  });
+
+  /** For the user config value text `raw`, doctor resolves the budget to
+   * `bytes`: a 70000-byte AGENTS.md warns as over that user-config budget. */
+  function expectUserBudget(raw: string, bytes: number): void {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(70000), "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      `project_doc_max_bytes = ${raw}\n`,
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
+      `over the ${bytes}-byte project_doc_max_bytes budget from user config`,
+    );
+    expect(report.exitCode).toBe(0);
+  }
+
+  for (const [form, bytes] of [
+    ["65_536", 65536],
+    ["+16384", 16384],
+    ["0x10000", 65536],
+    ["0o200000", 65536],
+    ["0b10000000000000000", 65536],
+  ] as const) {
+    it(`accepts the TOML integer form ${form} as a ${bytes}-byte budget`, () => {
+      expectUserBudget(form, bytes);
+    });
+  }
+
+  it("a fenced # line past the budget is not a heading, so no heading is lost entirely", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(
+      join(repo, "AGENTS.md"),
+      agentsWithHeadingAt(33000, 32768, "```\n# not a heading\n```\n"),
+      "utf8",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
+      "no heading starts at or after the budget, so no heading is lost entirely",
+    );
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("a directory named AGENTS.override.md is not the instruction file, so AGENTS.md is measured", () => {
+    const repo = makeCodexRepo();
+    mkdirSync(join(repo, "AGENTS.override.md"));
+    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
+      "codex budget: AGENTS.md is 33000 bytes",
+    );
     expect(report.exitCode).toBe(0);
   });
 

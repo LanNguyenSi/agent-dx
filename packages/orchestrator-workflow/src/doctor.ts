@@ -92,15 +92,17 @@ export interface TargetReport {
   /**
    * Codex instruction-budget warnings against this target's own filesystem:
    * the target's manifest selects the `codex` harness and the root
-   * instruction file Codex would load (`AGENTS.override.md` when present,
-   * else `AGENTS.md`) is larger than the `project_doc_max_bytes` budget
-   * Codex would read it under, so Codex would silently truncate it (one
-   * warning per such file, naming the file, its size, the budget, the
-   * budget's source and the first heading lost). Omitted when there is
-   * none. Printed as `codex:` detail lines in the human output. Like the
-   * knowledge warnings, these never change `status` or the doctor exit
-   * code -- they surface an instruction-file truncation, not a kit-file
-   * install drift.
+   * instruction file Codex would load (`AGENTS.override.md` when it is a
+   * regular file, else `AGENTS.md`) is affected by the decided
+   * `project_doc_max_bytes` budget: the file is larger than a
+   * positive-integer budget Codex would silently truncate it to (naming
+   * the file, its size, the budget, its source and the first heading
+   * lost); or that budget is `0`, which makes Codex load no project
+   * instruction file at all; or the value is invalid, and Codex refuses
+   * to load that config file. Omitted when there is none. Printed as
+   * `codex:` detail lines in the human output. Like the knowledge
+   * warnings, these never change `status` or the doctor exit code -- they
+   * surface an instruction-file truncation, not a kit-file install drift.
    */
   codexWarnings?: string[];
   /** Human-output-only: the repo's own profile, or null when unknown. */
@@ -384,7 +386,13 @@ function computeKnowledgeWarnings(
  * files per directory from the project root (the directory with `.git`)
  * down to the working directory, taking `AGENTS.override.md` over
  * `AGENTS.md` in each directory; all of them share this one budget, and
- * content past it is cut off with only a log warning.
+ * content past it is cut off with only a log warning. Codex keeps the
+ * value of the highest layer that sets the key: `0` is accepted and makes
+ * it load no project instruction file at all, and a value that is not a
+ * non-negative integer makes it refuse to load that configuration;
+ * neither falls back to a lower layer. For a project Codex does not
+ * trust it loads neither the project config nor any instruction file;
+ * this check assumes a trusted project.
  */
 const CODEX_PROJECT_DOC_MAX_BYTES_DEFAULT = 32 * 1024;
 
@@ -406,18 +414,38 @@ export interface CodexBudgetInputs {
   env: Record<string, string | undefined>;
 }
 
+/** One accepted TOML integer form: an optional leading `+`, then decimal
+ * digits (groupable with `_` between digits, no leading zero) or a `0x`,
+ * `0o` or `0b` prefixed integer. */
+const TOML_INTEGER =
+  /^\+?(?:0x[0-9a-fA-F](?:_?[0-9a-fA-F])*|0o[0-7](?:_?[0-7])*|0b[01](?:_?[01])*|0|[1-9](?:_?[0-9])*)$/;
+
+/** The value of an accepted TOML integer text, or `undefined` when the
+ * text is not an accepted integer or its value is above
+ * `Number.MAX_SAFE_INTEGER`. */
+function parseCodexTomlInteger(raw: string): number | undefined {
+  if (!TOML_INTEGER.test(raw)) return undefined;
+  const unsigned = raw.startsWith("+") ? raw.slice(1) : raw;
+  const value = Number(unsigned.replace(/_/g, ""));
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
 /**
  * The strict single-key read of one Codex `config.toml`: the first
  * `project_doc_max_bytes` assignment in the top level (a `[table]` header
- * ends the top level, so keys under any table are not this key). A bare
- * decimal positive integer is the value; any other value text (a quoted
- * string, `0`, a negative or fractional number, an overflow past
- * `Number.MAX_SAFE_INTEGER`) is returned as ignored raw text. `undefined`
- * means the key is absent, including when the file cannot be read.
+ * ends the top level, so keys under any table are not this key). A valid
+ * TOML integer ({@link TOML_INTEGER}, which also accepts `0`) is the
+ * value after a trailing inline comment is stripped; any other value text
+ * (a quoted string, a negative or fractional number, an overflow past
+ * `Number.MAX_SAFE_INTEGER`) is returned as invalid raw text, and Codex
+ * rejects a whole config file holding such a value.
+ * `undefined` means the key is absent, including when the file cannot be
+ * read. Parser limits: no multi-line strings, no arrays, no quoted keys,
+ * and no reading of the `[profiles.*]` sections as extra layers.
  */
 function readCodexProjectDocMaxBytes(
   configFile: string,
-): { value: number } | { ignored: string } | undefined {
+): { value: number } | { invalid: string } | undefined {
   let text: string;
   try {
     text = readFileSync(configFile, "utf8");
@@ -430,36 +458,43 @@ function readCodexProjectDocMaxBytes(
     const assignment = /^project_doc_max_bytes\s*=\s*(.*)$/.exec(trimmed);
     if (!assignment) continue;
     const raw = assignment[1].split("#")[0].trim();
-    if (!/^[0-9]+$/.test(raw)) return { ignored: raw };
-    const value = Number(raw);
-    return Number.isSafeInteger(value) && value > 0
-      ? { value }
-      : { ignored: raw };
+    const value = parseCodexTomlInteger(raw);
+    return value === undefined ? { invalid: raw } : { value };
   }
   return undefined;
 }
 
-/** The winning budget, its source layer, and the raw texts of the layers
- * consulted above it whose value was ignored for not being a positive
- * integer, each as `<source>: <raw text>`. */
-interface CodexBudget {
-  bytes: number;
-  source: CodexBudgetSource;
-  ignored: string[];
-}
+/** What the config layers decide about the instruction budget. The
+ * highest layer that sets the key decides and no lower layer ever
+ * applies: `budget` is a winning positive byte count and its layer;
+ * `zero` means the winning value is `0`, and Codex then loads no project
+ * instruction file at all; `invalid` means the winning value is not a
+ * non-negative integer, and Codex refuses to load that config file. */
+type CodexBudgetDecision =
+  | { kind: "budget"; bytes: number; source: CodexBudgetSource }
+  | { kind: "zero"; configFile: string; source: CodexBudgetSource }
+  | {
+      kind: "invalid";
+      configFile: string;
+      source: CodexBudgetSource;
+      raw: string;
+    };
 
 /**
  * Resolves the instruction budget for one target across the layers this
  * kit considers, highest first: the project file
  * `<target>/.codex/config.toml`, then the user file `$CODEX_HOME/
  * config.toml` (`<homeDir>/.codex/config.toml` when the environment does
- * not set `CODEX_HOME`), then the default. A layer's value that is present
- * but not a positive integer is ignored and the next layer applies.
+ * not set `CODEX_HOME`), then the default. The highest layer that sets
+ * the key decides: its positive integer value is the budget, its `0`
+ * means Codex loads no project instruction file at all, and its invalid
+ * value means Codex refuses to load that config file; neither falls back
+ * to a lower layer.
  */
 function resolveCodexBudget(
   targetPath: string,
   inputs: CodexBudgetInputs,
-): CodexBudget {
+): CodexBudgetDecision {
   const codexHome = inputs.env["CODEX_HOME"];
   const layers: Array<{ configFile: string; source: CodexBudgetSource }> = [
     {
@@ -474,33 +509,51 @@ function resolveCodexBudget(
       source: "user config",
     },
   ];
-  const ignored: string[] = [];
   for (const layer of layers) {
     const read = readCodexProjectDocMaxBytes(layer.configFile);
     if (!read) continue;
-    if ("value" in read) {
-      return { bytes: read.value, source: layer.source, ignored };
+    if ("invalid" in read) {
+      return {
+        kind: "invalid",
+        configFile: layer.configFile,
+        source: layer.source,
+        raw: read.invalid,
+      };
     }
-    ignored.push(`${layer.source}: ${read.ignored}`);
+    return read.value === 0
+      ? { kind: "zero", configFile: layer.configFile, source: layer.source }
+      : { kind: "budget", bytes: read.value, source: layer.source };
   }
   return {
+    kind: "budget",
     bytes: CODEX_PROJECT_DOC_MAX_BYTES_DEFAULT,
     source: "default",
-    ignored,
   };
 }
 
 const ATX_HEADING_LINE = /^ {0,3}#{1,6}( |\t|$)/;
+const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})/;
 
 /**
  * The text of the first Markdown heading line that starts at or after
  * `budget` bytes into `content` -- the first heading Codex loses entirely
- * -- or `null` when no heading starts at or after the budget.
+ * -- or `null` when no heading starts at or after the budget. Lines
+ * inside a fenced code block (```` or ~~~) are not headings; a line is
+ * taken as opening or closing a fence by its marker alone.
  */
 function firstLostHeading(content: string, budget: number): string | null {
   let offset = 0;
+  let openFence: string | undefined;
   for (const line of content.split("\n")) {
-    if (offset >= budget && ATX_HEADING_LINE.test(line)) {
+    const fence = FENCE_LINE.exec(line);
+    if (fence) {
+      if (openFence === undefined) openFence = fence[1][0];
+      else if (fence[1][0] === openFence) openFence = undefined;
+    } else if (
+      openFence === undefined &&
+      offset >= budget &&
+      ATX_HEADING_LINE.test(line)
+    ) {
       return line.trim();
     }
     offset += Buffer.byteLength(line, "utf8") + 1;
@@ -508,19 +561,34 @@ function firstLostHeading(content: string, budget: number): string | null {
   return null;
 }
 
+/** Whether `path` names a regular file, like Codex's own per-directory
+ * `is_file` check: anything else (no entry, a directory, ...) is not an
+ * instruction file. */
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * One warning per target whose manifest selects the `codex` harness and
- * whose root Codex instruction file -- `AGENTS.override.md` when present,
- * else `AGENTS.md` -- is larger than the resolved instruction budget,
- * because Codex silently truncates it to that budget. The warning names the
- * file, its size in bytes, the budget, where the budget came from (project
- * config, user config, or default), the first heading that is lost entirely
- * (or says none is), and any layer value that was ignored for not being a
- * positive integer. Absent file, other harnesses, and files within the
- * budget warn nothing; like the knowledge warnings this never changes
- * `status` or the doctor exit code. Profiles, the system layer, managed
- * layers and `-c` session flags are config layers Codex itself consults
- * that this check does not consider.
+ * whose root Codex instruction file -- `AGENTS.override.md` when it is a
+ * regular file, else `AGENTS.md` -- is affected by the instruction budget
+ * decided in {@link resolveCodexBudget}. Three outcomes: the deciding
+ * positive-integer budget is below the file's size, and the warning names
+ * the file, its size in bytes, the budget, where the budget came from
+ * (project config, user config, or default) and the first heading that is
+ * lost entirely (or says none is); the deciding value is `0`, and the
+ * warning says Codex loads no project instruction file at all (no size
+ * comparison); the deciding value is invalid, and the warning says Codex
+ * refuses to load that config file, naming it and the value (no size
+ * comparison). Absent file, other harnesses, and files within the budget
+ * warn nothing; like the knowledge warnings this never changes `status`
+ * or the doctor exit code. The check assumes Codex trusts the project.
+ * Profiles, the system layer, managed layers and `-c` session flags are
+ * config layers Codex itself consults that this check does not consider.
  */
 function computeCodexBudgetWarnings(
   targetPath: string,
@@ -529,7 +597,7 @@ function computeCodexBudgetWarnings(
 ): string[] {
   if (!manifest.harnesses.includes("codex")) return [];
   const overrideFile = join(targetPath, "AGENTS.override.md");
-  const hasOverride = existsSync(overrideFile);
+  const hasOverride = isRegularFile(overrideFile);
   const instructionFile = hasOverride
     ? overrideFile
     : join(targetPath, "AGENTS.md");
@@ -539,19 +607,26 @@ function computeCodexBudgetWarnings(
   } catch {
     return [];
   }
+  const decision = resolveCodexBudget(targetPath, inputs);
+  if (decision.kind === "invalid") {
+    return [
+      `codex budget: Codex rejects the ${decision.source} file ${decision.configFile}: project_doc_max_bytes = ${decision.raw} is not a non-negative integer, so Codex refuses to load that configuration`,
+    ];
+  }
+  if (decision.kind === "zero") {
+    return [
+      `codex budget: ${hasOverride ? "AGENTS.override.md" : "AGENTS.md"} is never loaded: the ${decision.source} file ${decision.configFile} sets project_doc_max_bytes = 0, and Codex loads no project instruction file at all`,
+    ];
+  }
   const size = content.length;
-  const budget = resolveCodexBudget(targetPath, inputs);
-  if (size <= budget.bytes) return [];
-  const lost = firstLostHeading(content.toString("utf8"), budget.bytes);
+  if (size <= decision.bytes) return [];
+  const lost = firstLostHeading(content.toString("utf8"), decision.bytes);
   return [
     [
-      `codex budget: ${hasOverride ? "AGENTS.override.md" : "AGENTS.md"} is ${size} bytes, over the ${budget.bytes}-byte project_doc_max_bytes budget from ${budget.source}`,
+      `codex budget: ${hasOverride ? "AGENTS.override.md" : "AGENTS.md"} is ${size} bytes, over the ${decision.bytes}-byte project_doc_max_bytes budget from ${decision.source}`,
       lost === null
         ? "Codex silently truncates the file and no heading starts at or after the budget, so no heading is lost entirely"
         : `Codex silently truncates the file; first heading lost entirely: "${lost}"`,
-      ...budget.ignored.map(
-        (note) => `ignored ${note} (not a positive integer)`,
-      ),
     ].join("; "),
   ];
 }
