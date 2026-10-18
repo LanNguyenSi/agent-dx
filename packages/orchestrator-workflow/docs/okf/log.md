@@ -1,5 +1,10 @@
 # Bundle log
 
+- 2026-10-18T17:52:30Z, sibling-drift allowlist follows the moved paragraph line again: the allowlist entry for the
+  `docs-consistency.test.ts` citation in `subagent-contracts-superset.md` records its paragraph line
+  at the position the one-line addition to the verification-set paragraph moved it to; no
+  citation or claim changed. Re-stamped: `model-preselection.md`, `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`.
+
 - 2026-10-18T17:49:39Z, what names a verification set is defined once: a briefing names a set exactly when
   `verification_set.reference` is non-empty (an absent field or an empty reference means no set),
   and the contracts reference, the task slicer, the skill routing and both role prompts use that
