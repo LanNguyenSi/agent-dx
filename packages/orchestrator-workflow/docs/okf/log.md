@@ -1,5 +1,10 @@
 # Bundle log
 
+- 2026-10-18T06:53:21Z, runbook-sentence segmenter follow-up: `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md` re-stamped after the
+  `[Unreleased]` bullet for the segmenter fix and the `ANCHOR_CITATION_RE` comment reword in
+  `docs-consistency.test.ts`; their anchored citations still resolve and no claim changed.
+
 - 2026-10-18T06:44:45Z, runbook segmenter CommonMark gaps: the test-only fix to
   `test/runbook-sentences.ts` (an info-string fence line no longer closes a fence, a
   fence line may be indented by up to three spaces, and `1)` joins `1.` as an ordered-list
