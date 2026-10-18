@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `doctor` now warns when a target that selects the codex harness has a
+  root instruction file (`AGENTS.override.md` when it is a regular file,
+  else `AGENTS.md`) larger than Codex's `project_doc_max_bytes`
+  instruction budget, which Codex silently truncates. One warning per
+  such target names the file, its size, the budget and its source
+  (project config, user config, or the default 32768), and the first
+  heading lost entirely. The highest layer that sets the key decides: a
+  value of `0` warns that Codex loads no project instruction file at all,
+  and a value Codex cannot use (a string, a negative or fractional
+  number, and so on) warns that it refuses to load that configuration
+  file; neither falls back to a lower layer. The config file is read with
+  a TOML 0.5 parser (`@iarna/toml`, now a runtime dependency) while Codex
+  reads TOML 1.1, so a file the parser cannot read, or an integer outside
+  the range it reads exactly, is reported as a budget doctor does not
+  know instead of as a Codex rejection; an integer-valued float such as
+  `65536.0` is read as that integer although Codex rejects it.
+  The check assumes Codex trusts the project and does not consider
+  profiles, the system layer, managed layers or `-c` session flags; it is
+  a warning only, and the doctor exit code is unchanged.
+
 ## [0.45.0] - 2026-10-18
 
 - The package's runbook-sentence guard keeps its wording, and its segmenter
