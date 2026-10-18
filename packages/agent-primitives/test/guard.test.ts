@@ -528,6 +528,18 @@ interface FakePsOptions {
   late?: string;
   watch?: string;
   observed?: string;
+  /** A file that comes to exist before `flag` does. Of the calls made while it
+   * exists and `flag` does not, the first answers at once. The second
+   * creates `<lateSnapshot>.go`, which tells the process that arms `flag` to
+   * go ahead, waits until `flag` exists, and only then takes its snapshot: a
+   * `ps` that started in time but whose snapshot came late, as on a loaded
+   * host. */
+  lateSnapshot?: string;
+  /** A call that began before `flag` existed and took its snapshot after it
+   * came to exist fails like the calls that begin after it, instead of
+   * answering. For a `flag` armed by a process that changes its group right
+   * after, where such a snapshot shows the process outside the group. */
+  recheck?: boolean;
 }
 
 /**
@@ -550,6 +562,7 @@ function writeFakePs(options: FakePsOptions): {
   const dir = tmp();
   const count = path.join(dir, "count");
   const frozen = path.join(dir, "frozen");
+  const late = path.join(dir, "late");
   const quote = (v: string | undefined): string =>
     `'${(v ?? "").replace(/'/g, "'\\''")}'`;
   const skip = options.skip ?? 0;
@@ -582,7 +595,36 @@ if [ -e "$FLAG" ]; then
     ${options.hang === true ? `exec ${HANGING_PS}` : "exit 1"}
   fi
 fi
-exec "$REAL" "$@"
+${
+  options.lateSnapshot === undefined
+    ? ":"
+    : `if [ -e ${quote(options.lateSnapshot)} ]; then
+  p=$(cat ${quote(late)} 2>/dev/null || echo 0)
+  p=$((p + 1))
+  echo "$p" > ${quote(late)}
+  if [ "$p" -eq 2 ]; then
+    : > ${quote(options.lateSnapshot + ".go")}
+    i=0
+    while [ ! -e "$FLAG" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+    sleep 0.2
+  fi
+fi`
+}
+${
+  options.recheck === true
+    ? `# The flag may have come to exist while the real ps took its snapshot: a
+# snapshot taken after it is no snapshot this stand-in may answer, since the
+# process that arms the flag changes its group right after. So look again, and
+# go through the armed path when it exists now.
+SNAP="$COUNT.snap.$$"
+"$REAL" "$@" > "$SNAP"
+rc=$?
+if [ -e "$FLAG" ]; then rm -f "$SNAP"; exec "$0" "$@"; fi
+cat "$SNAP"
+rm -f "$SNAP"
+exit $rc`
+    : 'exec "$REAL" "$@"'
+}
 `;
   fs.writeFileSync(path.join(dir, "ps"), script, { mode: 0o755 });
   return {
@@ -1170,24 +1212,32 @@ describe("guard: a process table that cannot be read", () => {
   });
 
   /** A command that starts a group member (a `perl`, so that it keeps its
-   * pid when it changes group) which, a second later, arms the stand-in `ps`
-   * (the file `flag`), calls `setsid` in place and becomes `sleep <arg>`. The
-   * polls saw it in the group; every table after that fails. The command
-   * ends at `endMs`, or never when that is undefined. */
+   * pid when it changes group) which writes `pre` when it starts, waits for
+   * the stand-in `ps` to create `<pre>.go` (its second call, see
+   * `lateSnapshot`), arms the stand-in `ps` (the file `flag`), calls `setsid`
+   * in place and becomes `sleep <arg>`. The first call saw it in the group;
+   * every table after that fails. The command waits for `flag` to exist, so
+   * that it never ends before the stand-in `ps` is armed however late the
+   * child runs, and ends `endAfterFlagMs` after that, or never when that is
+   * undefined. */
   function leavesGroupInPlace(
     arg: string,
     flag: string,
-    endMs: number | undefined,
+    pre: string,
+    endAfterFlagMs: number | undefined,
   ): string {
     const perl =
-      'select(undef,undef,undef,1); open(F,">",$ARGV[0]) or die; close F; ' +
+      'open(P,">",$ARGV[2]) or die; close P; ' +
+      'for (1..500) { last if -e "$ARGV[2].go"; select(undef,undef,undef,0.02) } ' +
+      '-e "$ARGV[2].go" or die; ' +
+      'open(F,">",$ARGV[0]) or die; close F; ' +
       'POSIX::setsid() or die; exec {"sleep"} "sleep", $ARGV[1];';
     return (
       "const {spawn}=require('child_process');" +
-      `spawn('perl',['-MPOSIX','-e',${JSON.stringify(perl)},${JSON.stringify(flag)},'${arg}'],{stdio:'ignore'});` +
-      (endMs === undefined
+      `spawn('perl',['-MPOSIX','-e',${JSON.stringify(perl)},${JSON.stringify(flag)},'${arg}',${JSON.stringify(pre)}],{stdio:'ignore'});` +
+      (endAfterFlagMs === undefined
         ? "setInterval(()=>{},1000)"
-        : `setTimeout(()=>process.exit(0),${endMs})`)
+        : `const w=setInterval(()=>{if(require('fs').existsSync(${JSON.stringify(flag)})){clearInterval(w);setTimeout(()=>process.exit(0),${endAfterFlagMs})}},20)`)
     );
   }
 
@@ -1195,16 +1245,23 @@ describe("guard: a process table that cannot be read", () => {
    * result with every pid `process.kill` was called with. */
   async function runLeavingGroup(
     arg: string,
-    endMs: number | undefined,
+    endAfterFlagMs: number | undefined,
     over: Partial<GuardOptions>,
   ) {
-    const flag = path.join(tmp(), "flag");
-    const ps = installFakePs({ flag, fails: 10_000 });
+    const dir = tmp();
+    const flag = path.join(dir, "flag");
+    const pre = path.join(dir, "pre");
+    const ps = installFakePs({
+      flag,
+      fails: 10_000,
+      lateSnapshot: pre,
+      recheck: true,
+    });
     const kill = vi.spyOn(process, "kill");
     try {
       const r = await run(
         process.execPath,
-        ["-e", leavesGroupInPlace(arg, flag, endMs)],
+        ["-e", leavesGroupInPlace(arg, flag, pre, endAfterFlagMs)],
         { pollMs: 100, ...over },
       );
       // Signal 0 only asks whether a group exists; the kills are the rest.
@@ -1222,7 +1279,7 @@ describe("guard: a process table that cannot be read", () => {
 
   it("a group member that left the group in place (setsid) as the table stopped answering is killed by pid after the command ended", async () => {
     const esc = fx(7190);
-    const { r, pids } = await runLeavingGroup(esc.arg, 2500, {});
+    const { r, pids } = await runLeavingGroup(esc.arg, 1500, {});
     expect(r.reason).toBe("leftover_check_failed");
     expect(r.exitCode).toBe(2);
     expect(r.leftoverCheckFailed).toBe(true);
