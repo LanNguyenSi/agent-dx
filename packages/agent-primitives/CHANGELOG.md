@@ -62,6 +62,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   item with shell metacharacters, rejected without running before, now
   executes as a shell command: callers must not fill `-c` from untrusted
   text, the same rule `-x` values already had.
+- The shipped skill's `## 1. Search order` item 2 now names `ast-grep`
+  by name (it previously said only "a structural code-search tool"),
+  with one verified invocation template
+  (`ast-grep run -p '<pattern>' -l <lang> [<path>]`, `--json=compact`
+  for structured output, `$A` matching one node and `$$$A` several) and
+  a fallback sentence for when ast-grep is not on PATH (item 1's
+  semantic search or `rg -w '<name>'`), the way item 3 names `rg`:
+  measurements showed subagents never call a tool the loaded
+  instructions do not name explicitly. The `README.md` `doctor` bullet
+  names `ast-grep` among the default optional binaries, and the
+  `assets/skill-ledger.json` `0.17.0` digest is replaced for the
+  SKILL.md change.
 
 ## [0.16.0] - 2026-10-18
 

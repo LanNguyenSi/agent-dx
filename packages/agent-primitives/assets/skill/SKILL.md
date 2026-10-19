@@ -22,8 +22,13 @@ grep with no ignore rules:
 
 1. A semantic code-search CLI, when one is on PATH, for orientation
    questions ("where does X happen", "what handles Y").
-2. A structural code-search tool for symbol lookups: callers, definitions,
-   references.
+2. `ast-grep` for symbol lookups (callers, definitions, references), when
+   it is on PATH: `ast-grep run -p '<pattern>' -l <lang> [<path>]`, for
+   example `ast-grep run -p 'deriveCheckName($A)' -l ts src`; add
+   `--json=compact` for structured output. `$A` matches one node, `$$$A`
+   several. When ast-grep is not on PATH (`agent-primitives doctor` lists
+   it as optional), use the semantic search from item 1 or
+   `rg -w '<name>'` and read the hits.
 3. `rg` for plain text search: it respects ignore files, and supports `-t`
    type filters and `--json` for structured output.
 
