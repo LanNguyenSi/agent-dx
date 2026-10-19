@@ -115,7 +115,7 @@ none while the run still exits `0`. Escape the metacharacters, or name
 the whole test file in the command instead of filtering by name. A
 filter that selects nothing is refused at the baseline as
 `no_tests_executed` for the runners the zero-tests detectors recognize
-(vitest, node's `--test`, PHPUnit); `--require-baseline-evidence` is the
+(vitest, node's `--test`, PHPUnit, pytest); `--require-baseline-evidence` is the
 opt-in safety net for any runner, including jest and every other one the
 detectors do not recognize. Nothing detects a filter that selects the
 wrong tests on its own: pin what you expect in
@@ -287,7 +287,9 @@ PHPUnit/PHPStan/PHPCS output the same way they parse vitest/tsc/eslint
 output; `probe`'s zero-tests guard recognizes PHPUnit's `No tests
 executed!` and any run whose executed count (the stated total less
 Skipped, Incomplete and Warnings) is zero, the same way it recognizes
-vitest's and node's zero-count shapes. Watch the two PHPUnit shapes that
+vitest's, node's and pytest's zero-count shapes (pytest: `no tests ran
+in X.XXs`, or a summary line whose only counts are `skipped` and/or
+`deselected`). Watch the two PHPUnit shapes that
 exit `0` with nothing executed: an all-skipped run and a warnings-only
 run (`No tests found in class "X".`); the guard, not the exit code, is
 what catches those. A phpunit baseline whose output cannot be read

@@ -1,0 +1,32 @@
+EE..                                                                     [100%]
+==================================== ERRORS ====================================
+__________________________ ERROR at setup of test_e1 ___________________________
+
+    @pytest.fixture
+    def boom1():
+>       raise RuntimeError("x")
+E       RuntimeError: x
+
+test_plural.py:8: RuntimeError
+__________________________ ERROR at setup of test_e2 ___________________________
+
+    @pytest.fixture
+    def boom2():
+>       raise RuntimeError("y")
+E       RuntimeError: y
+
+test_plural.py:13: RuntimeError
+=============================== warnings summary ===============================
+test_plural.py::test_w1
+  /work/project/test_plural.py:25: UserWarning: a
+    warnings.warn("a")
+
+test_plural.py::test_w2
+  /work/project/test_plural.py:30: UserWarning: b
+    warnings.warn("b")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR test_plural.py::test_e1 - RuntimeError: x
+ERROR test_plural.py::test_e2 - RuntimeError: y
+2 passed, 2 warnings, 2 errors in 0.02s

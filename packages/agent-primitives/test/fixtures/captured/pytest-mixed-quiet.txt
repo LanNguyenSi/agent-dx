@@ -1,0 +1,18 @@
+.FsxX.                                                                   [100%]
+=================================== FAILURES ===================================
+__________________________________ test_fail ___________________________________
+
+    def test_fail():
+>       assert False
+E       assert False
+
+test_mixed.py:11: AssertionError
+=============================== warnings summary ===============================
+test_mixed.py::test_warns
+  /work/project/test_mixed.py:35: UserWarning: careful
+    warnings.warn('careful')
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test_mixed.py::test_fail - assert False
+1 failed, 2 passed, 1 skipped, 1 deselected, 1 xfailed, 1 xpassed, 1 warning in 0.02s

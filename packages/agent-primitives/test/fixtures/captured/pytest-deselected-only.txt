@@ -1,0 +1,5 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+collected 3 items / 3 deselected / 0 selected
+
+============================ 3 deselected in 0.00s =============================

@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+collected 1 item
+
+test_skip.py s                                                           [100%]
+
+=============================== warnings summary ===============================
+conftest.py:3
+  /work/project/conftest.py:3: UserWarning: x
+    warnings.warn("x")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 1 skipped, 1 warning in 0.00s =========================

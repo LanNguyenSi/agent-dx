@@ -1,0 +1,13 @@
+E                                                                        [100%]
+==================================== ERRORS ====================================
+_______________________ ERROR at setup of test_uses_boom _______________________
+
+    @pytest.fixture
+    def boom():
+>       raise RuntimeError('fixture blew up')
+E       RuntimeError: fixture blew up
+
+test_error.py:6: RuntimeError
+=========================== short test summary info ============================
+ERROR test_error.py::test_uses_boom - RuntimeError: fixture blew up
+1 error in 0.01s

@@ -660,6 +660,79 @@ before the fix by parsing `phpunit-fail-colorized.txt` and getting
 placement was read from these two real captures before the detector was
 touched, not guessed at.
 
+### Python captures (`pytest-*`)
+
+Raw final-summary-line captures from real `python3 -m pytest
+-p no:cacheprovider` runs (pytest 8.4.2, Python 3.9.6, macOS) against
+tiny throwaway test files in a scratch directory (never committed),
+trimmed of the capture directory's own absolute `rootdir:` line (the
+line is removed), and with the capture directory's own absolute path
+inside warning locations replaced by a neutral `/work/project/` prefix
+(the file names inside the path are kept) -- no fixture here carries
+the capture machine's home directory.
+Unlike the PHP captures, the wall-clock `in X.XXs` timing is kept
+verbatim here: pytest's summary line is recognized BY ITS SHAPE
+(including that timing tail), and the whole point of the recognition is
+that the digits differ run to run. Each case was captured twice, once
+with pytest's default verbosity (banner form, the summary line wrapped
+in `=` padding; `*-pass.txt`, `*-fail.txt`, `*-error.txt`,
+`*-no-tests-ran.txt`, `*-mixed.txt`, `*-skipped-only.txt`,
+`*-deselected-only.txt`) and once with `-q` (bare line; the `-quiet`
+twins). Exit codes as observed: pass/skipped-only `0`, fail/error/mixed
+`1`, no-tests-ran/deselected-only `5`.
+
+- `pytest-pass.txt` / `pytest-pass-quiet.txt`: three passing tests.
+- `pytest-fail.txt` / `pytest-fail-quiet.txt`: one passed, one failing
+  assertion (`1 failed, 1 passed`).
+- `pytest-error.txt` / `pytest-error-quiet.txt`: one test whose fixture
+  raises (`1 error`, singular, which is why the count word's regex
+  allows `errors?` plural only).
+- `pytest-no-tests-ran.txt` / `pytest-no-tests-ran-quiet.txt`: a test
+  file with no `test_*` function at all (pytest's own `no tests ran
+  in X.XXs` statement, exit `5` -- the zero-tests shape).
+- `pytest-mixed.txt` / `pytest-mixed-quiet.txt`: one failing suite run
+  carrying every count word at once (`1 failed, 2 passed, 1 skipped, 1
+  deselected, 1 xfailed, 1 xpassed, 1 warning`), produced with a
+  `-k "not deselect"` filter; confirms the banner form's padding stays
+  exactly `= text =` even at that width.
+- `pytest-skipped-only.txt` / `pytest-skipped-only-quiet.txt`: two
+  `@pytest.mark.skip` tests only -- exits `0` with `2 skipped` while
+  nothing executed (the silent-pass zero-tests shape).
+- `pytest-deselected-only.txt` / `pytest-deselected-only-quiet.txt`: a
+  `-k` filter deselecting every collected test (`3 deselected`, exit
+  `5`); `-k "nothing matches this"` itself is a usage error (exit `4`),
+  the filter expression must at least parse.
+- `pytest-skipped-deselected.txt`: `-k` selecting only a skipped test
+  (`1 skipped, 1 deselected`, exit `0`) -- the mixed zero-executed-only
+  shape.
+- `pytest-warnings-errors-plural.txt`: two fixture-error tests and two
+  warning-emitting tests (`2 passed, 2 warnings, 2 errors`) -- the only
+  capture with the plural `errors`/`warnings` count words.
+- `pytest-warning-only.txt`: a `conftest.py` that calls
+  `warnings.warn("x")` at import plus a test file with no `test_*`
+  function (`1 warning in 0.00s`, exit `5`) -- pytest collected
+  NOTHING, which the warning count alone must not hide (the
+  warnings-neutral zero-tests reading; round-1 review finding).
+- `pytest-skipped-warning.txt`: the same import-time warning beside one
+  `@pytest.mark.skip` test (`1 skipped, 1 warning`, exit `0`) --
+  zero-tests once the neutral warning is ignored.
+- `pytest-deselected-warning.txt`: the same import-time warning beside
+  a `-k notthis` run deselecting the only test (`1 deselected, 1
+  warning`, exit `5`) -- zero-tests the same way.
+- `pytest-passed-warning.txt` / `pytest-failed-warning.txt`: one
+  warning-emitting test that passes (`1 passed, 1 warning`, exit `0`)
+  and one that fails after warning (`1 failed, 1 warning`, exit `1`)
+  -- the not-zero side of the same rule: a warning beside a real count
+  changes nothing.
+- `pytest-long-run.txt`: one test sleeping 61s (`1 passed in 61.15s
+  (0:01:01)`, exit `0`) -- pytest's own ` (H:MM:SS)` long-run suffix,
+  captured from a real 61s run, the shape that used to leave the
+  summary line unrecognized (round-1 review finding).
+- `pytest-timing-run1.txt` / `pytest-timing-run2.txt`: two real runs of
+  the same single-test suite with deliberately different sleeps, pinned
+  at different timing digits (`1 passed in 0.11s` vs `1 passed in
+  0.25s`) -- the pair the byte-identity fallback can never call equal.
+
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 
 Minimal, self-contained projects with one deliberately failing check
