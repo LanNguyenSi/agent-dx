@@ -406,6 +406,236 @@ describe("detectKnownZeroTestsEvidence()", () => {
   });
 });
 
+// --- pytest (captured real pytest 8.4.2, Python 3.9.6, `python3 -m
+// pytest -p no:cacheprovider`, exit codes named per case): the final
+// summary line in its bare `-q` form and its default-verbosity `=`-
+// padded banner form. Timing digits stay IN these fixtures (unlike the
+// PHP captures' elided `Time:` values): the whole point of recognizing
+// the line is that its timing varies run to run, which is what used to
+// make the generic byte-identical fallback's verdict flip. -------------
+
+describe("detectKnownZeroTestsEvidence(): pytest (captured pytest 8.4.2)", () => {
+  it("pytest: a passing run in the banner form (exit 0) is NOT flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-pass"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-pass"), "")).toBe(true);
+  });
+
+  it("pytest: a passing run in the -q form (exit 0) is NOT flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-pass-quiet"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-pass-quiet"), "")).toBe(
+      true,
+    );
+  });
+
+  it("pytest: a failing run in the banner form (exit 1) is NOT flagged (a real test executed)", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-fail"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-fail"), "")).toBe(true);
+  });
+
+  it("pytest: a failing run in the -q form (exit 1) is NOT flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-fail-quiet"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-fail-quiet"), "")).toBe(
+      true,
+    );
+  });
+
+  it("pytest: a fixture-error run in the banner form (exit 1, `1 error`) is NOT flagged (the test ran and errored)", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-error"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-error"), "")).toBe(true);
+  });
+
+  it("pytest: a fixture-error run in the -q form (exit 1, `1 error`) is NOT flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-error-quiet"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-error-quiet"), "")).toBe(
+      true,
+    );
+  });
+
+  it("pytest: `no tests ran` in the banner form (empty file, exit 5) IS a zero-tests detection", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-no-tests-ran"), ""),
+    ).toEqual({ detected: true, via: "pytest" });
+    expect(hasKnownTestSummary(readCaptured("pytest-no-tests-ran"), "")).toBe(
+      true,
+    );
+  });
+
+  it("pytest: `no tests ran` in the -q form (exit 5) IS a zero-tests detection", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        readCaptured("pytest-no-tests-ran-quiet"),
+        "",
+      ),
+    ).toEqual({ detected: true, via: "pytest" });
+    expect(
+      hasKnownTestSummary(readCaptured("pytest-no-tests-ran-quiet"), ""),
+    ).toBe(true);
+  });
+
+  it("pytest: a mixed-count run in the banner form (exit 1: failed+passed+skipped+deselected+xfailed+xpassed+warning) is NOT flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-mixed"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-mixed"), "")).toBe(true);
+  });
+
+  it("pytest: the same mixed counts in the -q form are NOT flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-mixed-quiet"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-mixed-quiet"), "")).toBe(
+      true,
+    );
+  });
+
+  it("pytest: an all-skipped run in the banner form (exit 0!) IS flagged: nothing executed despite the green exit code", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-skipped-only"), ""),
+    ).toEqual({ detected: true, via: "pytest" });
+    expect(hasKnownTestSummary(readCaptured("pytest-skipped-only"), "")).toBe(
+      true,
+    );
+  });
+
+  it("pytest: an all-skipped run in the -q form IS flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        readCaptured("pytest-skipped-only-quiet"),
+        "",
+      ),
+    ).toEqual({ detected: true, via: "pytest" });
+  });
+
+  it("pytest: an all-deselected `-k` run in the banner form (`3 deselected`, exit 5) IS flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-deselected-only"), ""),
+    ).toEqual({ detected: true, via: "pytest" });
+    expect(
+      hasKnownTestSummary(readCaptured("pytest-deselected-only"), ""),
+    ).toBe(true);
+  });
+
+  it("pytest: an all-deselected `-k` run in the -q form IS flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        readCaptured("pytest-deselected-only-quiet"),
+        "",
+      ),
+    ).toEqual({ detected: true, via: "pytest" });
+  });
+
+  it("pytest: a skipped+deselected-only `-k` run (`1 skipped, 1 deselected`, exit 0) IS flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        readCaptured("pytest-skipped-deselected"),
+        "",
+      ),
+    ).toEqual({ detected: true, via: "pytest" });
+  });
+
+  it("pytest: plural `warnings`/`errors` counts (exit 1) are recognized and NOT flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        readCaptured("pytest-warnings-errors-plural"),
+        "",
+      ),
+    ).toEqual({ detected: false });
+    expect(
+      hasKnownTestSummary(readCaptured("pytest-warnings-errors-plural"), ""),
+    ).toBe(true);
+  });
+
+  it("pytest: two captures of the same suite with DIFFERENT timing digits (`0.11s` vs `0.25s`) are both recognized and both not flagged (the byte-identity coin flip this closes)", () => {
+    const run1 = readCaptured("pytest-timing-run1");
+    const run2 = readCaptured("pytest-timing-run2");
+    // The two tails genuinely differ in their timing digits: byte
+    // identity would NOT hold for this pair, which is exactly why the
+    // summary line has to be recognized on its own shape.
+    expect(run1).not.toBe(run2);
+    expect(run1).toContain("1 passed in 0.11s");
+    expect(run2).toContain("1 passed in 0.25s");
+    for (const output of [run1, run2]) {
+      expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+        detected: false,
+      });
+      expect(hasKnownTestSummary(output, "")).toBe(true);
+    }
+  });
+});
+
+// --- Negative controls for the pytest summary-line regex: the other
+// detectors' timing/count lines keep whatever result they had before
+// the pytest branch existed (the branch is ordered last in both
+// functions and none of these lines matches it, pinned here at the
+// public-API level; `via` also never flips to "pytest" for them). -----
+
+describe("pytest summary-line regex, negative controls", () => {
+  it("vitest's own `Tests  3 passed (3)` line is not read by the pytest branch (it stays a vitest summary, and a nonzero one, exactly as before the pytest regex existed)", () => {
+    const output = "      Tests  3 passed (3)\n";
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(true);
+  });
+
+  it("vitest's `Duration  N.NNs (...)` timing line is recognized by NO detector (unknown to pytest, whose regex must not fire on a trailing ` in ...s`-shaped tail)", () => {
+    const output =
+      "   Duration  1.23s (transform 45ms, setup 0ms, collect 30ms, tests 5ms, environment 0ms, prepare 1ms)\n";
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(false);
+  });
+
+  it("node's own `duration_ms` timing lines (spec and tap shapes) are recognized by NO detector (the word and timing-tail anchors hold)", () => {
+    for (const output of [
+      "ℹ duration_ms 29.783208\n",
+      "# duration_ms 29.78\n",
+    ]) {
+      expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+        detected: false,
+      });
+      expect(hasKnownTestSummary(output, "")).toBe(false);
+    }
+  });
+
+  it("PHPUnit's `Time:`/tally lines are unchanged by the pytest branch (`Time: 00:00.412, Memory: 10.00 MB` alone stays unknown; the tally still routes through the phpunit branch, never `via: pytest`)", () => {
+    const timeLine = "Time: 00:00.412, Memory: 10.00 MB\n";
+    expect(detectKnownZeroTestsEvidence(timeLine, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(timeLine, "")).toBe(false);
+    const tally = "Tests: 15, Assertions: 15, Warnings: 15.\n";
+    expect(detectKnownZeroTestsEvidence(tally, "").via).not.toBe("pytest");
+  });
+
+  it("an unknown runner's prose that merely contains counts or `passed in` stays unknown to both functions", () => {
+    for (const output of [
+      "all 5 tests passed in 0.5s of CI time\n",
+      "5 passed in the final report\n",
+      "3 passed (3) in 0.51s\n",
+      "all good, 0 issues\n",
+    ]) {
+      expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+        detected: false,
+      });
+      expect(hasKnownTestSummary(output, "")).toBe(false);
+    }
+  });
+});
+
 describe("hasKnownTestSummary()", () => {
   it("true for complete Vitest JSON summaries, including zero and nonzero runs", () => {
     expect(
@@ -1080,4 +1310,124 @@ describe("probe(): criterion 2 fixture pair, real vitest (task 273b3851)", () =>
     expect(result.mutation_probe?.expectation).toBe("met");
     expect(result.reason).toBeUndefined();
   }, 20000);
+});
+
+// --- End-to-end pair over a REAL pytest process (pytest 8.4.2 was used
+// for the captures above; CI may not ship pytest at all, so both tests
+// name their tool requirement and skip rather than silently weakening
+// the suite, the same `HAS_PYTHON3` seam `probe-pycache.test.ts` uses).
+
+/** Whether `python3 -m pytest --version` succeeds: the pair below needs
+ * a real pytest, not just a real python3. */
+const HAS_PYTEST = (() => {
+  try {
+    execFileSync("python3", ["-m", "pytest", "--version"], {
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const CALC_PY = [
+  "def add(a, b):",
+  "    return a + b",
+  "",
+  "",
+  "def unused(x):",
+  "    return x",
+  "",
+].join("\n");
+
+const TEST_CALC_PY = [
+  "from calc import add",
+  "",
+  "",
+  "def test_add():",
+  "    assert add(2, 3) == 5",
+  "",
+].join("\n");
+
+function initPytestRepo(): string {
+  const repo = makeTmpDir();
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["config", "user.email", "test@example.com"], {
+    cwd: repo,
+  });
+  execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "calc.py"), CALC_PY);
+  fs.writeFileSync(path.join(repo, "test_calc.py"), TEST_CALC_PY);
+  execFileSync("git", ["add", "-A"], { cwd: repo });
+  execFileSync(
+    "git",
+    ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+    { cwd: repo },
+  );
+  return repo;
+}
+
+// `-p no:cacheprovider`: pytest writes no `.pytest_cache` into the
+// freshly git-committed fixture repo (an untracked leftover there would
+// be probe's own restored-tree check complaining, not the point).
+const PYTEST_CMD = "python3 -m pytest -p no:cacheprovider -q test_calc.py";
+
+describe("probe(): real pytest end-to-end, timing-digit stability", () => {
+  it.skipIf(!HAS_PYTEST)(
+    "the same green mutant over a genuinely passing pytest suite is `survived` on two back-to-back runs whose summary timings differ (needs python3 -m pytest; skipped without it), not a byte-identity coin flip",
+    async () => {
+      // Mutates only the untested `unused` (same length): the suite
+      // genuinely runs and passes on both sides -- a real survivor.
+      // pytest's summary line carries timing digits (`1 passed in
+      // 0.11s` vs `0.09s`), so before the summary line was recognized
+      // the generic fallback's agreement with itself was luck.
+      const repo = initPytestRepo();
+      const options = (): ProbeOptions => ({
+        file: "calc.py",
+        line: 6,
+        form: "replace",
+        replaceText: "    return y",
+        testCommand: PYTEST_CMD,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+      });
+      for (const run of [1, 2]) {
+        const result = await probe(options());
+        expect(result.status, `run ${String(run)}`).toBe("survived");
+        expect(result.reason, `run ${String(run)}`).toBeUndefined();
+      }
+    },
+    60000,
+  );
+
+  it.skipIf(!HAS_PYTEST)(
+    "a mutant that renames the only test function so the mutant run collects nothing (`no tests ran in X.XXs`, exit 5) is no_tests_executed, never a verdict (needs python3 -m pytest; skipped without it)",
+    async () => {
+      const repo = initPytestRepo();
+      const result = await probe({
+        file: "test_calc.py",
+        line: 4,
+        form: "replace",
+        replaceText: "def xtest_add():",
+        testCommand: PYTEST_CMD,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+      });
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("no_tests_executed");
+      expect(result.mutation_probe?.result).toBe("not_run");
+      expect(
+        result.warnings.some((w) =>
+          /the mutant run's own output shows no test was actually executed \(pytest\)/.test(
+            w,
+          ),
+        ),
+      ).toBe(true);
+    },
+    60000,
+  );
 });

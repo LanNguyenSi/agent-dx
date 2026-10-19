@@ -77,9 +77,28 @@ import { combinedOutput } from "../exec.js";
  * reads this same `ambiguous` field to make the identical choice for a
  * mutant run's own output, past the baseline stage this docblock
  * otherwise describes.
+ *
+ * A fourth shape, pytest's, is read here directly (its final summary
+ * line is one anchored line, no per-version tally table to reuse):
+ * `N passed in X.XXs` and every comma-joined count combination pytest
+ * prints (`failed`, `error`/`errors`, `skipped`, `xfailed`, `xpassed`,
+ * `warning`/`warnings`, `deselected`), in the bare `-q` form and in the
+ * default verbosity's `=`-padded banner form, plus the `no tests ran
+ * in X.XXs` line pytest prints (exit 5) when it collected nothing.
+ * `hasKnownTestSummary` recognizes all of these, which is what makes a
+ * green pytest survivor `survived` on every run rather than by
+ * byte-identity luck: pytest's summary carries timing digits
+ * (`95 passed in 0.08s`), so two runs of the same green suite are
+ * byte-identical only by chance, and the generic fallback's verdict
+ * used to flip with them. The zero-tests reading is `no tests ran` or
+ * a summary whose only counts are `skipped` and/or `deselected`
+ * (nothing `passed`, nothing `failed`: an all-skipped run exits `0`
+ * while having exercised nothing, the same silent-pass shape as a
+ * vitest all-skipped `Tests` line).
  */
 
-export type ZeroTestsDetectorName = "vitest" | "node_test" | "phpunit";
+export type ZeroTestsDetectorName =
+  "vitest" | "node_test" | "phpunit" | "pytest";
 
 export interface ZeroTestsEvidence {
   detected: boolean;
@@ -92,7 +111,7 @@ export interface ZeroTestsEvidence {
    * `"zero_tests_ambiguous"` and `"no_tests_executed"` `RefusalReason`s
    * (see this module's own docblock above); `step.ts`'s mutant-phase
    * classify step reads it the same way for the mutant run's own
-   * `mutation_probe.reason`; absent for the vitest and node_test
+   * `mutation_probe.reason`; absent for the vitest, node_test and pytest
    * branches, which have no ambiguous reading to distinguish. */
   ambiguous?: boolean;
 }
@@ -105,6 +124,53 @@ export interface ZeroTestsEvidence {
  * on unrelated text that merely contains the word "tests".
  */
 const NODE_TEST_SUMMARY_LINE = /^[ℹ#]\s*tests\s+(\d+)\s*$/m;
+
+/**
+ * pytest's final summary line (both the bare `-q` form and the default
+ * verbosity's `=`-padded banner form), anchored on the whole line: a
+ * comma-joined list of `N <word>` counts (`N error`/`N errors`,
+ * `N warning`/`N warnings` included) and the elapsed
+ * `in <number>s` tail pytest always prints last, each side optionally
+ * wrapped in `= ` / ` =` banner padding. A line that merely contains
+ * "passed" somewhere else (vitest's `Tests  3 passed (3)`, PHPUnit's
+ * tallies) never matches: the anchors require the count list to start
+ * the line and the timing tail to end it. The duration is pytest's own
+ * `%.2fs` rendering (`format_duration`), integer or decimal.
+ */
+const PYTEST_SUMMARY_ITEM =
+  "\\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed|warnings?|deselected)";
+
+const PYTEST_SUMMARY_LINE = new RegExp(
+  `^(?:=+ )?((?:${PYTEST_SUMMARY_ITEM})(?:, ${PYTEST_SUMMARY_ITEM})*) in \\d+(?:\\.\\d+)?s(?: =+)?$`,
+  "m",
+);
+
+/** The line pytest prints (with exit 5) when it collected nothing at
+ * all -- both the bare and the banner-padded form, the same padding the
+ * counted summary above allows. */
+const PYTEST_NO_TESTS_LINE =
+  /^(?:=+ )?no tests ran in \d+(?:\.\d+)?s(?: =+)?$/m;
+
+/** pytest's counted final summary line, if the output carries one (the
+ * count list only, without any banner padding). */
+function pytestSummaryLine(combined: string): string | undefined {
+  return PYTEST_SUMMARY_LINE.exec(combined)?.[1];
+}
+
+/** Whether a pytest counted summary executed nothing: every count in it
+ * is `skipped` and/or `deselected`, i.e. nothing `passed`, `failed`,
+ * errored, xfailed or xpassed. A `1 error`-only or `1 xpassed`-only run
+ * did execute (and fails/changes the exit code accordingly), so those
+ * are not zero-tests readings. */
+function pytestSummaryIsZeroTests(summary: string): boolean {
+  for (const item of summary.split(", ")) {
+    const word = item.slice(item.indexOf(" ") + 1);
+    if (word !== "skipped" && word !== "deselected") {
+      return false;
+    }
+  }
+  return true;
+}
 
 /** A JSON reporter result must occupy one complete stream, never a fragment
  * embedded in mixed runner output. These stable Vitest 4 tally fields and
@@ -230,6 +296,16 @@ export function detectKnownZeroTestsEvidence(
   if (nodeMatch !== null && Number(nodeMatch[1]) === 0) {
     return { detected: true, via: "node_test" };
   }
+  // pytest: its own `no tests ran` statement (collected nothing, exit
+  // 5), or a counted summary whose every count executed nothing
+  // (skipped/deselected only -- an all-skipped run exits `0`).
+  if (PYTEST_NO_TESTS_LINE.test(combined)) {
+    return { detected: true, via: "pytest" };
+  }
+  const pytestSummary = pytestSummaryLine(combined);
+  if (pytestSummary !== undefined && pytestSummaryIsZeroTests(pytestSummary)) {
+    return { detected: true, via: "pytest" };
+  }
   return { detected: false };
 }
 
@@ -267,5 +343,9 @@ export function hasKnownTestSummary(
   if (phpunitDetector.matches(input)) {
     return true;
   }
-  return hasNodeTestSummaryLine(combined);
+  return (
+    hasNodeTestSummaryLine(combined) ||
+    PYTEST_NO_TESTS_LINE.test(combined) ||
+    pytestSummaryLine(combined) !== undefined
+  );
 }

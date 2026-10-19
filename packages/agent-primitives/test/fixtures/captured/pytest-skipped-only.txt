@@ -1,0 +1,7 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+collected 2 items
+
+test_skip_only.py ss                                                     [100%]
+
+============================== 2 skipped in 0.00s ==============================

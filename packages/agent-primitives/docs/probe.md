@@ -1591,9 +1591,13 @@ all-skipped/all-todo run, the shape a `-t`/name filter that matches no
 test inside files vitest still loaded produces), or a complete vitest
 `--reporter=json` result whose `numPassedTests + numFailedTests` is zero,
 node's built-in
-`--test` runner's own zero-count summary line, and PHPUnit's own
+`--test` runner's own zero-count summary line, PHPUnit's own
 zero-tests reading (which additionally refuses an output that cannot be
-read either way -- see the PHP section's zero-tests paragraphs). Any hit is
+read either way -- see the PHP section's zero-tests paragraphs), and
+pytest's zero-tests readings (its own `no tests ran in X.XXs` line,
+printed with exit `5` when it collected nothing, or a final summary
+line whose only counts are `skipped` and/or `deselected` -- an
+all-skipped run exits `0` while having executed nothing). Any hit is
 `status: "inconclusive"`, `reason: "no_tests_executed"`, exit `2`,
 `mutation_probe.result: "not_run"` -- never `"killed"`/`"survived"`, a
 verdict that measured nothing. A baseline that reported no exit code of
@@ -1901,6 +1905,20 @@ legitimate top-level assertion, which has the same `tests 1`/`pass 1`
 summary. `--require-baseline-evidence` remains the remedy for the Node
 limitation and for any unrecognized custom reporter.
 
+pytest's final summary line is recognized in both forms it prints: the
+bare `-q` form (`3 passed in 0.01s`) and the default verbosity's
+`=`-padded banner form, with the count list spelled out in any order
+pytest prints it (`passed`, `failed`, `error`/`errors`, `skipped`,
+`xfailed`, `xpassed`, `warning`/`warnings`, `deselected`). Recognition
+here is what makes a green pytest survivor stable: that line carries
+wall-clock timing digits (`95 passed in 0.08s`), so two runs of the
+same green suite are byte-identical only by chance, and a survivor's
+`survived`-versus-`inconclusive` outcome used to ride on that chance.
+With the line recognized, neither the zero-tests detectors (nothing
+zero about `95 passed`) nor the generic byte-identical fallback (which
+only ever fires for output no detector recognizes) second-guesses the
+run, on either side of the `--expect` split.
+
 With no `--timeout` given and a test command that looks like a whole test
 suite rather than one targeted file -- `npm test`, `npm run test`/`npm
 run test:<anything>`, `yarn test`, `pnpm test` (each with nothing after
@@ -2097,7 +2115,7 @@ whether `--file` was given explicitly or is derived from the patch.
   test file in the command instead of filtering by name. A filter that
   selects NOTHING is already refused at the baseline as
   `no_tests_executed` for the runners the zero-tests detectors recognize
-  (vitest, node's `--test`, PHPUnit; see the paragraph on a baseline
+  (vitest, node's `--test`, PHPUnit, pytest; see the paragraph on a baseline
   that exits `0` but never actually ran a test, above), and
   `--require-baseline-evidence` is the opt-in safety net for any runner,
   including jest and every other one the detectors do not recognize.
@@ -2419,7 +2437,7 @@ above.
 | `pre_failed` | present | present | `--pre` exited non-zero during the baseline phase |
 | `baseline_failed` | present | present | the baseline test itself exited non-zero, or reported no exit code at all (it timed out, or a signal killed it), or `--pass-regex` was given and its pattern did not match the baseline's own output |
 | `target_changed_during_baseline` | present | present | the baseline run rewrote the target (a formatter, a codegen step) before any mutation |
-| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit) executed nothing, whatever its exit code -- for phpunit, this BASELINE-phase refusal fires only where the output itself STATES that (its own `No tests executed!` line, or a tally whose executed count derives to zero without depending on a version the output does not state); see the zero-tests paragraphs above. A phpunit MUTANT run whose own output is merely unreadable (the `"ambiguous"` shape, the row below) reports `zero_tests_ambiguous` instead, the same split the baseline phase already makes on the identical field: see the "An `exit()`/`die()` call mid-suite is read as an UNREADABLE result" paragraph above. |
+| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit, pytest) executed nothing, whatever its exit code -- for phpunit, this BASELINE-phase refusal fires only where the output itself STATES that (its own `No tests executed!` line, or a tally whose executed count derives to zero without depending on a version the output does not state); see the zero-tests paragraphs above. A phpunit MUTANT run whose own output is merely unreadable (the `"ambiguous"` shape, the row below) reports `zero_tests_ambiguous` instead, the same split the baseline phase already makes on the identical field: see the "An `exit()`/`die()` call mid-suite is read as an UNREADABLE result" paragraph above. |
 | `zero_tests_ambiguous` | present | present | phpunit only: the baseline's own output cannot be read for whether any test executed at all -- either its result report is missing altogether (a mid-suite `exit()`/`die()`, banner present but no `OK (`/marker/tally/progress counter/post-run `Time:` line), or it states no PHPUnit version banner and its tally carries a version-dependent count that decides the question with no version to read it against; see the zero-tests paragraphs above. This table covers the BASELINE-phase refusal only (`RefusalReason`, `REFUSAL_RESULT_SHAPE`); a MUTANT run whose own phpunit output reads the same way reports the identical `zero_tests_ambiguous` string as `mutation_probe.reason`, a plain string there rather than a `RefusalReason` (see the mutant-phase zero-tests paragraph below) |
 | `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |
 | `pycache_isolation_failed` | present | present | this run has at least one Python (`.py`) target and creating its isolated `PYTHONPYCACHEPREFIX` directory failed (an unwritable or full log directory); see [non-js-test-runners.md](non-js-test-runners.md)'s "Python bytecode cache" entry |

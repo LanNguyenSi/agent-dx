@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe` now recognizes pytest's final summary line, in both the bare
+  `-q` form and the default verbosity's `=`-padded banner form: the
+  comma-joined `N <word>` count list (`passed`, `failed`,
+  `error`/`errors`, `skipped`, `xfailed`, `xpassed`,
+  `warning`/`warnings`, `deselected`, in whatever combination pytest
+  prints) with its elapsed ` in <number>s` tail, plus the `no tests ran
+  in <number>s` line pytest prints with exit `5` when it collected
+  nothing. `hasKnownTestSummary` matching that line (captured real
+  pytest 8.4.2 output under `test/fixtures/captured/pytest-*.txt`) is
+  what closes the flaky verdict: the line carries wall-clock timing
+  digits (`95 passed in 0.08s`), so two runs of the same green suite
+  are byte-identical only by chance, and a green-mutant survivor was
+  reported `inconclusive`/`no_tests_executed` or `survived` depending
+  on that luck. With the line recognized the generic byte-identical
+  fallback stays out of pytest's way and the survivor is `survived` on
+  every run. `detectKnownZeroTestsEvidence` gains the `pytest`
+  detector (`ZeroTestsDetectorName` gains `pytest`) for the two
+  zero-tests readings: pytest's own `no tests ran` statement, and a
+  counted summary whose only counts are `skipped` and/or `deselected`
+  (an all-skipped run exits `0` having executed nothing, captured
+  real; a run whose only other counts are `error`s or `xpassed` did
+  execute and is not flagged). Lines that merely contain "passed"
+  elsewhere (vitest's `Tests  3 passed (3)`, PHPUnit's tallies, a
+  `duration_ms` line) keep their previous results. `README.md`,
+  `docs/probe.md` and `assets/skill/SKILL.md` name pytest among the
+  recognized runners; `test/skill-ledger.json`'s `0.17.0` digest is
+  updated for the SKILL.md change.
+
 ### Changed
 
 - `verify -c` now accepts an item that is not a valid check name as an
