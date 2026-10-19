@@ -17,11 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no assertion removed or loosened and no test deleted or skipped. A fix
   that changes code, configuration, or instruction semantics keeps the
   reviewer round, and high and critical findings stay blocking under both
-  options. The closure is recorded in the same `05-review-findings.md` row
-  (Severity and Decision headers unchanged, Decision `accepted`) with the
-  finding, the fix commit, the test run as the exact command with its exit
-  code, a killed mutation probe for each new or tightened test, and the bundle
-  check result where the repository has a knowledge bundle. It is not a review
+  options. A comment that a tool reads (lint, type-check, coverage,
+  formatter, or test-environment directives, shebangs, build tags) counts as
+  configuration, not explanatory text, and changing a shared test helper,
+  fixture, snapshot, golden file, or allowlist entry, or narrowing a test,
+  counts as loosening. A finding that fires the Round-2 halt signal, and any
+  fix on a task whose Review-round escalation budget has fired, is not
+  eligible: those rules govern. The closure is recorded in the same
+  `05-review-findings.md` row (Severity and Decision headers unchanged,
+  Decision `accepted`) with the finding, the fix commit, the test run as the
+  package's full test command (plus the type-check when a test or source file
+  was touched) with its exit code, a killed mutation probe for each new or
+  tightened test, and the bundle check result where the repository has a
+  knowledge bundle. It is not a review
   round for the test-adequacy cap, the Round-2 halt rule, the Review-round
   escalation budget or the Fix-regression decision point. Step 8 of the
   detailed workflow points to both options. Anchored by an observed run, in

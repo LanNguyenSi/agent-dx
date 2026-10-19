@@ -5650,7 +5650,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 238,
+    paragraphLine: 251,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -9815,10 +9815,10 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("names the two finding categories and the independent-review precondition", () => {
     expect(option).toContain(
-      "A second closing option covers a medium finding in category `docs` or `tests`.",
+      "A second closing option covers a medium finding in the category the reviewer reported (`docs` or `tests`).",
     );
     expect(option).toContain(
-      "After independent review, the orchestrator may close such a finding without another reviewer round only when its entire unreviewed delta consists of fixes of these two classes.",
+      "After independent review, the orchestrator may close such a finding without another reviewer round only when the task's entire unreviewed delta consists of fixes of these two classes.",
     );
   });
 
@@ -9828,9 +9828,27 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
+  it("counts a comment that a tool reads as configuration, not explanatory text", () => {
+    expect(option).toContain(
+      "A comment that a tool reads (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags) counts as configuration, not explanatory text.",
+    );
+  });
+
   it("states the test class with its no-loosening bound", () => {
     expect(option).toContain(
       "The second class adds tests or tightens existing ones, with no assertion removed or loosened and no test deleted or skipped.",
+    );
+  });
+
+  it("counts indirect weakening of untouched tests as loosening", () => {
+    expect(option).toContain(
+      "Changing a shared test helper, fixture, snapshot, or golden file, changing an allowlist or exemption entry, or adding `.only` or a condition that narrows a test counts as loosening unless every dependent test is shown unchanged.",
+    );
+  });
+
+  it("excludes a Round-2 halt finding and a task whose escalation budget has fired", () => {
+    expect(option).toContain(
+      "A finding that fires the Round-2 halt signal, and any fix on a task whose Review-round escalation budget has fired, is not eligible for this option: those rules govern and the next attempt goes through the reviewer subagent.",
     );
   });
 
@@ -9848,7 +9866,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("records the closure in the review-findings row with the evidence list", () => {
     expect(option).toContain(
-      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the exact command with its exit code, a killed mutation probe for each new or tightened test, and the bundle check result where the repository has a knowledge bundle.",
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, and the bundle check result where the repository has a knowledge bundle.",
     );
   });
 

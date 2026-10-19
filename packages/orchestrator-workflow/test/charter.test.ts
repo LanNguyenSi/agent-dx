@@ -187,9 +187,10 @@ describe("a rule-holding reference states each of its sentences once", () => {
 describe("the docs-or-test medium closing option is normative once", () => {
   it("sits only in review-and-recovery.md", () => {
     const clauses = [
-      "A second closing option covers a medium finding in category `docs` or `tests`.",
+      "A second closing option covers a medium finding in the category the reviewer reported (`docs` or `tests`).",
       "The second class adds tests or tightens existing ones, with no assertion removed or loosened and no test deleted or skipped.",
       "A fix that changes code, configuration, or instruction semantics keeps the reviewer round, whatever the finding's category.",
+      "A finding that fires the Round-2 halt signal, and any fix on a task whose Review-round escalation budget has fired, is not eligible for this option: those rules govern and the next attempt goes through the reviewer subagent.",
       "High and critical findings stay blocking: neither closing option closes one, and accepting one follows the waiver rules.",
     ];
     for (const clause of clauses) {
