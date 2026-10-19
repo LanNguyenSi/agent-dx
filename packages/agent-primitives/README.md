@@ -22,9 +22,9 @@ for teams shipping with AI agents.
 ## Key features
 
 - `doctor`: checks a list of required and optional binaries on `PATH`
-  (the default optional list leads with `ast-grep`, the structural
-  code-search tool the package's skill names for symbol lookups, with
-  `rg` for plain text search) and reports a few environment signals
+  (`rg` is required; the default optional list leads with `ast-grep`,
+  the structural code-search tool the package's skill names for symbol
+  lookups) and reports a few environment signals
   (git worktree, `node_modules`, whether a rebuild is likely needed).
 - `verify`: runs named checks (`build`, `typecheck`, `lint`, `test` by
   default) and reports a compact, bounded summary instead of raw output.
