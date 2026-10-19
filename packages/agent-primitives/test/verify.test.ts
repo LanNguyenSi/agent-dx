@@ -563,20 +563,33 @@ describe("verify: --fail-fast falls through a skipped check", () => {
 });
 
 describe("verify: check name validation", () => {
-  it("rejects a -c name carrying shell metacharacters before ever building a command", async () => {
+  it("a -c item that is not a valid check name runs as an implicit -x check under the derived name, with one canonical-form warning, not a usage error", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, {});
     const logDir = makeTmpDir();
     const { fn, calls } = makeStubExec();
-    await expect(
-      verify({
-        cwd,
-        logDir,
-        checks: ["good; touch /tmp/pwned-agent-primitives-test"],
-        execFn: fn,
-      }),
-    ).rejects.toThrow(UsageError);
-    expect(calls).toEqual([]);
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["npm run typecheck"],
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm run typecheck"]);
+    expect(result.checks).toHaveLength(1);
+    expect(result.checks[0]).toMatchObject({
+      name: "npm_run_typecheck",
+      command: "npm run typecheck",
+      status: "pass",
+    });
+    const implicitWarnings = result.warnings.filter((w) =>
+      w.includes("implicit -x"),
+    );
+    expect(implicitWarnings).toHaveLength(1);
+    expect(implicitWarnings[0]).toContain('"npm run typecheck"');
+    expect(implicitWarnings[0]).toContain('"npm_run_typecheck"');
+    expect(implicitWarnings[0]).toContain(
+      `-c npm_run_typecheck -x 'npm_run_typecheck=npm run typecheck'`,
+    );
   });
 
   it("rejects an -x override name carrying shell metacharacters before ever building a command", async () => {
@@ -605,41 +618,51 @@ describe("verify: check name validation", () => {
     expect(calls).toEqual(["npm run a.b:c-d_1 --silent"]);
   });
 
-  it("hints the -c/-x form when -c is passed a shell command", async () => {
+  it("a failing command item is a fail exactly as an explicit -x check would be (exit code propagates, no usage error)", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, {});
     const logDir = makeTmpDir();
-    const { fn, calls } = makeStubExec();
-    const message = `verify: invalid check name "npm run typecheck" (must match /^[A-Za-z0-9_.:-]+$/); -c takes check names, not commands. To run a command as a check, name it and pass the command with -x: -c npm_run_typecheck -x 'npm_run_typecheck=npm run typecheck'`;
-    await expect(
-      verify({ cwd, logDir, checks: ["npm run typecheck"], execFn: fn }),
-    ).rejects.toThrow(message);
-    let err: unknown;
-    try {
-      await verify({ cwd, logDir, checks: ["npm run typecheck"], execFn: fn });
-    } catch (e) {
-      err = e;
-    }
-    expect(err).toBeInstanceOf(UsageError);
-    expect((err as Error).message).toBe(message);
-    expect(calls).toEqual([]);
+    const { fn, calls } = makeStubExec({ "exit 1": { exitCode: 1 } });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["exit 1"],
+      execFn: fn,
+    });
+    expect(calls).toEqual(["exit 1"]);
+    expect(result.checks[0]).toMatchObject({
+      name: "exit_1",
+      command: "exit 1",
+      status: "fail",
+      exitCode: 1,
+    });
+    expect(result.checks[0].failures).toHaveLength(1);
+    expect(result.status).toBe("fail");
   });
 
-  it("POSIX-quotes single quotes in the derived -x command of the hint", async () => {
+  it("POSIX-quotes single quotes in the command inside the implicit -x warning's canonical form", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, {});
     const logDir = makeTmpDir();
     const { fn, calls } = makeStubExec();
-    let err: unknown;
-    try {
-      await verify({ cwd, logDir, checks: ["echo 'hi'"], execFn: fn });
-    } catch (e) {
-      err = e;
-    }
-    expect(err).toBeInstanceOf(UsageError);
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["echo 'hi'"],
+      execFn: fn,
+    });
+    expect(calls).toEqual(["echo 'hi'"]);
+    expect(result.checks[0]).toMatchObject({
+      name: "echo_hi",
+      command: "echo 'hi'",
+      status: "pass",
+    });
     const suffix = String.raw`-c echo_hi -x 'echo_hi=echo '\''hi'\'''`;
-    expect((err as Error).message.endsWith(suffix)).toBe(true);
-    expect(calls).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) => w.includes("implicit -x") && w.endsWith(suffix),
+      ),
+    ).toBe(true);
   });
 
   it("keeps the old hintless message for an invalid -x override name", async () => {
@@ -692,6 +715,165 @@ describe("verify: duplicate check names", () => {
     });
     expect(calls).toEqual(["npm run d --silent"]);
     expect(result.checks).toHaveLength(1);
+  });
+});
+
+describe("verify: implicit -x from command -c items", () => {
+  it.each([[""], ["   "], ["\t"]])(
+    "an empty or whitespace-only item (%j) stays a usage error at the API, never a check that runs nothing",
+    async (item) => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, { test: "vitest run" });
+      const logDir = makeTmpDir();
+      const { fn, calls } = makeStubExec();
+      const err = await verify({
+        cwd,
+        logDir,
+        checks: [item],
+        execFn: fn,
+      }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(UsageError);
+      expect((err as Error).message).toContain("invalid check name");
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it("a plain name alone keeps today's meaning (npm run <name>) and carries no implicit -x warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "vitest run" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({ cwd, logDir, checks: ["test"], execFn: fn });
+    expect(calls).toEqual(["npm run test --silent"]);
+    expect(result.checks[0]).toMatchObject({
+      name: "test",
+      command: "npm run test --silent",
+      status: "pass",
+    });
+    expect(result.status).toBe("pass");
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("a -c value matching the name pattern but reading like a command (tsc) stays a check name, no warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { tsc: "tsc --noEmit" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({ cwd, logDir, checks: ["tsc"], execFn: fn });
+    expect(calls).toEqual(["npm run tsc --silent"]);
+    expect(result.checks[0].name).toBe("tsc");
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("a command and a plain name in one -c list both run, in order, with exactly one implicit -x warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "vitest run" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["npm run build", "test"],
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm run build", "npm run test --silent"]);
+    expect(result.checks.map((c) => c.name)).toEqual(["npm_run_build", "test"]);
+    expect(
+      result.warnings.filter((w) => w.includes("implicit -x")),
+    ).toHaveLength(1);
+  });
+
+  it("a command whose derived name equals an explicit -x key: the explicit -x keeps the name, the implicit one gets _2, both run", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["npm run build"],
+      overrides: { npm_run_build: "echo explicit" },
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm run build", "echo explicit"]);
+    expect(result.checks).toHaveLength(2);
+    expect(result.checks[0]).toMatchObject({
+      name: "npm_run_build_2",
+      command: "npm run build",
+    });
+    expect(result.checks[1]).toMatchObject({
+      name: "npm_run_build",
+      command: "echo explicit",
+    });
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("implicit -x") && w.includes('check "npm_run_build_2"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("a plain -c name equal to a command item's derived name keeps it; the implicit one gets _2", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { npm_run_build: "x" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["npm_run_build", "npm run build"],
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm run npm_run_build --silent", "npm run build"]);
+    expect(result.checks.map((c) => c.name)).toEqual([
+      "npm_run_build",
+      "npm_run_build_2",
+    ]);
+  });
+
+  it("two different command items deriving the same name: the second gets the _2 suffix, both run", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["npm test", "npm/test"],
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm test", "npm/test"]);
+    expect(result.checks.map((c) => c.name)).toEqual([
+      "npm_test",
+      "npm_test_2",
+    ]);
+    expect(
+      result.warnings.filter((w) => w.includes("implicit -x")),
+    ).toHaveLength(2);
+    expect(
+      result.warnings.some(
+        (w) => w.includes("implicit -x") && w.includes('check "npm_test_2"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("two identical command items collapse to one check and one warning, the way a duplicated -c name does", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["npm test", "npm test"],
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm test"]);
+    expect(result.checks).toHaveLength(1);
+    expect(result.checks[0].name).toBe("npm_test");
+    expect(
+      result.warnings.filter((w) => w.includes("implicit -x")),
+    ).toHaveLength(1);
   });
 });
 

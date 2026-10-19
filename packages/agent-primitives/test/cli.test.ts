@@ -949,10 +949,12 @@ describe("cli verify", () => {
     expect(parsed.truncated).toBe(true);
   }, 20000);
 
-  it("rejects a -c name carrying shell metacharacters as usage_error, never executed (no side-effect file appears)", async () => {
+  it("a -c command item with shell metacharacters is now accepted as an implicit -x: it runs, and the warning names the canonical form", async () => {
     const cwd = makeTmpDir();
     const logDir = makeTmpDir();
-    const sentinel = path.join(cwd, "pwned");
+    // The old behavior was usage_error with the command never run; a
+    // passing check whose exitCode comes from the item itself proves the
+    // item is now executed as an implicit -x check.
     const run = await spawnCli([
       "-C",
       cwd,
@@ -960,12 +962,265 @@ describe("cli verify", () => {
       logDir,
       "verify",
       "-c",
-      `test; touch ${sentinel}`,
+      `node -e "process.exit(0)" && exit 0`,
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    expect(parsed.checks).toHaveLength(1);
+    expect(parsed.checks[0].status).toBe("pass");
+    expect(parsed.checks[0].exitCode).toBe(0);
+    expect(
+      parsed.warnings.some(
+        (w: string) =>
+          w.includes("implicit -x") &&
+          w.includes(`-c ${parsed.checks[0].name} -x '`),
+      ),
+    ).toBe(true);
+  });
+
+  it("-c <plain name> alone keeps today's behavior: runs npm run <name>, exit 0, no implicit -x warning", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { test: "exit 0" },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "test",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    expect(parsed.checks).toHaveLength(1);
+    expect(parsed.checks[0].name).toBe("test");
+    expect(parsed.checks[0].command).toBe("npm run test --silent");
+    expect(parsed.warnings.some((w: string) => w.includes("implicit -x"))).toBe(
+      false,
+    );
+  });
+
+  it('-c "exit 1" runs as an implicit -x: check exit_1 fails exactly as -x exit_1=exit 1 does, exit 1, one canonical-form warning', async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "exit_1",
+    );
+    expect(check.status).toBe("fail");
+    expect(check.exitCode).toBe(1);
+    expect(check.failures).toHaveLength(1);
+    expect(
+      parsed.warnings.filter((w: string) => w.includes("implicit -x")),
+    ).toHaveLength(1);
+    expect(
+      parsed.warnings.some(
+        (w: string) =>
+          w.includes("implicit -x") &&
+          w.includes(`-c exit_1 -x 'exit_1=exit 1'`),
+      ),
+    ).toBe(true);
+  });
+
+  it('-c "exit 0,test" runs the implicit -x check and the plain name in order, exit 0, one warning', async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { test: "exit 0" },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "exit 0,test",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    expect(parsed.checks.map((c: { name: string }) => c.name)).toEqual([
+      "exit_0",
+      "test",
+    ]);
+    expect(
+      parsed.warnings.filter((w: string) => w.includes("implicit -x")),
+    ).toHaveLength(1);
+  });
+
+  it('-c "exit 1" with an explicit -x exit_1: the explicit -x keeps the name, the implicit one gets exit_1_2, both run', async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "exit 1",
+      "-x",
+      "exit_1=exit 0",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const byName = Object.fromEntries(
+      parsed.checks.map((c: { name: string; status: string }) => [
+        c.name,
+        c.status,
+      ]),
+    );
+    expect(byName).toEqual({ exit_1: "pass", exit_1_2: "fail" });
+    expect(
+      parsed.warnings.some(
+        (w: string) =>
+          w.includes("implicit -x") && w.includes('check "exit_1_2"'),
+      ),
+    ).toBe(true);
+  });
+
+  it('-c "exit 1,exit;1": two commands deriving exit_1, the second runs as exit_1_2, exit 1', async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "exit 1,exit;1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    expect(parsed.checks.map((c: { name: string }) => c.name)).toEqual([
+      "exit_1",
+      "exit_1_2",
+    ]);
+    expect(
+      parsed.warnings.some(
+        (w: string) =>
+          w.includes("implicit -x") && w.includes(`-c exit_1_2 -x '`),
+      ),
+    ).toBe(true);
+  });
+
+  it('-c "build,,test": empty items are dropped before verify sees them (parseList), same as "build,test"', async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { build: "exit 0", test: "exit 0" },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "build,,test",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    expect(parsed.checks.map((c: { name: string }) => c.name)).toEqual([
+      "build",
+      "test",
+    ]);
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it('-c "," alone is an empty check list: status error, reason nothing_verified, exit 2', async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", cwd, "-l", logDir, "verify", "-c", ","]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    expect(parsed.reason).toBe("nothing_verified");
+    expect(parsed.checks).toEqual([]);
+  });
+
+  it("-c tsc (a name-shaped value that reads like a command) stays a check name: npm run tsc, exit 0, no warning", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { tsc: "exit 0" },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "tsc",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    expect(parsed.checks[0].name).toBe("tsc");
+    expect(parsed.checks[0].command).toBe("npm run tsc --silent");
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("-x with an invalid key is still a usage_error, exit 2 (unchanged by the implicit -x behavior)", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "-x",
+      "bad name=exit 0",
     ]);
     expect(run.code).toBe(2);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("usage_error");
-    expect(fs.existsSync(sentinel)).toBe(false);
+    expect(parsed.message).toContain("invalid check name");
   });
 
   it("--fail-fast on a package missing `build` runs typecheck, lint, and test, then reports the missing check", async () => {

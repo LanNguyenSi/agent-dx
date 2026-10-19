@@ -13,7 +13,14 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
 - `-c, --checks <list>`: comma-separated check names, in run order
   (default `build,typecheck,lint,test`, deduplicated preserving the first
   occurrence; build before typecheck, matching the CI convention of
-  building before typechecking against built output).
+  building before typechecking against built output). An item that is
+  not a valid check name is accepted as an implicit `-x`: the item runs
+  as the check's command under a derived name, with a warning naming the
+  canonical `-c <name> -x '<name>=<command>'` form (see below). Such an
+  item executes as a shell command, like an `-x` value: never fill `-c`
+  from untrusted text. Empty items are dropped (an empty list resolves to
+  `nothing_verified`); at the API, an empty or whitespace-only item is a
+  usage error.
 - `-x, --exec <name=command>`: override a check's command (repeatable; a
   name that is not in the run list is still run, appended in the order
   given). Its value executes as a shell command; never fill it from
@@ -79,19 +86,42 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
 
 Every resolved check name, from `-c` and from `-x` alike, is validated
 against a conservative pattern (letters, digits, `_`, `.`, `:`, `-`) before
-any command is built; a name outside that pattern is `status:
-"usage_error"`, exit `2`, and is never run.
-
-`-c` takes check names, not commands. To run a script that is not one of
-the default check names (for example `typecheck:test` or `format:check`),
-give it a name with `-c` and its command with `-x`; the usage error for a
-command passed to `-c` prints this form with a derived name:
+any command is built. An `-x` key outside that pattern is `status:
+"usage_error"`, exit `2`, and is never run. A `-c` item outside the
+pattern is not a usage error: it is accepted as an implicit `-x`. The
+canonical form stays `-c <name> -x '<name>=<command>'`; the implicit form
+is a convenience for the common mistake, and every implicit item carries
+one warning naming the item, the name it was given, and its canonical
+form. To run a script that is not one of the default check names (for
+example `typecheck:test` or `format:check`), prefer giving it a name with
+`-c` and its command with `-x`:
 
 ```sh
+# canonical (recommended):
 agent-primitives verify -c typecheck_test,format_check \
   -x 'typecheck_test=npm run typecheck:test' \
   -x 'format_check=npm run format:check'
+
+# accepted as two implicit -x checks, each with a warning naming the
+# canonical form:
+agent-primitives verify -c 'npm run typecheck:test,npm run format:check'
 ```
+
+How a `-c` item resolves:
+
+- An item matching the name pattern is a check name run as
+  `npm run <name> --silent`, exactly as before, even when it reads like
+  a command (`tsc`); no warning.
+- Any other item is the check's own command, run through exactly the
+  `-x` resolution path, under a name derived from the item (non-name
+  characters become underscores, leading non-alphanumerics and trailing
+  underscores are dropped, `check` when nothing remains).
+- A derived name that collides with an already-resolved name (a plain
+  `-c` name, an `-x` key, or an earlier derived name) gets a numeric
+  suffix (`_2`, `_3`, ...) until it is unique: the plain name or `-x`
+  key always keeps its own name, and both checks run.
+- Identical command items collapse to one check, the same way a
+  duplicated `-c` name does.
 
 Check resolution, per name: an `-x` override wins; otherwise a matching
 `package.json` `scripts[name]` runs as `npm run <name> --silent`; a requested

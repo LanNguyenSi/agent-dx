@@ -38,7 +38,10 @@ runner is on PATH, never trim its output by hand instead of using its own
 Every requested check must resolve to a command and pass. A missing
 `package.json` script is reported as `status: "skipped", reason:
 "no_script"` and makes the enclosing verify result `status: "error"`; use
-`-x name=command` only when deliberately supplying that command.
+`-x name=command` only when deliberately supplying that command. A whole
+command passed to `-c` runs as an implicit `-x` check under a derived
+name and carries a warning naming the canonical form; always write the
+canonical `-c <name> -x '<name>=<command>'` form yourself instead.
 
 ## 3. Probe
 
