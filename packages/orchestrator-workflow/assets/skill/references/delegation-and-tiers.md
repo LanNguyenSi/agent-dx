@@ -13,7 +13,8 @@ briefing, before spawning the advisor, and before changing a model.
   The unsuffixed default subagent is the normal case; `-high`/`-xhigh` fit
   high-risk changes, hard problems, or repeated failed attempts. Record a
   non-default tier choice with a one-line reason in `03-decisions.md` when
-  the task is non-trivial.
+  the task is non-trivial. The reviewer's default tier per change class comes
+  from the Review method and reviewer tier by risk class section below.
 - For the implementer specifically, `-low` is spawned only when none of the
   following hold: an acceptance criterion demands a test, typecheck, lint, or
   build run; the task assignment names mutation probes to run; or the task
@@ -58,13 +59,16 @@ other file points here.
 - `normal`, on `reviewer-medium`: a delta that contains only explanatory
   documentation, comments, or citations and contains no source- or test-file
   edits and no semantic change to executable commands, configuration, policy,
-  instructions, or behavior. Explanatory prose in an instruction file that
-  changes no instruction semantics counts as documentation; a change to what
-  an instruction demands is an instruction change and takes the row its
-  content belongs to.
+  instructions, or behavior. A delta that touches an instruction, policy,
+  template, or prompt file is never docs-only for this mapping: it takes
+  `rigorous`, or `adversarial` when it touches the repository's declared
+  safety core.
 
 The rules that apply to the three rows:
 
+- The tier a row names is the default reviewer tier for that class. A higher
+  tier is the non-default choice, recorded with a one-line reason; a lower
+  tier than the row names is never chosen.
 - Never pair `adversarial` with the `-medium` reviewer tier, a budget mismatch
   that names probes without the effort to run them; tiers themselves are
   unchanged by this axis.
@@ -75,7 +79,9 @@ The rules that apply to the three rows:
   highest class, and a doubt between two classes goes to the higher one.
 - Fix and delta rounds of a task keep the task's class: a round never drops
   below the highest class an earlier round of the task was given, whatever
-  its own delta contains.
+  its own delta contains. The closing options in
+  [review and recovery](review-and-recovery.md) are not review rounds and are
+  governed there, not here.
 - The operator's high-risk flag can only raise a class to `adversarial`; it
   never lowers one.
 - The safety core is declared per repository, as Pinned-prose changes in

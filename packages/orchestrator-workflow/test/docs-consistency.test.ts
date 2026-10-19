@@ -167,10 +167,10 @@ function phraseBoundedSlice(
  *      charter (agents-md-section.md) and trust-and-outward.md.
  *   2. Outward actions only by the orchestrator. Sites: the charter and
  *      trust-and-outward.md; pinned in outward-actions.test.ts.
- *   3. The review gate severities and waiver authority. Sites: the charter
- *      and, for the docs-only closing options, review-and-recovery.md.
- *   4. The reviewer's read-only rule. Site: the reviewer prompt
- *      (assets/agents/reviewer.md).
+ *   3. The review gate severities and waiver authority. Sites: the charter,
+ *      for the docs-only closing options review-and-recovery.md, and, for the
+ *      review method class mapping, delegation-and-tiers.md.
+ *   4. The reviewer's read-only rule. Site: assets/agents/reviewer.md.
  *
  * Rule 1 also lives in runbook-selection.test.ts. charter.test.ts rejects a
  * second copy of a pinned sentence in the charter, SKILL.md, or a reference.
@@ -9919,7 +9919,26 @@ describe("safety core: the review method and tier class list stays pinned at the
       "`normal`, on `reviewer-medium`: a delta that contains only explanatory documentation, comments, or citations and contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior.",
     );
     expect(section).toContain(
-      "Explanatory prose in an instruction file that changes no instruction semantics counts as documentation; a change to what an instruction demands is an instruction change and takes the row its content belongs to.",
+      "A delta that touches an instruction, policy, template, or prompt file is never docs-only for this mapping: it takes `rigorous`, or `adversarial` when it touches the repository's declared safety core.",
+    );
+    expect(section).not.toContain("counts as documentation");
+  });
+
+  it("states the tier a row names as the class default, a higher tier as the recorded non-default choice, and a lower tier as never chosen", () => {
+    expect(section).toContain(
+      "The tier a row names is the default reviewer tier for that class. A higher tier is the non-default choice, recorded with a one-line reason; a lower tier than the row names is never chosen.",
+    );
+  });
+
+  it("points the Effort tiers bullet at this section for the reviewer's default tier per class", () => {
+    expect(unwrap(tiers)).toContain(
+      "The reviewer's default tier per change class comes from the Review method and reviewer tier by risk class section below.",
+    );
+  });
+
+  it("leaves the closing options of the review and recovery reference to that reference", () => {
+    expect(section).toContain(
+      "The closing options in [review and recovery](review-and-recovery.md) are not review rounds and are governed there, not here.",
     );
   });
 

@@ -45,16 +45,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as its core, and anything the operator flags high-risk; `rigorous` on
   `reviewer-medium` covers all other code changes (tests and behaviour-changing
   configuration included) and all other instruction, prompt, template, or
-  policy changes; `normal` on `reviewer-medium` stays the docs-only row. A
-  delta spanning classes takes its highest class and a doubt goes up, fix and
-  delta rounds keep the task's class, and the operator flag can only raise.
-  The sentence that kept the general default for a round touching an
-  instruction, policy, template, or prompt file is gone, and the reviewer
-  prompt's `normal` row now fits docs-only deltas instead of docs, renames, and
-  batch cosmetics. The rule never to pair `adversarial` with the `-medium` tier is unchanged.
-  Anchored by an observed run, in which the review findings of high severity
-  came from one security-relevant task. Installed skill and reviewer files
-  report as outdated until refreshed.
+  policy changes; `normal` on `reviewer-medium` stays the docs-only row, and a
+  delta touching such a file is never docs-only. A row's tier is the class
+  default, a higher tier the recorded non-default choice, a lower one never
+  chosen. A delta spanning classes takes its highest class and a doubt goes
+  up, fix and delta rounds keep the task's class, and the operator flag can
+  only raise. This routing replaces the sentence that kept the general default
+  for a round touching an instruction file, and the reviewer prompt's `normal`
+  row now fits docs-only deltas; never pairing `adversarial` with `-medium` is
+  unchanged. Anchored by an observed run (high-severity findings came from one
+  security-relevant task). Installed files report as outdated until refreshed.
 
 ## [0.46.0] - 2026-10-18
 

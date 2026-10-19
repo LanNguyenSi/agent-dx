@@ -207,9 +207,25 @@ describe("the review method and tier class mapping is normative once", () => {
       "`rigorous`, on `reviewer-medium`: all other code changes, tests and CI or configuration that changes behaviour included, and all other changes to instruction, prompt, template, or policy files.",
       "Never pair `adversarial` with the `-medium` reviewer tier, a budget mismatch that names probes without the effort to run them; tiers themselves are unchanged by this axis.",
       "A delta that spans classes takes the method and tier of its highest class, and a doubt between two classes goes to the higher one.",
+      "The tier a row names is the default reviewer tier for that class. A higher tier is the non-default choice, recorded with a one-line reason; a lower tier than the row names is never chosen.",
+      "The closing options in [review and recovery](review-and-recovery.md) are not review rounds and are governed there, not here.",
     ];
     for (const clause of clauses) {
       expect(sitesOf(clause)).toEqual(["references/delegation-and-tiers.md"]);
+    }
+  });
+
+  it("is not restated in the reviewer prompt, which runs without the skill", () => {
+    const reviewerPrompt = flatten(readAsset("agents/reviewer.md"));
+    for (const clause of [
+      "`adversarial`, on the unsuffixed reviewer (high) or `reviewer-xhigh`:",
+      "`rigorous`, on `reviewer-medium`:",
+      "`normal`, on `reviewer-medium`:",
+      "Never pair `adversarial` with the `-medium` reviewer tier",
+      "a doubt between two classes goes to the higher one",
+      "a lower tier than the row names is never chosen",
+    ]) {
+      expect(reviewerPrompt).not.toContain(clause);
     }
   });
 });
