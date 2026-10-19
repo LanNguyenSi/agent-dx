@@ -719,6 +719,25 @@ describe("verify: duplicate check names", () => {
 });
 
 describe("verify: implicit -x from command -c items", () => {
+  it.each([[""], ["   "], ["\t"]])(
+    "an empty or whitespace-only item (%j) stays a usage error at the API, never a check that runs nothing",
+    async (item) => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, { test: "vitest run" });
+      const logDir = makeTmpDir();
+      const { fn, calls } = makeStubExec();
+      const err = await verify({
+        cwd,
+        logDir,
+        checks: [item],
+        execFn: fn,
+      }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(UsageError);
+      expect((err as Error).message).toContain("invalid check name");
+      expect(calls).toEqual([]);
+    },
+  );
+
   it("a plain name alone keeps today's meaning (npm run <name>) and carries no implicit -x warning", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, { test: "vitest run" });

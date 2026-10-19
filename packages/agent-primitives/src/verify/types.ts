@@ -142,7 +142,10 @@ export interface VerifyOptions {
   /** Directory `exec.ts` writes per-check log files into (a `verify/`
    * subdirectory is created under it). */
   logDir: string;
-  /** Check names, in run order. Defaults to `DEFAULT_CHECKS`. */
+  /** Check names, in run order (already split; the CLI splits `-c` on
+   * commas). Defaults to `DEFAULT_CHECKS`. An item that is not a valid check
+   * name runs as a shell command (an implicit `-x`), so never fill this from
+   * untrusted text; an empty item is a usage error. */
   checks?: string[];
   /** `-x name=command` overrides, keyed by check name. */
   overrides?: Record<string, string>;

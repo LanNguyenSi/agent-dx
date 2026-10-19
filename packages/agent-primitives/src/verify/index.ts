@@ -82,10 +82,11 @@ export const DEFAULT_DETECTORS: Detector[] = [
 export const DEFAULT_MAX_FAILURES = 20;
 
 /** A check name reaches `npm run <name> --silent` (and a log file name)
- * unquoted; this is the conservative allowlist every resolved name (from
- * `-c` and from `-x`) must match before any command is built, so a name
- * carrying shell metacharacters is rejected as a usage error instead of
- * being interpolated into a shell command. */
+ * unquoted; this is the conservative allowlist every resolved name (plain
+ * `-c` names, the derived names of implicit `-x` checks, and `-x` keys)
+ * must match before any command is built. An `-x` key outside it is a usage
+ * error; a `-c` item outside it is not a name at all and becomes an
+ * implicit `-x` under a derived name (it executes as a shell command). */
 const CHECK_NAME_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 
 /** Derives a valid check name from an arbitrary raw string (the implicit
@@ -416,6 +417,14 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     if (CHECK_NAME_PATTERN.test(item)) {
       requestedNames.push(item);
       continue;
+    }
+    // An empty or whitespace-only item names no check and no command: it
+    // stays a usage error, never an implicit check that runs nothing and
+    // passes (the CLI already drops such items; API callers do not).
+    if (item.trim() === "") {
+      throw new UsageError(
+        `verify: invalid check name "${item}" (must match ${CHECK_NAME_PATTERN})`,
+      );
     }
     if (seenImplicitItems.has(item)) continue;
     seenImplicitItems.add(item);

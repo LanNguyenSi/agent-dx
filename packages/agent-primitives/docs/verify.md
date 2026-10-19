@@ -16,7 +16,9 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
   building before typechecking against built output). An item that is
   not a valid check name is accepted as an implicit `-x`: the item runs
   as the check's command under a derived name, with a warning naming the
-  canonical `-c <name> -x '<name>=<command>'` form (see below).
+  canonical `-c <name> -x '<name>=<command>'` form (see below). Such an
+  item executes as a shell command, like an `-x` value: never fill `-c`
+  from untrusted text. An empty item is still a usage error.
 - `-x, --exec <name=command>`: override a check's command (repeatable; a
   name that is not in the run list is still run, appended in the order
   given). Its value executes as a shell command; never fill it from
