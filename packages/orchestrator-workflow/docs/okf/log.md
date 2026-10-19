@@ -1,5 +1,13 @@
 # Bundle log
 
+- 2026-10-19T05:59:26Z, second closing option, summary alignment: the `[Unreleased]` bullet now names the
+  category the reviewer reported, exemption entries, the "unless every dependent test is shown
+  unchanged" clause and the task's entire unreviewed delta, as the rule does; the line count of
+  the entry is unchanged, so no `CHANGELOG.md` citation moved. `review-gate-and-waivers.md` now
+  cites the comment clause and the loosening clause at their own lines; its other claims were
+  re-verified. `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md` list
+  `CHANGELOG.md` as a source and make no claim about the closing options: re-verified,
+  re-stamped.
 - 2026-10-19T05:44:35Z, second closing option, review fix: the option now excludes a finding that fires the Round-2
   halt signal and any fix on a task whose Review-round escalation budget has fired, counts a
   comment a tool reads as configuration, counts indirect weakening of untouched tests as
