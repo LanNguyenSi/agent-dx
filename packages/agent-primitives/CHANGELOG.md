@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command items collapse like a duplicated `-c` name, an item matching
   the name pattern keeps its meaning as a check name run as
   `npm run <name>` (even one that reads like a command, e.g. `tsc`), and
-  an invalid `-x` key stays a usage error, as does an empty item. A `-c`
+  an invalid `-x` key stays a usage error, as does an empty item passed
+  through the API (the CLI drops empty items). A `-c`
   item with shell metacharacters, rejected without running before, now
   executes as a shell command: callers must not fill `-c` from untrusted
   text, the same rule `-x` values already had.
