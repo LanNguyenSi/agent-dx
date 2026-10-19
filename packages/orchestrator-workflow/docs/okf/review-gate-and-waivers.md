@@ -12,6 +12,7 @@ sources:
   - packages/orchestrator-workflow/assets/templates/05-review-findings.md
   - packages/orchestrator-workflow/assets/templates/06-handoff.md
   - packages/orchestrator-workflow/test/docs-consistency.test.ts
+  - packages/orchestrator-workflow/test/charter.test.ts
   - packages/orchestrator-workflow/test/template-markers.test.ts
   - packages/orchestrator-workflow/test/decision-authority.test.ts
   - packages/orchestrator-workflow/CHANGELOG.md
@@ -163,6 +164,31 @@ is now its one site; the charter only points to it
 the detailed workflow does the same. It is
 pinned as sentences at that site only, in
 `test/docs-consistency.test.ts:3090#"safety core: the docs-only closing delta stays narrowly bounded at the review and recovery reference"`.
+
+A second closing option sits in the same section, with its own conditions
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:178#"A second closing option covers a medium finding in category"`).
+After independent review, the orchestrator may close a *medium* finding in
+category `docs` or `tests` without another reviewer round when the entire
+unreviewed delta consists of fixes of two classes: only explanatory text, or
+tests added or existing tests tightened with no assertion removed or loosened
+and no test deleted or skipped
+(`review-and-recovery.md:183#"file that changes no instruction semantics. The second class adds tests or"`).
+Unlike the first option it may touch test files, which is why the bound and
+the probe requirement below exist: a test change can hide a behaviour change.
+A fix that changes code, configuration, or instruction semantics keeps the
+reviewer round, and high and critical findings stay blocking under both options
+(`review-and-recovery.md:185#"deleted or skipped. A fix that changes code, configuration, or instruction"`).
+The closure is recorded in the same `05-review-findings.md` row, Decision
+`accepted`, with the finding, the fix commit, the test run as the exact command
+with its exit code, a killed mutation probe for each new or tightened test, and
+the bundle check result where the repository has a knowledge bundle
+(`review-and-recovery.md:188#"accepting one follows the waiver rules. Record the closure in the"`). It is
+not a review round, so it counts toward neither the test-adequacy cap, the
+Round-2 halt rule, the Review-round escalation budget nor the Fix-regression
+decision point
+(`review-and-recovery.md:193#"knowledge bundle. Such a closure is not a review round: it counts toward none"`). The clauses are pinned as whole sentences
+in `test/docs-consistency.test.ts:9800#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
+their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.
 
 ## The Decision legend in 05-review-findings.md
 

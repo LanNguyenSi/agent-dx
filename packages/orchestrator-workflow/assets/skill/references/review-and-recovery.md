@@ -175,6 +175,27 @@ ineligible finding, and records the concrete verification in a
 `05-review-findings.md` row with its Severity and Decision headers unchanged
 and Decision `accepted`.
 
+A second closing option covers a medium finding in category `docs` or
+`tests`. After independent review, the orchestrator may close such a finding
+without another reviewer round only when its entire unreviewed delta consists
+of fixes of these two classes. The first class changes only explanatory text:
+documentation, comments, citations, or explanatory prose in an instruction
+file that changes no instruction semantics. The second class adds tests or
+tightens existing ones, with no assertion removed or loosened and no test
+deleted or skipped. A fix that changes code, configuration, or instruction
+semantics keeps the reviewer round, whatever the finding's category. High and
+critical findings stay blocking: neither closing option closes one, and
+accepting one follows the waiver rules. Record the closure in the
+`05-review-findings.md` row with its Severity and Decision headers unchanged
+and Decision `accepted`: the finding, the fix commit, the test run as the
+exact command with its exit code, a killed mutation probe for each new or
+tightened test, and the bundle check result where the repository has a
+knowledge bundle. Such a closure is not a review round: it counts toward none
+of the cap in Pinned-prose changes, the Round-2 halt rule, the Review-round
+escalation budget, or the Fix-regression decision point. Anchored by an
+observed run; see the entry for this rule in the orchestrator-workflow
+CHANGELOG.
+
 ## Final acceptance rule
 
 Subagents provide evidence. The orchestrator decides. The operator receives

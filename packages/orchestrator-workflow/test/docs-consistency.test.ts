@@ -168,7 +168,7 @@ function phraseBoundedSlice(
  *   2. Outward actions only by the orchestrator. Sites: the charter and
  *      trust-and-outward.md; pinned in outward-actions.test.ts.
  *   3. The review gate severities and waiver authority. Sites: the charter
- *      and, for the docs-only closing delta, review-and-recovery.md.
+ *      and, for the docs-only closing options, review-and-recovery.md.
  *   4. The reviewer's read-only rule. Site: the reviewer prompt
  *      (assets/agents/reviewer.md).
  *
@@ -9785,6 +9785,76 @@ describe("safety core: the reviewer's in-place exception is pinned whole at revi
   it("keeps the in-place mode a bounded exception applied only by the runner", () => {
     expect(reviewerMd).toContain(
       'That stays a bounded exception to "never in the reviewed tree," not a redefinition of it: only the orchestrator\'s briefing authorizes it, only the runner itself applies the mutant (never you by hand), the runner must report `restored_verified: true` for every such probe (a missing or `false` value is a finding), the tree must be clean and at the reviewed head before the runner starts, and no other agent may be active in that tree at the same time (see the concurrency rule in step 7 of the detailed workflow).',
+    );
+  });
+});
+
+/**
+ * Safety core, rule 3 (continued): the second closing option, for a medium
+ * `docs` or `tests` finding, never reaches a high or critical finding and
+ * never closes a fix that changes code, configuration or instruction
+ * semantics. Its load-bearing clauses are pinned as whole sentences at the
+ * same site, the Docs-only closure section of the review and recovery
+ * reference.
+ */
+describe("safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference", () => {
+  const recovery = readAsset("skill/references/review-and-recovery.md");
+  const sectionStart = recovery.indexOf("## Docs-only closure");
+  const sectionEnd = recovery.indexOf("## Final acceptance rule");
+  const section = unwrap(recovery.slice(sectionStart, sectionEnd));
+  const optionStart = section.indexOf("A second closing option covers");
+  const option = section.slice(optionStart);
+
+  it("sits in the Docs-only closure section after the first option (sanity: not vacuously true)", () => {
+    expect(sectionStart).toBeGreaterThanOrEqual(0);
+    expect(sectionEnd).toBeGreaterThan(sectionStart);
+    expect(optionStart).toBeGreaterThan(
+      section.indexOf("It never closes a high/critical or other ineligible"),
+    );
+  });
+
+  it("names the two finding categories and the independent-review precondition", () => {
+    expect(option).toContain(
+      "A second closing option covers a medium finding in category `docs` or `tests`.",
+    );
+    expect(option).toContain(
+      "After independent review, the orchestrator may close such a finding without another reviewer round only when its entire unreviewed delta consists of fixes of these two classes.",
+    );
+  });
+
+  it("states the explanatory-text class without letting instruction semantics change", () => {
+    expect(option).toContain(
+      "The first class changes only explanatory text: documentation, comments, citations, or explanatory prose in an instruction file that changes no instruction semantics.",
+    );
+  });
+
+  it("states the test class with its no-loosening bound", () => {
+    expect(option).toContain(
+      "The second class adds tests or tightens existing ones, with no assertion removed or loosened and no test deleted or skipped.",
+    );
+  });
+
+  it("keeps the reviewer round for a fix that changes code, configuration, or instruction semantics", () => {
+    expect(option).toContain(
+      "A fix that changes code, configuration, or instruction semantics keeps the reviewer round, whatever the finding's category.",
+    );
+  });
+
+  it("keeps high and critical findings blocking under both closing options", () => {
+    expect(option).toContain(
+      "High and critical findings stay blocking: neither closing option closes one, and accepting one follows the waiver rules.",
+    );
+  });
+
+  it("records the closure in the review-findings row with the evidence list", () => {
+    expect(option).toContain(
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the exact command with its exit code, a killed mutation probe for each new or tightened test, and the bundle check result where the repository has a knowledge bundle.",
+    );
+  });
+
+  it("is not a review round for the cap, the halt rule, the escalation budget, or the fix-regression decision point", () => {
+    expect(option).toContain(
+      "Such a closure is not a review round: it counts toward none of the cap in Pinned-prose changes, the Round-2 halt rule, the Review-round escalation budget, or the Fix-regression decision point.",
     );
   });
 });

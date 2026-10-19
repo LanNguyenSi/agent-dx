@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The review gate's closing rule in `references/review-and-recovery.md` (the
+  Docs-only closure section, still its one site) gains a second closing
+  option. After independent review, the orchestrator may close a medium
+  finding in category `docs` or `tests` without another reviewer round when
+  the entire unreviewed delta is explanatory text only (documentation,
+  comments, citations, or explanatory prose in an instruction file that
+  changes no instruction semantics) or adds tests or tightens existing ones
+  with no assertion removed or loosened and no test deleted or skipped. A fix
+  that changes code, configuration, or instruction semantics keeps the
+  reviewer round, and high and critical findings stay blocking under both
+  options. The closure is recorded in the same `05-review-findings.md` row
+  (Severity and Decision headers unchanged, Decision `accepted`) with the
+  finding, the fix commit, the test run as the exact command with its exit
+  code, a killed mutation probe for each new or tightened test, and the bundle
+  check result where the repository has a knowledge bundle. It is not a review
+  round for the test-adequacy cap, the Round-2 halt rule, the Review-round
+  escalation budget or the Fix-regression decision point. Step 8 of the
+  detailed workflow points to both options. Anchored by an observed run, in
+  which several review rounds existed only for such mediums. Installed skill
+  files report as outdated until refreshed.
+
 ## [0.46.0] - 2026-10-18
 
 - `doctor` now warns when a target that selects the codex harness has a
