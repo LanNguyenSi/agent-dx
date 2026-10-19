@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-10-19
+
 - The review gate's closing rule in `references/review-and-recovery.md` (the
   Docs-only closure section, still its one site) gains a second closing
   option. After independent review, the orchestrator may close a medium
