@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `verify -c` now accepts an item that is not a valid check name as an
+  implicit `-x`: the item runs as that check's command under a name
+  derived from it, and one warning per implicit item names the item, the
+  derived name and the canonical `-c <name> -x '<name>=<command>'` form,
+  which stays the recommended spelling. A derived name colliding with a
+  plain `-c` name, an `-x` key or an earlier derived name appends `_2`,
+  `_3`, ... to the implicit check only (both checks run), identical
+  command items collapse like a duplicated `-c` name, an item matching
+  the name pattern keeps its meaning as a check name run as
+  `npm run <name>` (even one that reads like a command, e.g. `tsc`), and
+  an invalid `-x` key stays a usage error.
+
 ## [0.16.0] - 2026-10-18
 
 ### Added

@@ -88,8 +88,10 @@ export const DEFAULT_MAX_FAILURES = 20;
  * being interpolated into a shell command. */
 const CHECK_NAME_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 
-/** Derives a valid check name from an arbitrary raw string (the `-c` hint);
- * it starts with a letter or digit, so the hint never reads as a flag. */
+/** Derives a valid check name from an arbitrary raw string (the implicit
+ * `-x` check a command `-c` item is converted into, and the canonical
+ * form quoted in its warning); it starts with a letter or digit, so the
+ * derived name never reads as a flag. */
 export function deriveCheckName(raw: string): string {
   const derived = raw
     .replace(/[^A-Za-z0-9_.:-]+/g, "_")
@@ -383,9 +385,56 @@ function dedupePreservingOrder(names: string[]): string[] {
  */
 export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const start = Date.now();
-  const overrides = options.overrides ?? {};
+  const explicitOverrides = options.overrides ?? {};
   const passRegexes = options.passRegexes ?? {};
-  const requestedNames = options.checks ?? DEFAULT_CHECKS;
+  const requestedItems = options.checks ?? DEFAULT_CHECKS;
+
+  // A `-c` item that is not a valid check name is accepted as an implicit
+  // `-x`: the item itself becomes that check's command (merged into
+  // `overrides`, so it runs through exactly the explicit `-x` resolution
+  // path), and the check's name is derived from the item. A `-c` item
+  // that does match the name pattern keeps its meaning as a check name
+  // run as `npm run <name>`, even when it reads like a command (`tsc`).
+  // Names already claimed by a plain `-c` name or an explicit `-x` key
+  // keep them (the `-x` key itself is still validated below); only the
+  // implicit name gets a numeric suffix (`_2`, `_3`, ...) on a collision,
+  // and both checks run. Identical command items collapse the same way a
+  // duplicated `-c` name does (`dedupePreservingOrder` below). Each
+  // implicit item contributes one warning naming the canonical
+  // `-c <name> -x '<name>=<command>'` form.
+  const implicitOverrides: Record<string, string> = {};
+  const implicitWarnings: string[] = [];
+  const seenImplicitItems = new Set<string>();
+  const takenNames = new Set<string>();
+  for (const item of requestedItems) {
+    if (CHECK_NAME_PATTERN.test(item)) takenNames.add(item);
+  }
+  for (const key of Object.keys(explicitOverrides)) takenNames.add(key);
+
+  const requestedNames: string[] = [];
+  for (const item of requestedItems) {
+    if (CHECK_NAME_PATTERN.test(item)) {
+      requestedNames.push(item);
+      continue;
+    }
+    if (seenImplicitItems.has(item)) continue;
+    seenImplicitItems.add(item);
+    const derived = deriveCheckName(item);
+    let name = derived;
+    for (let suffix = 2; takenNames.has(name); suffix++) {
+      name = `${derived}_${String(suffix)}`;
+    }
+    takenNames.add(name);
+    requestedNames.push(name);
+    implicitOverrides[name] = item;
+    const quoted = item.replace(/'/g, "'\\''");
+    implicitWarnings.push(
+      `-c item "${item}" is not a valid check name: it runs as check "${name}" as an implicit -x. Canonical form: -c ${name} -x '${name}=${quoted}'`,
+    );
+  }
+
+  const overrides = { ...implicitOverrides, ...explicitOverrides };
+
   // A check name that only exists as an `-x` override (not in the
   // requested/default list) is still run: an override that is never used
   // would be a silent no-op, which this package's principles rule out.
@@ -397,18 +446,12 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   // Every resolved name is validated before any command is built (from
   // `-c`/the default list and from `-x` keys alike): a name carrying a
   // shell metacharacter is a usage error, never interpolated into `npm
-  // run <name> --silent` under `sh -c`. A name from the requested list
-  // additionally gets the `-c <name> -x '<name>=<command>'` hint, since
-  // the common case is an agent passing a whole command to `-c`.
+  // run <name> --silent` under `sh -c`. An invalid `-x` key still lands
+  // here; a `-c` item outside the pattern never does, having become an
+  // implicit `-x` above under a `deriveCheckName` name that always
+  // matches.
   for (const name of requestedAndOverrideNames) {
     if (!CHECK_NAME_PATTERN.test(name)) {
-      if (requestedNames.includes(name)) {
-        const derived = deriveCheckName(name);
-        const quoted = name.replace(/'/g, "'\\''");
-        throw new UsageError(
-          `verify: invalid check name "${name}" (must match ${CHECK_NAME_PATTERN}); -c takes check names, not commands. To run a command as a check, name it and pass the command with -x: -c ${derived} -x '${derived}=${quoted}'`,
-        );
-      }
       throw new UsageError(
         `verify: invalid check name "${name}" (must match ${CHECK_NAME_PATTERN})`,
       );
@@ -449,6 +492,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
 
   const scripts = readScripts(options.cwd);
   const warnings: string[] = [];
+  warnings.push(...implicitWarnings);
   const namesNeedingScripts = names.some(
     (name) => !Object.prototype.hasOwnProperty.call(overrides, name),
   );
