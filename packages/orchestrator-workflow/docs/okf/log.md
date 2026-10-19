@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-10-19T05:39:38Z, second closing option, review fix: the option now excludes a finding that fires the Round-2
+- 2026-10-19T05:44:35Z, second closing option, review fix: the option now excludes a finding that fires the Round-2
   halt signal and any fix on a task whose Review-round escalation budget has fired, counts a
   comment a tool reads as configuration, counts indirect weakening of untouched tests as
   loosening, names the full test command as the recorded run, and speaks of the category the
@@ -9,7 +9,10 @@
   new lines. The `[Unreleased]` entry grew by eight lines, so every anchored log citation of the
   two released `CHANGELOG.md` entries it cites was re-pointed and its anchor text confirmed on
   the new line. The recorded paragraph line of one sibling-guard exemption moved with the doc
-  paragraph. Re-stamped: `review-gate-and-waivers.md`.
+  paragraph. The other three docs listing the changed files as sources make no claim about the
+  closing options, and their citations into the changed files still resolve, so only their
+  timestamps move. Re-stamped: `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
 
 - 2026-10-19T05:22:03Z, second closing option for a medium `docs` or `tests` finding: `review-and-recovery.md` gains
   the option in its Docs-only closure section (one rule site) and step 8 of the detailed
