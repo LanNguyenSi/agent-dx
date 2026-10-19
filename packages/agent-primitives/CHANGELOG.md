@@ -27,15 +27,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every run. `detectKnownZeroTestsEvidence` gains the `pytest`
   detector (`ZeroTestsDetectorName` gains `pytest`) for the two
   zero-tests readings: pytest's own `no tests ran` statement, and a
-  counted summary whose only counts are `skipped` and/or `deselected`
-  (an all-skipped run exits `0` having executed nothing, captured
-  real; a run whose only other counts are `error`s or `xpassed` did
-  execute and is not flagged). Lines that merely contain "passed"
-  elsewhere (vitest's `Tests  3 passed (3)`, PHPUnit's tallies, a
-  `duration_ms` line) keep their previous results. `README.md`,
-  `docs/probe.md` and `assets/skill/SKILL.md` name pytest among the
-  recognized runners; `test/skill-ledger.json`'s `0.17.0` digest is
-  updated for the SKILL.md change.
+  counted summary whose remaining counts, once the neutral
+  `warning`/`warnings` counts are ignored, are all `skipped` and/or
+  `deselected` (an all-skipped run exits `0` having executed nothing,
+  captured real; a warnings-only `1 warning in 0.00s`, exit `5`,
+  collected nothing behind a mere import-time warning, captured real;
+  a run whose other counts are `error`s or `xpassed` did execute and is
+  not flagged). Timings of a minute or more carry pytest's own
+  ` (H:MM:SS)` suffix, allowed right after the seconds in both summary
+  lines (captured real: `1 passed in 61.15s (0:01:01)`). Lines that
+  merely contain "passed" elsewhere (vitest's `Tests  3 passed (3)`,
+  PHPUnit's tallies, a `duration_ms` line) or that merely END in a
+  pytest-shaped summary (an `INFO 2 passed in 3s` log-prefixed line, a
+  `3 passed in 0.01s and more` trailing text) keep their previous,
+  unrecognized results. `README.md`, `docs/probe.md` and
+  `assets/skill/SKILL.md` name pytest among the recognized runners;
+  `assets/skill-ledger.json`'s `0.17.0` digest is updated for the
+  SKILL.md change.
 
 ### Changed
 

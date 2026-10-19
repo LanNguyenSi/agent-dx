@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+collected 1 item
+
+test_p.py .                                                              [100%]
+
+=============================== warnings summary ===============================
+test_p.py::test_ok
+  /work/project/test_p.py:5: UserWarning: x
+    warnings.warn("x")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+========================= 1 passed, 1 warning in 0.00s =========================

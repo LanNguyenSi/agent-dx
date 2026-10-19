@@ -18,11 +18,11 @@ E       RuntimeError: y
 test_plural.py:13: RuntimeError
 =============================== warnings summary ===============================
 test_plural.py::test_w1
-  /Users/lannguyensi/git/pandora/wt/b136-t06/packages/agent-primitives/.scratch-pytest/test_plural.py:25: UserWarning: a
+  /work/project/test_plural.py:25: UserWarning: a
     warnings.warn("a")
 
 test_plural.py::test_w2
-  /Users/lannguyensi/git/pandora/wt/b136-t06/packages/agent-primitives/.scratch-pytest/test_plural.py:30: UserWarning: b
+  /work/project/test_plural.py:30: UserWarning: b
     warnings.warn("b")
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

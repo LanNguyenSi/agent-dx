@@ -557,6 +557,89 @@ describe("detectKnownZeroTestsEvidence(): pytest (captured pytest 8.4.2)", () =>
     ).toBe(true);
   });
 
+  it("pytest: a warnings-only summary (`1 warning in 0.00s`, exit 5: a conftest.py warning at import, a test file collecting nothing) IS flagged -- the warning count is neutral, nothing else ran (round-1 review finding)", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-warning-only"), ""),
+    ).toEqual({ detected: true, via: "pytest" });
+    expect(hasKnownTestSummary(readCaptured("pytest-warning-only"), "")).toBe(
+      true,
+    );
+  });
+
+  it("pytest: a skipped test plus a warning (`1 skipped, 1 warning`, exit 0) IS flagged: ignoring the neutral warning, only a skipped count remains", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-skipped-warning"), ""),
+    ).toEqual({ detected: true, via: "pytest" });
+    expect(
+      hasKnownTestSummary(readCaptured("pytest-skipped-warning"), ""),
+    ).toBe(true);
+  });
+
+  it("pytest: a deselected test plus a warning (`1 deselected, 1 warning`, exit 5) IS flagged, the same neutral-warning reading", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        readCaptured("pytest-deselected-warning"),
+        "",
+      ),
+    ).toEqual({ detected: true, via: "pytest" });
+    expect(
+      hasKnownTestSummary(readCaptured("pytest-deselected-warning"), ""),
+    ).toBe(true);
+  });
+
+  it("pytest: a passing test plus a warning (`1 passed, 1 warning`, exit 0) is NOT flagged: neutrality only ignores the warning, the passed count still executed", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-passed-warning"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-passed-warning"), "")).toBe(
+      true,
+    );
+  });
+
+  it("pytest: a failing test plus a warning (`1 failed, 1 warning`, exit 1) is NOT flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("pytest-failed-warning"), ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary(readCaptured("pytest-failed-warning"), "")).toBe(
+      true,
+    );
+  });
+
+  it("pytest: the real long-run capture (`1 passed in 61.15s (0:01:01)`, a 61s sleep, exit 0) is recognized and NOT flagged: the ` (H:MM:SS)` suffix pytest appends to timings of a minute or more is part of the timing tail (round-1 review finding)", () => {
+    const output = readCaptured("pytest-long-run");
+    expect(output).toContain("1 passed in 61.15s (0:01:01)");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(true);
+  });
+
+  it("pytest: hand-written long-run lines -- `1 passed in 61.23s (0:01:01)` matches with and without `=` padding and `no tests ran in 61.23s (0:01:01)` is a zero-tests detection (the same real shape as the capture above, spelled with fixed digits; the bare `-q` variant of this exact line is the capture's own line with the banner padding removed, so no second 61s run was captured for it)", () => {
+    for (const line of [
+      "1 passed in 61.23s (0:01:01)\n",
+      "= 1 passed in 61.23s (0:01:01) =\n",
+      "====================================== 1 passed in 61.23s (0:01:01) ======================================\n",
+    ]) {
+      expect(detectKnownZeroTestsEvidence(line, "")).toEqual({
+        detected: false,
+      });
+      expect(hasKnownTestSummary(line, "")).toBe(true);
+    }
+    expect(
+      detectKnownZeroTestsEvidence("no tests ran in 61.23s (0:01:01)\n", ""),
+    ).toEqual({ detected: true, via: "pytest" });
+    expect(hasKnownTestSummary("no tests ran in 61.23s (0:01:01)\n", "")).toBe(
+      true,
+    );
+    // And the suffix must stay closed: a trailing suffix-shaped word is
+    // still trailing text the `$` anchor rejects (the finding-1
+    // negative, re-pinned against the widened timing tail).
+    expect(
+      detectKnownZeroTestsEvidence("3 passed in 0.01s and more\n", ""),
+    ).toEqual({ detected: false });
+    expect(hasKnownTestSummary("3 passed in 0.01s and more\n", "")).toBe(false);
+  });
+
   it("pytest: two captures of the same suite with DIFFERENT timing digits (`0.11s` vs `0.25s`) are both recognized and both not flagged (the byte-identity coin flip this closes)", () => {
     const run1 = readCaptured("pytest-timing-run1");
     const run2 = readCaptured("pytest-timing-run2");
@@ -633,6 +716,22 @@ describe("pytest summary-line regex, negative controls", () => {
       });
       expect(hasKnownTestSummary(output, "")).toBe(false);
     }
+  });
+
+  it("a pytest-shaped summary behind a log-prefix (`INFO 2 passed in 3s`, the shape a logging formatter prints when pytest's own output is re-logged) is NOT a summary: the `^` anchor is load-bearing (round-1 review finding)", () => {
+    const output = "INFO 2 passed in 3s\n";
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(false);
+  });
+
+  it("a pytest-shaped summary followed by trailing text that is not pytest's own long-run suffix (`3 passed in 0.01s and more`) is NOT a summary: the `$` anchor is load-bearing (round-1 review finding)", () => {
+    const output = "3 passed in 0.01s and more\n";
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(false);
   });
 });
 

@@ -1596,8 +1596,11 @@ zero-tests reading (which additionally refuses an output that cannot be
 read either way -- see the PHP section's zero-tests paragraphs), and
 pytest's zero-tests readings (its own `no tests ran in X.XXs` line,
 printed with exit `5` when it collected nothing, or a final summary
-line whose only counts are `skipped` and/or `deselected` -- an
-all-skipped run exits `0` while having executed nothing). Any hit is
+line whose remaining counts, once the neutral `warning`/`warnings`
+counts are ignored, are all `skipped` and/or `deselected` -- an
+all-skipped run exits `0` while having executed nothing, and a
+warnings-only `1 warning in X.XXs` (exit `5`) collected nothing behind
+a mere import-time warning). Any hit is
 `status: "inconclusive"`, `reason: "no_tests_executed"`, exit `2`,
 `mutation_probe.result: "not_run"` -- never `"killed"`/`"survived"`, a
 verdict that measured nothing. A baseline that reported no exit code of
@@ -1917,7 +1920,15 @@ same green suite are byte-identical only by chance, and a survivor's
 With the line recognized, neither the zero-tests detectors (nothing
 zero about `95 passed`) nor the generic byte-identical fallback (which
 only ever fires for output no detector recognizes) second-guesses the
-run, on either side of the `--expect` split.
+run, on either side of the `--expect` split. A timing of a minute or
+more keeps the line recognizable too: pytest then appends its own
+` (H:MM:SS)` form right after the seconds (`1 passed in 61.15s
+(0:01:01)`, captured real), and that suffix is part of the accepted
+timing tail in both the counted summary and the `no tests ran` line.
+ANSI-coloured pytest output (`--color=yes`) is not recognized: its
+escape codes break the anchored summary line, so such output keeps the
+old fallback behaviour (the generic byte-identical comparison)
+unchanged.
 
 With no `--timeout` given and a test command that looks like a whole test
 suite rather than one targeted file -- `npm test`, `npm run test`/`npm

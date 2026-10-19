@@ -83,18 +83,22 @@ import { combinedOutput } from "../exec.js";
  * `N passed in X.XXs` and every comma-joined count combination pytest
  * prints (`failed`, `error`/`errors`, `skipped`, `xfailed`, `xpassed`,
  * `warning`/`warnings`, `deselected`), in the bare `-q` form and in the
- * default verbosity's `=`-padded banner form, plus the `no tests ran
- * in X.XXs` line pytest prints (exit 5) when it collected nothing.
+ * default verbosity's `=`-padded banner form, with pytest's own
+ * ` (H:MM:SS)` long-run suffix allowed on the timing tail of runs of a
+ * minute or more, plus the `no tests ran in X.XXs` line pytest prints
+ * (exit 5) when it collected nothing.
  * `hasKnownTestSummary` recognizes all of these, which is what makes a
  * green pytest survivor `survived` on every run rather than by
  * byte-identity luck: pytest's summary carries timing digits
  * (`95 passed in 0.08s`), so two runs of the same green suite are
  * byte-identical only by chance, and the generic fallback's verdict
  * used to flip with them. The zero-tests reading is `no tests ran` or
- * a summary whose only counts are `skipped` and/or `deselected`
+ * a summary whose remaining counts, once the neutral `warning`/
+ * `warnings` counts are ignored, are all `skipped` and/or `deselected`
  * (nothing `passed`, nothing `failed`: an all-skipped run exits `0`
  * while having exercised nothing, the same silent-pass shape as a
- * vitest all-skipped `Tests` line).
+ * vitest all-skipped `Tests` line; a warnings-only `1 warning in
+ * 0.00s`, exit 5, collected nothing).
  */
 
 export type ZeroTestsDetectorName =
@@ -135,21 +139,24 @@ const NODE_TEST_SUMMARY_LINE = /^[ℹ#]\s*tests\s+(\d+)\s*$/m;
  * "passed" somewhere else (vitest's `Tests  3 passed (3)`, PHPUnit's
  * tallies) never matches: the anchors require the count list to start
  * the line and the timing tail to end it. The duration is pytest's own
- * `%.2fs` rendering (`format_duration`), integer or decimal.
+ * `%.2fs` rendering (`format_duration`), integer or decimal; runs of a
+ * minute or more append pytest's own ` (H:MM:SS)` form right after the
+ * seconds (captured real: `1 passed in 61.15s (0:01:01)`).
  */
 const PYTEST_SUMMARY_ITEM =
   "\\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed|warnings?|deselected)";
 
 const PYTEST_SUMMARY_LINE = new RegExp(
-  `^(?:=+ )?((?:${PYTEST_SUMMARY_ITEM})(?:, ${PYTEST_SUMMARY_ITEM})*) in \\d+(?:\\.\\d+)?s(?: =+)?$`,
+  `^(?:=+ )?((?:${PYTEST_SUMMARY_ITEM})(?:, ${PYTEST_SUMMARY_ITEM})*) in \\d+(?:\\.\\d+)?s(?: \\(\\d+:\\d{2}:\\d{2}\\))?(?: =+)?$`,
   "m",
 );
 
 /** The line pytest prints (with exit 5) when it collected nothing at
- * all -- both the bare and the banner-padded form, the same padding the
- * counted summary above allows. */
+ * all -- both the bare and the banner-padded form, the same padding and
+ * the same optional long-run ` (H:MM:SS)` suffix the counted summary
+ * above allows. */
 const PYTEST_NO_TESTS_LINE =
-  /^(?:=+ )?no tests ran in \d+(?:\.\d+)?s(?: =+)?$/m;
+  /^(?:=+ )?no tests ran in \d+(?:\.\d+)?s(?: \(\d+:\d{2}:\d{2}\))?(?: =+)?$/m;
 
 /** pytest's counted final summary line, if the output carries one (the
  * count list only, without any banner padding). */
@@ -161,10 +168,17 @@ function pytestSummaryLine(combined: string): string | undefined {
  * is `skipped` and/or `deselected`, i.e. nothing `passed`, `failed`,
  * errored, xfailed or xpassed. A `1 error`-only or `1 xpassed`-only run
  * did execute (and fails/changes the exit code accordingly), so those
- * are not zero-tests readings. */
+ * are not zero-tests readings. A `warning`/`warnings` count is NEUTRAL
+ * (round-1 review finding): pytest emits a warning for a mere import,
+ * so `1 warning in 0.00s` (exit 5, collected nothing) and
+ * `1 skipped, 1 warning in 0.00s` executed nothing, while a warning
+ * riding alongside a real count changes nothing about this reading. */
 function pytestSummaryIsZeroTests(summary: string): boolean {
   for (const item of summary.split(", ")) {
     const word = item.slice(item.indexOf(" ") + 1);
+    if (word === "warning" || word === "warnings") {
+      continue;
+    }
     if (word !== "skipped" && word !== "deselected") {
       return false;
     }

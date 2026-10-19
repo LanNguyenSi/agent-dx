@@ -665,7 +665,11 @@ touched, not guessed at.
 Raw final-summary-line captures from real `python3 -m pytest
 -p no:cacheprovider` runs (pytest 8.4.2, Python 3.9.6, macOS) against
 tiny throwaway test files in a scratch directory (never committed),
-trimmed only of the capture directory's own absolute `rootdir:` line.
+trimmed of the capture directory's own absolute `rootdir:` line (the
+line is removed), and with the capture directory's own absolute path
+inside warning locations replaced by a neutral `/work/project/` prefix
+(the file names inside the path are kept) -- no fixture here carries
+the capture machine's home directory.
 Unlike the PHP captures, the wall-clock `in X.XXs` timing is kept
 verbatim here: pytest's summary line is recognized BY ITS SHAPE
 (including that timing tail), and the whole point of the recognition is
@@ -704,6 +708,26 @@ twins). Exit codes as observed: pass/skipped-only `0`, fail/error/mixed
 - `pytest-warnings-errors-plural.txt`: two fixture-error tests and two
   warning-emitting tests (`2 passed, 2 warnings, 2 errors`) -- the only
   capture with the plural `errors`/`warnings` count words.
+- `pytest-warning-only.txt`: a `conftest.py` that calls
+  `warnings.warn("x")` at import plus a test file with no `test_*`
+  function (`1 warning in 0.00s`, exit `5`) -- pytest collected
+  NOTHING, which the warning count alone must not hide (the
+  warnings-neutral zero-tests reading; round-1 review finding).
+- `pytest-skipped-warning.txt`: the same import-time warning beside one
+  `@pytest.mark.skip` test (`1 skipped, 1 warning`, exit `0`) --
+  zero-tests once the neutral warning is ignored.
+- `pytest-deselected-warning.txt`: the same import-time warning beside
+  a `-k notthis` run deselecting the only test (`1 deselected, 1
+  warning`, exit `5`) -- zero-tests the same way.
+- `pytest-passed-warning.txt` / `pytest-failed-warning.txt`: one
+  warning-emitting test that passes (`1 passed, 1 warning`, exit `0`)
+  and one that fails after warning (`1 failed, 1 warning`, exit `1`)
+  -- the not-zero side of the same rule: a warning beside a real count
+  changes nothing.
+- `pytest-long-run.txt`: one test sleeping 61s (`1 passed in 61.15s
+  (0:01:01)`, exit `0`) -- pytest's own ` (H:MM:SS)` long-run suffix,
+  captured from a real 61s run, the shape that used to leave the
+  summary line unrecognized (round-1 review finding).
 - `pytest-timing-run1.txt` / `pytest-timing-run2.txt`: two real runs of
   the same single-test suite with deliberately different sleeps, pinned
   at different timing digits (`1 passed in 0.11s` vs `1 passed in

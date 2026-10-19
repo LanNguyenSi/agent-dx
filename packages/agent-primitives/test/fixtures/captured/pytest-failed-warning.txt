@@ -1,0 +1,24 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+collected 1 item
+
+test_f.py F                                                              [100%]
+
+=================================== FAILURES ===================================
+___________________________________ test_bad ___________________________________
+
+    def test_bad():
+        warnings.warn("x")
+>       assert False
+E       assert False
+
+test_f.py:6: AssertionError
+=============================== warnings summary ===============================
+test_f.py::test_bad
+  /work/project/test_f.py:5: UserWarning: x
+    warnings.warn("x")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test_f.py::test_bad - assert False
+========================= 1 failed, 1 warning in 0.01s =========================
