@@ -331,7 +331,7 @@ directory and the subagents.
    Routine decisions within the delegated contract remain the orchestrator's
    responsibility; an out-of-scope change requires an operator decision.
    Markdown records evidence of real authority and never grant it by themselves.
-   The docs-only closing option is
+   The docs-only and the docs-or-test medium closing options are
    in [review and recovery](review-and-recovery.md).
    Halt at the first
    `recurrence: repeated` finding whose class a previous round's fix already addressed and

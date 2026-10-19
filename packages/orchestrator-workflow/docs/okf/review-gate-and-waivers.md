@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-10-18T21:02:00Z
+timestamp: 2026-10-19T05:59:26Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -12,6 +12,7 @@ sources:
   - packages/orchestrator-workflow/assets/templates/05-review-findings.md
   - packages/orchestrator-workflow/assets/templates/06-handoff.md
   - packages/orchestrator-workflow/test/docs-consistency.test.ts
+  - packages/orchestrator-workflow/test/charter.test.ts
   - packages/orchestrator-workflow/test/template-markers.test.ts
   - packages/orchestrator-workflow/test/decision-authority.test.ts
   - packages/orchestrator-workflow/CHANGELOG.md
@@ -163,6 +164,44 @@ is now its one site; the charter only points to it
 the detailed workflow does the same. It is
 pinned as sentences at that site only, in
 `test/docs-consistency.test.ts:3090#"safety core: the docs-only closing delta stays narrowly bounded at the review and recovery reference"`.
+
+A second closing option sits in the same section, with its own conditions
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:178#"A second closing option covers a medium finding in the category"`).
+After independent review, the orchestrator may close a *medium* finding in the
+category the reviewer reported (`docs` or `tests`) without another reviewer
+round when the task's entire unreviewed delta consists of fixes of two classes:
+only explanatory text, or tests added or existing tests tightened with no
+assertion removed or loosened and no test deleted or skipped
+(`review-and-recovery.md:186#"configuration, not explanatory text. The second class adds tests or tightens"`).
+A comment that a tool reads (lint, type-check, coverage, formatter, or
+test-environment directives, shebangs, build tags) counts as configuration
+(`review-and-recovery.md:184#"semantics. A comment that a tool reads (lint, type-check, coverage, formatter,"`),
+and changing a shared test helper, fixture, snapshot, golden file, or allowlist or exemption entry, or narrowing a test, counts as loosening unless every dependent test is
+shown unchanged
+(`review-and-recovery.md:188#"skipped. Changing a shared test helper, fixture, snapshot, or golden file,"`).
+Unlike the first option it may touch test files, which is why the bound and
+the probe requirement below exist: a test change can hide a behaviour change.
+A fix that changes code, configuration, or instruction semantics keeps the
+reviewer round
+(`review-and-recovery.md:191#"unchanged. A fix that changes code, configuration, or instruction semantics"`),
+a finding that fires the Round-2 halt signal and any fix on a task whose
+Review-round escalation budget has fired are not eligible, so those rules
+govern
+(`review-and-recovery.md:193#"fires the Round-2 halt signal, and any fix on a task whose Review-round"`),
+and high and critical findings stay blocking under both options
+(`review-and-recovery.md:196#"critical findings stay blocking: neither closing option closes one, and"`).
+The closure is recorded in the same `05-review-findings.md` row, Decision
+`accepted`, with the finding, the fix commit, the test run as the package's
+full test command (plus the type-check when a test or source file was touched)
+with its exit code, a killed mutation probe for each new or tightened test, and
+the bundle check result where the repository has a knowledge bundle
+(`review-and-recovery.md:197#"accepting one follows the waiver rules. Record the closure in the"`). It is
+not a review round, so it counts toward neither the test-adequacy cap, the
+Round-2 halt rule, the Review-round escalation budget nor the Fix-regression
+decision point
+(`review-and-recovery.md:203#"knowledge bundle. Such a closure is not a review round: it counts toward none"`). The clauses are pinned as whole sentences
+in `test/docs-consistency.test.ts:9800#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
+their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.
 
 ## The Decision legend in 05-review-findings.md
 
