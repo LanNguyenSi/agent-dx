@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-10-19T05:59:26Z
+timestamp: 2026-10-19T06:14:44Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -814,13 +814,14 @@ requirement; `adversarial` adds one discriminating probe or negative
 control per acceptance criterion, an active search of the neighbouring
 scenario space, an attempt to break the claimed invariant, and a list of
 failed break attempts. the delegation and tiers reference states the selection rule by risk
-class (`adversarial` at minimum for security judgment, install/deploy
-scripts, hand-edited lockfiles, cross-major overrides, or anything the
-operator flags high-risk; `normal` only for docs, renames, or batch
-cosmetics; `rigorous` otherwise) and forbids pairing `adversarial` with
+class (`adversarial` for security judgment, sandbox or isolation code,
+installers and install/deploy scripts, hand-edited lockfiles, cross-major
+overrides, a change to the repository's declared safety core, or anything the
+operator flags high-risk; `rigorous` for all other code and instruction
+changes; `normal` for docs-only deltas) and forbids pairing `adversarial` with
 the `-medium` reviewer tier as a budget mismatch that names probes
 without the effort to run them
-(`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:50-51#"a budget mismatch that names probes"`);
+(`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:68#"a budget mismatch"`);
 tiers themselves are unchanged by this axis.
 
 `rigorous` and `adversarial` carry a withdrawal rule: a finding that does
@@ -855,9 +856,13 @@ pins the field and its three-method enum at the reviewer prompt, the
 `withdrawn` sub-fields are pinned the same way, and a byte-for-byte
 cross-copy equality check covers the combined block
 (`test/docs-consistency.test.ts:1078#"the method_applied/withdrawn block is byte-for-byte identical between SKILL.md and reviewer.md"`). The
-unnamed-method default in `reviewer.md` and the selection-rule sentence in
-the detailed workflow reference, including the
-never-`adversarial`-on-`-medium` constraint, carry no sentence pin.
+unnamed-method default in `reviewer.md` carries no sentence pin. The class
+list and the rules under it, including the
+never-`adversarial`-on-`-medium` constraint, are pinned as whole sentences at
+their one site in the delegation and tiers reference
+(`test/docs-consistency.test.ts:9886#"safety core: the review method and tier class list stays pinned"`),
+and `test/charter.test.ts` pins that the class mapping appears at that site only
+(`test/charter.test.ts:202#"the review method and tier class mapping is normative once"`).
 
 Motivation and the anchoring dogfood evidence live in
 `CHANGELOG.md:#[0.32.0]#"A review-method axis, orthogonal to the effort tier"`,
