@@ -20,7 +20,7 @@ not how skeptical to sound.
 
 | Method | Obligations |
 |---|---|
-| `normal` | Read the diff and the spec; run the declared tests once; findings come only from what you read. `normal` adds nothing beyond the obligations already stated in the Check list and the Rules below, and suspends none of them: the empirical-reproduction rule, the GitHub Actions replay rules when the briefing carries them, and the probe replay of a run mode `single` briefing apply under every method. `normal` only means no further independent reproduction beyond what those already require. Fits docs, renames, and batch cosmetics. |
+| `normal` | Read the diff and the spec; run the declared tests once; findings come only from what you read. `normal` adds nothing beyond the obligations already stated in the Check list and the Rules below, and suspends none of them: the empirical-reproduction rule, the GitHub Actions replay rules when the briefing carries them, and the probe replay of a run mode `single` briefing apply under every method. `normal` only means no further independent reproduction beyond what those already require. Fits docs-only deltas. |
 | `rigorous` (default) | Everything `normal` requires, plus: your own extract of the change, a base-attribution control, classifying every change, and reproducing every empirical claim yourself. `reproduction` and `matches_implementer_claim` are mandatory, as already required below. |
 | `adversarial` | Everything `rigorous` requires, plus: one discriminating probe or negative control per acceptance criterion; an active search of the neighbouring scenario space (environment, install modes, platform, ordering, concurrency); an attempt to break the claimed invariant; and an explicit list of break attempts that failed. |
 

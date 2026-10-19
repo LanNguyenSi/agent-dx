@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-10-19T05:59:26Z
+timestamp: 2026-10-19T06:32:03Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -442,18 +442,30 @@ install with the next kit re-install. No test pins the section's clauses;
 `test/probe-plans-recovery.test.ts` only checks that every packaged reference
 is routed from the entrypoint.
 
-## Ceremony rules: docs-only review default, pinned prose
+## Ceremony rules: review method by risk class, pinned prose
 
 Two rules scale ceremony without touching the gate above.
 
-Docs-only review default (`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:54#"- For a review round whose entire delta contains only explanatory"`):
-"For a review round whose entire delta contains only explanatory documentation, comments, or citations and contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed".
-The sentence declares itself a refinement of the general tier default for
-that one class. "A review round that touches an instruction, policy, template
-or prompt file (for example a SKILL.md instruction) keeps the general default,
-whatever the file type, and the minimums above are unaffected."
-The charter states neither the general default nor this refinement; both sit
-in `delegation-and-tiers.md`, and step 7 of the detailed workflow points there.
+Review method and tier by risk class (`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:44#"### Review method and reviewer tier by risk class"`):
+the section maps a change class to a method and a reviewer tier in three rows and is
+the one place that does so. `adversarial` on the unsuffixed reviewer or
+`reviewer-xhigh` covers security judgment, sandbox or isolation code, installers
+and install or deploy scripts, hand-edited lockfiles, cross-major overrides, a
+change to the safety rules the repository declares as its core, and anything the
+operator flags high-risk (`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:51#"on the unsuffixed reviewer (high) or"`).
+`rigorous` on `reviewer-medium` covers all other code changes, tests and
+behaviour-changing configuration included, and all other changes to instruction,
+prompt, template, or policy files. `normal` on `reviewer-medium` covers a delta
+that "contains only explanatory documentation, comments, or citations and contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior",
+and a delta that touches an instruction, policy, template, or prompt file is never docs-only for this mapping
+(`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:59#"a delta that contains only explanatory"`).
+The rules under the rows: the tier a row names is the class default (a higher tier is the recorded non-default choice, a lower one is never chosen), a delta spanning classes takes its highest class and a
+doubt goes up, fix and delta rounds keep the task's class, the operator flag only
+raises, the closing options in `review-and-recovery.md` are not review rounds and are
+governed there, and the safety core is the one each repository declares, the kit's installed
+trust boundary, outward-action, review-gate, and reviewer read-only rules included.
+The charter states none of this; it sits in `delegation-and-tiers.md`, and step 7
+of the detailed workflow points there.
 
 Pinned-prose changes (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:132#"## Pinned-prose changes"`)
 cover a change to documentation wording that a test pins or could pin. The

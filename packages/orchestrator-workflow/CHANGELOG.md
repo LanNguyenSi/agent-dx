@@ -36,6 +36,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which several review rounds existed only for such mediums. Installed skill
   files report as outdated until refreshed.
 
+- The review method and reviewer tier now follow the risk class of the change,
+  mapped at one site, the Review method section of
+  `references/delegation-and-tiers.md`. `adversarial` on the unsuffixed
+  reviewer or `reviewer-xhigh` covers security judgment, sandbox or isolation
+  code, installers and install or deploy scripts, hand-edited lockfiles,
+  cross-major overrides, a change to the safety rules the repository declares
+  as its core, and anything the operator flags high-risk; `rigorous` on
+  `reviewer-medium` covers all other code changes (tests and behaviour-changing
+  configuration included) and all other instruction, prompt, template, or
+  policy changes; `normal` on `reviewer-medium` stays the docs-only row, and a
+  delta touching such a file is never docs-only. A row's tier is the class
+  default, a higher tier the recorded non-default choice, a lower one never
+  chosen. A delta spanning classes takes its highest class and a doubt goes
+  up, fix and delta rounds keep the task's class, and the operator flag can
+  only raise. This routing replaces the sentence that kept the general default
+  for a round touching an instruction file, and the reviewer prompt's `normal`
+  row now fits docs-only deltas; never pairing `adversarial` with `-medium` is
+  unchanged. Anchored by an observed run (high-severity findings came from one
+  security-relevant task). Installed files report as outdated until refreshed.
+
 ## [0.46.0] - 2026-10-18
 
 - `doctor` now warns when a target that selects the codex harness has a

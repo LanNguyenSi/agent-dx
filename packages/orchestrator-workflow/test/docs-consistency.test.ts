@@ -167,10 +167,10 @@ function phraseBoundedSlice(
  *      charter (agents-md-section.md) and trust-and-outward.md.
  *   2. Outward actions only by the orchestrator. Sites: the charter and
  *      trust-and-outward.md; pinned in outward-actions.test.ts.
- *   3. The review gate severities and waiver authority. Sites: the charter
- *      and, for the docs-only closing options, review-and-recovery.md.
- *   4. The reviewer's read-only rule. Site: the reviewer prompt
- *      (assets/agents/reviewer.md).
+ *   3. The review gate severities and waiver authority. Sites: the charter,
+ *      for the docs-only closing options review-and-recovery.md, and, for the
+ *      review method class mapping, delegation-and-tiers.md.
+ *   4. The reviewer's read-only rule. Site: assets/agents/reviewer.md.
  *
  * Rule 1 also lives in runbook-selection.test.ts. charter.test.ts rejects a
  * second copy of a pinned sentence in the charter, SKILL.md, or a reference.
@@ -9874,5 +9874,117 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     expect(option).toContain(
       "Such a closure is not a review round: it counts toward none of the cap in Pinned-prose changes, the Round-2 halt rule, the Review-round escalation budget, or the Fix-regression decision point.",
     );
+  });
+});
+
+/**
+ * Safety core: the review method and reviewer tier follow the risk class of
+ * the change. The class list is pinned as whole sentences at its one site,
+ * the delegation and tiers reference, so a safety-core class cannot fall to
+ * the medium tier unnoticed. Every other file points there and is not pinned.
+ */
+describe("safety core: the review method and tier class list stays pinned at the delegation and tiers reference", () => {
+  const tiers = readAsset("skill/references/delegation-and-tiers.md");
+  const sectionStart = tiers.indexOf(
+    "### Review method and reviewer tier by risk class",
+  );
+  const sectionEnd = tiers.indexOf("### Advisor");
+  const section = unwrap(tiers.slice(sectionStart, sectionEnd));
+
+  it("sits between its heading and the Advisor heading (sanity: not vacuously true)", () => {
+    expect(sectionStart).toBeGreaterThanOrEqual(0);
+    expect(sectionEnd).toBeGreaterThan(sectionStart);
+  });
+
+  it("names the one site that maps a change class to a method and a tier", () => {
+    expect(section).toContain(
+      "This section is the one place that maps a change class to a method and a reviewer tier; every other file points here.",
+    );
+  });
+
+  it("keeps the safety-core classes adversarial on a high or xhigh reviewer", () => {
+    expect(section).toContain(
+      "`adversarial`, on the unsuffixed reviewer (high) or `reviewer-xhigh`: security judgment, sandbox or isolation code, installers and install or deploy scripts, hand-edited lockfiles, cross-major overrides, a change to the safety rules the repository declares as its core, and anything the operator flags high-risk.",
+    );
+  });
+
+  it("puts all other code and instruction changes on rigorous at the medium tier, tests and behaviour-changing configuration included", () => {
+    expect(section).toContain(
+      "`rigorous`, on `reviewer-medium`: all other code changes, tests and CI or configuration that changes behaviour included, and all other changes to instruction, prompt, template, or policy files.",
+    );
+  });
+
+  it("puts only docs-only deltas on normal at the medium tier", () => {
+    expect(section).toContain(
+      "`normal`, on `reviewer-medium`: a delta that contains only explanatory documentation, comments, or citations and contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior.",
+    );
+    expect(section).toContain(
+      "A delta that touches an instruction, policy, template, or prompt file is never docs-only for this mapping: it takes `rigorous`, or `adversarial` when it touches the repository's declared safety core.",
+    );
+    expect(section).not.toContain("counts as documentation");
+  });
+
+  it("states the tier a row names as the class default, a higher tier as the recorded non-default choice, and a lower tier as never chosen", () => {
+    expect(section).toContain(
+      "The tier a row names is the default reviewer tier for that class. A higher tier is the non-default choice, recorded with a one-line reason; a lower tier than the row names is never chosen.",
+    );
+  });
+
+  it("points the Effort tiers bullet at this section for the reviewer's default tier per class", () => {
+    expect(unwrap(tiers)).toContain(
+      "The reviewer's default tier per change class comes from the Review method and reviewer tier by risk class section below.",
+    );
+  });
+
+  it("leaves the closing options of the review and recovery reference to that reference", () => {
+    expect(section).toContain(
+      "The closing options in [review and recovery](review-and-recovery.md) are not review rounds and are governed there, not here.",
+    );
+  });
+
+  it("never pairs adversarial with the medium tier", () => {
+    expect(section).toContain(
+      "Never pair `adversarial` with the `-medium` reviewer tier, a budget mismatch that names probes without the effort to run them; tiers themselves are unchanged by this axis.",
+    );
+  });
+
+  it("runs the same method mapping on the unsuffixed reviewer where tier variants are not installed", () => {
+    expect(section).toContain(
+      "Where tier variants are not installed, the unsuffixed reviewer runs with the same method mapping.",
+    );
+  });
+
+  it("has the orchestrator classify, takes the highest class of a spanning delta, and sends a doubt up", () => {
+    expect(section).toContain(
+      "The orchestrator classifies the delta and records the class in the briefing.",
+    );
+    expect(section).toContain(
+      "A delta that spans classes takes the method and tier of its highest class, and a doubt between two classes goes to the higher one.",
+    );
+  });
+
+  it("keeps the task's class across fix and delta rounds", () => {
+    expect(section).toContain(
+      "Fix and delta rounds of a task keep the task's class: a round never drops below the highest class an earlier round of the task was given, whatever its own delta contains.",
+    );
+  });
+
+  it("lets the operator flag only raise a class", () => {
+    expect(section).toContain(
+      "The operator's high-risk flag can only raise a class to `adversarial`; it never lowers one.",
+    );
+  });
+
+  it("leaves the safety core to the repository's declaration and names the kit's installed rules as part of it", () => {
+    expect(section).toContain(
+      "The safety core is declared per repository, as Pinned-prose changes in [review and recovery](review-and-recovery.md) says.",
+    );
+    expect(section).toContain(
+      "The rules this kit installs for the instruction trust boundary (runbook authority included), outward actions, the review gate, and the reviewer's read-only rule belong to that core wherever the kit is installed.",
+    );
+  });
+
+  it("does not restate the old rule that an instruction-file round keeps the general default", () => {
+    expect(section).not.toContain("keeps the general default");
   });
 });
