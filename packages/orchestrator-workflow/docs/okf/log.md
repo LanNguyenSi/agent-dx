@@ -1,5 +1,17 @@
 # Bundle log
 
+- 2026-10-19T05:22:03Z, second closing option for a medium `docs` or `tests` finding: `review-and-recovery.md` gains
+  the option in its Docs-only closure section (one rule site) and step 8 of the detailed
+  workflow names both options. `review-gate-and-waivers.md` gains a paragraph on the option, with
+  anchored citations into the new lines and its pins in `docs-consistency.test.ts` and
+  `charter.test.ts`; both tests are now listed as sources. The new `[Unreleased]` entry shifts
+  the later `CHANGELOG.md` lines by twenty-one, so every anchored log citation of the two
+  released entries it cites was re-pointed and its anchor text confirmed on the new line. The
+  recorded paragraph line of one sibling-guard exemption moved with the new paragraph. The other
+  three re-stamped docs make no claim about the closing rules, and their citations into the
+  shifted files still resolve. Re-stamped: `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
 - 2026-10-18T21:02:00Z, release 0.46.0: the `[Unreleased]` entries move under a new `## [0.46.0]` heading,
   which shifts every later `CHANGELOG.md` line by two; each anchored log citation into those
   lines was re-pointed and its anchor text confirmed on the new line. The docs that list
