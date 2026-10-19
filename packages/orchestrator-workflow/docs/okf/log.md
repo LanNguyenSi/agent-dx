@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-10-19T08:14:57Z, release 0.47.0: the `[Unreleased]` entries move under a new `## [0.47.0]` heading,
+  which shifts every later `CHANGELOG.md` line by two; each anchored log citation into those
+  lines was re-pointed and its anchor text confirmed on the new line. The docs that list
+  `CHANGELOG.md` as a source make no claim about line positions, so their claims are unchanged
+  and only the timestamps move. Re-stamped: `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`.
 - 2026-10-19T06:32:03Z, review method and tier by risk class, review fix round: the Review method section of
   `delegation-and-tiers.md` now says the tier a row names is the class default (a higher tier the
   recorded non-default choice, a lower one never chosen), the Effort tiers bullet points to the section
