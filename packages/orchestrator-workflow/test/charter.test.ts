@@ -198,3 +198,18 @@ describe("the docs-or-test medium closing option is normative once", () => {
     }
   });
 });
+
+describe("the review method and tier class mapping is normative once", () => {
+  it("sits only in delegation-and-tiers.md", () => {
+    const clauses = [
+      "This section is the one place that maps a change class to a method and a reviewer tier; every other file points here.",
+      "`adversarial`, on the unsuffixed reviewer (high) or `reviewer-xhigh`: security judgment, sandbox or isolation code, installers and install or deploy scripts, hand-edited lockfiles, cross-major overrides, a change to the safety rules the repository declares as its core, and anything the operator flags high-risk.",
+      "`rigorous`, on `reviewer-medium`: all other code changes, tests and CI or configuration that changes behaviour included, and all other changes to instruction, prompt, template, or policy files.",
+      "Never pair `adversarial` with the `-medium` reviewer tier, a budget mismatch that names probes without the effort to run them; tiers themselves are unchanged by this axis.",
+      "A delta that spans classes takes the method and tier of its highest class, and a doubt between two classes goes to the higher one.",
+    ];
+    for (const clause of clauses) {
+      expect(sitesOf(clause)).toEqual(["references/delegation-and-tiers.md"]);
+    }
+  });
+});

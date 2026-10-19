@@ -236,7 +236,7 @@ directory and the subagents.
    reviewer can tell whether a diff touches an operator runbook. Pick the reviewer tier and name a
    `review_method` in the briefing, as
    [delegation and tiers](delegation-and-tiers.md) says; every briefing names
-   one, and that file also states the default for a docs-only delta.
+   one, and that file maps each change class to its method and tier.
    For a change whose acceptance rests on tests that pin documentation wording,
    write the briefing as the Pinned-prose changes section of [review and
    recovery](review-and-recovery.md) requires.

@@ -40,27 +40,49 @@ briefing, before spawning the advisor, and before changing a model.
   the reviewer and the advisor. This holds whether or not tier variants are
   installed; it is not gated on `--tiers`.
 
-### Review method and the docs-only default
+### Review method and reviewer tier by risk class
 
-- Every reviewer briefing names a `review_method`: `normal | rigorous |
-  adversarial`, an obligation set orthogonal to the effort tier.
-  `adversarial` is the minimum for security judgment, install/deploy
-  scripts, hand-edited lockfiles, cross-major overrides, or anything the
-  operator flags high-risk; `normal` fits only docs, renames, or batch
-  cosmetics; `rigorous` is the default otherwise. Never pair `adversarial`
-  with the `-medium` reviewer tier, a budget mismatch that names probes
-  without the effort to run them; tiers themselves are unchanged by this
-  axis.
-- For a review round whose entire delta contains only explanatory
+Every reviewer briefing names a `review_method`: `normal | rigorous |
+adversarial`, an obligation set orthogonal to the effort tier. This section is
+the one place that maps a change class to a method and a reviewer tier; every
+other file points here.
+
+- `adversarial`, on the unsuffixed reviewer (high) or `reviewer-xhigh`:
+  security judgment, sandbox or isolation code, installers and install or
+  deploy scripts, hand-edited lockfiles, cross-major overrides, a change to
+  the safety rules the repository declares as its core, and anything the
+  operator flags high-risk.
+- `rigorous`, on `reviewer-medium`: all other code changes, tests and CI or
+  configuration that changes behaviour included, and all other changes to
+  instruction, prompt, template, or policy files.
+- `normal`, on `reviewer-medium`: a delta that contains only explanatory
   documentation, comments, or citations and contains no source- or test-file
   edits and no semantic change to executable commands, configuration, policy,
-  instructions, or behavior, default to the `-medium` reviewer tier with
-  `review_method: normal` where tier variants are installed. This refines the
-  general tier default for that one class only; a higher tier there is the
-  non-default choice, recorded with a one-line reason. A review round that
-  touches an instruction, policy, template or prompt file (for example a
-  SKILL.md instruction) keeps the general default, whatever the file type,
-  and the minimums above are unaffected.
+  instructions, or behavior. Explanatory prose in an instruction file that
+  changes no instruction semantics counts as documentation; a change to what
+  an instruction demands is an instruction change and takes the row its
+  content belongs to.
+
+The rules that apply to the three rows:
+
+- Never pair `adversarial` with the `-medium` reviewer tier, a budget mismatch
+  that names probes without the effort to run them; tiers themselves are
+  unchanged by this axis.
+- Where tier variants are not installed, the unsuffixed reviewer runs with the
+  same method mapping.
+- The orchestrator classifies the delta and records the class in the
+  briefing. A delta that spans classes takes the method and tier of its
+  highest class, and a doubt between two classes goes to the higher one.
+- Fix and delta rounds of a task keep the task's class: a round never drops
+  below the highest class an earlier round of the task was given, whatever
+  its own delta contains.
+- The operator's high-risk flag can only raise a class to `adversarial`; it
+  never lowers one.
+- The safety core is declared per repository, as Pinned-prose changes in
+  [review and recovery](review-and-recovery.md) says. The rules this kit
+  installs for the instruction trust boundary (runbook authority included),
+  outward actions, the review gate, and the reviewer's read-only rule belong
+  to that core wherever the kit is installed.
 
 ### Advisor
 
