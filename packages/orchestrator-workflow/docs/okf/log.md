@@ -1,5 +1,20 @@
 # Bundle log
 
+- 2026-10-19T06:32:03Z, review method and tier by risk class, review fix round: the Review method section of
+  `delegation-and-tiers.md` now says the tier a row names is the class default (a higher tier the
+  recorded non-default choice, a lower one never chosen), the Effort tiers bullet points to the section
+  for the reviewer's default tier per class, the `normal` row says a delta touching an instruction,
+  policy, template, or prompt file is never docs-only, and the closing options of
+  `review-and-recovery.md` are named as not review rounds. `review-gate-and-waivers.md` renames its
+  Ceremony rules section heading to match (no document or test cited the old heading text), quotes the
+  fixed `normal` row, and cites the heading, the `adversarial` row line and the `normal` row line at
+  their new lines, each one lower. `subagent-contracts-superset.md` re-points its
+  never-`adversarial`-on-`-medium` citation four lines down and `model-preselection.md` its Models
+  bullet citation six lines down, each anchor text confirmed on the new line. The `[Unreleased]` bullet keeps its line count, so no
+  `CHANGELOG.md` citation moved, and the consistency test keeps its line count outside its appended
+  describe. `run-state-lifecycle-and-markers.md` lists `CHANGELOG.md` and the consistency test as
+  sources and makes no claim about the review method: re-verified. Re-stamped: the four docs above.
+
 - 2026-10-19T06:14:44Z, review method and tier mapped by risk class: the Review method section of
   `delegation-and-tiers.md` (now headed "Review method and reviewer tier by risk class") maps three
   classes to a method and a tier at one site, and the reviewer prompt's `normal` row fits docs-only
