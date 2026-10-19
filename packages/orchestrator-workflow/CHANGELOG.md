@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The review gate's closing rule in `references/review-and-recovery.md` (the
   Docs-only closure section, still its one site) gains a second closing
   option. After independent review, the orchestrator may close a medium
-  finding in category `docs` or `tests` without another reviewer round when
-  the entire unreviewed delta is explanatory text only (documentation,
+  finding in the category the reviewer reported (`docs` or `tests`) without
+  another reviewer round when the task's entire unreviewed delta is explanatory text only (documentation,
   comments, citations, or explanatory prose in an instruction file that
   changes no instruction semantics) or adds tests or tightens existing ones
   with no assertion removed or loosened and no test deleted or skipped. A fix
@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   options. A comment that a tool reads (lint, type-check, coverage,
   formatter, or test-environment directives, shebangs, build tags) counts as
   configuration, not explanatory text, and changing a shared test helper,
-  fixture, snapshot, golden file, or allowlist entry, or narrowing a test,
-  counts as loosening. A finding that fires the Round-2 halt signal, and any
+  fixture, snapshot, golden file, or allowlist or exemption entry, or narrowing a test,
+  counts as loosening unless every dependent test is shown unchanged. A finding that fires the Round-2 halt signal, and any
   fix on a task whose Review-round escalation budget has fired, is not
   eligible: those rules govern. The closure is recorded in the same
   `05-review-findings.md` row (Severity and Decision headers unchanged,

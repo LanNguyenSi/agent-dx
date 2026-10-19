@@ -174,11 +174,11 @@ only explanatory text, or tests added or existing tests tightened with no
 assertion removed or loosened and no test deleted or skipped
 (`review-and-recovery.md:186#"configuration, not explanatory text. The second class adds tests or tightens"`).
 A comment that a tool reads (lint, type-check, coverage, formatter, or
-test-environment directives, shebangs, build tags) counts as configuration, and
-changing a shared test helper, fixture, snapshot, golden file, or allowlist
-entry, or narrowing a test, counts as loosening unless every dependent test is
+test-environment directives, shebangs, build tags) counts as configuration
+(`review-and-recovery.md:184#"semantics. A comment that a tool reads (lint, type-check, coverage, formatter,"`),
+and changing a shared test helper, fixture, snapshot, golden file, or allowlist or exemption entry, or narrowing a test, counts as loosening unless every dependent test is
 shown unchanged
-(`review-and-recovery.md:184#"semantics. A comment that a tool reads (lint, type-check, coverage, formatter,"`).
+(`review-and-recovery.md:188#"skipped. Changing a shared test helper, fixture, snapshot, or golden file,"`).
 Unlike the first option it may touch test files, which is why the bound and
 the probe requirement below exist: a test change can hide a behaviour change.
 A fix that changes code, configuration, or instruction semantics keeps the
