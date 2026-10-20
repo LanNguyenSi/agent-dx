@@ -1283,6 +1283,33 @@ describe("planLinks: a refusal another candidate of the round supersedes is not 
     }
   });
 
+  it("returns the superseded refusal in supersededRefusals, with the text it would have carried, and not in warnings", () => {
+    const { root, named, operator } = vendorShapes();
+
+    for (const candidates of [
+      [named, operator],
+      [operator, named],
+    ]) {
+      const plan = planLinks(candidates, ctx(root));
+
+      expect(plan.warnings).toEqual([]);
+      expect(plan.supersededRefusals).toEqual([
+        `skipped linking ${named.absDir} (${named.namedBy}): it resolves ` +
+          "outside the repository root; a directory named by repository " +
+          "content must both sit inside the root and resolve inside it",
+      ]);
+    }
+  });
+
+  it("supersededRefusals stays empty when the refusal stands: it is reported as a warning, once", () => {
+    const { root, named } = vendorShapes();
+
+    const plan = planLinks([named], ctx(root));
+
+    expect(plan.supersededRefusals).toEqual([]);
+    expect(plan.warnings).toHaveLength(1);
+  });
+
   it("keeps the warning, unchanged, when nothing links that destination", () => {
     const { root, named } = vendorShapes();
 

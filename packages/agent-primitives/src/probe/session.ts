@@ -178,6 +178,12 @@ export interface IsolationField {
    * link the repository named from one the operator typed. Empty for an
    * `inplace` run and for a copy whose links all came from `--link`. */
   linkedNamedBy: { path: string; namedBy: string }[];
+  /** The provenance refusals a link this run accepted superseded (see
+   * `WorktreeSyncSuccess.supersededRefusals`): what repository content
+   * asked for was refused and quietly overridden, now visible without
+   * becoming a warning. Present ONLY when non-empty, absent otherwise,
+   * so every envelope that is not that shape keeps its exact bytes. */
+  supersededRefusals?: string[];
   syncedTrackedFiles: number;
   syncedUntrackedFiles: number;
 }

@@ -190,6 +190,87 @@ describe("probe --plan: a plan outside the repository gets the --link policy for
     ).toHaveLength(1);
   }, 60000);
 
+  it("a composer vendor-dir superseded by the operator's --link: the envelope carries the refusal in isolation.supersededRefusals, not in warnings", async () => {
+    const fx = makeFixture();
+    fs.writeFileSync(
+      path.join(fx.repo, "composer.json"),
+      JSON.stringify({ config: { "vendor-dir": "lib" } }),
+    );
+
+    const run = await spawnCli([
+      "-C",
+      fx.repo,
+      "-l",
+      path.join(fx.base, "logs-superseded"),
+      "-m",
+      "100000",
+      "probe",
+      "--file",
+      "src/a.sh",
+      "-n",
+      "1",
+      "-M",
+      "x=1",
+      "-w",
+      "x=2",
+      "-t",
+      "node test.js",
+      "--link",
+      "lib",
+    ]);
+    const envelope = JSON.parse(run.stdout) as {
+      status: string;
+      warnings: string[];
+      isolation?: {
+        linked?: string[];
+        supersededRefusals?: string[];
+      };
+    };
+
+    expect(envelope.status).toBe("killed");
+    expect(
+      envelope.warnings.filter((w) => w.includes("skipped linking")),
+    ).toEqual([]);
+    expect(envelope.isolation?.linked).toContain(path.join(fx.repo, "lib"));
+    expect(envelope.isolation?.supersededRefusals).toHaveLength(1);
+    expect(envelope.isolation?.supersededRefusals?.[0]).toContain(
+      "resolves outside the repository root",
+    );
+  }, 60000);
+
+  it("isolation.supersededRefusals stays absent when no refusal was superseded", async () => {
+    const fx = makeFixture();
+
+    const run = await spawnCli([
+      "-C",
+      fx.repo,
+      "-l",
+      path.join(fx.base, "logs-plain"),
+      "-m",
+      "100000",
+      "probe",
+      "--file",
+      "src/a.sh",
+      "-n",
+      "1",
+      "-M",
+      "x=1",
+      "-w",
+      "x=2",
+      "-t",
+      "node test.js",
+      "--link",
+      "lib",
+    ]);
+    const envelope = JSON.parse(run.stdout) as {
+      status: string;
+      isolation?: { supersededRefusals?: string[] };
+    };
+
+    expect(envelope.status).toBe("killed");
+    expect(envelope.isolation?.supersededRefusals).toBeUndefined();
+  }, 60000);
+
   it("resolves a relative --plan path against -C, and honours an outside plan reached through a symlinked directory that lies outside too", async () => {
     const fx = makeFixture();
     writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);

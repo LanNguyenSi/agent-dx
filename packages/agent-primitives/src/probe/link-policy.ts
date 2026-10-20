@@ -181,8 +181,18 @@ export interface LinkPolicyContext {
 export interface LinkPlan {
   /** Accepted candidates, in the order they were evaluated. */
   links: PlannedLink[];
-  /** One line per refused or skipped candidate, in evaluation order. */
+  /** One line per refused or skipped candidate, in evaluation order.
+   * A provenance refusal superseded by an accepted candidate for the
+   * same destination is NOT here (it would contradict `links`); it is
+   * in `supersededRefusals` instead. */
   warnings: string[];
+  /** The provenance refusals an accepted candidate for the same
+   * destination superseded, with the very warning text they would have
+   * carried. Kept separate from `warnings` because they are not
+   * warnings (the destination IS linked, so the refusal's advice no
+   * longer stands) but must not vanish either: what was refused, and
+   * what overrode the refusal, stays readable to whoever asks. */
+  supersededRefusals: string[];
 }
 
 /**
@@ -882,17 +892,23 @@ export function planLinks(
   // `--link` for a path a `composer.json` also names) already provides
   // that link, so the refused twin would only be noise. The check runs
   // after the loop, so candidate order cannot matter, and it only filters
-  // what is reported: no accept/refuse decision above depends on it.
+  // what is reported: no accept/refuse decision above depends on it. The
+  // superseded refusals are not dropped: they are returned separately, so
+  // a reader can still see what was refused and quietly overridden.
   const linkedDestinations = new Set(links.map((l) => l.canonicalRelPath));
-  return {
-    links,
-    warnings: refusals
-      .filter(
-        (r) =>
-          r.destination === undefined || !linkedDestinations.has(r.destination),
-      )
-      .map((r) => r.warning),
-  };
+  const reported: string[] = [];
+  const supersededRefusals: string[] = [];
+  for (const refusal of refusals) {
+    if (
+      refusal.destination !== undefined &&
+      linkedDestinations.has(refusal.destination)
+    ) {
+      supersededRefusals.push(refusal.warning);
+    } else {
+      reported.push(refusal.warning);
+    }
+  }
+  return { links, warnings: reported, supersededRefusals };
 }
 
 /** What `linkSourceIsOperatorInput` is asked about: the `link` list of a

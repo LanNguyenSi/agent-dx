@@ -742,6 +742,11 @@ export async function openRunSetup(
     isolationField.path = wtSession.worktreePath;
     isolationField.linked = wtSession.linked;
     isolationField.linkedNamedBy = wtSession.linkedNamedBy;
+    // Only when there is something to say: an envelope that superseded
+    // no refusal keeps the isolation field it had before this feature.
+    if (wtSession.supersededRefusals.length > 0) {
+      isolationField.supersededRefusals = wtSession.supersededRefusals;
+    }
     isolationField.syncedTrackedFiles = wtSession.syncedTrackedFiles;
     isolationField.syncedUntrackedFiles = wtSession.syncedUntrackedFiles;
     setupLogPaths = [...priorLogPaths, ...wtSession.logPaths];
