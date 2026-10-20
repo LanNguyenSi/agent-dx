@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-10-19T08:14:57Z
+timestamp: 2026-10-20T04:27:18Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -172,34 +172,49 @@ category the reviewer reported (`docs` or `tests`) without another reviewer
 round when the task's entire unreviewed delta consists of fixes of two classes:
 only explanatory text, or tests added or existing tests tightened with no
 assertion removed or loosened and no test deleted or skipped
-(`review-and-recovery.md:186#"configuration, not explanatory text. The second class adds tests or tightens"`).
-A comment that a tool reads (lint, type-check, coverage, formatter, or
-test-environment directives, shebangs, build tags) counts as configuration
-(`review-and-recovery.md:184#"semantics. A comment that a tool reads (lint, type-check, coverage, formatter,"`),
-and changing a shared test helper, fixture, snapshot, golden file, or allowlist or exemption entry, or narrowing a test, counts as loosening unless every dependent test is
-shown unchanged
-(`review-and-recovery.md:188#"skipped. Changing a shared test helper, fixture, snapshot, or golden file,"`).
+(`review-and-recovery.md:188#"second class adds tests or tightens existing ones, with no assertion"`).
+Text that a tool reads counts as configuration, not explanatory text: comment
+directives (lint, type-check, coverage, formatter, or test-environment
+directives, shebangs, build tags), document frontmatter such as a bundle's
+`sources:` list, and a document that a test or tool parses
+(`review-and-recovery.md:184#"semantics. Text that a tool reads counts as configuration, not explanatory"`).
+Changing a shared test helper, fixture, snapshot, golden file, or allowlist or
+exemption entry counts as loosening unless every dependent test is shown
+unchanged, meaning it asserts exactly what it did before and its recorded
+mutation probes are still killed
+(`review-and-recovery.md:189#"or loosened and no test deleted or skipped. Changing a shared test helper,"`;
+`review-and-recovery.md:192#"it asserts exactly what it did before, and its recorded mutation probes are"`),
+and adding `.only` or a condition that narrows a test counts as loosening
+without exception
+(`review-and-recovery.md:193#"still killed. Adding"`).
 Unlike the first option it may touch test files, which is why the bound and
 the probe requirement below exist: a test change can hide a behaviour change.
 A fix that changes code, configuration, or instruction semantics keeps the
 reviewer round
-(`review-and-recovery.md:191#"unchanged. A fix that changes code, configuration, or instruction semantics"`),
-a finding that fires the Round-2 halt signal and any fix on a task whose
-Review-round escalation budget has fired are not eligible, so those rules
-govern
-(`review-and-recovery.md:193#"fires the Round-2 halt signal, and any fix on a task whose Review-round"`),
+(`review-and-recovery.md:194#"loosening without exception. A fix that changes code, configuration, or"`).
+The halt exclusion reads the reviewer's markers, not the orchestrator's
+judgement: a finding marked `recurrence: repeated` with `introduced_by_delta`
+`yes` or `unknown`, and any fix on a task whose Review-round escalation budget
+has fired, are not eligible, so those rules govern
+(`review-and-recovery.md:196#"category. A finding the reviewer marked"`),
 and high and critical findings stay blocking under both options
-(`review-and-recovery.md:196#"critical findings stay blocking: neither closing option closes one, and"`).
+(`review-and-recovery.md:200#"High and critical findings stay blocking: neither closing option closes one,"`).
 The closure is recorded in the same `05-review-findings.md` row, Decision
 `accepted`, with the finding, the fix commit, the test run as the package's
 full test command (plus the type-check when a test or source file was touched)
-with its exit code, a killed mutation probe for each new or tightened test, and
-the bundle check result where the repository has a knowledge bundle
-(`review-and-recovery.md:197#"accepting one follows the waiver rules. Record the closure in the"`). It is
+with its exit code, a killed mutation probe for each new or tightened test, the
+evidence that each dependent test is unchanged where a shared helper, fixture,
+snapshot, golden file, allowlist, or exemption entry changed, and the bundle
+check result where the repository has a knowledge bundle
+(`review-and-recovery.md:201#"and accepting one follows the waiver rules. Record the closure in the"`). It is
 not a review round, so it counts toward neither the test-adequacy cap, the
 Round-2 halt rule, the Review-round escalation budget nor the Fix-regression
 decision point
-(`review-and-recovery.md:203#"knowledge bundle. Such a closure is not a review round: it counts toward none"`). The clauses are pinned as whole sentences
+(`review-and-recovery.md:210#"a knowledge bundle. Such a closure is not a review round: it counts toward"`).
+On a task of the `adversarial` class the first option is not available and the
+second closes a finding only when the fix changes test files exclusively; the
+task's class is the highest class any round of the task was given
+(`review-and-recovery.md:216#"the classes listed in the"`). The clauses are pinned as whole sentences
 in `test/docs-consistency.test.ts:9800#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
 their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.
 
@@ -459,7 +474,8 @@ prompt, template, or policy files. `normal` on `reviewer-medium` covers a delta
 that "contains only explanatory documentation, comments, or citations and contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior",
 and a delta that touches an instruction, policy, template, or prompt file is never docs-only for this mapping
 (`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:59#"a delta that contains only explanatory"`).
-The rules under the rows: the tier a row names is the class default (a higher tier is the recorded non-default choice, a lower one is never chosen), a delta spanning classes takes its highest class and a
+The rules under the rows: the tier a row names is the class default (a higher tier is the recorded non-default choice, a lower one is never chosen), and for the `adversarial` row, which names two tiers, the unsuffixed reviewer is the default and `reviewer-xhigh` the higher, recorded choice
+(`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:72#"tiers: the unsuffixed reviewer (high) is that row's default, and"`), a delta spanning classes takes its highest class and a
 doubt goes up, fix and delta rounds keep the task's class, the operator flag only
 raises, the closing options in `review-and-recovery.md` are not review rounds and are
 governed there, and the safety core is the one each repository declares, the kit's installed

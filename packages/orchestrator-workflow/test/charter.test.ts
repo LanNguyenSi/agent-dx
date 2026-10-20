@@ -190,7 +190,9 @@ describe("the docs-or-test medium closing option is normative once", () => {
       "A second closing option covers a medium finding in the category the reviewer reported (`docs` or `tests`).",
       "The second class adds tests or tightens existing ones, with no assertion removed or loosened and no test deleted or skipped.",
       "A fix that changes code, configuration, or instruction semantics keeps the reviewer round, whatever the finding's category.",
-      "A finding that fires the Round-2 halt signal, and any fix on a task whose Review-round escalation budget has fired, is not eligible for this option: those rules govern and the next attempt goes through the reviewer subagent.",
+      "A finding the reviewer marked `recurrence: repeated` with `introduced_by_delta` `yes` or `unknown`, and any fix on a task whose Review-round escalation budget has fired, is not eligible for this option: those rules govern and the next attempt goes through the reviewer subagent.",
+      "Adding `.only` or a condition that narrows a test counts as loosening without exception.",
+      "On a task of the `adversarial` class, the classes listed in the `adversarial` row of [delegation and tiers](delegation-and-tiers.md), the first option (the docs-only closure above) is not available, and the second option closes a finding only when the fix changes test files exclusively: its explanatory-text class is not available there and its test class is.",
       "High and critical findings stay blocking: neither closing option closes one, and accepting one follows the waiver rules.",
     ];
     for (const clause of clauses) {
@@ -208,6 +210,7 @@ describe("the review method and tier class mapping is normative once", () => {
       "Never pair `adversarial` with the `-medium` reviewer tier, a budget mismatch that names probes without the effort to run them; tiers themselves are unchanged by this axis.",
       "A delta that spans classes takes the method and tier of its highest class, and a doubt between two classes goes to the higher one.",
       "The tier a row names is the default reviewer tier for that class. A higher tier is the non-default choice, recorded with a one-line reason; a lower tier than the row names is never chosen.",
+      "The `adversarial` row names two tiers: the unsuffixed reviewer (high) is that row's default, and `reviewer-xhigh` is the higher, recorded choice.",
       "The closing options in [review and recovery](review-and-recovery.md) are not review rounds and are governed there, not here.",
     ];
     for (const clause of clauses) {

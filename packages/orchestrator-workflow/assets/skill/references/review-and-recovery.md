@@ -181,30 +181,47 @@ close such a finding without another reviewer round only when the task's
 entire unreviewed delta consists of fixes of these two classes. The first
 class changes only explanatory text: documentation, comments, citations, or
 explanatory prose in an instruction file that changes no instruction
-semantics. A comment that a tool reads (lint, type-check, coverage, formatter,
-or test-environment directives, shebangs, build tags) counts as
-configuration, not explanatory text. The second class adds tests or tightens
-existing ones, with no assertion removed or loosened and no test deleted or
-skipped. Changing a shared test helper, fixture, snapshot, or golden file,
-changing an allowlist or exemption entry, or adding `.only` or a condition
-that narrows a test counts as loosening unless every dependent test is shown
-unchanged. A fix that changes code, configuration, or instruction semantics
-keeps the reviewer round, whatever the finding's category. A finding that
-fires the Round-2 halt signal, and any fix on a task whose Review-round
-escalation budget has fired, is not eligible for this option: those rules
-govern and the next attempt goes through the reviewer subagent. High and
-critical findings stay blocking: neither closing option closes one, and
-accepting one follows the waiver rules. Record the closure in the
+semantics. Text that a tool reads counts as configuration, not explanatory
+text: comment directives (lint, type-check, coverage, formatter, or
+test-environment directives, shebangs, build tags), document frontmatter such
+as a bundle's `sources:` list, and a document that a test or tool parses. The
+second class adds tests or tightens existing ones, with no assertion removed
+or loosened and no test deleted or skipped. Changing a shared test helper,
+fixture, snapshot, or golden file, or changing an allowlist or exemption
+entry, counts as loosening unless every dependent test is shown unchanged:
+it asserts exactly what it did before, and its recorded mutation probes are
+still killed. Adding `.only` or a condition that narrows a test counts as
+loosening without exception. A fix that changes code, configuration, or
+instruction semantics keeps the reviewer round, whatever the finding's
+category. A finding the reviewer marked `recurrence: repeated` with
+`introduced_by_delta` `yes` or `unknown`, and any fix on a task whose
+Review-round escalation budget has fired, is not eligible for this option:
+those rules govern and the next attempt goes through the reviewer subagent.
+High and critical findings stay blocking: neither closing option closes one,
+and accepting one follows the waiver rules. Record the closure in the
 `05-review-findings.md` row with its Severity and Decision headers unchanged
 and Decision `accepted`: the finding, the fix commit, the test run as the
 package's full test command (plus the type-check when a test or source file
 was touched) with its exit code, a killed mutation probe for each new or
-tightened test, and the bundle check result where the repository has a
-knowledge bundle. Such a closure is not a review round: it counts toward none
-of the cap in Pinned-prose changes, the Round-2 halt rule, the Review-round
-escalation budget, or the Fix-regression decision point. Anchored by an
-observed run; see the entry for this rule in the orchestrator-workflow
-CHANGELOG.
+tightened test, the evidence that each dependent test is unchanged (its
+assertions compared with the base, its recorded probes rerun and still
+killed) where a shared helper, fixture, snapshot, golden file, allowlist, or
+exemption entry changed, and the bundle check result where the repository has
+a knowledge bundle. Such a closure is not a review round: it counts toward
+none of the cap in Pinned-prose changes, the Round-2 halt rule, the
+Review-round escalation budget, or the Fix-regression decision point.
+Anchored by an observed run; see the entry for this rule in the
+orchestrator-workflow CHANGELOG.
+
+On a task of the `adversarial` class, the classes listed in the `adversarial`
+row of [delegation and tiers](delegation-and-tiers.md), the first option (the
+docs-only closure above) is not available, and the second option closes a
+finding only when the fix changes test files exclusively: its
+explanatory-text class is not available there and its test class is. The
+task's class is the highest class any round of the task was given, so a
+docs-only fix on a task that was reviewed `adversarial` does not qualify. A
+fix that touches documentation, comments, wording, instructions, or code on
+such a task goes through a reviewer round.
 
 ## Final acceptance rule
 

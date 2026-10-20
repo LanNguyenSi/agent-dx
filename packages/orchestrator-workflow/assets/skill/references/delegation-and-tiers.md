@@ -68,7 +68,9 @@ The rules that apply to the three rows:
 
 - The tier a row names is the default reviewer tier for that class. A higher
   tier is the non-default choice, recorded with a one-line reason; a lower
-  tier than the row names is never chosen.
+  tier than the row names is never chosen. The `adversarial` row names two
+  tiers: the unsuffixed reviewer (high) is that row's default, and
+  `reviewer-xhigh` is the higher, recorded choice.
 - Never pair `adversarial` with the `-medium` reviewer tier, a budget mismatch
   that names probes without the effort to run them; tiers themselves are
   unchanged by this axis.
