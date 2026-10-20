@@ -1,5 +1,10 @@
 # Bundle log
 
+- 2026-10-20T06:08:51Z, closing options, single-site pins: `test/charter.test.ts` now also pins the dependent-test sentence,
+  the configuration-definition sentence and the closure-record sentence of the second closing option to
+  `review-and-recovery.md`; `subagent-contracts-superset.md` re-verified and its charter citation re-pointed by
+  three lines; `review-gate-and-waivers.md` re-verified against the new pins (its "single site in
+  `test/charter.test.ts`" sentence now covers these sentences too).
 - 2026-10-20T05:33:20Z, closing options, second review fix round: `review-and-recovery.md` (Docs-only closure section, still the
   one site) now asks three things of each dependent test of a changed shared helper, fixture, snapshot, golden
   file, allowlist, or exemption entry: it asserts exactly what it did before, including the comparisons it makes
