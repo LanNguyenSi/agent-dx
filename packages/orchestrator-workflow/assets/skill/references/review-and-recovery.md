@@ -187,15 +187,17 @@ semantics. Text that a tool reads counts as configuration, not explanatory
 text: comment directives (lint, type-check, coverage, formatter, or
 test-environment directives, shebangs, build tags), document frontmatter such
 as a bundle's `sources:` list, and any part of a document that a test or tool
-reads as data (markers, anchored citations, pinned sentences). The second
-class adds tests or tightens existing ones, with no assertion removed or
-loosened and no test deleted or skipped. Changing a shared test helper,
-fixture, snapshot, or golden file, or changing an allowlist or exemption
-entry, counts as loosening unless every dependent test is shown unchanged:
-it asserts exactly what it did before, including the expected values that the
-changed helper, fixture, snapshot, golden file, allowlist, or exemption entry
-supplies to it, and at least one mutation probe against the behaviour it
-checks (a recorded one, or a new one where none is recorded) is still killed.
+reads as data (markers, pinned sentences). Citations, anchored ones included,
+stay explanatory text. The second class adds tests or tightens existing ones,
+with no assertion removed or loosened and no test deleted or skipped.
+Changing a shared test helper, fixture, snapshot, or golden file, or changing
+an allowlist or exemption entry, counts as loosening unless every dependent
+test is shown unchanged: it asserts exactly what it did before, including the
+comparisons it makes through the changed helper, fixture, snapshot, golden
+file, allowlist, or exemption entry and the inputs and expected values that
+entry supplies to it; every mutation probe recorded against it is still
+killed; and at least one mutation probe whose kill depends on the changed
+entry is killed (a new one where no recorded probe does).
 Adding `.only` or a condition that narrows a test counts as loosening without
 exception. A fix that changes code, configuration, or instruction semantics
 keeps the reviewer round, whatever the finding's category. A finding the
@@ -210,8 +212,9 @@ and Decision `accepted`: the finding, the fix commit, the test run as the
 package's full test command (plus the type-check when a test or source file
 was touched) with its exit code, a killed mutation probe for each new or
 tightened test, the evidence that each dependent test is unchanged (its
-assertions and supplied expected values compared with the base, and a
-mutation probe against its behaviour, recorded or new, still killed) where a
+assertions and the comparisons, inputs, and expected values that pass through
+the changed entry compared with the base, every recorded probe rerun and still
+killed, and a probe whose kill depends on the changed entry killed) where a
 shared helper, fixture, snapshot, golden file, allowlist, or exemption entry
 changed, and the bundle check result where the repository has a knowledge
 bundle. Such a closure is not a review round: it counts toward none of the cap
@@ -225,7 +228,7 @@ docs-only closure above) is not available, and the second option closes a
 finding only when the fix changes test files exclusively: its
 explanatory-text class is not available there and its test class is. A task is
 of the `adversarial` class when its delta falls in a class that row lists or
-when any round of the task was reviewed `adversarial` (the task's class
+when any round of the task was given the `adversarial` class (the task's class
 follows Fix and delta rounds in
 [delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a
 task does not qualify. A fix that touches anything other than test files

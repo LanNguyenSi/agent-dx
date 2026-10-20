@@ -5650,7 +5650,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 281,
+    paragraphLine: 292,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -9830,7 +9830,13 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("counts text that a tool reads as configuration, not explanatory text", () => {
     expect(option).toContain(
-      "Text that a tool reads counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and any part of a document that a test or tool reads as data (markers, anchored citations, pinned sentences).",
+      "Text that a tool reads counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and any part of a document that a test or tool reads as data (markers, pinned sentences).",
+    );
+  });
+
+  it("keeps citations, anchored ones included, as explanatory text", () => {
+    expect(option).toContain(
+      "Citations, anchored ones included, stay explanatory text.",
     );
   });
 
@@ -9848,7 +9854,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("counts indirect weakening of untouched tests as loosening unless every dependent test is shown unchanged, and defines that evidence", () => {
     expect(option).toContain(
-      "Changing a shared test helper, fixture, snapshot, or golden file, or changing an allowlist or exemption entry, counts as loosening unless every dependent test is shown unchanged: it asserts exactly what it did before, including the expected values that the changed helper, fixture, snapshot, golden file, allowlist, or exemption entry supplies to it, and at least one mutation probe against the behaviour it checks (a recorded one, or a new one where none is recorded) is still killed.",
+      "Changing a shared test helper, fixture, snapshot, or golden file, or changing an allowlist or exemption entry, counts as loosening unless every dependent test is shown unchanged: it asserts exactly what it did before, including the comparisons it makes through the changed helper, fixture, snapshot, golden file, allowlist, or exemption entry and the inputs and expected values that entry supplies to it; every mutation probe recorded against it is still killed; and at least one mutation probe whose kill depends on the changed entry is killed (a new one where no recorded probe does).",
     );
   });
 
@@ -9878,7 +9884,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("records the closure in the review-findings row with the evidence list", () => {
     expect(option).toContain(
-      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the evidence that each dependent test is unchanged (its assertions and supplied expected values compared with the base, and a mutation probe against its behaviour, recorded or new, still killed) where a shared helper, fixture, snapshot, golden file, allowlist, or exemption entry changed, and the bundle check result where the repository has a knowledge bundle.",
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the evidence that each dependent test is unchanged (its assertions and the comparisons, inputs, and expected values that pass through the changed entry compared with the base, every recorded probe rerun and still killed, and a probe whose kill depends on the changed entry killed) where a shared helper, fixture, snapshot, golden file, allowlist, or exemption entry changed, and the bundle check result where the repository has a knowledge bundle.",
     );
   });
 
@@ -9894,9 +9900,9 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("takes the adversarial class from the delta or from any round reviewed adversarial", () => {
+  it("takes the adversarial class from the delta or from any round given the adversarial class", () => {
     expect(option).toContain(
-      "A task is of the `adversarial` class when its delta falls in a class that row lists or when any round of the task was reviewed `adversarial` (the task's class follows Fix and delta rounds in [delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a task does not qualify.",
+      "A task is of the `adversarial` class when its delta falls in a class that row lists or when any round of the task was given the `adversarial` class (the task's class follows Fix and delta rounds in [delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a task does not qualify.",
     );
   });
 

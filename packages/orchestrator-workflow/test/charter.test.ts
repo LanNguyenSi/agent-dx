@@ -193,8 +193,11 @@ describe("the docs-or-test medium closing option is normative once", () => {
       "A finding the reviewer marked `recurrence: repeated` with `introduced_by_delta` `yes` or `unknown`, and any fix on a task whose Review-round escalation budget has fired, is not eligible for this option: those rules govern and the next attempt goes through the reviewer subagent.",
       "Adding `.only` or a condition that narrows a test counts as loosening without exception.",
       "On a task of the `adversarial` class, the classes listed in the `adversarial` row of [delegation and tiers](delegation-and-tiers.md), the first option (the docs-only closure above) is not available, and the second option closes a finding only when the fix changes test files exclusively: its explanatory-text class is not available there and its test class is.",
-      "A task is of the `adversarial` class when its delta falls in a class that row lists or when any round of the task was reviewed `adversarial` (the task's class follows Fix and delta rounds in [delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a task does not qualify.",
+      "A task is of the `adversarial` class when its delta falls in a class that row lists or when any round of the task was given the `adversarial` class (the task's class follows Fix and delta rounds in [delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a task does not qualify.",
       "What counts as explanatory text for this option is limited by the definition of configuration under the second option below, which governs both options.",
+      "A fix that touches anything other than test files (documentation, wording, instructions, configuration, or non-test code) on such a task goes through a reviewer round.",
+      "Test files are the tests themselves and the test helpers, fixtures, snapshots, and golden files under the repository's test directories, and a change to a shared one still needs the dependent-test evidence of the second option.",
+      "Citations, anchored ones included, stay explanatory text.",
       "High and critical findings stay blocking: neither closing option closes one, and accepting one follows the waiver rules.",
     ];
     for (const clause of clauses) {

@@ -172,63 +172,74 @@ category the reviewer reported (`docs` or `tests`) without another reviewer
 round when the task's entire unreviewed delta consists of fixes of two classes:
 only explanatory text, or tests added or existing tests tightened with no
 assertion removed or loosened and no test deleted or skipped
-(`review-and-recovery.md:191#"class adds tests or tightens existing ones, with no assertion removed or"`).
+(`review-and-recovery.md:191#"The second class adds tests or tightens existing ones,"`).
 Text that a tool reads counts as configuration, not explanatory text: comment
 directives (lint, type-check, coverage, formatter, or test-environment
 directives, shebangs, build tags), document frontmatter such as a bundle's
 `sources:` list, and any part of a document that a test or tool reads as data
-(markers, anchored citations, pinned sentences)
+(markers, pinned sentences)
 (`review-and-recovery.md:186#"semantics. Text that a tool reads counts as configuration, not explanatory"`).
+Citations, anchored ones included, stay explanatory text, so a citation fix
+stays closable under either option
+(`review-and-recovery.md:190#"Citations, anchored ones included,"`).
 The definition governs the first option too: what counts as explanatory text
 there is limited by it
 (`review-and-recovery.md:176#"What counts as explanatory text for this option is"`).
 Changing a shared test helper, fixture, snapshot, golden file, or allowlist or
 exemption entry counts as loosening unless every dependent test is shown
-unchanged, meaning it asserts exactly what it did before (including the
-expected values the changed data supplies to it) and at least one mutation
-probe against the behaviour it checks, a recorded one or a new one where none
-is recorded, is still killed. That binds the evidence to the data: unchanged
-assertion code alone does not show it
-(`review-and-recovery.md:192#"loosened and no test deleted or skipped. Changing a shared test helper,"`;
-`review-and-recovery.md:195#"it asserts exactly what it did before, including the expected values that the"`;
-`review-and-recovery.md:198#"checks (a recorded one, or a new one where none is recorded) is still killed."`),
+unchanged, which takes three things. The test asserts exactly what it did
+before, including the comparisons it makes through the changed entry and the
+inputs and expected values that entry supplies to it, so a helper that turns
+lenient or a fixture that drops an input case fails it even when the test
+source and the remaining expected values are untouched. Every mutation probe
+recorded against the test is still killed, so one surviving probe fails it.
+And at least one mutation probe whose kill depends on the changed entry is
+killed, a new one where no recorded probe does, so a probe killed by an
+assertion that never touches the entry does not count
+(`review-and-recovery.md:193#"Changing a shared test helper, fixture, snapshot, or golden file, or changing"`;
+`review-and-recovery.md:196#"comparisons it makes through the changed helper, fixture, snapshot, golden"`;
+`review-and-recovery.md:198#"entry supplies to it; every mutation probe recorded against it is still"`;
+`review-and-recovery.md:199#"killed; and at least one mutation probe whose kill depends on the changed"`),
 and adding `.only` or a condition that narrows a test counts as loosening
 without exception
-(`review-and-recovery.md:199#"a condition that narrows a test counts as loosening without"`).
+(`review-and-recovery.md:201#"a condition that narrows a test counts as loosening without"`).
 Unlike the first option it may touch test files, which is why the bound and
 the probe requirement below exist: a test change can hide a behaviour change.
 A fix that changes code, configuration, or instruction semantics keeps the
 reviewer round
-(`review-and-recovery.md:200#"exception. A fix that changes code, configuration, or instruction semantics"`).
+(`review-and-recovery.md:202#"exception. A fix that changes code, configuration, or instruction semantics"`).
 The halt exclusion reads the reviewer's markers, not the orchestrator's
 judgement: a finding marked `recurrence: repeated` with `introduced_by_delta`
 `yes` or `unknown`, and any fix on a task whose Review-round escalation budget
 has fired, are not eligible, so those rules govern
-(`review-and-recovery.md:204#"fired, is not eligible for this option: those rules govern and the next"`),
+(`review-and-recovery.md:206#"fired, is not eligible for this option: those rules govern and the next"`),
 and high and critical findings stay blocking under both options
-(`review-and-recovery.md:206#"High and critical findings stay blocking: neither closing option closes one,"`).
+(`review-and-recovery.md:208#"High and critical findings stay blocking: neither closing option closes one,"`).
 The closure is recorded in the same `05-review-findings.md` row, Decision
 `accepted`, with the finding, the fix commit, the test run as the package's
 full test command (plus the type-check when a test or source file was touched)
 with its exit code, a killed mutation probe for each new or tightened test, the
-evidence that each dependent test is unchanged (assertions and supplied
-expected values compared with the base, and a mutation probe against its
-behaviour, recorded or new, still killed) where a shared helper, fixture,
-snapshot, golden file, allowlist, or exemption entry changed, and the bundle
-check result where the repository has a knowledge bundle
-(`review-and-recovery.md:216#"changed, and the bundle check result where the repository has a knowledge"`). It is
+evidence that each dependent test is unchanged (assertions and the
+comparisons, inputs, and expected values that pass through the changed entry
+compared with the base, every recorded probe rerun and still killed, and a
+probe whose kill depends on the changed entry killed) where a shared helper,
+fixture, snapshot, golden file, allowlist, or exemption entry changed, and the
+bundle check result where the repository has a knowledge bundle
+(`review-and-recovery.md:216#"the changed entry compared with the base, every recorded probe rerun and still"`;
+`review-and-recovery.md:219#"changed, and the bundle check result where the repository has a knowledge"`). It is
 not a review round, so it counts toward neither the test-adequacy cap, the
 Round-2 halt rule, the Review-round escalation budget nor the Fix-regression
 decision point
-(`review-and-recovery.md:217#"bundle. Such a closure is not a review round: it counts toward none of the cap"`).
+(`review-and-recovery.md:220#"bundle. Such a closure is not a review round: it counts toward none of the cap"`).
 On a task of the `adversarial` class the first option is not available and the
 second closes a finding only when the fix changes test files exclusively
-(`review-and-recovery.md:222#"the classes listed in the"`).
+(`review-and-recovery.md:225#"the classes listed in the"`).
 A task is of that class when its delta falls in a class the `adversarial` row
-lists or when any round of the task was reviewed `adversarial`, so a docs-only
-fix on such a task does not qualify, and any fix other than one confined to
-test files goes through a reviewer round
-(`review-and-recovery.md:227#"when its delta falls in a class that row lists or"`).
+lists or when any round of the task was given the `adversarial` class, so a
+docs-only fix on such a task does not qualify, and any fix other than one
+confined to test files goes through a reviewer round
+(`review-and-recovery.md:230#"when its delta falls in a class that row lists or"`;
+`review-and-recovery.md:231#"when any round of the task was given the"`).
 The clauses are pinned as whole sentences
 in `test/docs-consistency.test.ts:9800#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
 their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.
