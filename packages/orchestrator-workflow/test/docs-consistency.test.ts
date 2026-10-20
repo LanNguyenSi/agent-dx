@@ -5650,7 +5650,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 251,
+    paragraphLine: 292,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -9828,9 +9828,21 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("counts a comment that a tool reads as configuration, not explanatory text", () => {
+  it("counts text that a tool reads as configuration, not explanatory text", () => {
     expect(option).toContain(
-      "A comment that a tool reads (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags) counts as configuration, not explanatory text.",
+      "Text that a tool reads counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and any part of a document that a test or tool reads as data (markers, pinned sentences).",
+    );
+  });
+
+  it("keeps citations, anchored ones included, as explanatory text", () => {
+    expect(option).toContain(
+      "Citations, anchored ones included, stay explanatory text.",
+    );
+  });
+
+  it("makes the configuration definition govern the first option too", () => {
+    expect(section).toContain(
+      "What counts as explanatory text for this option is limited by the definition of configuration under the second option below, which governs both options.",
     );
   });
 
@@ -9840,15 +9852,21 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("counts indirect weakening of untouched tests as loosening", () => {
+  it("counts indirect weakening of untouched tests as loosening unless every dependent test is shown unchanged, and defines that evidence", () => {
     expect(option).toContain(
-      "Changing a shared test helper, fixture, snapshot, or golden file, changing an allowlist or exemption entry, or adding `.only` or a condition that narrows a test counts as loosening unless every dependent test is shown unchanged.",
+      "Changing a shared test helper, fixture, snapshot, or golden file, or changing an allowlist or exemption entry, counts as loosening unless every dependent test is shown unchanged: it asserts exactly what it did before, including the comparisons it makes through the changed helper, fixture, snapshot, golden file, allowlist, or exemption entry and the inputs and expected values that entry supplies to it; every mutation probe recorded against it is still killed; and at least one mutation probe whose kill depends on the changed entry is killed (a new one where no recorded probe does).",
     );
   });
 
-  it("excludes a Round-2 halt finding and a task whose escalation budget has fired", () => {
+  it("counts `.only` and a narrowing condition as loosening without exception", () => {
     expect(option).toContain(
-      "A finding that fires the Round-2 halt signal, and any fix on a task whose Review-round escalation budget has fired, is not eligible for this option: those rules govern and the next attempt goes through the reviewer subagent.",
+      "Adding `.only` or a condition that narrows a test counts as loosening without exception.",
+    );
+  });
+
+  it("excludes a finding the reviewer marked repeated and delta-introduced, and a task whose escalation budget has fired", () => {
+    expect(option).toContain(
+      "A finding the reviewer marked `recurrence: repeated` with `introduced_by_delta` `yes` or `unknown`, and any fix on a task whose Review-round escalation budget has fired, is not eligible for this option: those rules govern and the next attempt goes through the reviewer subagent.",
     );
   });
 
@@ -9866,13 +9884,37 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("records the closure in the review-findings row with the evidence list", () => {
     expect(option).toContain(
-      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, and the bundle check result where the repository has a knowledge bundle.",
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the evidence that each dependent test is unchanged (its assertions and the comparisons, inputs, and expected values that pass through the changed entry compared with the base, every recorded probe rerun and still killed, and a probe whose kill depends on the changed entry killed) where a shared helper, fixture, snapshot, golden file, allowlist, or exemption entry changed, and the bundle check result where the repository has a knowledge bundle.",
     );
   });
 
   it("is not a review round for the cap, the halt rule, the escalation budget, or the fix-regression decision point", () => {
     expect(option).toContain(
       "Such a closure is not a review round: it counts toward none of the cap in Pinned-prose changes, the Round-2 halt rule, the Review-round escalation budget, or the Fix-regression decision point.",
+    );
+  });
+
+  it("withholds the first option from an adversarial-class task and limits the second to test-only fixes", () => {
+    expect(option).toContain(
+      "On a task of the `adversarial` class, the classes listed in the `adversarial` row of [delegation and tiers](delegation-and-tiers.md), the first option (the docs-only closure above) is not available, and the second option closes a finding only when the fix changes test files exclusively: its explanatory-text class is not available there and its test class is.",
+    );
+  });
+
+  it("takes the adversarial class from the delta or from any round given the adversarial class", () => {
+    expect(option).toContain(
+      "A task is of the `adversarial` class when its delta falls in a class that row lists or when any round of the task was given the `adversarial` class (the task's class follows Fix and delta rounds in [delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a task does not qualify.",
+    );
+  });
+
+  it("keeps the reviewer round for any non-test fix on an adversarial-class task", () => {
+    expect(option).toContain(
+      "A fix that touches anything other than test files (documentation, wording, instructions, configuration, or non-test code) on such a task goes through a reviewer round.",
+    );
+  });
+
+  it("defines test files once and keeps the dependent-test evidence for a shared one", () => {
+    expect(option).toContain(
+      "Test files are the tests themselves and the test helpers, fixtures, snapshots, and golden files under the repository's test directories, and a change to a shared one still needs the dependent-test evidence of the second option.",
     );
   });
 });
@@ -9927,6 +9969,12 @@ describe("safety core: the review method and tier class list stays pinned at the
   it("states the tier a row names as the class default, a higher tier as the recorded non-default choice, and a lower tier as never chosen", () => {
     expect(section).toContain(
       "The tier a row names is the default reviewer tier for that class. A higher tier is the non-default choice, recorded with a one-line reason; a lower tier than the row names is never chosen.",
+    );
+  });
+
+  it("names the unsuffixed reviewer as the adversarial row's default and reviewer-xhigh as its higher, recorded choice", () => {
+    expect(section).toContain(
+      "The `adversarial` row names two tiers: the unsuffixed reviewer (high) is that row's default, and `reviewer-xhigh` is the higher, recorded choice.",
     );
   });
 

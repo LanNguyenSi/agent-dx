@@ -173,7 +173,9 @@ policy, instructions, or behavior; and closes only low/medium documentation
 or maintainability findings. It never closes a high/critical or other
 ineligible finding, and records the concrete verification in a
 `05-review-findings.md` row with its Severity and Decision headers unchanged
-and Decision `accepted`.
+and Decision `accepted`. What counts as explanatory text for this option is
+limited by the definition of configuration under the second option below,
+which governs both options.
 
 A second closing option covers a medium finding in the category the reviewer
 reported (`docs` or `tests`). After independent review, the orchestrator may
@@ -181,30 +183,60 @@ close such a finding without another reviewer round only when the task's
 entire unreviewed delta consists of fixes of these two classes. The first
 class changes only explanatory text: documentation, comments, citations, or
 explanatory prose in an instruction file that changes no instruction
-semantics. A comment that a tool reads (lint, type-check, coverage, formatter,
-or test-environment directives, shebangs, build tags) counts as
-configuration, not explanatory text. The second class adds tests or tightens
-existing ones, with no assertion removed or loosened and no test deleted or
-skipped. Changing a shared test helper, fixture, snapshot, or golden file,
-changing an allowlist or exemption entry, or adding `.only` or a condition
-that narrows a test counts as loosening unless every dependent test is shown
-unchanged. A fix that changes code, configuration, or instruction semantics
-keeps the reviewer round, whatever the finding's category. A finding that
-fires the Round-2 halt signal, and any fix on a task whose Review-round
-escalation budget has fired, is not eligible for this option: those rules
-govern and the next attempt goes through the reviewer subagent. High and
-critical findings stay blocking: neither closing option closes one, and
-accepting one follows the waiver rules. Record the closure in the
+semantics. Text that a tool reads counts as configuration, not explanatory
+text: comment directives (lint, type-check, coverage, formatter, or
+test-environment directives, shebangs, build tags), document frontmatter such
+as a bundle's `sources:` list, and any part of a document that a test or tool
+reads as data (markers, pinned sentences). Citations, anchored ones included,
+stay explanatory text. The second class adds tests or tightens existing ones,
+with no assertion removed or loosened and no test deleted or skipped.
+Changing a shared test helper, fixture, snapshot, or golden file, or changing
+an allowlist or exemption entry, counts as loosening unless every dependent
+test is shown unchanged: it asserts exactly what it did before, including the
+comparisons it makes through the changed helper, fixture, snapshot, golden
+file, allowlist, or exemption entry and the inputs and expected values that
+entry supplies to it; every mutation probe recorded against it is still
+killed; and at least one mutation probe whose kill depends on the changed
+entry is killed (a new one where no recorded probe does).
+Adding `.only` or a condition that narrows a test counts as loosening without
+exception. A fix that changes code, configuration, or instruction semantics
+keeps the reviewer round, whatever the finding's category. A finding the
+reviewer marked `recurrence: repeated` with `introduced_by_delta` `yes` or
+`unknown`, and any fix on a task whose Review-round escalation budget has
+fired, is not eligible for this option: those rules govern and the next
+attempt goes through the reviewer subagent.
+High and critical findings stay blocking: neither closing option closes one,
+and accepting one follows the waiver rules. Record the closure in the
 `05-review-findings.md` row with its Severity and Decision headers unchanged
 and Decision `accepted`: the finding, the fix commit, the test run as the
 package's full test command (plus the type-check when a test or source file
 was touched) with its exit code, a killed mutation probe for each new or
-tightened test, and the bundle check result where the repository has a
-knowledge bundle. Such a closure is not a review round: it counts toward none
-of the cap in Pinned-prose changes, the Round-2 halt rule, the Review-round
-escalation budget, or the Fix-regression decision point. Anchored by an
-observed run; see the entry for this rule in the orchestrator-workflow
-CHANGELOG.
+tightened test, the evidence that each dependent test is unchanged (its
+assertions and the comparisons, inputs, and expected values that pass through
+the changed entry compared with the base, every recorded probe rerun and still
+killed, and a probe whose kill depends on the changed entry killed) where a
+shared helper, fixture, snapshot, golden file, allowlist, or exemption entry
+changed, and the bundle check result where the repository has a knowledge
+bundle. Such a closure is not a review round: it counts toward none of the cap
+in Pinned-prose changes, the Round-2 halt rule, the Review-round escalation
+budget, or the Fix-regression decision point. Anchored by an observed run; see the entry for this rule in the
+orchestrator-workflow CHANGELOG.
+
+On a task of the `adversarial` class, the classes listed in the `adversarial`
+row of [delegation and tiers](delegation-and-tiers.md), the first option (the
+docs-only closure above) is not available, and the second option closes a
+finding only when the fix changes test files exclusively: its
+explanatory-text class is not available there and its test class is. A task is
+of the `adversarial` class when its delta falls in a class that row lists or
+when any round of the task was given the `adversarial` class (the task's class
+follows Fix and delta rounds in
+[delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a
+task does not qualify. A fix that touches anything other than test files
+(documentation, wording, instructions, configuration, or non-test code) on
+such a task goes through a reviewer round. Test files are the tests
+themselves and the test helpers, fixtures, snapshots, and golden files under
+the repository's test directories, and a change to a shared one still needs
+the dependent-test evidence of the second option.
 
 ## Final acceptance rule
 

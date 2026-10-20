@@ -190,7 +190,17 @@ describe("the docs-or-test medium closing option is normative once", () => {
       "A second closing option covers a medium finding in the category the reviewer reported (`docs` or `tests`).",
       "The second class adds tests or tightens existing ones, with no assertion removed or loosened and no test deleted or skipped.",
       "A fix that changes code, configuration, or instruction semantics keeps the reviewer round, whatever the finding's category.",
-      "A finding that fires the Round-2 halt signal, and any fix on a task whose Review-round escalation budget has fired, is not eligible for this option: those rules govern and the next attempt goes through the reviewer subagent.",
+      "A finding the reviewer marked `recurrence: repeated` with `introduced_by_delta` `yes` or `unknown`, and any fix on a task whose Review-round escalation budget has fired, is not eligible for this option: those rules govern and the next attempt goes through the reviewer subagent.",
+      "Adding `.only` or a condition that narrows a test counts as loosening without exception.",
+      "On a task of the `adversarial` class, the classes listed in the `adversarial` row of [delegation and tiers](delegation-and-tiers.md), the first option (the docs-only closure above) is not available, and the second option closes a finding only when the fix changes test files exclusively: its explanatory-text class is not available there and its test class is.",
+      "A task is of the `adversarial` class when its delta falls in a class that row lists or when any round of the task was given the `adversarial` class (the task's class follows Fix and delta rounds in [delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a task does not qualify.",
+      "What counts as explanatory text for this option is limited by the definition of configuration under the second option below, which governs both options.",
+      "A fix that touches anything other than test files (documentation, wording, instructions, configuration, or non-test code) on such a task goes through a reviewer round.",
+      "Test files are the tests themselves and the test helpers, fixtures, snapshots, and golden files under the repository's test directories, and a change to a shared one still needs the dependent-test evidence of the second option.",
+      "Citations, anchored ones included, stay explanatory text.",
+      "Text that a tool reads counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and any part of a document that a test or tool reads as data (markers, pinned sentences).",
+      "Changing a shared test helper, fixture, snapshot, or golden file, or changing an allowlist or exemption entry, counts as loosening unless every dependent test is shown unchanged: it asserts exactly what it did before, including the comparisons it makes through the changed helper, fixture, snapshot, golden file, allowlist, or exemption entry and the inputs and expected values that entry supplies to it; every mutation probe recorded against it is still killed; and at least one mutation probe whose kill depends on the changed entry is killed (a new one where no recorded probe does).",
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the evidence that each dependent test is unchanged (its assertions and the comparisons, inputs, and expected values that pass through the changed entry compared with the base, every recorded probe rerun and still killed, and a probe whose kill depends on the changed entry killed) where a shared helper, fixture, snapshot, golden file, allowlist, or exemption entry changed, and the bundle check result where the repository has a knowledge bundle.",
       "High and critical findings stay blocking: neither closing option closes one, and accepting one follows the waiver rules.",
     ];
     for (const clause of clauses) {
@@ -208,6 +218,7 @@ describe("the review method and tier class mapping is normative once", () => {
       "Never pair `adversarial` with the `-medium` reviewer tier, a budget mismatch that names probes without the effort to run them; tiers themselves are unchanged by this axis.",
       "A delta that spans classes takes the method and tier of its highest class, and a doubt between two classes goes to the higher one.",
       "The tier a row names is the default reviewer tier for that class. A higher tier is the non-default choice, recorded with a one-line reason; a lower tier than the row names is never chosen.",
+      "The `adversarial` row names two tiers: the unsuffixed reviewer (high) is that row's default, and `reviewer-xhigh` is the higher, recorded choice.",
       "The closing options in [review and recovery](review-and-recovery.md) are not review rounds and are governed there, not here.",
     ];
     for (const clause of clauses) {
