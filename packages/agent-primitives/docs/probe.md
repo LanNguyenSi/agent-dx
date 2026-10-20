@@ -20,7 +20,7 @@ every command.
 | `-r, --replace <text>` | replace the whole line with this text | none |
 | `-M, --match <substr>` | substring to find on the line; requires `-w` | none |
 | `-w, --with <text>` | replacement for the first match of `-M` | none |
-| `-p, --patch <path>` | unified diff, applied with `git apply` | none |
+| `-p, --patch <path>` | unified diff, applied with `git apply`; a relative path resolves against `-C/--cwd`, the same base as `--file` and a plan patch | none |
 | `-t, --test <command>` | shell command that runs the test | required unless `--plan` supplies it |
 | `--pre <command>` | shell command (e.g. a rebuild) run before each test invocation | none |
 | `--env <NAME=VALUE>` | environment variable for `--pre` and `-t` in the baseline and the mutant run; repeatable | none |
@@ -808,12 +808,16 @@ any link is created, and every refusal is a warning in the envelope,
 never a silent drop, with one exception: the refusal of a directory
 repository content named because it resolves outside the root (a
 composer `vendor-dir` that is a symlink out of the repository) is not
-reported when another candidate of the same round for the same
-destination (in the copy's own spelling) was accepted, such as the
+reported as a warning when another candidate of the same round for the
+same destination (in the copy's own spelling) was accepted, such as the
 operator's `--link`, the worktree link manifest or an outside plan's
 `link` list for that path. The destination is planned to be linked (a
 later syscall-time refusal is reported on its own), so the warning
-would contradict `isolation.linked`. Every other refusal keeps its
+would contradict `isolation.linked`. Such a superseded refusal is not
+dropped either: it appears, with the very text it would have carried,
+in the `isolation.supersededRefusals` array (`string[]`, present only
+when non-empty), next to the `isolation.linked` entry that overrides
+it. Every other refusal keeps its
 warning: a tracked destination or target describes a hazard of the
 destination or its target that a second candidate does not remove, and
 the "already covered" note reports a duplicate that was left out. Each
@@ -2350,7 +2354,7 @@ exactly which `reason` is which).
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. Under `--plan`, this same `env` row appears on the plan's own top-level envelope (`plan`'s sibling, not inside it), applied to the shared baseline and every mutant's own run, echoed once the same way. |
 | `expectation` | `"met"` \| `"violated"` | `--plan` only, once the plan has concluded (`status` is `killed` or `survived`) | the plan's own verdict as an expectation aggregate, in the same words `mutation_probe.expectation` uses for one mutant: `"met"` when every mutant's own expectation was met, `"violated"` when at least one was, mirroring `summary.met`/`summary.violated` (see the `--plan` section below). Absent when the plan did not conclude (`status: "inconclusive"`, whatever the `reason`): nothing was aggregated. The single-probe form carries no top-level `expectation` of its own -- its one verdict already sits in `mutation_probe.expectation`, so there is nothing separate to aggregate. |
-| `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced) -- every entry in it names a source that was checked to exist as a directory when the run started (an auto-discovered candidate is only ever a candidate once it already exists, and `--link`/a `--plan` file's/the defaults file's `link` are refused up front, `reason: "link_source_not_found"`, when their source does not, see "Non-JS repositories" above); that check runs once, so a source removed between it and the link actually being created is not re-checked and can still end up a dangling link -- `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, the `link` of a `--plan` file stored inside the repository, the `link` of the defaults file stored inside the repository), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
+| `isolation` | `{ mode, path, linked, linkedNamedBy, supersededRefusals?, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced) -- every entry in it names a source that was checked to exist as a directory when the run started (an auto-discovered candidate is only ever a candidate once it already exists, and `--link`/a `--plan` file's/the defaults file's `link` are refused up front, `reason: "link_source_not_found"`, when their source does not, see "Non-JS repositories" above); that check runs once, so a source removed between it and the link actually being created is not re-checked and can still end up a dangling link -- `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, the `link` of a `--plan` file stored inside the repository, the `link` of the defaults file stored inside the repository), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `supersededRefusals` lists, one entry per refusal, the warning text of a provenance refusal that an accepted link for the same destination superseded (see the link policy above), and is ABSENT (never empty) when nothing was superseded; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
 | `totalDurationMs` | number | always, for this envelope (see the top-level-usage-error carve-out above, and `--plan`, whose own envelope carries no `totalDurationMs` at all) | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
 
 ### Mapping a probe result into an implementer report
@@ -2541,8 +2545,10 @@ exactly one form: `replace` (with `line`), `match` together with `with`
 Unlike the single-probe `-p`, a plan mutant's `file` is never derived
 from the patch: every path in the plan is known before the run starts, so
 the containment check below can cover all of them up front. Paths in a
-plan file (`file`, `patch`) are resolved against the invocation cwd
-(`-C/--cwd`); `link` is the one exception, resolved against the
+plan file (`file`, `patch`), the single probe's `-p, --patch` path and
+its `--file` path all resolve against the invocation cwd (`-C/--cwd`),
+one base for every spelling; `link` is the one exception, resolved
+against the
 repository root instead, so a plan's own `link` entries
 mean the same thing regardless of which subdirectory `--cwd` names, the
 same way the repository defaults file's entries do. An unknown key, a

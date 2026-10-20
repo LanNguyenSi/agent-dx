@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe` now surfaces the superseded link refusals it used to drop: the
+  refusal of a directory repository content named because it resolves
+  outside the root (a composer `vendor-dir` that is a symlink out of the
+  repository) is not reported as a warning when another candidate of the
+  same run for the same destination (typically the operator's own
+  `--link`) was accepted, and that stays -- but the refusal text is no
+  longer discarded either. It is returned by `planLinks` as
+  `supersededRefusals` and reaches the envelope as
+  `isolation.supersededRefusals`, a `string[]` present only when
+  non-empty, next to the `isolation.linked` entry that overrode it.
+  Every other refusal keeps its warning, and nothing new became one.
+
+### Changed
+
+- `probe -p, --patch` with a relative path now resolves it against the
+  invocation cwd (`-C/--cwd`), the same base `--file` and a `--plan`
+  entry's `patch` already used, and the resolved path is what every
+  message names. It used to resolve against the CLI process's own cwd,
+  so `-C <repo> -p rel.patch` looked for `rel.patch` outside the
+  checkout the probe was pointed at: the patch was not found
+  (`usage_error`/`patch_not_readable`) unless the process happened to
+  sit in that same directory. Callers who passed `-C` with a relative
+  `-p` are affected: the patch is now named where `-C` points, the way
+  the same spelling already named `--file` and plan patches. An absolute
+  `-p`, and any run without `-C`, are unchanged.
+
 ## [0.17.0] - 2026-10-19
 
 ### Added

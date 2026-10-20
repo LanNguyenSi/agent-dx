@@ -579,6 +579,18 @@ async function runProbePipeline(
   }
 
   const cwd = path.resolve(opts.cwd);
+  // `-p/--patch` resolves against `cwd` -- the same base as `--file`
+  // (`path.resolve(cwd, opts.file)` below) and a plan entry's `patch`
+  // (`runProbePlanPipeline`), so one path spells the same file whichever
+  // form names it. Resolved once, here, and used everywhere (the
+  // metadata check, the `--file` derivation's `git apply --numstat`, the
+  // dry run and real apply through `spec`, and every message that names
+  // the patch): a relative `-p` never resolves against the process cwd,
+  // which is only the base when `-C` is not given.
+  const patchPath =
+    opts.patchPath === undefined
+      ? undefined
+      : path.resolve(cwd, opts.patchPath);
   // Resolve once at the entry boundary. Every downstream writer,
   // worktree cleanup and marker then uses the same absolute scratch root
   // even when the invocation cwd changes between setup phases.
@@ -641,7 +653,7 @@ async function runProbePipeline(
   // Every check there is metadata-only; see `patchUnusableReason` for
   // why nothing here opens the patch or reads its bytes.
   if (opts.form === "patch") {
-    const unusable = patchUnusableReason(opts.patchPath ?? "");
+    const unusable = patchUnusableReason(patchPath ?? "");
     if (unusable !== undefined) {
       return {
         status: "usage_error",
@@ -654,7 +666,7 @@ async function runProbePipeline(
   if (opts.file !== undefined) {
     displayFile = path.resolve(cwd, opts.file);
   } else if (opts.form === "patch") {
-    const listing = await listPatchTouchedPaths(opts.patchPath ?? "", logDir, {
+    const listing = await listPatchTouchedPaths(patchPath ?? "", logDir, {
       timeoutMs: gitApplyTimeoutMs,
     });
     derivationLogPaths = [listing.logPath];
@@ -880,7 +892,7 @@ async function runProbePipeline(
     replaceText: opts.replaceText,
     matchText: opts.matchText,
     withText: opts.withText,
-    patchPath: opts.patchPath,
+    patchPath,
     expect: opts.expect,
   };
 

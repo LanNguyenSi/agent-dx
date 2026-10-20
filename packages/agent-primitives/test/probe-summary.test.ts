@@ -430,6 +430,51 @@ describe("summary helpers", () => {
     );
   });
 
+  it("firstFailingLine prefers the failure over the numbered line of a risky-test section below it", () => {
+    const stdoutTail = [
+      "PHPUnit 10.5.20 by Sebastian Bergmann and contributors.",
+      "",
+      "....R...F                                                             8 / 8 (100%)",
+      "",
+      "Time: 00:00.012, Memory: 8.00 MB",
+      "",
+      "There was 1 failure:",
+      "",
+      "1) App\\Tests\\FooTest::testBar",
+      "Failed asserting that 41 matches expected 42.",
+      "",
+      "/app/tests/FooTest.php:17",
+      "",
+      "There was 1 risky test:",
+      "",
+      "1) App\\Tests\\FooTest::testRisked",
+      "This test did not perform any assertions",
+      "",
+      "/app/tests/FooTest.php:23",
+      "",
+      "FAILURES!",
+      "Tests: 8, Assertions: 7, Failures: 1, Risky: 1.",
+    ].join("\n");
+    expect(firstFailingLine({ stdoutTail, stderrTail: "" })).toBe(
+      "1) App\\Tests\\FooTest::testBar",
+    );
+  });
+
+  it("firstFailingLine matches a PHPUnit failure line whose test name carries a data set", () => {
+    const numbered =
+      "1) App\\Tests\\FooTest::testBar with data set #0 ('a', 'b')";
+    const named = '1) App\\Tests\\FooTest::testBar with data set "empty"';
+    for (const line of [numbered, named]) {
+      const stdoutTail = [
+        "There was 1 failure:",
+        "",
+        line,
+        "Failed asserting that two strings are equal.",
+      ].join("\n");
+      expect(firstFailingLine({ stdoutTail, stderrTail: "" })).toBe(line);
+    }
+  });
+
   it("firstFailingLine keeps each runner's line and finds none in a passing PHPUnit tail", () => {
     const cases: Array<[string, string]> = [
       [" FAIL  test/a.test.ts > adds", "FAIL test/a.test.ts > adds"],

@@ -694,6 +694,14 @@ export interface WorktreeSyncSuccess {
    * for is worth reading back off the envelope. Never a second listing
    * of `linked`: every path here appears there too. */
   linkedNamedBy: { path: string; namedBy: string }[];
+  /** The provenance refusals (a directory repository content named that
+   * resolves outside the root) an accepted candidate for the same
+   * destination -- typically the operator's own `--link` -- superseded,
+   * with the warning text they would have carried. Not warnings: the
+   * destination IS linked, which is exactly why the refusal's advice no
+   * longer stands. Empty when nothing was superseded; never silently
+   * dropped from the run's record either. */
+  supersededRefusals: string[];
   /** Number of `git diff HEAD --numstat -z` records synced into the
    * worktree (0 for a clean tree); NOT necessarily the number of bytes
    * or hunks, and unrelated to `syncedUntrackedFiles` below. */
@@ -1527,6 +1535,7 @@ export async function beginWorktree(
     canonicalRelPath,
   });
   syncWarnings.push(...plan.warnings);
+  const supersededRefusals = plan.supersededRefusals;
   const linked: string[] = [];
   const linkedNamedBy: { path: string; namedBy: string }[] = [];
   // Every link this loop has actually CREATED, which is not the same
@@ -1858,6 +1867,7 @@ export async function beginWorktree(
     mappedCwd,
     linked,
     linkedNamedBy,
+    supersededRefusals,
     syncedTrackedFiles,
     syncedUntrackedFiles: syncableRelPaths.length,
     warnings: syncWarnings,
