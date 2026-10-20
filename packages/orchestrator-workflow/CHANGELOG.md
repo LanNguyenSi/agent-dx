@@ -9,21 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The second closing option in `references/review-and-recovery.md` (the
   Docs-only closure section, still its one site) is tightened. "Every
-  dependent test is shown unchanged" now means the test asserts exactly what
-  it did before and its recorded mutation probes are still killed, and the
-  closure record lists that evidence. Adding `.only` or a condition that
-  narrows a test counts as loosening without exception, so it no longer
-  conflicts with the "no test deleted or skipped" bound. The exclusion for a
-  recurring defect is based on the reviewer's markers (`recurrence: repeated`
-  with `introduced_by_delta` `yes` or `unknown`) instead of the
-  orchestrator-judged halt signal. The configuration carve-out widens from "a
-  comment that a tool reads" to text that a tool reads: comment directives,
-  document frontmatter such as a bundle's `sources:` list, and a document
-  that a test or tool parses. On a task of the `adversarial` class, neither
-  option closes a finding by explanatory text: the first option is not
-  available, the second closes only a fix that changes test files
-  exclusively, and the task's class is the highest class any round of the
-  task was given. In `references/delegation-and-tiers.md`, the `adversarial`
+  dependent test is shown unchanged" now binds the evidence to the data: the
+  test asserts exactly what it did before, including the expected values that
+  the changed helper, fixture, snapshot, golden file, allowlist, or exemption
+  entry supplies to it, and at least one mutation probe against the behaviour
+  it checks (a recorded one, or a new one where none is recorded) is still
+  killed. The closure record lists that evidence. Adding `.only` or a
+  condition that narrows a test counts as loosening without exception, so it
+  no longer conflicts with the "no test deleted or skipped" bound. The
+  exclusion for a recurring defect is based on the reviewer's markers
+  (`recurrence: repeated` with `introduced_by_delta` `yes` or `unknown`)
+  instead of the orchestrator-judged halt signal. The configuration carve-out
+  widens from "a comment that a tool reads" to text that a tool reads: comment
+  directives, document frontmatter such as a bundle's `sources:` list, and any
+  part of a document that a test or tool reads as data (markers, anchored
+  citations, pinned sentences), and that definition governs the Docs-only
+  closure's first option as well. On a task of the `adversarial` class,
+  neither option closes a finding by explanatory text: the first option is
+  not available, the second closes only a fix that changes test files
+  exclusively, and a task is of that class when its delta falls in a class the
+  `adversarial` row lists or when any round of the task was reviewed
+  `adversarial`. Test files are defined once there: the tests themselves and
+  the helpers, fixtures, snapshots, and golden files under the repository's
+  test directories, with the dependent-test evidence still required for a
+  shared one. In `references/delegation-and-tiers.md`, the `adversarial`
   row's two tiers are now stated as a default (the unsuffixed reviewer) and a
   higher, recorded choice (`reviewer-xhigh`). Installed skill files report as
   outdated until refreshed.

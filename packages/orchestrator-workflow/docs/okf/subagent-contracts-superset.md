@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-10-20T04:27:18Z
+timestamp: 2026-10-20T04:57:40Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -860,9 +860,9 @@ unnamed-method default in `reviewer.md` carries no sentence pin. The class
 list and the rules under it, including the
 never-`adversarial`-on-`-medium` constraint, are pinned as whole sentences at
 their one site in the delegation and tiers reference
-(`test/docs-consistency.test.ts:9910#"safety core: the review method and tier class list stays pinned"`),
+(`test/docs-consistency.test.ts:9922#"safety core: the review method and tier class list stays pinned"`),
 and `test/charter.test.ts` pins that the class mapping appears at that site only
-(`test/charter.test.ts:204#"the review method and tier class mapping is normative once"`).
+(`test/charter.test.ts:206#"the review method and tier class mapping is normative once"`).
 
 Motivation and the anchoring dogfood evidence live in
 `CHANGELOG.md:#[0.32.0]#"A review-method axis, orthogonal to the effort tier"`,

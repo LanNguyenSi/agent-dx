@@ -5650,7 +5650,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 266,
+    paragraphLine: 281,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -9830,7 +9830,13 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("counts text that a tool reads as configuration, not explanatory text", () => {
     expect(option).toContain(
-      "Text that a tool reads counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and a document that a test or tool parses.",
+      "Text that a tool reads counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and any part of a document that a test or tool reads as data (markers, anchored citations, pinned sentences).",
+    );
+  });
+
+  it("makes the configuration definition govern the first option too", () => {
+    expect(section).toContain(
+      "What counts as explanatory text for this option is limited by the definition of configuration under the second option below, which governs both options.",
     );
   });
 
@@ -9842,7 +9848,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("counts indirect weakening of untouched tests as loosening unless every dependent test is shown unchanged, and defines that evidence", () => {
     expect(option).toContain(
-      "Changing a shared test helper, fixture, snapshot, or golden file, or changing an allowlist or exemption entry, counts as loosening unless every dependent test is shown unchanged: it asserts exactly what it did before, and its recorded mutation probes are still killed.",
+      "Changing a shared test helper, fixture, snapshot, or golden file, or changing an allowlist or exemption entry, counts as loosening unless every dependent test is shown unchanged: it asserts exactly what it did before, including the expected values that the changed helper, fixture, snapshot, golden file, allowlist, or exemption entry supplies to it, and at least one mutation probe against the behaviour it checks (a recorded one, or a new one where none is recorded) is still killed.",
     );
   });
 
@@ -9872,7 +9878,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("records the closure in the review-findings row with the evidence list", () => {
     expect(option).toContain(
-      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the evidence that each dependent test is unchanged (its assertions compared with the base, its recorded probes rerun and still killed) where a shared helper, fixture, snapshot, golden file, allowlist, or exemption entry changed, and the bundle check result where the repository has a knowledge bundle.",
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the evidence that each dependent test is unchanged (its assertions and supplied expected values compared with the base, and a mutation probe against its behaviour, recorded or new, still killed) where a shared helper, fixture, snapshot, golden file, allowlist, or exemption entry changed, and the bundle check result where the repository has a knowledge bundle.",
     );
   });
 
@@ -9888,15 +9894,21 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("takes the adversarial task's class from the highest class any round was given", () => {
+  it("takes the adversarial class from the delta or from any round reviewed adversarial", () => {
     expect(option).toContain(
-      "The task's class is the highest class any round of the task was given, so a docs-only fix on a task that was reviewed `adversarial` does not qualify.",
+      "A task is of the `adversarial` class when its delta falls in a class that row lists or when any round of the task was reviewed `adversarial` (the task's class follows Fix and delta rounds in [delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a task does not qualify.",
     );
   });
 
   it("keeps the reviewer round for any non-test fix on an adversarial-class task", () => {
     expect(option).toContain(
-      "A fix that touches documentation, comments, wording, instructions, or code on such a task goes through a reviewer round.",
+      "A fix that touches anything other than test files (documentation, wording, instructions, configuration, or non-test code) on such a task goes through a reviewer round.",
+    );
+  });
+
+  it("defines test files once and keeps the dependent-test evidence for a shared one", () => {
+    expect(option).toContain(
+      "Test files are the tests themselves and the test helpers, fixtures, snapshots, and golden files under the repository's test directories, and a change to a shared one still needs the dependent-test evidence of the second option.",
     );
   });
 });
