@@ -1,5 +1,18 @@
 # Bundle log
 
+- 2026-10-20T05:33:20Z, closing options, second review fix round: `review-and-recovery.md` (Docs-only closure section, still the
+  one site) now asks three things of each dependent test of a changed shared helper, fixture, snapshot, golden
+  file, allowlist, or exemption entry: it asserts exactly what it did before, including the comparisons it makes
+  through the changed entry and the inputs and expected values that entry supplies; every mutation probe recorded
+  against it is still killed; and at least one probe whose kill depends on the changed entry is killed. The
+  closure record lists the same evidence. Anchored citations leave the configuration list and a sentence keeps
+  citations, anchored ones included, as explanatory text; the `adversarial` class union reads "given the
+  `adversarial` class". `review-gate-and-waivers.md` rewrites its second-option paragraph to match and cites the
+  changed lines at their new positions; `subagent-contracts-superset.md` re-points its two test citations by the
+  lines added above them. The `[Unreleased]` entry keeps its line count, so no anchored `CHANGELOG.md` citation in
+  this log moved. `model-preselection.md` and `run-state-lifecycle-and-markers.md` cite nothing that moved and
+  make no claim about the closing options: re-verified against the changed sources. Re-stamped: the four docs
+  above.
 - 2026-10-20T05:05:07Z, closing options tightened, review fix round: `review-and-recovery.md` (Docs-only closure section, still the
   one site) now binds the dependent-test evidence to the data (the expected values that the changed helper,
   fixture, snapshot, golden file, allowlist, or exemption entry supplies, and a mutation probe against the
