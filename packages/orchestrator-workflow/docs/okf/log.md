@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-10-20T04:57:40Z, closing options tightened, review fix round: `review-and-recovery.md` (Docs-only closure section, still the
+- 2026-10-20T05:05:07Z, closing options tightened, review fix round: `review-and-recovery.md` (Docs-only closure section, still the
   one site) now binds the dependent-test evidence to the data (the expected values that the changed helper,
   fixture, snapshot, golden file, allowlist, or exemption entry supplies, and a mutation probe against the
   behaviour, recorded or new), narrows the configuration carve-out from "a document that a test or tool parses"
@@ -12,7 +12,7 @@
   above them. Every anchored `CHANGELOG.md` citation in this log moves down by the lines the `[Unreleased]`
   entry gained, each anchor text confirmed on its new line. `model-preselection.md` and
   `run-state-lifecycle-and-markers.md` cite nothing that moved and make no claim about the closing options:
-  re-verified, not re-stamped. Re-stamped: `review-gate-and-waivers.md`, `subagent-contracts-superset.md`.
+  re-verified against the changed sources. Re-stamped: the four docs above.
 - 2026-10-20T04:27:18Z, closing options tightened: `review-and-recovery.md` (Docs-only closure section, still the one site)
   now defines "every dependent test is shown unchanged" as asserting exactly what it did before with its
   recorded mutation probes still killed and adds that evidence to the closure record, counts `.only` and
