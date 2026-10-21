@@ -1,5 +1,19 @@
 # Bundle log
 
+- 2026-10-21T05:06:59Z, closing options, framework binding, tool-read entries, and record clause: `review-and-recovery.md` (Docs-only closure section, still the
+  one site) now counts an addition as read also when the test framework applies it to existing tests without any
+  test naming it (a new `conftest.py`, a `__mocks__` module, a `TestMain`, a registered setup file), and makes the
+  tie-break, the closure-record clause, and this bundle say the same thing: an addition counts as read unless the
+  record shows a search, at the fix commit, that found no reader. An entry that a tool other than a test reads
+  stays configuration and keeps the reviewer round. The no-reader rule is scoped to helpers, fixtures, snapshots,
+  golden files, and allowlist or exemption entries, so tightening an existing test and a new test case stay
+  closable. On an `adversarial`-class task only a fix that qualifies for the second option's test class closes.
+  `test/charter.test.ts` and `test/docs-consistency.test.ts` pin the new sentences and the replaced ones are gone.
+  `review-gate-and-waivers.md` rewrites its second-option paragraph and re-points its citations,
+  `subagent-contracts-superset.md` re-points its two test citations, and the `CHANGELOG.md` citations in this log
+  move by the lines added above them. `model-preselection.md` and `run-state-lifecycle-and-markers.md` cite
+  nothing that moved and make no claim about the closing options: re-verified against the changed sources.
+  Re-stamped: the four docs above.
 - 2026-10-21T04:41:53Z, closing options, structural rule for shared test entries: `review-and-recovery.md` (Docs-only closure section, still the
   one site) replaces the "unless every dependent test is shown unchanged" exception with a structural rule: changing
   an existing test's expected value, or an existing helper, fixture entry, snapshot, golden file, or allowlist or
