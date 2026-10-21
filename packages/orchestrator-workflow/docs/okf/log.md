@@ -1,5 +1,21 @@
 # Bundle log
 
+- 2026-10-21T05:26:01Z, closing options, setup code in test files and the three reader kinds: `review-and-recovery.md` (Docs-only
+  closure section, still the one site) now counts code that a test file adds outside a test case (a module mock, a
+  top-level or `describe`-level hook, module-level or init-time code such as a pytest module-level patch or a Go
+  `func init()`) as a helper that every existing test running alongside it reads, so a new test case in an existing
+  test file qualifies only when every line the fix adds sits inside it; in a new test file an import that binds a
+  name and a definition of a function, class, or test case are not such code. A tool reader is a tool other than a
+  test that consumes the entry as data or configuration; compiling, type-checking, linting, or running a file is no
+  such read, and the configuration definition leaves test helpers, fixtures, snapshots, golden files, and entries
+  that only tests read to the test class. The tie-break, the closure record's search scope, and this bundle name all
+  three kinds of reader (an existing test, a test-framework binding, another tool). `test/charter.test.ts` and
+  `test/docs-consistency.test.ts` pin the new and changed sentences and the replaced ones are gone.
+  `review-gate-and-waivers.md` rewrites its second-option paragraph and re-points its citations,
+  `subagent-contracts-superset.md` re-points its two test citations, and the `CHANGELOG.md` citations in this log
+  move by the lines added above them. `model-preselection.md` and `run-state-lifecycle-and-markers.md` cite nothing
+  that moved and make no claim about the closing options: re-verified against the changed sources. Re-stamped: the
+  four docs above.
 - 2026-10-21T05:06:59Z, closing options, framework binding, tool-read entries, and record clause: `review-and-recovery.md` (Docs-only closure section, still the
   one site) now counts an addition as read also when the test framework applies it to existing tests without any
   test naming it (a new `conftest.py`, a `__mocks__` module, a `TestMain`, a registered setup file), and makes the
