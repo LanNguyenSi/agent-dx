@@ -14,7 +14,8 @@
   paragraph to match, qualifies "a citation fix stays closable under either option" for `adversarial`-class tasks,
   and cites the changed lines at their new positions; `subagent-contracts-superset.md` lists `test/charter.test.ts`
   among its sources and re-points its two test citations and the two log citations into it by the lines added
-  above them. Re-stamped: the two docs above.
+  above them. `model-preselection.md` and `run-state-lifecycle-and-markers.md` cite nothing that moved and make no
+  claim about the closing options: re-verified against the changed sources. Re-stamped: the four docs above.
 - 2026-10-20T06:08:51Z, closing options, single-site pins: `test/charter.test.ts` now also pins the dependent-test sentence,
   the configuration-definition sentence and the closure-record sentence of the second closing option to
   `review-and-recovery.md`; `subagent-contracts-superset.md` re-verified and its charter citation re-pointed by
