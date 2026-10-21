@@ -1,5 +1,22 @@
 # Bundle log
 
+- 2026-10-21T06:19:00Z, closing options, line-level test class: `review-and-recovery.md` (Docs-only closure section, still the one
+  site) now bounds the second option's test class line by line. It closes a fix only when the fix changes existing
+  test files exclusively and every line it adds, changes, or removes is part of an assertion added inside an existing
+  test case or of a new test case added to an existing test file; several new test cases and added assertions may
+  share one fix, and a new `describe` block holding nothing but new test cases counts as part of them. A new file of
+  any kind, a new or changed helper, fixture, snapshot, golden file, or allowlist or exemption entry, an import, any
+  line outside a test case, and a configuration change keep the reviewer round. The reader kinds, the
+  framework-binding and tool-reader definitions, the setup-code rule, the reader search in the closure record, and
+  the sentence that left test fixtures out of the configuration definition are gone; the closure record asks for a
+  killed probe per added assertion and per new test case, and the adversarial paragraph applies the same class.
+  `test/charter.test.ts` and `test/docs-consistency.test.ts` pin the new sentences and the replaced ones are gone.
+  `review-gate-and-waivers.md` rewrites its second-option paragraph (and names the lexical boundary's accepted
+  residual: state a new test case leaves behind is not judged) and re-points its citations,
+  `subagent-contracts-superset.md` re-points its two test citations, and the `CHANGELOG.md` citations in this log
+  move by the lines removed above them. `model-preselection.md` and `run-state-lifecycle-and-markers.md` cite nothing
+  that moved and make no claim about the closing options: re-verified against the changed sources. Re-stamped: the
+  four docs above.
 - 2026-10-21T05:26:01Z, closing options, setup code in test files and the three reader kinds: `review-and-recovery.md` (Docs-only
   closure section, still the one site) now counts code that a test file adds outside a test case (a module mock, a
   top-level or `describe`-level hook, module-level or init-time code such as a pytest module-level patch or a Go
