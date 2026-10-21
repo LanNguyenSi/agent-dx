@@ -217,6 +217,18 @@ typecheck:test`, `npm run format:check` and `npm test`; CI runs all of
 them for this package (see the repository's
 [CONTRIBUTING.md](../../CONTRIBUTING.md)).
 
+Several suites (the guard, process-execution, probe and git-bounds
+suites among them) start real processes and deliberately orphan some of
+them (a detached grandchild whose parent exits); their teardown kills
+every process a case started.
+What it cannot do is reap them: a reaped process is reaped by its
+parent, and an orphan's parent is PID 1, which node tests are not (and
+node has no `waitpid` for foreign pids). In a container run WITHOUT an
+init process the killed orphans therefore stay in the process table as
+zombies until the container ends; harmless, and gone after it. Run
+container test jobs with `docker run --init` (or an equivalent init
+reaper) when zombie counts there matter.
+
 ## License
 
 MIT

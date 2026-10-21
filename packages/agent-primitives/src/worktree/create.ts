@@ -699,6 +699,15 @@ export type BranchDiscard =
   /** Another worktree has the branch checked out (a concurrent create of the
    * same branch, say). */
   | { outcome: "checked_out"; worktree: string }
+  /** The worktree THIS add created at the target still holds the branch,
+   * but git lists its registration as prunable: a failing post-checkout
+   * hook broke it on the way out (deleting its `.git`, say). `description`
+   * is `describePrunable`'s wording for it. */
+  | {
+      outcome: "prunable_at_target";
+      worktree: string;
+      description: string;
+    }
   /** The branch no longer points at the commit the add started it at. */
   | { outcome: "moved" }
   /** The worktree list could not be read, so use of the branch is unknown. */
@@ -733,7 +742,9 @@ export function discardCreatedBranch(
     // Only a live registration was made by this add: resolveTarget refuses
     // a target that exists, and a prunable entry (its directory deleted,
     // not yet pruned) is an old registration that makes git refuse the add
-    // before any worktree exists.
+    // before any worktree exists. A prunable entry that survived the add
+    // (a failing post-checkout hook broke the new worktree) is this call's
+    // own and is told by the holder check below.
     const made = entries.find((e) => samePath(e.path, target) && !e.prunable);
     if (made !== undefined) {
       return {
@@ -745,6 +756,22 @@ export function discardCreatedBranch(
   }
   const holder = entries.find((e) => e.branch === branch);
   if (holder !== undefined) {
+    if (
+      target !== undefined &&
+      holder.prunable &&
+      samePath(holder.path, target)
+    ) {
+      // The holder is the registration this add made, broken after the
+      // checkout (a failing post-checkout hook that deleted the new
+      // worktree's `.git` leaves exactly this: the entry, now prunable,
+      // still names the branch). It is not a concurrent create, and the
+      // branch next to it is none of this call's to delete.
+      return {
+        outcome: "prunable_at_target",
+        worktree: holder.path,
+        description: describePrunable(holder),
+      };
+    }
     return { outcome: "checked_out", worktree: holder.path };
   }
   const ref = `refs/heads/${branch}`;
@@ -781,6 +808,14 @@ export function describeDiscard(
     }
     case "checked_out":
       return `. The branch ${branch} is checked out in ${d.worktree} (a concurrent create of the same branch, say), so it was kept`;
+    case "prunable_at_target":
+      // `describePrunable` gives the `git worktree prune` advice itself for
+      // a directory that still exists; a gone one needs it here.
+      return `. The worktree ${d.worktree} was created, but git now lists it as prunable: ${d.description}; the branch ${branch} was kept${
+        d.description.includes("git worktree prune")
+          ? ""
+          : "; run `git worktree prune` in the repository to drop the registration"
+      }`;
     case "moved":
       return `. The branch ${branch} was kept: it no longer points at the commit this call created it at, so it may hold commits; inspect it before deleting it`;
     case "unchecked":

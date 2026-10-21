@@ -3485,10 +3485,12 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
   "worktree remove: a symbolic ref of a reftable common stack whose name is not ASCII",
   () => {
     // The same visible name in both Unicode normalization forms. git converts
-    // a command-line argument to NFC where core.precomposeunicode is on (macOS
-    // sets it at init) but a reftable record keeps the bytes it was written
-    // with, so a decomposed name could never be matched by an `--exclude`
-    // argument and the walk would follow the ref to the branch.
+    // a command-line argument to the composed form where
+    // core.precomposeunicode is on (macOS sets it at init) but a reftable
+    // record keeps the bytes it was written with, so an `--exclude` spelled
+    // with the name as text could miss a stored name in the other form and
+    // the walk would follow the ref to the branch; the pattern therefore
+    // spells every non-ASCII byte of the name as a `?`.
     const NFD_NAME = "cafe\u0301";
     const NFC_NAME = "caf\u00e9";
 
@@ -3531,11 +3533,20 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
           },
         );
         expect(stored.split("\n")).toContain(`refs/remotes/origin/${name}`);
-        await expectUnknownState(f, wt, sha, SYMLINK_FLAG_SETS);
-        const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
-        expect(r.json.message).toContain("non-ASCII character");
+        // No longer an unknown state: the exclusion replaces every non-ASCII
+        // byte of the name with a `?`, git has no form to convert such an
+        // argument to, and wildmatch matches it against the stored bytes one
+        // for one, so the walk reads the state as what it is, unpushed.
+        // Every flag set that touches the branch refuses and keeps
+        // everything.
+        for (const flags of SYMLINK_FLAG_SETS) {
+          const r = await cliBounded(f.work, ["remove", wt, ...flags]);
+          expect(r.code, r.stdout + r.stderr).toBe(2);
+          expect(r.json.reason).toBe("unpushed_commits");
+        }
+        expect(git(f.repo, ["rev-parse", "refs/heads/feat"]).trim()).toBe(sha);
         expect(fs.existsSync(wt)).toBe(true);
-        // Every refusal can be overridden, as for any unknown state.
+        // --force still removes, as for any other unpushed state.
         const forced = await cliBounded(f.work, [
           "remove",
           wt,
@@ -3547,6 +3558,30 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
       },
     );
 
+    it("keeps the dirty and the unpushed protections for a remote whose name holds a non-ASCII character", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const { wt, sha } = makeUnpushed(f);
+      // The shape a fetch writes for any remote with such a name: the
+      // symbolic ref `refs/remotes/<remote>/HEAD`, stored as written.
+      writeRef(f, `${NFD_NAME}/HEAD`, true, "refs/heads/main");
+      // Unpushed: the symbolic ref is excluded through the `?` pattern, the
+      // walk reads the state, and the branch is kept as what it is. (The
+      // plain `cli` runner: this case walks nothing a bounded run guards
+      // against, and it keeps the case runnable without `ps`.)
+      const r = await cli(f.work, ["remove", wt, "--delete-branch"]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe("unpushed_commits");
+      expect(fs.existsSync(wt)).toBe(true);
+      expect(git(f.repo, ["rev-parse", "refs/heads/feat"]).trim()).toBe(sha);
+      // Dirty: refused as always, before the branch question is even
+      // reached; no `--force` is asked for.
+      fs.writeFileSync(path.join(wt, "a.txt"), "dirty\n");
+      const d = await cli(f.work, ["remove", wt]);
+      expect(d.code, d.stdout + d.stderr).toBe(2);
+      expect(d.json.reason).toBe("worktree_dirty");
+      expect(fs.existsSync(wt)).toBe(true);
+    });
+
     it("still reports the unpushed commits behind a symbolic ref with an ASCII name", async () => {
       const f = makeFixture({ refFormat: "reftable" });
       const { wt, sha } = makeUnpushed(f);
@@ -3555,7 +3590,7 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
         "refs/remotes/origin/self",
         "refs/heads/feat",
       ]);
-      for (const flags of SYMLINK_FLAG_SETS.filter((s) => s.length > 0)) {
+      for (const flags of SYMLINK_FLAG_SETS) {
         const r = await cliBounded(f.work, ["remove", wt, ...flags]);
         expect(r.code, r.stdout + r.stderr).toBe(2);
         expect(r.json.reason).toBe("unpushed_commits");
@@ -4118,8 +4153,14 @@ describe("worktree remove: a ref store git was told to keep elsewhere", () => {
         const r = await cliBounded(f.work, ["remove", wt, ...flags], env);
         const label = `${flags.join(" ")}: ${r.stdout}${r.stderr}`;
         expect(r.code, label).toBe(2);
-        expect(r.json.reason, label).toBe("unpushed_state_unknown");
-        expect(r.json.message, label).toContain("GIT_REFERENCE_BACKEND");
+        if (flags.includes("origin/self")) {
+          // The worktree commands no longer pass the variable to git, so a
+          // custom --base is refused earlier as unresolvable.
+          expect(r.json.reason, label).toBe("base_not_found");
+        } else {
+          expect(r.json.reason, label).toBe("unpushed_state_unknown");
+          expect(r.json.message, label).toContain("GIT_REFERENCE_BACKEND");
+        }
       }
       // Neither store lost the worktree or the branch.
       const listed = parseWorktreeList(
