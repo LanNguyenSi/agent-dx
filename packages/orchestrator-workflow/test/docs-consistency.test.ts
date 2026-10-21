@@ -5650,7 +5650,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 292,
+    paragraphLine: 315,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -5734,7 +5734,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 80,
     end: 85,
     anchorKey: "5633dd3c",
-    paragraphLine: 76,
+    paragraphLine: 77,
     uncitedLines: [174, 187],
     claim:
       'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
@@ -5746,7 +5746,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 639,
     end: 639,
     anchorKey: "9e1acc22",
-    paragraphLine: 260,
+    paragraphLine: 261,
     uncitedLines: [532, 603],
     claim:
       "line 639 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 532 is the list-shape helper's own field regex, and uncited 603 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
@@ -9828,9 +9828,9 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("counts text that a tool reads as configuration, not explanatory text", () => {
+  it("counts text that a tool consumes as data or configuration as configuration, not explanatory text", () => {
     expect(option).toContain(
-      "Text that a tool reads counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and any part of a document that a test or tool reads as data (markers, pinned sentences).",
+      "Text that a tool consumes as data or configuration counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and any part of a documentation or instruction file that a test or tool reads as data (markers, pinned sentences).",
     );
   });
 
@@ -9852,9 +9852,27 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("counts indirect weakening of untouched tests as loosening unless every dependent test is shown unchanged, and defines that evidence", () => {
+  it("closes a test-class fix only when every added, changed, or removed line belongs to an added assertion in an existing test case or a new test case in an existing test file", () => {
     expect(option).toContain(
-      "Changing a shared test helper, fixture, snapshot, or golden file, or changing an allowlist or exemption entry, counts as loosening unless every dependent test is shown unchanged: it asserts exactly what it did before, including the comparisons it makes through the changed helper, fixture, snapshot, golden file, allowlist, or exemption entry and the inputs and expected values that entry supplies to it; every mutation probe recorded against it is still killed; and at least one mutation probe whose kill depends on the changed entry is killed (a new one where no recorded probe does).",
+      "This test class closes a fix only when the fix changes existing test files exclusively and every line it adds, changes, or removes is part of an assertion added inside an existing test case or part of a new test case added to an existing test file, where a new test case is the call or declaration that defines it and its body.",
+    );
+  });
+
+  it("keeps every existing assertion in place and counts a rewritten expected value as loosening", () => {
+    expect(option).toContain(
+      "An added assertion leaves every existing assertion in place: none is removed, rewritten, or loosened, and rewriting an existing test's expected value counts as loosening.",
+    );
+  });
+
+  it("allows several new test cases and added assertions in one fix and counts a describe wrapper of only new cases as part of them", () => {
+    expect(option).toContain(
+      "One fix may add several new test cases and add assertions next to them; a new `describe` block whose body holds nothing but new test cases counts as part of those new test cases, and so do blank lines that separate a new test case from its neighbours.",
+    );
+  });
+
+  it("keeps the reviewer round for every other change: new files, helpers, fixtures, entries, imports, lines outside a test case, configuration", () => {
+    expect(option).toContain(
+      "Anything else keeps the reviewer round: a new file of any kind (a test file, helper, fixture, snapshot, or golden file); a helper, fixture, snapshot, golden file, or allowlist or exemption entry that the fix adds or changes anywhere but inside a new test case; an import; a module mock (`vi.mock` or `jest.mock`) wherever it is written, since the runner hoists it to module level; any other line outside a test case, such as a hook (`beforeEach`, `beforeAll`, a Go `TestMain`, a pytest `setup_module` or autouse fixture), or module-level or init-time code (a pytest module-level patch, a Go `func init()`, a package-level initializer); and a configuration change.",
     );
   });
 
@@ -9884,7 +9902,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("records the closure in the review-findings row with the evidence list", () => {
     expect(option).toContain(
-      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the evidence that each dependent test is unchanged (its assertions and the comparisons, inputs, and expected values that pass through the changed entry compared with the base, every recorded probe rerun and still killed, and a probe whose kill depends on the changed entry killed) where a shared helper, fixture, snapshot, golden file, allowlist, or exemption entry changed, and the bundle check result where the repository has a knowledge bundle.",
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each added assertion and each new test case, and the bundle check result where the repository has a knowledge bundle.",
     );
   });
 
@@ -9912,9 +9930,9 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("defines test files once and keeps the dependent-test evidence for a shared one", () => {
+  it("applies the same line-level test class on an adversarial-class task", () => {
     expect(option).toContain(
-      "Test files are the tests themselves and the test helpers, fixtures, snapshots, and golden files under the repository's test directories, and a change to a shared one still needs the dependent-test evidence of the second option.",
+      "On such a task the test class is the same as under the second option: a fix closes only when every line it adds, changes, or removes is part of an added assertion in an existing test case or of a new test case in an existing test file, so a new or changed helper, fixture, snapshot, or golden file, an import, a module mock wherever it is written, or any other line outside a test case keeps the reviewer round there too.",
     );
   });
 });

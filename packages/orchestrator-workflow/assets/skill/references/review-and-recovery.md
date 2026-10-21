@@ -183,21 +183,35 @@ close such a finding without another reviewer round only when the task's
 entire unreviewed delta consists of fixes of these two classes. The first
 class changes only explanatory text: documentation, comments, citations, or
 explanatory prose in an instruction file that changes no instruction
-semantics. Text that a tool reads counts as configuration, not explanatory
-text: comment directives (lint, type-check, coverage, formatter, or
-test-environment directives, shebangs, build tags), document frontmatter such
-as a bundle's `sources:` list, and any part of a document that a test or tool
-reads as data (markers, pinned sentences). Citations, anchored ones included,
-stay explanatory text. The second class adds tests or tightens existing ones,
-with no assertion removed or loosened and no test deleted or skipped.
-Changing a shared test helper, fixture, snapshot, or golden file, or changing
-an allowlist or exemption entry, counts as loosening unless every dependent
-test is shown unchanged: it asserts exactly what it did before, including the
-comparisons it makes through the changed helper, fixture, snapshot, golden
-file, allowlist, or exemption entry and the inputs and expected values that
-entry supplies to it; every mutation probe recorded against it is still
-killed; and at least one mutation probe whose kill depends on the changed
-entry is killed (a new one where no recorded probe does).
+semantics. Text that a tool consumes as data or configuration counts as
+configuration, not explanatory text: comment directives (lint, type-check,
+coverage, formatter, or test-environment directives, shebangs, build tags),
+document frontmatter such as a bundle's `sources:` list, and any part of a
+documentation or instruction file that a test or tool reads as data (markers,
+pinned sentences). Citations, anchored ones included, stay explanatory text.
+The second class adds tests or tightens existing ones, with no assertion
+removed or loosened and no test deleted or skipped.
+This test class closes a fix only when the fix changes existing test files
+exclusively and every line it adds, changes, or removes is part of an
+assertion added inside an existing test case or part of a new test case added
+to an existing test file, where a new test case is the call or declaration
+that defines it and its body.
+An added assertion leaves every existing assertion in place: none is removed,
+rewritten, or loosened, and rewriting an existing test's expected value counts
+as loosening.
+One fix may add several new test cases and add assertions next to them; a
+new `describe` block whose body holds nothing but new test cases counts as
+part of those new test cases, and so do blank lines that separate a new test
+case from its neighbours.
+Anything else keeps the reviewer round: a new file of any kind (a test file,
+helper, fixture, snapshot, or golden file); a helper, fixture, snapshot,
+golden file, or allowlist or exemption entry that the fix adds or changes
+anywhere but inside a new test case; an import; a module mock (`vi.mock` or
+`jest.mock`) wherever it is written, since the runner hoists it to module
+level; any other line outside a test case, such as a hook (`beforeEach`,
+`beforeAll`, a Go `TestMain`, a pytest `setup_module` or autouse fixture), or
+module-level or init-time code (a pytest module-level patch, a Go `func
+init()`, a package-level initializer); and a configuration change.
 Adding `.only` or a condition that narrows a test counts as loosening without
 exception. A fix that changes code, configuration, or instruction semantics
 keeps the reviewer round, whatever the finding's category. A finding the
@@ -210,16 +224,12 @@ and accepting one follows the waiver rules. Record the closure in the
 `05-review-findings.md` row with its Severity and Decision headers unchanged
 and Decision `accepted`: the finding, the fix commit, the test run as the
 package's full test command (plus the type-check when a test or source file
-was touched) with its exit code, a killed mutation probe for each new or
-tightened test, the evidence that each dependent test is unchanged (its
-assertions and the comparisons, inputs, and expected values that pass through
-the changed entry compared with the base, every recorded probe rerun and still
-killed, and a probe whose kill depends on the changed entry killed) where a
-shared helper, fixture, snapshot, golden file, allowlist, or exemption entry
-changed, and the bundle check result where the repository has a knowledge
-bundle. Such a closure is not a review round: it counts toward none of the cap
-in Pinned-prose changes, the Round-2 halt rule, the Review-round escalation
-budget, or the Fix-regression decision point. Anchored by an observed run; see the entry for this rule in the
+was touched) with its exit code, a killed mutation probe for each added
+assertion and each new test case, and the bundle check result where the
+repository has a knowledge bundle. Such a closure is not a review round: it
+counts toward none of the cap in Pinned-prose changes, the Round-2 halt rule,
+the Review-round escalation budget, or the Fix-regression decision point.
+Anchored by an observed run; see the entry for this rule in the
 orchestrator-workflow CHANGELOG.
 
 On a task of the `adversarial` class, the classes listed in the `adversarial`
@@ -233,10 +243,13 @@ follows Fix and delta rounds in
 [delegation and tiers](delegation-and-tiers.md)), so a docs-only fix on such a
 task does not qualify. A fix that touches anything other than test files
 (documentation, wording, instructions, configuration, or non-test code) on
-such a task goes through a reviewer round. Test files are the tests
-themselves and the test helpers, fixtures, snapshots, and golden files under
-the repository's test directories, and a change to a shared one still needs
-the dependent-test evidence of the second option.
+such a task goes through a reviewer round. On such a task the test class is
+the same as under the second option: a fix closes only when every line it adds,
+changes, or removes is part of an added assertion in an existing test case or
+of a new test case in an existing test file, so a new or changed helper,
+fixture, snapshot, or golden file, an import, a module mock wherever it is
+written, or any other line outside a test case keeps the reviewer round there
+too.
 
 ## Final acceptance rule
 
