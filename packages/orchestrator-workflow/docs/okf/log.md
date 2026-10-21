@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-10-21T06:30:47Z, closing options, module mocks: `review-and-recovery.md` (Docs-only closure section) now names a module mock
+  (`vi.mock` or `jest.mock`) as keeping the reviewer round wherever it is written, because the runner hoists it to module
+  level, and adds a Go `TestMain` and a pytest `setup_module` or autouse fixture to the hook examples; the adversarial
+  paragraph says the same. review-gate-and-waivers.md mirrors it and its review-and-recovery.md citations moved by one
+  line; re-verified and re-stamped with subagent-contracts-superset.md, model-preselection.md and
+  run-state-lifecycle-and-markers.md, whose sources changed.
 - 2026-10-21T06:19:00Z, closing options, line-level test class: `review-and-recovery.md` (Docs-only closure section, still the one
   site) now bounds the second option's test class line by line. It closes a fix only when the fix changes existing
   test files exclusively and every line it adds, changes, or removes is part of an assertion added inside an existing
