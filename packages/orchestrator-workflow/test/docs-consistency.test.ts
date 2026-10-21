@@ -5650,7 +5650,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 292,
+    paragraphLine: 300,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -5734,7 +5734,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 80,
     end: 85,
     anchorKey: "5633dd3c",
-    paragraphLine: 76,
+    paragraphLine: 77,
     uncitedLines: [174, 187],
     claim:
       'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
@@ -5746,7 +5746,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 639,
     end: 639,
     anchorKey: "9e1acc22",
-    paragraphLine: 260,
+    paragraphLine: 261,
     uncitedLines: [532, 603],
     claim:
       "line 639 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 532 is the list-shape helper's own field regex, and uncited 603 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
@@ -9852,9 +9852,21 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("counts indirect weakening of untouched tests as loosening unless every dependent test is shown unchanged, and defines that evidence", () => {
+  it("keeps the reviewer round for a change to an existing expected value or to an existing entry that an existing test reads", () => {
     expect(option).toContain(
-      "Changing a shared test helper, fixture, snapshot, or golden file, or changing an allowlist or exemption entry, counts as loosening unless every dependent test is shown unchanged: it asserts exactly what it did before, including the comparisons it makes through the changed helper, fixture, snapshot, golden file, allowlist, or exemption entry and the inputs and expected values that entry supplies to it; every mutation probe recorded against it is still killed; and at least one mutation probe whose kill depends on the changed entry is killed (a new one where no recorded probe does).",
+      "Changing an existing test's expected value, or an existing test helper, fixture entry, snapshot, golden file, or allowlist or exemption entry that an existing test reads, counts as loosening and keeps the reviewer round; a tightening adds an assertion instead of rewriting an expected value.",
+    );
+  });
+
+  it("lets only an addition that no existing test reads qualify for the test class", () => {
+    expect(option).toContain(
+      "Only an addition that no existing test reads qualifies for this class: a new helper, a new fixture file, or a new allowlist or exemption entry.",
+    );
+  });
+
+  it("decides whether an existing test reads an entry by import, load, call, or iteration, and counts an undemonstrated addition as read", () => {
+    expect(option).toContain(
+      "An entry counts as read by an existing test when that test imports, loads, calls, or iterates it or the file or collection that holds it, and an addition whose diff does not show that no existing test does counts as read.",
     );
   });
 
@@ -9884,7 +9896,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("records the closure in the review-findings row with the evidence list", () => {
     expect(option).toContain(
-      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the evidence that each dependent test is unchanged (its assertions and the comparisons, inputs, and expected values that pass through the changed entry compared with the base, every recorded probe rerun and still killed, and a probe whose kill depends on the changed entry killed) where a shared helper, fixture, snapshot, golden file, allowlist, or exemption entry changed, and the bundle check result where the repository has a knowledge bundle.",
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, how it was established that no existing test reads an added helper, fixture, allowlist, or exemption entry (the existing tests that import, load, or iterate it, or their absence), and the bundle check result where the repository has a knowledge bundle.",
     );
   });
 
@@ -9912,9 +9924,9 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("defines test files once and keeps the dependent-test evidence for a shared one", () => {
+  it("defines test files once and keeps the reviewer round for a loosening change to one on an adversarial-class task", () => {
     expect(option).toContain(
-      "Test files are the tests themselves and the test helpers, fixtures, snapshots, and golden files under the repository's test directories, and a change to a shared one still needs the dependent-test evidence of the second option.",
+      "Test files are the tests themselves and the test helpers, fixtures, snapshots, and golden files under the repository's test directories, and a change to any of them that counts as loosening under the second option keeps the reviewer round there too.",
     );
   });
 });

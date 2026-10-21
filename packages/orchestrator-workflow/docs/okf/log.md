@@ -1,5 +1,20 @@
 # Bundle log
 
+- 2026-10-21T04:41:53Z, closing options, structural rule for shared test entries: `review-and-recovery.md` (Docs-only closure section, still the
+  one site) replaces the "unless every dependent test is shown unchanged" exception with a structural rule: changing
+  an existing test's expected value, or an existing helper, fixture entry, snapshot, golden file, or allowlist or
+  exemption entry that an existing test reads, counts as loosening and keeps the reviewer round, and only an
+  addition that no existing test reads qualifies. An entry counts as read when an existing test imports, loads,
+  calls, or iterates it or the file or collection that holds it, and an addition not shown otherwise counts as read.
+  The dependent-test evidence (the unchanged-assertions check and the probe whose kill depends on the changed
+  entry) is removed with the exception, and the closure record asks instead how it was established that no existing
+  test reads an added entry. The test-files sentence of the `adversarial` paragraph now keeps the reviewer round for
+  a change that counts as loosening. `test/charter.test.ts` and `test/docs-consistency.test.ts` pin the new
+  sentences at that site and the removed ones are gone. `review-gate-and-waivers.md` rewrites its second-option
+  paragraph to match, qualifies "a citation fix stays closable under either option" for `adversarial`-class tasks,
+  and cites the changed lines at their new positions; `subagent-contracts-superset.md` lists `test/charter.test.ts`
+  among its sources and re-points its two test citations and the two log citations into it by the lines added
+  above them. Re-stamped: the two docs above.
 - 2026-10-20T06:08:51Z, closing options, single-site pins: `test/charter.test.ts` now also pins the dependent-test sentence,
   the configuration-definition sentence and the closure-record sentence of the second closing option to
   `review-and-recovery.md`; `subagent-contracts-superset.md` re-verified and its charter citation re-pointed by
@@ -2854,8 +2869,8 @@
   its current line, 329. Two further citations surfaced by the same
   ambiguity-clearing effect, both into `docs/okf/subagent-contracts-
   superset.md` itself
-  (`docs/okf/subagent-contracts-superset.md:386#"second, explicitly non-probabilistic trigger for the same field, with"`
-  and `docs/okf/subagent-contracts-superset.md:508#"reports as killed together with their"`),
+  (`docs/okf/subagent-contracts-superset.md:387#"second, explicitly non-probabilistic trigger for the same field, with"`
+  and `docs/okf/subagent-contracts-superset.md:509#"reports as killed together with their"`),
   were re-pointed to their current lines by the same anchor-text search
   as the rest of this round's re-pointing.
   A fifth, unrelated warning (not from the ambiguity-clearing effect: a
@@ -4226,8 +4241,8 @@
   "...reports as killed together with their...") were re-anchored to a
   shorter quote sitting wholly on the anchor's own last line instead of a
   two-line span, per this bundle's own single-line-anchor convention
-  (`docs/okf/subagent-contracts-superset.md:386#"second, explicitly non-probabilistic trigger for the same field, with"`,
-  `docs/okf/subagent-contracts-superset.md:508#"reports as killed together with their"`).
+  (`docs/okf/subagent-contracts-superset.md:387#"second, explicitly non-probabilistic trigger for the same field, with"`,
+  `docs/okf/subagent-contracts-superset.md:509#"reports as killed together with their"`).
   `okf-kit check --json packages/orchestrator-workflow/docs/okf` went from
   0 errors/0 warnings/23 notices at round-1 HEAD, to warnings introduced
   by this round's own edits (all resolved by the re-derivation pass

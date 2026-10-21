@@ -190,14 +190,15 @@ as a bundle's `sources:` list, and any part of a document that a test or tool
 reads as data (markers, pinned sentences). Citations, anchored ones included,
 stay explanatory text. The second class adds tests or tightens existing ones,
 with no assertion removed or loosened and no test deleted or skipped.
-Changing a shared test helper, fixture, snapshot, or golden file, or changing
-an allowlist or exemption entry, counts as loosening unless every dependent
-test is shown unchanged: it asserts exactly what it did before, including the
-comparisons it makes through the changed helper, fixture, snapshot, golden
-file, allowlist, or exemption entry and the inputs and expected values that
-entry supplies to it; every mutation probe recorded against it is still
-killed; and at least one mutation probe whose kill depends on the changed
-entry is killed (a new one where no recorded probe does).
+Changing an existing test's expected value, or an existing test helper,
+fixture entry, snapshot, golden file, or allowlist or exemption entry that an
+existing test reads, counts as loosening and keeps the reviewer round; a
+tightening adds an assertion instead of rewriting an expected value.
+Only an addition that no existing test reads qualifies for this class: a new
+helper, a new fixture file, or a new allowlist or exemption entry.
+An entry counts as read by an existing test when that test imports, loads,
+calls, or iterates it or the file or collection that holds it, and an addition
+whose diff does not show that no existing test does counts as read.
 Adding `.only` or a condition that narrows a test counts as loosening without
 exception. A fix that changes code, configuration, or instruction semantics
 keeps the reviewer round, whatever the finding's category. A finding the
@@ -211,13 +212,10 @@ and accepting one follows the waiver rules. Record the closure in the
 and Decision `accepted`: the finding, the fix commit, the test run as the
 package's full test command (plus the type-check when a test or source file
 was touched) with its exit code, a killed mutation probe for each new or
-tightened test, the evidence that each dependent test is unchanged (its
-assertions and the comparisons, inputs, and expected values that pass through
-the changed entry compared with the base, every recorded probe rerun and still
-killed, and a probe whose kill depends on the changed entry killed) where a
-shared helper, fixture, snapshot, golden file, allowlist, or exemption entry
-changed, and the bundle check result where the repository has a knowledge
-bundle. Such a closure is not a review round: it counts toward none of the cap
+tightened test, how it was established that no existing test reads an added
+helper, fixture, allowlist, or exemption entry (the existing tests that import,
+load, or iterate it, or their absence), and the bundle check result where the
+repository has a knowledge bundle. Such a closure is not a review round: it counts toward none of the cap
 in Pinned-prose changes, the Round-2 halt rule, the Review-round escalation
 budget, or the Fix-regression decision point. Anchored by an observed run; see the entry for this rule in the
 orchestrator-workflow CHANGELOG.
@@ -235,8 +233,8 @@ task does not qualify. A fix that touches anything other than test files
 (documentation, wording, instructions, configuration, or non-test code) on
 such a task goes through a reviewer round. Test files are the tests
 themselves and the test helpers, fixtures, snapshots, and golden files under
-the repository's test directories, and a change to a shared one still needs
-the dependent-test evidence of the second option.
+the repository's test directories, and a change to any of them that counts as
+loosening under the second option keeps the reviewer round there too.
 
 ## Final acceptance rule
 
