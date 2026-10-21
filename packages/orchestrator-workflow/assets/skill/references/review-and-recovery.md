@@ -206,11 +206,12 @@ case from its neighbours.
 Anything else keeps the reviewer round: a new file of any kind (a test file,
 helper, fixture, snapshot, or golden file); a helper, fixture, snapshot,
 golden file, or allowlist or exemption entry that the fix adds or changes
-anywhere but inside a new test case; an import; any line outside a test case,
-such as a module mock (a top-level `vi.mock` or `jest.mock`), a hook
-(`beforeEach`, `beforeAll`), or module-level or init-time code (a pytest
-module-level patch, a Go `func init()`, a package-level initializer); and a
-configuration change.
+anywhere but inside a new test case; an import; a module mock (`vi.mock` or
+`jest.mock`) wherever it is written, since the runner hoists it to module
+level; any other line outside a test case, such as a hook (`beforeEach`,
+`beforeAll`, a Go `TestMain`, a pytest `setup_module` or autouse fixture), or
+module-level or init-time code (a pytest module-level patch, a Go `func
+init()`, a package-level initializer); and a configuration change.
 Adding `.only` or a condition that narrows a test counts as loosening without
 exception. A fix that changes code, configuration, or instruction semantics
 keeps the reviewer round, whatever the finding's category. A finding the
@@ -246,8 +247,9 @@ such a task goes through a reviewer round. On such a task the test class is
 the same as under the second option: a fix closes only when every line it adds,
 changes, or removes is part of an added assertion in an existing test case or
 of a new test case in an existing test file, so a new or changed helper,
-fixture, snapshot, or golden file, an import, or any other line outside a test
-case keeps the reviewer round there too.
+fixture, snapshot, or golden file, an import, a module mock wherever it is
+written, or any other line outside a test case keeps the reviewer round there
+too.
 
 ## Final acceptance rule
 

@@ -5650,7 +5650,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 314,
+    paragraphLine: 315,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -9872,7 +9872,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("keeps the reviewer round for every other change: new files, helpers, fixtures, entries, imports, lines outside a test case, configuration", () => {
     expect(option).toContain(
-      "Anything else keeps the reviewer round: a new file of any kind (a test file, helper, fixture, snapshot, or golden file); a helper, fixture, snapshot, golden file, or allowlist or exemption entry that the fix adds or changes anywhere but inside a new test case; an import; any line outside a test case, such as a module mock (a top-level `vi.mock` or `jest.mock`), a hook (`beforeEach`, `beforeAll`), or module-level or init-time code (a pytest module-level patch, a Go `func init()`, a package-level initializer); and a configuration change.",
+      "Anything else keeps the reviewer round: a new file of any kind (a test file, helper, fixture, snapshot, or golden file); a helper, fixture, snapshot, golden file, or allowlist or exemption entry that the fix adds or changes anywhere but inside a new test case; an import; a module mock (`vi.mock` or `jest.mock`) wherever it is written, since the runner hoists it to module level; any other line outside a test case, such as a hook (`beforeEach`, `beforeAll`, a Go `TestMain`, a pytest `setup_module` or autouse fixture), or module-level or init-time code (a pytest module-level patch, a Go `func init()`, a package-level initializer); and a configuration change.",
     );
   });
 
@@ -9932,7 +9932,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("applies the same line-level test class on an adversarial-class task", () => {
     expect(option).toContain(
-      "On such a task the test class is the same as under the second option: a fix closes only when every line it adds, changes, or removes is part of an added assertion in an existing test case or of a new test case in an existing test file, so a new or changed helper, fixture, snapshot, or golden file, an import, or any other line outside a test case keeps the reviewer round there too.",
+      "On such a task the test class is the same as under the second option: a fix closes only when every line it adds, changes, or removes is part of an added assertion in an existing test case or of a new test case in an existing test file, so a new or changed helper, fixture, snapshot, or golden file, an import, a module mock wherever it is written, or any other line outside a test case keeps the reviewer round there too.",
     );
   });
 });

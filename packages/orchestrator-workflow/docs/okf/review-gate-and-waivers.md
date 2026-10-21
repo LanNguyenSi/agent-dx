@@ -186,7 +186,7 @@ stays closable under either option on a task outside the `adversarial` class;
 on an `adversarial`-class task only test-only fixes close, and a citation fix,
 being documentation, keeps the reviewer round
 (`review-and-recovery.md:191#"pinned sentences). Citations, anchored ones included, stay explanatory text."`;
-`review-and-recovery.md:234#"the classes listed in the"`).
+`review-and-recovery.md:235#"the classes listed in the"`).
 The definition governs the first option too: what counts as explanatory text
 there is limited by it
 (`review-and-recovery.md:176#"What counts as explanatory text for this option is"`).
@@ -209,9 +209,10 @@ them, as do the blank lines that separate a new test case from its neighbours
 Everything else keeps the reviewer round: a new file of any kind (test file,
 helper, fixture, snapshot, golden file), a helper, fixture, snapshot, golden
 file, or allowlist or exemption entry added or changed anywhere but inside a
-new test case, an import, any line outside a test case (a module mock such as
-a top-level `vi.mock`, a hook such as `beforeEach`, module-level or init-time
-code such as a Go `func init()`), and a configuration change
+new test case, an import, a module mock such as `vi.mock` wherever it is
+written (the runner hoists it to module level), any other line outside a test
+case (a hook such as `beforeEach` or a Go `TestMain`, module-level or
+init-time code such as a Go `func init()`), and a configuration change
 (`review-and-recovery.md:206#"Anything else keeps the reviewer round: a new file of any kind (a test file,"`).
 An orchestrator decides eligibility from the diff alone, with no search for
 readers: a new fixture file, a new helper, a new allowlist entry, or a new
@@ -224,34 +225,34 @@ This rule replaces an earlier dependent-test exception, so neither
 dependent-test evidence nor a search for readers is asked for.
 Adding `.only` or a condition that narrows a test counts as loosening
 without exception
-(`review-and-recovery.md:214#"a condition that narrows a test counts as loosening without"`).
+(`review-and-recovery.md:215#"a condition that narrows a test counts as loosening without"`).
 Unlike the first option it may touch test files, which is why the bound and
 the probe requirement below exist: a test change can hide a behaviour change.
 A fix that changes code, configuration, or instruction semantics keeps the
 reviewer round
-(`review-and-recovery.md:215#"exception. A fix that changes code, configuration, or instruction semantics"`).
+(`review-and-recovery.md:216#"exception. A fix that changes code, configuration, or instruction semantics"`).
 The halt exclusion reads the reviewer's markers, not the orchestrator's
 judgement: a finding marked `recurrence: repeated` with `introduced_by_delta`
 `yes` or `unknown`, and any fix on a task whose Review-round escalation budget
 has fired, are not eligible, so those rules govern
-(`review-and-recovery.md:219#"fired, is not eligible for this option: those rules govern and the next"`),
+(`review-and-recovery.md:220#"fired, is not eligible for this option: those rules govern and the next"`),
 and high and critical findings stay blocking under both options
-(`review-and-recovery.md:221#"High and critical findings stay blocking: neither closing option closes one,"`).
+(`review-and-recovery.md:222#"High and critical findings stay blocking: neither closing option closes one,"`).
 The closure is recorded in the same `05-review-findings.md` row, Decision
 `accepted`, with the finding, the fix commit, the test run as the package's
 full test command (plus the type-check when a test or source file was touched)
 with its exit code, a killed mutation probe for each added assertion and each
 new test case, and the bundle check result where the repository has a
 knowledge bundle
-(`review-and-recovery.md:226#"was touched) with its exit code, a killed mutation probe for each added"`;
-`review-and-recovery.md:227#"bundle check result where the"`). It is
+(`review-and-recovery.md:227#"was touched) with its exit code, a killed mutation probe for each added"`;
+`review-and-recovery.md:228#"bundle check result where the"`). It is
 not a review round, so it counts toward neither the test-adequacy cap, the
 Round-2 halt rule, the Review-round escalation budget nor the Fix-regression
 decision point
-(`review-and-recovery.md:228#"closure is not a review round: it"`).
+(`review-and-recovery.md:229#"closure is not a review round: it"`).
 On a task of the `adversarial` class the first option is not available and the
 second closes a finding only when the fix changes test files exclusively
-(`review-and-recovery.md:234#"the classes listed in the"`).
+(`review-and-recovery.md:235#"the classes listed in the"`).
 A task is of that class when its delta falls in a class the `adversarial` row
 lists or when any round of the task was given the `adversarial` class, so a
 docs-only fix on such a task does not qualify, and any fix other than one
@@ -259,9 +260,9 @@ confined to test files goes through a reviewer round; on such a task the test
 class is the same line-level rule as under the second option, so a new or
 changed helper, fixture, snapshot, or golden file, an import, or any other
 line outside a test case keeps the round there too
-(`review-and-recovery.md:239#"when its delta falls in a class that row lists or"`;
-`review-and-recovery.md:240#"when any round of the task was given the"`;
-`review-and-recovery.md:245#"such a task goes through a reviewer round. On such a task the test class is"`).
+(`review-and-recovery.md:240#"when its delta falls in a class that row lists or"`;
+`review-and-recovery.md:241#"when any round of the task was given the"`;
+`review-and-recovery.md:246#"such a task goes through a reviewer round. On such a task the test class is"`).
 The clauses are pinned as whole sentences
 in `test/docs-consistency.test.ts:9800#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
 their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.
