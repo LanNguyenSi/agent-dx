@@ -194,11 +194,20 @@ Changing an existing test's expected value, or an existing test helper,
 fixture entry, snapshot, golden file, or allowlist or exemption entry that an
 existing test reads, counts as loosening and keeps the reviewer round; a
 tightening adds an assertion instead of rewriting an expected value.
-Only an addition that no existing test reads qualifies for this class: a new
-helper, a new fixture file, or a new allowlist or exemption entry.
-An entry counts as read by an existing test when that test imports, loads,
-calls, or iterates it or the file or collection that holds it, and an addition
-whose diff does not show that no existing test does counts as read.
+Among helpers, fixtures, snapshots, golden files, and allowlist or exemption
+entries, only an addition that no existing test and no other tool reads
+qualifies for this class: a new helper, a new fixture file, a new snapshot or
+golden file, or a new allowlist or exemption entry. An entry that a tool other
+than a test reads (a CI guard script, a lint or coverage exclusion, a
+slop-detector allow entry) is configuration under the definition above and
+keeps the reviewer round, a new test alongside it or not.
+An addition counts as read by an existing test when that test imports, loads,
+calls, or iterates it or the file or collection that holds it, and also when
+the test framework applies it to existing tests without any test naming it: a
+new pytest `conftest.py`, a new Jest `__mocks__` module, a new Go test file
+that defines `TestMain`, or a setup file the test configuration registers.
+An addition counts as read unless the closure record shows a search, at the
+fix commit, that found no reader of either kind.
 Adding `.only` or a condition that narrows a test counts as loosening without
 exception. A fix that changes code, configuration, or instruction semantics
 keeps the reviewer round, whatever the finding's category. A finding the
@@ -212,13 +221,16 @@ and accepting one follows the waiver rules. Record the closure in the
 and Decision `accepted`: the finding, the fix commit, the test run as the
 package's full test command (plus the type-check when a test or source file
 was touched) with its exit code, a killed mutation probe for each new or
-tightened test, how it was established that no existing test reads an added
-helper, fixture, allowlist, or exemption entry (the existing tests that import,
-load, or iterate it, or their absence), and the bundle check result where the
-repository has a knowledge bundle. Such a closure is not a review round: it counts toward none of the cap
-in Pinned-prose changes, the Round-2 halt rule, the Review-round escalation
-budget, or the Fix-regression decision point. Anchored by an observed run; see the entry for this rule in the
-orchestrator-workflow CHANGELOG.
+tightened test, the search that found no reader of an added helper, fixture,
+snapshot, golden file, allowlist, or exemption entry (its command and scope:
+the existing tests, the framework's discovery and configuration files such as
+`conftest.py`, `__mocks__`, test mains, and setup or config files, and the
+repository's scripts and tool configuration, run at the fix commit), and the
+bundle check result where the repository has a knowledge bundle. Such a
+closure is not a review round: it counts toward none of the cap in Pinned-prose
+changes, the Round-2 halt rule, the Review-round escalation budget, or the
+Fix-regression decision point. Anchored by an observed run; see the entry for
+this rule in the orchestrator-workflow CHANGELOG.
 
 On a task of the `adversarial` class, the classes listed in the `adversarial`
 row of [delegation and tiers](delegation-and-tiers.md), the first option (the
@@ -233,8 +245,10 @@ task does not qualify. A fix that touches anything other than test files
 (documentation, wording, instructions, configuration, or non-test code) on
 such a task goes through a reviewer round. Test files are the tests
 themselves and the test helpers, fixtures, snapshots, and golden files under
-the repository's test directories, and a change to any of them that counts as
-loosening under the second option keeps the reviewer round there too.
+the repository's test directories, and on such a task a fix closes only when it
+qualifies for the second option's test class, so a change to an existing entry
+or any other loosening change to one of them keeps the reviewer round there
+too.
 
 ## Final acceptance rule
 

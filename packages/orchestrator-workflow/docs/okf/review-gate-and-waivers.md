@@ -184,7 +184,7 @@ stays closable under either option on a task outside the `adversarial` class;
 on an `adversarial`-class task only test-only fixes close, and a citation fix,
 being documentation, keeps the reviewer round
 (`review-and-recovery.md:190#"Citations, anchored ones included,"`;
-`review-and-recovery.md:223#"the classes listed in the"`).
+`review-and-recovery.md:235#"the classes listed in the"`).
 The definition governs the first option too: what counts as explanatory text
 there is limited by it
 (`review-and-recovery.md:176#"What counts as explanatory text for this option is"`).
@@ -195,59 +195,70 @@ edited until a test passes vacuously, or one value changed in a golden file that
 a single test reads, cannot close a finding; a tightening adds an assertion
 instead of rewriting an expected value
 (`review-and-recovery.md:193#"Changing an existing test's expected value, or an existing test helper,"`).
-Only an addition that no existing test reads qualifies for the class: a new
-helper, a new fixture file, or a new allowlist or exemption entry
-(`review-and-recovery.md:197#"Only an addition that no existing test reads qualifies for this class: a new"`).
-Whether an existing test reads an entry is decided from the diff and a search,
-not from intent: the entry counts as read when an existing test imports, loads,
-calls, or iterates it or the file or collection that holds it, and an addition
-whose diff does not show that no existing test does counts as read, so a new
-entry in an allowlist that an existing test iterates keeps the round
-(`review-and-recovery.md:199#"An entry counts as read by an existing test when that test imports, loads,"`).
+Among helpers, fixtures, snapshots, golden files, and allowlist or exemption
+entries, only an addition that no existing test and no other tool reads
+qualifies for the class: a new helper, a new fixture file, a new snapshot or
+golden file, or a new allowlist or exemption entry. An entry that a tool other
+than a test reads (a CI guard script, a lint or coverage exclusion, a
+slop-detector allow entry) is configuration and keeps the round, a new test
+alongside it or not
+(`review-and-recovery.md:197#"Among helpers, fixtures, snapshots, golden files, and allowlist or exemption"`).
+Whether an addition is read is decided by a search, not from the diff alone or
+from intent: it counts as read when an existing test imports, loads, calls, or
+iterates it or the file or collection that holds it, and also when the test
+framework applies it to existing tests without any test naming it (a new
+`conftest.py`, a `__mocks__` module, a `TestMain`, a registered setup file),
+and it counts as read unless the closure record shows a search, at the fix
+commit, that found no reader of either kind, so a new entry in an allowlist
+that an existing test iterates keeps the round
+(`review-and-recovery.md:204#"An addition counts as read by an existing test when that test imports, loads,"`;
+`review-and-recovery.md:209#"An addition counts as read unless the closure record shows a search, at the"`).
 This structural rule replaces a dependent-test exception, so no
-dependent-test evidence is asked for: a qualifying addition has no existing
-dependent test, and every other change keeps the reviewer round,
+dependent-test evidence is asked for: a change to an existing entry keeps the
+reviewer round, so there is no dependent test left to show unchanged,
 and adding `.only` or a condition that narrows a test counts as loosening
 without exception
-(`review-and-recovery.md:202#"a condition that narrows a test counts as loosening without"`).
+(`review-and-recovery.md:211#"a condition that narrows a test counts as loosening without"`).
 Unlike the first option it may touch test files, which is why the bound and
 the probe requirement below exist: a test change can hide a behaviour change.
 A fix that changes code, configuration, or instruction semantics keeps the
 reviewer round
-(`review-and-recovery.md:203#"exception. A fix that changes code, configuration, or instruction semantics"`).
+(`review-and-recovery.md:212#"exception. A fix that changes code, configuration, or instruction semantics"`).
 The halt exclusion reads the reviewer's markers, not the orchestrator's
 judgement: a finding marked `recurrence: repeated` with `introduced_by_delta`
 `yes` or `unknown`, and any fix on a task whose Review-round escalation budget
 has fired, are not eligible, so those rules govern
-(`review-and-recovery.md:207#"fired, is not eligible for this option: those rules govern and the next"`),
+(`review-and-recovery.md:216#"fired, is not eligible for this option: those rules govern and the next"`),
 and high and critical findings stay blocking under both options
-(`review-and-recovery.md:209#"High and critical findings stay blocking: neither closing option closes one,"`).
+(`review-and-recovery.md:218#"High and critical findings stay blocking: neither closing option closes one,"`).
 The closure is recorded in the same `05-review-findings.md` row, Decision
 `accepted`, with the finding, the fix commit, the test run as the package's
 full test command (plus the type-check when a test or source file was touched)
-with its exit code, a killed mutation probe for each new or tightened test, how
-it was established that no existing test reads an added helper, fixture, allowlist, or
-exemption entry (the existing tests that import, load, or iterate it, or their
-absence), and the bundle check result where the repository has a knowledge
-bundle
-(`review-and-recovery.md:215#"tightened test, how it was established that no existing test reads an added"`;
-`review-and-recovery.md:217#"load, or iterate it, or their absence), and the bundle check result where the"`). It is
+with its exit code, a killed mutation probe for each new or tightened test, the
+search that found no reader of an added helper, fixture, snapshot, golden file,
+allowlist, or exemption entry (its command and scope: the existing tests, the
+framework's discovery and configuration files, and the repository's scripts and
+tool configuration, run at the fix commit), and the bundle check result where
+the repository has a knowledge bundle
+(`review-and-recovery.md:224#"tightened test, the search that found no reader"`;
+`review-and-recovery.md:229#"bundle check result where the"`). It is
 not a review round, so it counts toward neither the test-adequacy cap, the
 Round-2 halt rule, the Review-round escalation budget nor the Fix-regression
 decision point
-(`review-and-recovery.md:218#"bundle. Such a closure is not a review round: it counts toward none of the cap"`).
+(`review-and-recovery.md:230#"closure is not a review round: it counts toward none of the cap"`).
 On a task of the `adversarial` class the first option is not available and the
 second closes a finding only when the fix changes test files exclusively
-(`review-and-recovery.md:223#"the classes listed in the"`).
+(`review-and-recovery.md:235#"the classes listed in the"`).
 A task is of that class when its delta falls in a class the `adversarial` row
 lists or when any round of the task was given the `adversarial` class, so a
 docs-only fix on such a task does not qualify, and any fix other than one
-confined to test files goes through a reviewer round; a change to a test
-helper, fixture, snapshot, golden file, or allowlist or exemption entry that
-counts as loosening under the second option keeps the round there too
-(`review-and-recovery.md:228#"when its delta falls in a class that row lists or"`;
-`review-and-recovery.md:229#"when any round of the task was given the"`;
-`review-and-recovery.md:236#"the repository's test directories, and a change to any of them that counts as"`).
+confined to test files goes through a reviewer round; on such a task a fix
+closes only when it qualifies for the second option's test class, so a change
+to an existing test helper, fixture, snapshot, golden file, or allowlist or
+exemption entry keeps the round there too
+(`review-and-recovery.md:240#"when its delta falls in a class that row lists or"`;
+`review-and-recovery.md:241#"when any round of the task was given the"`;
+`review-and-recovery.md:248#"the repository's test directories, and on such a task a fix"`).
 The clauses are pinned as whole sentences
 in `test/docs-consistency.test.ts:9800#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
 their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.

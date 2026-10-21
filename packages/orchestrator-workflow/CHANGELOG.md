@@ -11,10 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Docs-only closure section, still its one site) is tightened. Changing an
   existing test's expected value, or an existing helper, fixture entry,
   snapshot, golden file, or allowlist or exemption entry that an existing test
-  reads, counts as loosening and keeps the round; only an addition no existing
-  test reads qualifies. An entry counts as read when an existing test imports,
-  loads, calls, or iterates it or its file or collection, and an addition not
-  shown otherwise counts as read. The closure record says how that was shown.
+  reads, counts as loosening and keeps the round; only an addition that no
+  existing test and no other tool reads qualifies, so an allowlist entry that a
+  CI guard script or a lint or coverage exclusion reads stays configuration.
+  This replaces the exception that closed a change to a shared test helper,
+  fixture, snapshot, golden file, or allowlist entry when every dependent test
+  was shown unchanged, together with the dependent-test evidence it asked for.
+  An addition counts as read when an existing test imports, loads, calls, or
+  iterates it or its file or collection, and also when the test framework
+  applies it to existing tests without any test naming it (a new `conftest.py`,
+  a `__mocks__` module, a `TestMain`, or a registered setup file); it counts as
+  read unless the closure record shows a search of the existing tests, the
+  framework's discovery and configuration files, and the repository's scripts
+  at the fix commit that found no reader.
   Adding `.only` or a condition that narrows a test counts as loosening without
   exception, so it no longer conflicts with the "no test deleted or skipped"
   bound. The exclusion for a recurring defect is based on the reviewer's
@@ -31,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delta falls in a class the `adversarial` row lists or when any round of the
   task was given the `adversarial` class. Test files are defined once there:
   the tests themselves and the helpers, fixtures, snapshots, and golden files
-  under the repository's test directories, and a loosening change to one keeps
-  the round there too. In `references/delegation-and-tiers.md`, the
+  under the repository's test directories, and such a fix closes only when it
+  qualifies for the second option's test class, so a change to an existing
+  entry keeps the round there too. In `references/delegation-and-tiers.md`, the
   `adversarial` row's two tiers are now stated as a default (the unsuffixed
   reviewer) and a higher, recorded choice (`reviewer-xhigh`). Installed skill
   files report as outdated until refreshed.

@@ -5650,7 +5650,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 300,
+    paragraphLine: 311,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -9858,15 +9858,27 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("lets only an addition that no existing test reads qualify for the test class", () => {
+  it("lets only an addition that no existing test and no other tool reads qualify for the test class", () => {
     expect(option).toContain(
-      "Only an addition that no existing test reads qualifies for this class: a new helper, a new fixture file, or a new allowlist or exemption entry.",
+      "Among helpers, fixtures, snapshots, golden files, and allowlist or exemption entries, only an addition that no existing test and no other tool reads qualifies for this class: a new helper, a new fixture file, a new snapshot or golden file, or a new allowlist or exemption entry.",
     );
   });
 
-  it("decides whether an existing test reads an entry by import, load, call, or iteration, and counts an undemonstrated addition as read", () => {
+  it("keeps the reviewer round for an entry that a tool other than a test reads, as configuration", () => {
     expect(option).toContain(
-      "An entry counts as read by an existing test when that test imports, loads, calls, or iterates it or the file or collection that holds it, and an addition whose diff does not show that no existing test does counts as read.",
+      "An entry that a tool other than a test reads (a CI guard script, a lint or coverage exclusion, a slop-detector allow entry) is configuration under the definition above and keeps the reviewer round, a new test alongside it or not.",
+    );
+  });
+
+  it("counts an addition as read by an existing test through import, load, call, iteration, or the test framework's own discovery", () => {
+    expect(option).toContain(
+      "An addition counts as read by an existing test when that test imports, loads, calls, or iterates it or the file or collection that holds it, and also when the test framework applies it to existing tests without any test naming it: a new pytest `conftest.py`, a new Jest `__mocks__` module, a new Go test file that defines `TestMain`, or a setup file the test configuration registers.",
+    );
+  });
+
+  it("counts an addition as read unless the closure record shows a search that found no reader", () => {
+    expect(option).toContain(
+      "An addition counts as read unless the closure record shows a search, at the fix commit, that found no reader of either kind.",
     );
   });
 
@@ -9896,7 +9908,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("records the closure in the review-findings row with the evidence list", () => {
     expect(option).toContain(
-      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, how it was established that no existing test reads an added helper, fixture, allowlist, or exemption entry (the existing tests that import, load, or iterate it, or their absence), and the bundle check result where the repository has a knowledge bundle.",
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the search that found no reader of an added helper, fixture, snapshot, golden file, allowlist, or exemption entry (its command and scope: the existing tests, the framework's discovery and configuration files such as `conftest.py`, `__mocks__`, test mains, and setup or config files, and the repository's scripts and tool configuration, run at the fix commit), and the bundle check result where the repository has a knowledge bundle.",
     );
   });
 
@@ -9924,9 +9936,9 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("defines test files once and keeps the reviewer round for a loosening change to one on an adversarial-class task", () => {
+  it("defines test files once and lets a fix on an adversarial-class task close only when it qualifies for the test class", () => {
     expect(option).toContain(
-      "Test files are the tests themselves and the test helpers, fixtures, snapshots, and golden files under the repository's test directories, and a change to any of them that counts as loosening under the second option keeps the reviewer round there too.",
+      "Test files are the tests themselves and the test helpers, fixtures, snapshots, and golden files under the repository's test directories, and on such a task a fix closes only when it qualifies for the second option's test class, so a change to an existing entry or any other loosening change to one of them keeps the reviewer round there too.",
     );
   });
 });
