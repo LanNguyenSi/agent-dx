@@ -11,9 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Docs-only closure section, still its one site) is tightened. Changing an
   existing test's expected value, or an existing helper, fixture entry,
   snapshot, golden file, or allowlist or exemption entry that an existing test
-  reads, counts as loosening and keeps the round; only an addition that no
-  existing test and no other tool reads qualifies, so an allowlist entry that a
-  CI guard script or a lint or coverage exclusion reads stays configuration.
+  reads, counts as loosening and keeps the round; only an addition with none of
+  three kinds of reader (an existing test, a test-framework binding, another
+  tool that consumes it as data or configuration) qualifies, so an allowlist
+  entry that a CI guard script or a lint or coverage exclusion reads stays
+  configuration, while compiling, linting, or running a file is no such read.
+  Code that a test file adds outside a test case (a module mock, a top-level or
+  `describe`-level hook, module-level or init-time code) counts as a helper
+  that every existing test running alongside it reads, so a new test case in
+  an existing test file qualifies only when every line the fix adds sits inside
+  it.
   This replaces the exception that closed a change to a shared test helper,
   fixture, snapshot, golden file, or allowlist entry when every dependent test
   was shown unchanged, together with the dependent-test evidence it asked for.
@@ -22,17 +29,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applies it to existing tests without any test naming it (a new `conftest.py`,
   a `__mocks__` module, a `TestMain`, or a registered setup file); it counts as
   read unless the closure record shows a search of the existing tests, the
+  lines each changed or new test file adds outside a test case, the
   framework's discovery and configuration files, and the repository's scripts
-  at the fix commit that found no reader.
+  at the fix commit that found none of the three kinds of reader.
   Adding `.only` or a condition that narrows a test counts as loosening without
   exception, so it no longer conflicts with the "no test deleted or skipped"
   bound. The exclusion for a recurring defect is based on the reviewer's
   markers (`recurrence: repeated` with `introduced_by_delta` `yes` or
   `unknown`) instead of the orchestrator-judged halt signal. The configuration
   carve-out widens from "a comment that a tool reads" to text that a tool
-  reads: comment directives, document frontmatter such as a bundle's `sources:`
-  list, and any part of a document that a test or tool reads as data (markers,
-  pinned sentences); citations, anchored ones included, stay explanatory text,
+  consumes as data or configuration: comment directives, document frontmatter
+  such as a bundle's `sources:` list, and any part of a documentation or
+  instruction file that a test or tool reads as data (markers, pinned
+  sentences), while test fixtures, snapshots, and golden files that only tests
+  read stay with the test class; citations, anchored ones included, stay explanatory text,
   and that definition governs the Docs-only closure's first option as well. On
   a task of the `adversarial` class, neither option closes a finding by
   explanatory text: the first option is not available, the second closes only a

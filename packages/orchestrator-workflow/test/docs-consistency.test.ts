@@ -5650,7 +5650,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 57,
     end: 57,
     anchorKey: "42832de5",
-    paragraphLine: 311,
+    paragraphLine: 335,
     uncitedLines: [91],
     claim:
       'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
@@ -9828,9 +9828,9 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("counts text that a tool reads as configuration, not explanatory text", () => {
+  it("counts text that a tool consumes as data or configuration as configuration, not explanatory text", () => {
     expect(option).toContain(
-      "Text that a tool reads counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and any part of a document that a test or tool reads as data (markers, pinned sentences).",
+      "Text that a tool consumes as data or configuration counts as configuration, not explanatory text: comment directives (lint, type-check, coverage, formatter, or test-environment directives, shebangs, build tags), document frontmatter such as a bundle's `sources:` list, and any part of a documentation or instruction file that a test or tool reads as data (markers, pinned sentences).",
     );
   });
 
@@ -9858,27 +9858,45 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
     );
   });
 
-  it("lets only an addition that no existing test and no other tool reads qualify for the test class", () => {
+  it("leaves test helpers, fixtures, snapshots, golden files, and entries that only tests read to the test class, not the configuration definition", () => {
     expect(option).toContain(
-      "Among helpers, fixtures, snapshots, golden files, and allowlist or exemption entries, only an addition that no existing test and no other tool reads qualifies for this class: a new helper, a new fixture file, a new snapshot or golden file, or a new allowlist or exemption entry.",
+      "Test helpers, fixtures, snapshots, golden files, and allowlist or exemption entries that only tests read are not configuration under this definition: the second class below governs them.",
     );
   });
 
-  it("keeps the reviewer round for an entry that a tool other than a test reads, as configuration", () => {
+  it("counts code a test file adds outside a test case as a helper read by every existing test running alongside it", () => {
     expect(option).toContain(
-      "An entry that a tool other than a test reads (a CI guard script, a lint or coverage exclusion, a slop-detector allow entry) is configuration under the definition above and keeps the reviewer round, a new test alongside it or not.",
+      "Code that a test file adds outside a test case counts as a helper that every existing test running alongside it, in the same file, process, or package, reads: a module mock such as a top-level `vi.mock` or `jest.mock`, a hook at the top level or in a `describe` block such as `beforeEach` or `beforeAll`, and module-level or init-time code such as a pytest module-level patch, a Go `func init()`, or a package-level initializer.",
+    );
+  });
+
+  it("lets a new test case in an existing test file qualify only when every added line sits inside it", () => {
+    expect(option).toContain(
+      "A new test case in an existing test file therefore qualifies only when every line the fix adds to that file sits inside the new test case; in a new test file, an import that binds a name and a definition of a function, class, or test case are not such code.",
+    );
+  });
+
+  it("lets only an addition with none of the three kinds of reader qualify for the test class", () => {
+    expect(option).toContain(
+      "Among helpers, fixtures, snapshots, golden files, and allowlist or exemption entries, only an addition with none of the three kinds of reader below (an existing test, a test-framework binding, another tool) qualifies for this class: a new helper, a new fixture file, a new snapshot or golden file, or a new allowlist or exemption entry.",
+    );
+  });
+
+  it("keeps the reviewer round for an entry that a tool other than a test consumes, as configuration, and does not count compiling, linting, or running as a read", () => {
+    expect(option).toContain(
+      "An entry that a tool other than a test consumes as data or configuration (a CI guard script's allowlist, a lint or coverage exclusion list, a slop-detector allow file) is configuration under the definition above and keeps the reviewer round, a new test alongside it or not; compiling, type-checking, linting, or running a file does not count as such a read.",
     );
   });
 
   it("counts an addition as read by an existing test through import, load, call, iteration, or the test framework's own discovery", () => {
     expect(option).toContain(
-      "An addition counts as read by an existing test when that test imports, loads, calls, or iterates it or the file or collection that holds it, and also when the test framework applies it to existing tests without any test naming it: a new pytest `conftest.py`, a new Jest `__mocks__` module, a new Go test file that defines `TestMain`, or a setup file the test configuration registers.",
+      "An addition counts as read by an existing test when that test imports, loads, calls, or iterates it or the file or collection that holds it, and also when the test framework applies it to existing tests without any test naming it (a test-framework binding): a new pytest `conftest.py`, a new Jest `__mocks__` module, a new Go test file that defines `TestMain`, or a setup file the test configuration registers.",
     );
   });
 
-  it("counts an addition as read unless the closure record shows a search that found no reader", () => {
+  it("counts an addition as read unless the closure record shows a search that found none of the three kinds of reader", () => {
     expect(option).toContain(
-      "An addition counts as read unless the closure record shows a search, at the fix commit, that found no reader of either kind.",
+      "An addition counts as read unless the closure record shows a search, at the fix commit, that found none of the three kinds of reader: no existing test that reads it, no test-framework binding that applies it to existing tests, and no other tool that consumes it.",
     );
   });
 
@@ -9908,7 +9926,7 @@ describe("safety core: the docs-or-test medium closing option stays bounded at t
 
   it("records the closure in the review-findings row with the evidence list", () => {
     expect(option).toContain(
-      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the search that found no reader of an added helper, fixture, snapshot, golden file, allowlist, or exemption entry (its command and scope: the existing tests, the framework's discovery and configuration files such as `conftest.py`, `__mocks__`, test mains, and setup or config files, and the repository's scripts and tool configuration, run at the fix commit), and the bundle check result where the repository has a knowledge bundle.",
+      "Record the closure in the `05-review-findings.md` row with its Severity and Decision headers unchanged and Decision `accepted`: the finding, the fix commit, the test run as the package's full test command (plus the type-check when a test or source file was touched) with its exit code, a killed mutation probe for each new or tightened test, the search that found no reader of an added helper, fixture, snapshot, golden file, allowlist, or exemption entry (its command and scope, covering all three kinds of reader: the existing tests, the lines each changed or new test file adds outside a test case, the framework's discovery and configuration files such as `conftest.py`, `__mocks__`, test mains, and setup or config files, and the repository's scripts and tool configuration, run at the fix commit), and the bundle check result where the repository has a knowledge bundle.",
     );
   });
 

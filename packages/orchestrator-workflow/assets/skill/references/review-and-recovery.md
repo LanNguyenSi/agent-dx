@@ -183,31 +183,51 @@ close such a finding without another reviewer round only when the task's
 entire unreviewed delta consists of fixes of these two classes. The first
 class changes only explanatory text: documentation, comments, citations, or
 explanatory prose in an instruction file that changes no instruction
-semantics. Text that a tool reads counts as configuration, not explanatory
-text: comment directives (lint, type-check, coverage, formatter, or
-test-environment directives, shebangs, build tags), document frontmatter such
-as a bundle's `sources:` list, and any part of a document that a test or tool
-reads as data (markers, pinned sentences). Citations, anchored ones included,
-stay explanatory text. The second class adds tests or tightens existing ones,
-with no assertion removed or loosened and no test deleted or skipped.
+semantics. Text that a tool consumes as data or configuration counts as
+configuration, not explanatory text: comment directives (lint, type-check,
+coverage, formatter, or test-environment directives, shebangs, build tags),
+document frontmatter such as a bundle's `sources:` list, and any part of a
+documentation or instruction file that a test or tool reads as data (markers,
+pinned sentences). Test helpers, fixtures, snapshots, golden files, and
+allowlist or exemption entries that only tests read are not configuration
+under this definition: the second class below governs them. Citations,
+anchored ones included, stay explanatory text. The second class adds tests or
+tightens existing ones, with no assertion removed or loosened and no test
+deleted or skipped.
 Changing an existing test's expected value, or an existing test helper,
 fixture entry, snapshot, golden file, or allowlist or exemption entry that an
 existing test reads, counts as loosening and keeps the reviewer round; a
 tightening adds an assertion instead of rewriting an expected value.
+Code that a test file adds outside a test case counts as a helper that every
+existing test running alongside it, in the same file, process, or package,
+reads: a module mock such as a top-level `vi.mock` or `jest.mock`, a hook at
+the top level or in a `describe` block such as `beforeEach` or `beforeAll`,
+and module-level or init-time code such as a pytest module-level patch, a Go
+`func init()`, or a package-level initializer.
+A new test case in an existing test file therefore qualifies only when every
+line the fix adds to that file sits inside the new test case; in a new test
+file, an import that binds a name and a definition of a function, class, or
+test case are not such code.
 Among helpers, fixtures, snapshots, golden files, and allowlist or exemption
-entries, only an addition that no existing test and no other tool reads
-qualifies for this class: a new helper, a new fixture file, a new snapshot or
-golden file, or a new allowlist or exemption entry. An entry that a tool other
-than a test reads (a CI guard script, a lint or coverage exclusion, a
-slop-detector allow entry) is configuration under the definition above and
-keeps the reviewer round, a new test alongside it or not.
+entries, only an addition with none of the three kinds of reader below (an
+existing test, a test-framework binding, another tool) qualifies for this
+class: a new helper, a new fixture file, a new snapshot or golden file, or a
+new allowlist or exemption entry.
+An entry that a tool other than a test consumes as data or configuration (a
+CI guard script's allowlist, a lint or coverage exclusion list, a
+slop-detector allow file) is configuration under the definition above and
+keeps the reviewer round, a new test alongside it or not; compiling,
+type-checking, linting, or running a file does not count as such a read.
 An addition counts as read by an existing test when that test imports, loads,
 calls, or iterates it or the file or collection that holds it, and also when
-the test framework applies it to existing tests without any test naming it: a
-new pytest `conftest.py`, a new Jest `__mocks__` module, a new Go test file
-that defines `TestMain`, or a setup file the test configuration registers.
+the test framework applies it to existing tests without any test naming it (a
+test-framework binding): a new pytest `conftest.py`, a new Jest `__mocks__`
+module, a new Go test file that defines `TestMain`, or a setup file the test
+configuration registers.
 An addition counts as read unless the closure record shows a search, at the
-fix commit, that found no reader of either kind.
+fix commit, that found none of the three kinds of reader: no existing test
+that reads it, no test-framework binding that applies it to existing tests,
+and no other tool that consumes it.
 Adding `.only` or a condition that narrows a test counts as loosening without
 exception. A fix that changes code, configuration, or instruction semantics
 keeps the reviewer round, whatever the finding's category. A finding the
@@ -222,10 +242,12 @@ and Decision `accepted`: the finding, the fix commit, the test run as the
 package's full test command (plus the type-check when a test or source file
 was touched) with its exit code, a killed mutation probe for each new or
 tightened test, the search that found no reader of an added helper, fixture,
-snapshot, golden file, allowlist, or exemption entry (its command and scope:
-the existing tests, the framework's discovery and configuration files such as
-`conftest.py`, `__mocks__`, test mains, and setup or config files, and the
-repository's scripts and tool configuration, run at the fix commit), and the
+snapshot, golden file, allowlist, or exemption entry (its command and scope,
+covering all three kinds of reader: the existing tests, the lines each changed
+or new test file adds outside a test case, the framework's discovery and
+configuration files such as `conftest.py`, `__mocks__`, test mains, and setup
+or config files, and the repository's scripts and tool configuration, run at
+the fix commit), and the
 bundle check result where the repository has a knowledge bundle. Such a
 closure is not a review round: it counts toward none of the cap in Pinned-prose
 changes, the Round-2 halt rule, the Review-round escalation budget, or the
