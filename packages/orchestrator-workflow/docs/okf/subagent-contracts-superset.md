@@ -861,9 +861,9 @@ unnamed-method default in `reviewer.md` carries no sentence pin. The class
 list and the rules under it, including the
 never-`adversarial`-on-`-medium` constraint, are pinned as whole sentences at
 their one site in the delegation and tiers reference
-(`test/docs-consistency.test.ts:9970#"safety core: the review method and tier class list stays pinned"`),
+(`test/docs-consistency.test.ts:9946#"safety core: the review method and tier class list stays pinned"`),
 and `test/charter.test.ts` pins that the class mapping appears at that site only
-(`test/charter.test.ts:219#"the review method and tier class mapping is normative once"`).
+(`test/charter.test.ts:215#"the review method and tier class mapping is normative once"`).
 
 Motivation and the anchoring dogfood evidence live in
 `CHANGELOG.md:#[0.32.0]#"A review-method axis, orthogonal to the effort tier"`,

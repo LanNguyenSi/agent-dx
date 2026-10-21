@@ -8,54 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - The second closing option in `references/review-and-recovery.md` (the
-  Docs-only closure section, still its one site) is tightened. Changing an
-  existing test's expected value, or an existing helper, fixture entry,
-  snapshot, golden file, or allowlist or exemption entry that an existing test
-  reads, counts as loosening and keeps the round; only an addition with none of
-  three kinds of reader (an existing test, a test-framework binding, another
-  tool that consumes it as data or configuration) qualifies, so an allowlist
-  entry that a CI guard script or a lint or coverage exclusion reads stays
-  configuration, while compiling, linting, or running a file is no such read.
-  Code that a test file adds outside a test case (a module mock, a top-level or
-  `describe`-level hook, module-level or init-time code) counts as a helper
-  that every existing test running alongside it reads, so a new test case in
-  an existing test file qualifies only when every line the fix adds sits inside
-  it.
-  This replaces the exception that closed a change to a shared test helper,
-  fixture, snapshot, golden file, or allowlist entry when every dependent test
-  was shown unchanged, together with the dependent-test evidence it asked for.
-  An addition counts as read when an existing test imports, loads, calls, or
-  iterates it or its file or collection, and also when the test framework
-  applies it to existing tests without any test naming it (a new `conftest.py`,
-  a `__mocks__` module, a `TestMain`, or a registered setup file); it counts as
-  read unless the closure record shows a search of the existing tests, the
-  lines each changed or new test file adds outside a test case, the
-  framework's discovery and configuration files, and the repository's scripts
-  at the fix commit that found none of the three kinds of reader.
-  Adding `.only` or a condition that narrows a test counts as loosening without
-  exception, so it no longer conflicts with the "no test deleted or skipped"
-  bound. The exclusion for a recurring defect is based on the reviewer's
-  markers (`recurrence: repeated` with `introduced_by_delta` `yes` or
-  `unknown`) instead of the orchestrator-judged halt signal. The configuration
-  carve-out widens from "a comment that a tool reads" to text that a tool
-  consumes as data or configuration: comment directives, document frontmatter
-  such as a bundle's `sources:` list, and any part of a documentation or
-  instruction file that a test or tool reads as data (markers, pinned
-  sentences), while test fixtures, snapshots, and golden files that only tests
-  read stay with the test class; citations, anchored ones included, stay explanatory text,
-  and that definition governs the Docs-only closure's first option as well. On
-  a task of the `adversarial` class, neither option closes a finding by
-  explanatory text: the first option is not available, the second closes only a
-  fix that changes test files exclusively, and a task is of that class when its
-  delta falls in a class the `adversarial` row lists or when any round of the
-  task was given the `adversarial` class. Test files are defined once there:
-  the tests themselves and the helpers, fixtures, snapshots, and golden files
-  under the repository's test directories, and such a fix closes only when it
-  qualifies for the second option's test class, so a change to an existing
-  entry keeps the round there too. In `references/delegation-and-tiers.md`, the
-  `adversarial` row's two tiers are now stated as a default (the unsuffixed
-  reviewer) and a higher, recorded choice (`reviewer-xhigh`). Installed skill
-  files report as outdated until refreshed.
+  Docs-only closure section, still its one site) is tightened. Its test class
+  is now bounded line by line: it closes a fix only when the fix changes
+  existing test files exclusively and every line it adds, changes, or removes
+  is part of an assertion added inside an existing test case or of a new test
+  case added to an existing test file. One fix may add several new test cases
+  and assertions, and a new `describe` block holding nothing but new test
+  cases counts as part of them. Everything else keeps the reviewer round: a
+  new file of any kind, a new or changed helper, fixture, snapshot, golden
+  file, or allowlist or exemption entry, an import, any line outside a test
+  case (a module mock, a hook, module-level or init-time code), and a
+  configuration change; rewriting an existing expected value counts as
+  loosening. This replaces the exception that closed a change to a shared
+  test helper, fixture, snapshot, golden file, or allowlist entry when every
+  dependent test was shown unchanged, together with the dependent-test
+  evidence it asked for; the closure record now lists a killed mutation probe
+  for each added assertion and each new test case. Adding `.only` or a
+  condition that narrows a test counts as loosening without exception, so it
+  no longer conflicts with the "no test deleted or skipped" bound. The
+  exclusion for a recurring defect is based on the reviewer's markers
+  (`recurrence: repeated` with `introduced_by_delta` `yes` or `unknown`)
+  instead of the orchestrator-judged halt signal. The configuration carve-out
+  widens from "a comment that a tool reads" to text that a tool consumes as
+  data or configuration: comment directives, document frontmatter such as a
+  bundle's `sources:` list, and any part of a documentation or instruction
+  file that a test or tool reads as data (markers, pinned sentences);
+  citations, anchored ones included, stay explanatory text, and that
+  definition governs the Docs-only closure's first option as well. On a task
+  of the `adversarial` class, neither option closes a finding by explanatory
+  text: the first option is not available, the second closes only a fix that
+  changes test files exclusively under the same line-level test class, and a
+  task is of that class when its delta falls in a class the `adversarial` row
+  lists or when any round of the task was given the `adversarial` class. In
+  `references/delegation-and-tiers.md`, the `adversarial` row's two tiers are
+  now stated as a default (the unsuffixed reviewer) and a higher, recorded
+  choice (`reviewer-xhigh`). Installed skill files report as outdated until
+  refreshed.
 
 ## [0.47.0] - 2026-10-19
 
