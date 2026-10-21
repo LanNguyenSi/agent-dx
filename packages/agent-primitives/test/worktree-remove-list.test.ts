@@ -3539,7 +3539,7 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
         // for one, so the walk reads the state as what it is, unpushed.
         // Every flag set that touches the branch refuses and keeps
         // everything.
-        for (const flags of SYMLINK_FLAG_SETS.filter((s) => s.length > 0)) {
+        for (const flags of SYMLINK_FLAG_SETS) {
           const r = await cliBounded(f.work, ["remove", wt, ...flags]);
           expect(r.code, r.stdout + r.stderr).toBe(2);
           expect(r.json.reason).toBe("unpushed_commits");
@@ -3590,7 +3590,7 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
         "refs/remotes/origin/self",
         "refs/heads/feat",
       ]);
-      for (const flags of SYMLINK_FLAG_SETS.filter((s) => s.length > 0)) {
+      for (const flags of SYMLINK_FLAG_SETS) {
         const r = await cliBounded(f.work, ["remove", wt, ...flags]);
         expect(r.code, r.stdout + r.stderr).toBe(2);
         expect(r.json.reason).toBe("unpushed_commits");
@@ -4153,8 +4153,14 @@ describe("worktree remove: a ref store git was told to keep elsewhere", () => {
         const r = await cliBounded(f.work, ["remove", wt, ...flags], env);
         const label = `${flags.join(" ")}: ${r.stdout}${r.stderr}`;
         expect(r.code, label).toBe(2);
-        expect(r.json.reason, label).toBe("unpushed_state_unknown");
-        expect(r.json.message, label).toContain("GIT_REFERENCE_BACKEND");
+        if (flags.includes("origin/self")) {
+          // The worktree commands no longer pass the variable to git, so a
+          // custom --base is refused earlier as unresolvable.
+          expect(r.json.reason, label).toBe("base_not_found");
+        } else {
+          expect(r.json.reason, label).toBe("unpushed_state_unknown");
+          expect(r.json.message, label).toContain("GIT_REFERENCE_BACKEND");
+        }
       }
       // Neither store lost the worktree or the branch.
       const listed = parseWorktreeList(

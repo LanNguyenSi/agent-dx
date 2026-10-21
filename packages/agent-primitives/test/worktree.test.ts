@@ -16,11 +16,7 @@ import {
 } from "../src/worktree/create.js";
 import { excludePatternFor, resolveRepo } from "../src/worktree/git.js";
 import { caseInsensitiveVolume } from "./helpers/case-fs.js";
-import {
-  FIXED_BIN_DIR,
-  resolveBinary,
-  spawnCli,
-} from "./helpers/spawn-cli.js";
+import { FIXED_BIN_DIR, resolveBinary, spawnCli } from "./helpers/spawn-cli.js";
 
 /**
  * Hermetic: every git call, in-process and inside the spawned CLI, runs
@@ -1820,6 +1816,61 @@ describe.skipIf(!TRAILING_SPACE_OK)(
       expect(git(spaced, ["rev-parse", "refs/heads/spaced"]).trim()).toBe(
         f.mainSha,
       );
+    });
+  },
+);
+
+describe.skipIf(!TRAILING_SPACE_OK)(
+  "worktree: a separate git dir whose name ends in a space",
+  () => {
+    function makeSeparate(): { base: string; repo: string; gitDir: string } {
+      const f = makeFixture();
+      const repo = path.join(f.base, "sep");
+      const gitDir = path.join(f.base, "gd ");
+      git(f.base, [
+        "init",
+        "-q",
+        "-b",
+        "main",
+        "--separate-git-dir",
+        gitDir,
+        repo,
+      ]);
+      write(repo, "a.txt", "one\n");
+      git(repo, ["add", "-A"]);
+      git(repo, ["commit", "-q", "-m", "init"]);
+      // git lists a separate git directory as the main entry of
+      // `worktree list`, so that is the checkout a link is taken from.
+      write(gitDir, "vendor/lib.txt", "lib\n");
+      return { base: f.base, repo, gitDir };
+    }
+
+    it("resolveRepo returns the common git dir byte-exact, trailing space kept", () => {
+      const s = makeSeparate();
+      expect(resolveRepo(s.repo).commonDir).toBe(s.gitDir);
+    });
+
+    it("writes the exclude line into that git dir", async () => {
+      const s = makeSeparate();
+      const target = path.join(s.base, "wt-sep");
+      const r = await run(path.join(s.base, "work"), [
+        "--repo",
+        s.repo,
+        "--branch",
+        "sep",
+        "--base",
+        "main",
+        "--path",
+        target,
+        "--link",
+        "vendor",
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      const exclude = fs.readFileSync(
+        path.join(s.gitDir, "info", "exclude"),
+        "utf8",
+      );
+      expect(exclude.split("\n")).toContain("/vendor");
     });
   },
 );

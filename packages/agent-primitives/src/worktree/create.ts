@@ -756,7 +756,11 @@ export function discardCreatedBranch(
   }
   const holder = entries.find((e) => e.branch === branch);
   if (holder !== undefined) {
-    if (target !== undefined && holder.prunable && samePath(holder.path, target)) {
+    if (
+      target !== undefined &&
+      holder.prunable &&
+      samePath(holder.path, target)
+    ) {
       // The holder is the registration this add made, broken after the
       // checkout (a failing post-checkout hook that deleted the new
       // worktree's `.git` leaves exactly this: the entry, now prunable,

@@ -456,9 +456,7 @@ export function resolveRepo(repoPath: string): RepoContext {
   return {
     repoRoot: realOrSelf(topLevel),
     mainCheckout,
-    commonDir: realOrSelf(
-      path.resolve(repoPath, gitOutputLine(common.stdout)),
-    ),
+    commonDir: realOrSelf(path.resolve(repoPath, gitOutputLine(common.stdout))),
     name: path.basename(mainCheckout),
     worktrees,
   };
@@ -1383,9 +1381,7 @@ function unpushedInCommonStack(cwd: string, commonDir: BytePath): GitRunResult {
     // Ref names cannot hold glob characters, so the ASCII parts of the
     // name are literal and the pattern excludes this ref; for `--remotes`
     // it is relative to `refs/remotes/`.
-    excludes.push(
-      `--exclude=${pattern.replace(/^refs\/remotes\//, "")}`,
-    );
+    excludes.push(`--exclude=${pattern.replace(/^refs\/remotes\//, "")}`);
   }
   return git(
     cwd,

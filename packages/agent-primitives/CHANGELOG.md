@@ -41,8 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was looked for under a trimmed name in the containment checks of
   `worktree create` and written trimmed into `info/exclude`.
 - `worktree`: `GIT_REF_STORAGE_FORMAT` and `GIT_REFERENCE_BACKEND` are now
-  stripped from the environment of every git the CLI runs, the way
-  `GIT_DIR` and the other repository-selection variables already were.
+  stripped from the environment of every git the worktree commands run
+  (and of the git calls `probe` makes for its link manifest and its
+  scratch repositories), the way `GIT_DIR` and the other
+  repository-selection variables already were. The worktree commands
+  therefore ignore these variables and work on the repository's own ref
+  store; `worktree create` does not refuse a value that names another one.
   They used to be looked at only by the unpushed check of `worktree
   remove` (which still refuses a value naming a location, the caller's
   environment saying its git reads its refs elsewhere), while every other
@@ -348,8 +352,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stack under `refs/remotes` whose name holds a non-ASCII character is the
   `unpushed_state_unknown` refusal (branch kept; `--force` still removes).
   The name is handed to `git rev-list` as an exact `--exclude`, but on macOS
-  git converts a command-line argument to the composed form
-  (`core.precomposeunicode`),
+  git converts a command-line argument to NFC (`core.precomposeunicode`),
   while a reftable record keeps the bytes it was written with, so a symbolic
   ref stored with a decomposed name was never excluded, `--remotes` followed
   it to the local branch, the walk printed nothing and `--delete-branch`
