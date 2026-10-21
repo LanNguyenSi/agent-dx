@@ -46,15 +46,32 @@ export const REPO_SELECTION_ENV_VARS = [
 ] as const;
 
 /**
+ * Ambient variables that choose WHICH ref storage format (and, with a
+ * location attached to the format name, storage location) a git child
+ * reads. A command that runs git on a named repository must not inherit
+ * them, for the same reason it must not inherit `GIT_DIR`: one of them
+ * in the calling environment (a hook, a wrapper, an operator's shell
+ * that tests the reftable backend) would silently move every git of the
+ * run to another ref store, so `worktree add` could write its branch
+ * where no one looks for it.
+ */
+export const REF_FORMAT_ENV_VARS = [
+  "GIT_REF_STORAGE_FORMAT",
+  "GIT_REFERENCE_BACKEND",
+] as const;
+
+/**
  * The environment for a git child that is pointed at one repository by
- * `-C`: the process environment without the pathspec switches and without
- * the repository-selection variables, and with terminal prompts disabled
- * so a credential request fails instead of waiting on a terminal nobody
- * is watching. Other `GIT_*` variables (notably `GIT_CONFIG_*`) are kept.
+ * `-C`: the process environment without the pathspec switches, without
+ * the repository-selection variables and without the ref-format
+ * variables, and with terminal prompts disabled so a credential request
+ * fails instead of waiting on a terminal nobody is watching. Other
+ * `GIT_*` variables (notably `GIT_CONFIG_*`) are kept.
  */
 export function withoutRepoSelectionEnv(): NodeJS.ProcessEnv {
   const env = withoutPathspecEnv();
   for (const name of REPO_SELECTION_ENV_VARS) delete env[name];
+  for (const name of REF_FORMAT_ENV_VARS) delete env[name];
   env.GIT_TERMINAL_PROMPT = "0";
   return env;
 }

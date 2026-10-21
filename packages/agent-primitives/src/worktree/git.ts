@@ -14,7 +14,7 @@ import {
   type GitBytesResult,
   type GitRunResult,
 } from "../drift/git.js";
-import { withoutRepoSelectionEnv } from "../git-env.js";
+import { REF_FORMAT_ENV_VARS, withoutRepoSelectionEnv } from "../git-env.js";
 import { probeGitArgv } from "../probe/git.js";
 import { isRelContained } from "../probe/containment.js";
 
@@ -140,10 +140,11 @@ export interface GitCallOptions {
    * `-c core.commitGraph=false`, so git reads parents from the commit
    * objects and not from the `objects/info/commit-graph` file, which holds
    * parents of its own and is trusted without being checked against the
-   * objects. For a call whose answer decides whether commits are on a
-   * remote or in a base. It does not switch off `info/grafts` (see
-   * `alteredCommitGraph`). */
-  noReplaceObjects?: true;
+   * objects: the call reads the objects the repository holds, only those,
+   * and trusts nothing derived from them, which is what the name says. For
+   * a call whose answer decides whether commits are on a remote or in a
+   * base. It does not switch off `info/grafts` (see `alteredCommitGraph`). */
+  trustObjectsOnly?: true;
 }
 
 /** git's top-level option that ignores every replace ref. */
@@ -172,7 +173,7 @@ export const NO_COMMIT_GRAPH_CONFIG = ["-c", "core.commitGraph=false"] as const;
  * `args`. */
 function callArgv(args: readonly string[], options: GitCallOptions): string[] {
   const argv = probeGitArgv(args);
-  return options.noReplaceObjects === true
+  return options.trustObjectsOnly === true
     ? [
         NO_REPLACE_OBJECTS_FLAG,
         ...NO_REPLACE_REFS_CONFIG,
@@ -410,13 +411,21 @@ export function resolveRepo(repoPath: string): RepoContext {
       "not_a_git_repo",
     );
   }
-  const top = gitText(repoPath, ["rev-parse", "--show-toplevel"]);
-  if (top === undefined || top.length === 0) {
+  // Byte-exact: only git's own line ending comes off (`gitOutputLine`),
+  // never trailing white space, so a checkout whose name ends in a space
+  // resolves to the path the file system holds, not a trimmed lookalike.
+  const top = git(repoPath, ["rev-parse", "--show-toplevel"]);
+  if (
+    top.error !== undefined ||
+    top.status !== 0 ||
+    gitOutputLine(top.stdout).length === 0
+  ) {
     throw new WorktreeRefusal(
       `${repoPath} is not inside a git working tree`,
       "not_a_git_repo",
     );
   }
+  const topLevel = gitOutputLine(top.stdout);
   const listing = git(repoPath, ["worktree", "list", "--porcelain"]);
   if (listing.error !== undefined || listing.status !== 0) {
     throw new WorktreeRefusal(
@@ -432,8 +441,12 @@ export function resolveRepo(repoPath: string): RepoContext {
       "bare_repository",
     );
   }
-  const common = gitText(repoPath, ["rev-parse", "--git-common-dir"]);
-  if (common === undefined || common.length === 0) {
+  const common = git(repoPath, ["rev-parse", "--git-common-dir"]);
+  if (
+    common.error !== undefined ||
+    common.status !== 0 ||
+    gitOutputLine(common.stdout).length === 0
+  ) {
     throw new WorktreeRefusal(
       `cannot resolve the git directory of ${repoPath}`,
       "not_a_git_repo",
@@ -441,9 +454,11 @@ export function resolveRepo(repoPath: string): RepoContext {
   }
   const mainCheckout = realOrSelf(main.path);
   return {
-    repoRoot: realOrSelf(top),
+    repoRoot: realOrSelf(topLevel),
     mainCheckout,
-    commonDir: realOrSelf(path.resolve(repoPath, common)),
+    commonDir: realOrSelf(
+      path.resolve(repoPath, gitOutputLine(common.stdout)),
+    ),
     name: path.basename(mainCheckout),
     worktrees,
   };
@@ -1007,13 +1022,6 @@ const PLAIN_REF_FORMATS: ReadonlySet<string> = new Set(["files", "reftable"]);
  * parsed is unknown. Nothing the config says ever skips the inspection of
  * the store; this read only adds refusals.
  */
-/** Environment variables git reads for the ref storage format, newest name
- * first. */
-export const REF_STORAGE_ENV_VARS = [
-  "GIT_REF_STORAGE_FORMAT",
-  "GIT_REFERENCE_BACKEND",
-] as const;
-
 function refStoreElsewhere(
   cwd: string,
   commonDir: BytePath,
@@ -1021,11 +1029,14 @@ function refStoreElsewhere(
   // Newer git reads GIT_REF_STORAGE_FORMAT first and keeps
   // GIT_REFERENCE_BACKEND as a deprecated alias, so both are checked, and
   // two different values are refused as well: which one wins depends on
-  // the git version.
-  const env = withoutRepoSelectionEnv();
+  // the git version. Read from the caller's environment, not from the
+  // stripped child environment: `withoutRepoSelectionEnv()` removes these
+  // names, so no git of this run is ever redirected by one; the refusal
+  // stays, fail closed, because the caller says its git reads its refs
+  // somewhere else than the common directory this check inspects.
   const seen = new Set<string>();
-  for (const name of REF_STORAGE_ENV_VARS) {
-    const value = env[name];
+  for (const name of REF_FORMAT_ENV_VARS) {
+    const value = process.env[name];
     if (value === undefined) continue;
     if (!PLAIN_REF_FORMATS.has(value)) {
       return unknownUnpushed(
@@ -1036,7 +1047,7 @@ function refStoreElsewhere(
   }
   if (seen.size > 1) {
     return unknownUnpushed(
-      `${REF_STORAGE_ENV_VARS.join(" and ")} name different ref formats, so which store git reads depends on its version`,
+      `${REF_FORMAT_ENV_VARS.join(" and ")} name different ref formats, so which store git reads depends on its version`,
     );
   }
   const configPath = below(commonDir, "config");
@@ -1107,7 +1118,7 @@ const DEFAULT_REPLACE_REF_BASE = "refs/replace/";
  *
  * - replace refs (`git replace --graft`, `git replace`): switched off for the
  *   calls that decide, by `--no-replace-objects` together with
- *   `-c core.useReplaceRefs=false` (`noReplaceObjects`), whatever the
+ *   `-c core.useReplaceRefs=false` (`trustObjectsOnly`), whatever the
  *   caller's `GIT_NO_REPLACE_OBJECTS`, `core.useReplaceRefs` and
  *   `GIT_REPLACE_REF_BASE` say. A `GIT_REPLACE_REF_BASE` other
  *   than the default is refused as well: it says the caller's git reads
@@ -1116,7 +1127,7 @@ const DEFAULT_REPLACE_REF_BASE = "refs/replace/";
  *   from it without checking them against the commit objects, so a forged
  *   file can make an unpushed commit an ancestor of a remote-tracking ref.
  *   The calls that decide switch it off with `-c core.commitGraph=false`
- *   (`noReplaceObjects`), whatever the caller's configuration or environment
+ *   (`trustObjectsOnly`), whatever the caller's configuration or environment
  *   says, and read the parents from the commit objects.
  * - the grafts file, `info/grafts` in the common git directory (not the
  *   private directory of a linked worktree, which git does not read), or the
@@ -1291,7 +1302,7 @@ export function plausibleRefTarget(target: Buffer): boolean {
  * - `git --git-dir=<common-dir> rev-list <commit> --not --exclude=<each
  *   symbolic ref> --remotes` counts the commits no remote-tracking ref of
  *   the common stack holds, with the settings the files walk has
- *   (`noReplaceObjects`, the walk bound).
+ *   (`trustObjectsOnly`, the walk bound).
  *
  * The comparison of the two listings (`privateStackRemoteRefs`) runs first
  * and refuses any difference, as a tripwire that fails closed.
@@ -1303,7 +1314,7 @@ function unpushedInCommonStack(cwd: string, commonDir: BytePath): GitRunResult {
   const commonText = commonDir.toString("utf8");
   const head = git(cwd, ["rev-parse", "--verify", "HEAD^{commit}"], {
     ...REPORT_TIMEOUT,
-    noReplaceObjects: true,
+    trustObjectsOnly: true,
   });
   if (head.error !== undefined || head.status !== 0) {
     return unknownUnpushed(
@@ -1352,21 +1363,29 @@ function unpushedInCommonStack(cwd: string, commonDir: BytePath): GitRunResult {
         `git named ${quoteBytes(target)} as the target of the symbolic ref ${text} in the common reftable stack, which is no ref name, so the listing cannot be trusted to tell the symbolic refs from the plain ones`,
       );
     }
-    // A name with a byte at or above 0x80 cannot be handed to git as an
-    // exact `--exclude` on every platform: git converts a command-line
-    // argument to NFC when `core.precomposeunicode` is on (macOS sets it at
-    // init), while a reftable record keeps the bytes it was written with, so
-    // a name stored decomposed is never matched and `--remotes` follows the
-    // symbolic ref to the branch. NFC names are refused as well, since the
-    // result must not depend on how the name was written or on the platform.
-    if (/[^\x00-\x7f]/.test(text)) {
-      return unknownUnpushed(
-        `the symbolic ref ${text} in the common reftable stack has a name with a non-ASCII character, which cannot be passed to git as an exact exclusion on every platform (git may convert the argument to another Unicode normalization form than the one stored), so the walk could follow it to a local branch and count that branch's commits as pushed`,
-      );
+    // A byte at or above 0x80 cannot be handed to git in an exact
+    // `--exclude` on every platform: git converts a command-line argument
+    // to the composed form when `core.precomposeunicode` is on (macOS sets
+    // it at init), while a reftable record keeps the bytes it was written
+    // with, so a stored name in the other form is never matched and
+    // `--remotes` follows the symbolic ref to the branch. The pattern is
+    // kept pure ASCII instead: every byte at or above 0x80 of the name
+    // becomes a `?`, which wildmatch matches against the stored bytes one
+    // for one and which git has no reason to convert. A `?` can also match
+    // an ASCII byte, so the pattern may exclude one ref more than this
+    // name: an over-excluded remote-tracking ref only ever keeps a branch
+    // (it reads as unpushed), and ref names hold no glob character that
+    // the ASCII part could mean.
+    let pattern = "";
+    for (const byte of name) {
+      pattern += byte >= 0x80 ? "?" : String.fromCharCode(byte);
     }
-    // Ref names cannot hold glob characters, so the name is its own exact
-    // `--exclude` pattern; for `--remotes` it is relative to `refs/remotes/`.
-    excludes.push(`--exclude=${text.replace(/^refs\/remotes\//, "")}`);
+    // Ref names cannot hold glob characters, so the ASCII parts of the
+    // name are literal and the pattern excludes this ref; for `--remotes`
+    // it is relative to `refs/remotes/`.
+    excludes.push(
+      `--exclude=${pattern.replace(/^refs\/remotes\//, "")}`,
+    );
   }
   return git(
     cwd,
@@ -1378,7 +1397,7 @@ function unpushedInCommonStack(cwd: string, commonDir: BytePath): GitRunResult {
       ...excludes,
       "--remotes",
     ],
-    { ...REPORT_TIMEOUT_WALK, noReplaceObjects: true },
+    { ...REPORT_TIMEOUT_WALK, trustObjectsOnly: true },
   );
 }
 
@@ -1409,9 +1428,10 @@ function unpushedInCommonStack(cwd: string, commonDir: BytePath): GitRunResult {
  * a linked worktree's own reftable stack is merged into every listing made
  * in the worktree. A symbolic ref whose
  * name is not UTF-8 cannot be handed to `--exclude` exactly (an argument is
- * text) and is unknown as well; so is one of the common reftable stack whose
- * name holds any non-ASCII character, since git may convert the argument to
- * another Unicode normalization form than the stored one. Fails (non-zero
+ * text) and is unknown as well; one of the common reftable stack with such
+ * a name is excluded through a pure-ASCII pattern in which every non-ASCII
+ * byte of the name is a `?`, which git cannot re-normalize and wildmatch
+ * matches against the stored bytes. Fails (non-zero
  * status or `error`) when the refs cannot be listed, so the caller treats
  * the state as unknown. `error`
  * counts even with a status of 0: a listing that outgrows the output limit
@@ -1486,7 +1506,7 @@ export function unpushedCommits(cwd: string): GitRunResult {
   }
   return git(cwd, ["rev-list", "HEAD", "--not", ...excludes, "--remotes"], {
     ...REPORT_TIMEOUT_WALK,
-    noReplaceObjects: true,
+    trustObjectsOnly: true,
   });
 }
 
@@ -1752,7 +1772,7 @@ function decideMerge(
   }
   const anc = git(cwd, ["merge-base", "--is-ancestor", head, baseRef], {
     boundMs: GIT_WALK_BOUND_MS,
-    noReplaceObjects: true,
+    trustObjectsOnly: true,
   });
   if (anc.error === undefined && anc.status === 0) {
     return {
@@ -1772,7 +1792,7 @@ function decideMerge(
   // The commit a merged pull request must be at: a branch whose name was
   // reused, or that gained commits after the merge, is not covered by a
   // pull request that merged an older head of it.
-  const headSha = commitSha(cwd, head, { noReplaceObjects: true });
+  const headSha = commitSha(cwd, head, { trustObjectsOnly: true });
   if (headSha === undefined) {
     return {
       merged: "unknown",

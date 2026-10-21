@@ -14,9 +14,13 @@ import {
   describeDiscard,
   discardCreatedBranch,
 } from "../src/worktree/create.js";
-import { excludePatternFor } from "../src/worktree/git.js";
+import { excludePatternFor, resolveRepo } from "../src/worktree/git.js";
 import { caseInsensitiveVolume } from "./helpers/case-fs.js";
-import { resolveBinary, spawnCli } from "./helpers/spawn-cli.js";
+import {
+  FIXED_BIN_DIR,
+  resolveBinary,
+  spawnCli,
+} from "./helpers/spawn-cli.js";
 
 /**
  * Hermetic: every git call, in-process and inside the spawned CLI, runs
@@ -152,6 +156,23 @@ function listedWorktrees(repo: string): string[] {
     (w) => w.path,
   );
 }
+
+/** Whether this file system stores a directory name that ends in a space
+ * (APFS and ext4 do; a volume that strips or refuses it skips the case,
+ * which is recorded in the run output as a skipped test). */
+const TRAILING_SPACE_OK = (() => {
+  const probe = fs.mkdtempSync(
+    path.join(os.tmpdir(), "agent-primitives-space-"),
+  );
+  try {
+    fs.mkdirSync(path.join(probe, "spaced "));
+    return fs.readdirSync(probe).includes("spaced ");
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(probe, { recursive: true, force: true });
+  }
+})();
 
 describe("worktree create: base, branch and path", () => {
   it("creates a worktree from the default base with a branch that has no upstream", async () => {
@@ -937,6 +958,24 @@ describe("worktree create: a failed add leaves no branch of its own behind", () 
     const held = say({ outcome: "checked_out", worktree: "/other" });
     expect(held).toContain("checked out in /other");
     expect(held).toContain("kept");
+    const pruned = say({
+      outcome: "prunable_at_target",
+      worktree: "/t",
+      description:
+        "the directory still exists but git no longer treats it as a worktree; check it for work before running `git worktree prune`",
+    });
+    expect(pruned).toContain("was created, but git now lists it as prunable");
+    expect(pruned).toContain("the branch feat was kept");
+    expect(pruned).not.toContain("concurrent create");
+    // describePrunable's own advice, not doubled here.
+    expect(pruned.split("git worktree prune")).toHaveLength(2);
+    const prunedGone = say({
+      outcome: "prunable_at_target",
+      worktree: "/t",
+      description: "the directory is gone",
+    });
+    expect(prunedGone).toContain("git now lists it as prunable");
+    expect(prunedGone).toContain("run `git worktree prune`");
     const moved = say({ outcome: "moved" });
     expect(moved).toContain("no longer points");
     expect(moved).toContain("may hold commits");
@@ -1018,6 +1057,88 @@ describe("worktree create: a failed add leaves no branch of its own behind", () 
     ).toBe(0);
     expect(gitStatus(target, ["symbolic-ref", "-q", "HEAD"])).not.toBe(0);
     expect(git(target, ["rev-parse", "HEAD"]).trim()).toBe(f.mainSha);
+  });
+
+  it("says the new worktree is prunable when a failing hook deletes its .git, and keeps the branch", async () => {
+    const f = makeFixture();
+    const hook = path.join(f.repo, ".git", "hooks", "post-checkout");
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    // The hook runs in the new worktree (third argument 1 there); it takes
+    // the `.git` file away and fails. git then lists the entry as prunable
+    // while the branch still sits on it, and the message must say that the
+    // worktree at the target was created and broke, not that some other
+    // create checked the branch out.
+    // The hook runs in the CLI's fixed-PATH environment, where `rm` is not
+    // on PATH, so it reaches it by absolute path.
+    fs.writeFileSync(
+      hook,
+      '#!/bin/sh\n[ "$3" = 1 ] && /bin/rm -f .git\nexit 1\n',
+      { mode: 0o755 },
+    );
+    const target = path.join(f.base, "wt-broken");
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "broken",
+      "--path",
+      target,
+    ]);
+
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("worktree_add_failed");
+    expect(r.json.message).toContain(
+      "was created, but git now lists it as prunable",
+    );
+    expect(r.json.message).toContain("the branch broken was kept");
+    expect(r.json.message).toContain("git worktree prune");
+    expect(r.json.message).not.toContain("concurrent create");
+    // The prune advice is given once.
+    expect(r.json.message.split("git worktree prune")).toHaveLength(2);
+    // The branch is kept, the registration is there and prunable, and the
+    // directory minus its `.git` file still exists.
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/broken"]),
+    ).toBe(0);
+    expect(fs.existsSync(target)).toBe(true);
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).toContain(
+      "prunable",
+    );
+  });
+
+  it("discardCreatedBranch knows a prunable entry at the target is this call's own", () => {
+    const f = makeFixture();
+    const target = path.join(f.base, "wt-own");
+    git(f.repo, ["worktree", "add", "-q", "-b", "mine", target, "main"]);
+    fs.rmSync(path.join(target, ".git"));
+    const d = discardCreatedBranch(f.repo, "mine", false, f.mainSha, target);
+    expect(d.outcome).toBe("prunable_at_target");
+    expect((d as { worktree: string }).worktree).toBe(target);
+    expect((d as { description: string }).description).toContain(
+      "still exists",
+    );
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/mine"]),
+    ).toBe(0);
+  });
+
+  it("discardCreatedBranch still calls a prunable holder elsewhere a checked-out branch", () => {
+    const f = makeFixture();
+    const holder = path.join(f.base, "wt-holder");
+    git(f.repo, ["worktree", "add", "-q", "-b", "mine", holder, "main"]);
+    fs.rmSync(path.join(holder, ".git"));
+    const d = discardCreatedBranch(
+      f.repo,
+      "mine",
+      false,
+      f.mainSha,
+      path.join(f.base, "wt-other"),
+    );
+    expect(d.outcome).toBe("checked_out");
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/mine"]),
+    ).toBe(0);
   });
 
   it("removes the new branch when the target is a prunable registration whose directory was deleted", async () => {
@@ -1610,7 +1731,98 @@ describe("worktree create: ambient repository selection", () => {
       "dir=unset tree=unset index=unset",
     );
   });
+
+  it("keeps GIT_REF_STORAGE_FORMAT and GIT_REFERENCE_BACKEND away from every git and from setup", async () => {
+    const f = makeFixture();
+    const target = path.join(f.base, "wt-refenv");
+    const log = path.join(f.base, "git-env.log");
+    const shim = path.join(f.base, "git-shim");
+    fs.mkdirSync(shim);
+    // The shim is the only git the CLI can see and records, for every call,
+    // what the two ref-format variables look like in the environment the
+    // git child actually got.
+    fs.writeFileSync(
+      path.join(shim, "git"),
+      [
+        "#!/bin/sh",
+        'printf "backend=${GIT_REFERENCE_BACKEND-unset} format=${GIT_REF_STORAGE_FORMAT-unset}\\n" >> ' +
+          JSON.stringify(log),
+        `exec ${JSON.stringify(path.join(FIXED_BIN_DIR, "git"))} "$@"`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const r = await run(
+      f.work,
+      [
+        "--repo",
+        f.repo,
+        "--branch",
+        "refenv",
+        "--path",
+        target,
+        "--setup",
+        "echo backend=${GIT_REFERENCE_BACKEND-unset} format=${GIT_REF_STORAGE_FORMAT-unset} > env.txt",
+      ],
+      {
+        PATH: `${shim}${path.delimiter}${FIXED_BIN_DIR}`,
+        GIT_REFERENCE_BACKEND: "files",
+        GIT_REF_STORAGE_FORMAT: "reftable",
+      },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(listedWorktrees(f.repo)).toContain(target);
+    const lines = fs
+      .readFileSync(log, "utf8")
+      .trim()
+      .split("\n")
+      .filter((l) => l.length > 0);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(
+      lines.every((l) => l === "backend=unset format=unset"),
+      lines.join("\n"),
+    ).toBe(true);
+    expect(fs.readFileSync(path.join(target, "env.txt"), "utf8").trim()).toBe(
+      "backend=unset format=unset",
+    );
+  });
 });
+
+describe.skipIf(!TRAILING_SPACE_OK)(
+  "worktree: a checkout whose name ends in a space",
+  () => {
+    it("resolveRepo keeps the top level, the main checkout and the git dir byte-exact", () => {
+      const f = makeFixture();
+      const spaced = path.join(f.base, "repo ");
+      fs.renameSync(f.repo, spaced);
+      const repo = resolveRepo(spaced);
+      expect(repo.repoRoot).toBe(spaced);
+      expect(repo.mainCheckout).toBe(spaced);
+      expect(repo.commonDir).toBe(path.join(spaced, ".git"));
+      expect(repo.name).toBe("repo ");
+    });
+
+    it("creates a worktree of it, with the branch and the registration at the spaced paths", async () => {
+      const f = makeFixture();
+      const spaced = path.join(f.base, "repo ");
+      fs.renameSync(f.repo, spaced);
+      const target = path.join(f.base, "wt-space");
+      const r = await run(f.work, [
+        "--repo",
+        spaced,
+        "--branch",
+        "spaced",
+        "--path",
+        target,
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      expect(listedWorktrees(spaced)).toContain(target);
+      expect(git(spaced, ["rev-parse", "refs/heads/spaced"]).trim()).toBe(
+        f.mainSha,
+      );
+    });
+  },
+);
 
 describe("worktree create: setup and smoke", () => {
   it("runs setup in the new worktree, after the links exist", async () => {

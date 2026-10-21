@@ -34,6 +34,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-p` are affected: the patch is now named where `-C` points, the way
   the same spelling already named `--file` and plan patches. An absolute
   `-p`, and any run without `-C`, are unchanged.
+- `worktree`: the repository paths a `--repo` resolves to (the top level,
+  the main checkout and the common git directory) are kept byte for byte,
+  as git printed them with only the line ending taken off; they used to be
+  trimmed, so a checkout or git directory whose name ends in white space
+  was looked for under a trimmed name in the containment checks of
+  `worktree create` and written trimmed into `info/exclude`.
+- `worktree`: `GIT_REF_STORAGE_FORMAT` and `GIT_REFERENCE_BACKEND` are now
+  stripped from the environment of every git the CLI runs, the way
+  `GIT_DIR` and the other repository-selection variables already were.
+  They used to be looked at only by the unpushed check of `worktree
+  remove` (which still refuses a value naming a location, the caller's
+  environment saying its git reads its refs elsewhere), while every other
+  git of the run inherited them and could be moved to another ref store.
+- `worktree create`: when the add got as far as creating the worktree and
+  a failing post-checkout hook then deleted that new worktree's `.git`
+  file, the message no longer claims the branch is checked out in "a
+  concurrent create of the same branch, say": the worktree at the target
+  is this call's own, and the message now says it was created but git
+  lists it as prunable, keeps the branch, and points at
+  `git worktree prune`.
+- `worktree remove`: a reftable repository whose common stack holds a
+  symbolic remote-tracking ref with a non-ASCII character in its name is
+  no longer the `unpushed_state_unknown` refusal, which used to make every
+  removal there need `--force` (a fetch writes such a symbolic ref for any
+  remote whose name holds one). The ref is still excluded from the
+  evidence of a push, through a pure-ASCII `--exclude` pattern in which
+  every non-ASCII byte of the name is a `?`: git has no form to convert
+  such an argument to, and the pattern matches the stored bytes one for
+  one. The dirty and the unpushed protections are unchanged, a symbolic
+  ref whose name is not UTF-8 is refused as before, and the files backend
+  never was affected.
 
 ## [0.17.0] - 2026-10-19
 
@@ -317,7 +348,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stack under `refs/remotes` whose name holds a non-ASCII character is the
   `unpushed_state_unknown` refusal (branch kept; `--force` still removes).
   The name is handed to `git rev-list` as an exact `--exclude`, but on macOS
-  git converts a command-line argument to NFC (`core.precomposeunicode`),
+  git converts a command-line argument to the composed form
+  (`core.precomposeunicode`),
   while a reftable record keeps the bytes it was written with, so a symbolic
   ref stored with a decomposed name was never excluded, `--remotes` followed
   it to the local branch, the walk printed nothing and `--delete-branch`
