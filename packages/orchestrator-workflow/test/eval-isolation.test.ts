@@ -1,8 +1,11 @@
 import { spawn } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -29,8 +32,10 @@ import {
   maxTmpPathBytes,
   normalizeEnvName,
   scratchPathForms,
+  resolveChecked,
   scratchTmpPathBytes,
   sessionNpmCache,
+  unsafeAncestor,
   hostGitEnv,
   isGitConfigEnvName,
   isInside,
@@ -46,9 +51,12 @@ import {
 import {
   leftoverTotal,
   parseGuardEnvelope,
+  parseLsofPlaces,
+  placesInside,
   runGuarded,
   sweepByCwd,
 } from "../eval/processes.js";
+import type { ProcessPlaces } from "../eval/processes.js";
 import { FAKE_GUARD } from "./eval-helpers.js";
 
 let work: string;
@@ -159,6 +167,216 @@ describe("run scratch", () => {
     const file = join(work, "file-root");
     writeFileSync(file, "");
     expect(checkScratchRoot(file)).toContain("not a directory");
+  });
+});
+
+describe("scratch root ancestors", () => {
+  const uid = (): number => statSync(work).uid;
+  const dir = (name: string, mode: number): string => {
+    const path = mkdtempSync(join(work, `${name}-`));
+    chmodSync(path, mode);
+    return path;
+  };
+
+  it("refuses a root below a directory the group or others can write without the sticky bit", () => {
+    for (const mode of [0o777, 0o775, 0o757, 0o722]) {
+      const shared = dir("anc-open", mode);
+      // The root does not exist yet: it would be created inside the open directory.
+      const message = checkScratchRoot(join(shared, "root"));
+      expect(message, mode.toString(8)).toContain("unsafe directory");
+      expect(message, mode.toString(8)).toContain(shared);
+      expect(message, mode.toString(8)).toContain("sticky bit");
+      expect(() => createRunScratch(join(shared, "root"))).toThrow(
+        /unsafe directory/,
+      );
+      chmodSync(shared, 0o700);
+    }
+  });
+
+  it("looks past the parent, at every ancestor up to the file system root", () => {
+    const shared = dir("anc-deep", 0o777);
+    const deep = join(shared, "a", "b");
+    mkdirSync(deep, { recursive: true });
+    chmodSync(join(shared, "a"), 0o755);
+    chmodSync(deep, 0o700);
+    // The root itself is fine (0700, ours); the open directory is two levels above it.
+    const root = join(deep, "root");
+    mkdirSync(root, { mode: 0o700 });
+    const message = checkScratchRoot(root);
+    expect(message).toContain(shared);
+    expect(message).toContain("unsafe directory");
+    chmodSync(shared, 0o700);
+    expect(checkScratchRoot(root)).toBeNull();
+  });
+
+  it("accepts a sticky shared parent, such as /tmp or /Users/Shared, and a private one", () => {
+    const sticky = dir("anc-sticky", 0o1777);
+    expect(checkScratchRoot(join(sticky, "root"))).toBeNull();
+    const group = dir("anc-sticky-group", 0o1775);
+    expect(checkScratchRoot(join(group, "root"))).toBeNull();
+    const closed = dir("anc-closed", 0o755);
+    expect(checkScratchRoot(join(closed, "root"))).toBeNull();
+    chmodSync(sticky, 0o700);
+    chmodSync(group, 0o700);
+  });
+
+  it("refuses an ancestor owned by an account that is neither you nor root", () => {
+    const parent = dir("anc-owner", 0o755);
+    const message = checkScratchRoot(join(parent, "root"), uid() + 1);
+    expect(message).toContain(`owned by uid ${uid()}`);
+    expect(message).toContain("unsafe directory");
+    // The same chain is fine for its owner.
+    expect(checkScratchRoot(join(parent, "root"), uid())).toBeNull();
+  });
+
+  it("follows a symbolic link in the path instead of trusting it", () => {
+    const open = dir("anc-link-target", 0o777);
+    const link = join(work, `anc-link-${uid()}`);
+    symlinkSync(open, link);
+    const message = checkScratchRoot(join(link, "root"));
+    expect(message).toContain("unsafe directory");
+    expect(message).toContain(open);
+    chmodSync(open, 0o700);
+  });
+
+  it("judges the ancestors only: the path itself is the caller's to check", () => {
+    const parent = dir("anc-self", 0o755);
+    const open = join(parent, "open");
+    mkdirSync(open);
+    chmodSync(open, 0o777);
+    // The path is writable by others, its parent is not: not an ancestor problem.
+    expect(unsafeAncestor(open, uid())).toBeNull();
+    expect(unsafeAncestor(join(open, "child"), uid())).toContain(open);
+    chmodSync(open, 0o700);
+  });
+
+  it("refuses a dangling symbolic link in the path, and creates nothing where it points", () => {
+    const parent = dir("anc-dangling", 0o755);
+    const target = join(parent, "later");
+    const link = join(parent, "dl");
+    symlinkSync(target, link);
+    const root = join(link, "oe");
+    const message = checkScratchRoot(root);
+    expect(message).toContain(
+      `${link} is a symbolic link to ${target}, which does not exist`,
+    );
+    expect(() => createRunScratch(root)).toThrow(/does not exist/);
+    expect(existsSync(target)).toBe(false);
+    // Once the target exists (and is safe), the same path is accepted.
+    mkdirSync(target, { mode: 0o700 });
+    expect(checkScratchRoot(root)).toBeNull();
+    // A dangling link as the last component is the caller's: the root itself is a link.
+    rmSync(target, { recursive: true });
+    expect(unsafeAncestor(link, uid())).toContain("does not exist");
+  });
+
+  it("refuses a symbolic link in the path that another account owns", () => {
+    const parent = dir("anc-link-owner", 0o755);
+    const real = join(parent, "real");
+    mkdirSync(real, { mode: 0o700 });
+    const link = join(parent, "link");
+    symlinkSync(real, link);
+    // As seen by another uid, the link (owned by this test's uid) is foreign: it is refused as a link.
+    const message = unsafeAncestor(join(link, "root"), uid() + 1);
+    expect(message).toBe(
+      `${link} is a symbolic link owned by uid ${uid()}, who could point it elsewhere`,
+    );
+    expect(unsafeAncestor(join(link, "root"), uid())).toBeNull();
+  });
+
+  it("resolves relative links and chains of links before it judges the ancestors", () => {
+    const parent = dir("anc-chain", 0o755);
+    const open = join(parent, "open");
+    mkdirSync(open);
+    chmodSync(open, 0o777);
+    const closed = join(parent, "closed");
+    mkdirSync(closed, { mode: 0o700 });
+    // first -> second -> ../closed (relative), so the root lands in the closed directory.
+    mkdirSync(join(parent, "sub"), { mode: 0o755 });
+    symlinkSync("../closed", join(parent, "sub", "second"));
+    symlinkSync(join(parent, "sub", "second"), join(parent, "first"));
+    expect(resolveChecked(join(parent, "first", "root"), uid())).toEqual({
+      existing: closed,
+      missing: ["root"],
+    });
+    expect(checkScratchRoot(join(parent, "first", "root"))).toBeNull();
+    // The same chain into the open directory is refused at the open directory.
+    symlinkSync("../open", join(parent, "sub", "third"));
+    symlinkSync(join(parent, "sub", "third"), join(parent, "fourth"));
+    expect(checkScratchRoot(join(parent, "fourth", "root"))).toContain(
+      `${open} can be written by the group or others`,
+    );
+    chmodSync(open, 0o700);
+  });
+
+  it("stops at a loop of symbolic links and at a path below a file", () => {
+    const parent = dir("anc-loop", 0o755);
+    symlinkSync(join(parent, "b"), join(parent, "a"));
+    symlinkSync(join(parent, "a"), join(parent, "b"));
+    // Both links point at each other: stat fails, so the link counts as dangling.
+    expect(unsafeAncestor(join(parent, "a", "root"), uid())).toContain(
+      "which does not exist",
+    );
+    const file = join(parent, "file");
+    writeFileSync(file, "");
+    const below = resolveChecked(join(file, "root"), uid());
+    expect(below).toHaveProperty("error");
+    expect((below as { error: string }).error).toContain(
+      `${join(file, "root")} cannot be inspected`,
+    );
+    expect(checkScratchRoot(join(file, "root"))).toContain(
+      "cannot be inspected",
+    );
+  });
+
+  it("follows at most 40 symbolic links", () => {
+    const parent = dir("anc-many", 0o755);
+    const real = join(parent, "real");
+    mkdirSync(real, { mode: 0o700 });
+    // A chain of n links, each pointing at the next, the last at the real directory.
+    const chain = (n: number, name: string): string => {
+      let next = real;
+      for (let i = n; i >= 1; i -= 1) {
+        const link = join(parent, `${name}${i}`);
+        symlinkSync(next, link);
+        next = link;
+      }
+      return next;
+    };
+    // stat itself follows at most 32 links on macOS, so the bound is reached through the path, part by part.
+    const mid = chain(20, "p");
+    const deep = join(parent, "deep");
+    mkdirSync(deep, { mode: 0o700 });
+    const second = join(deep, "q");
+    symlinkSync(mid, second);
+    expect(resolveChecked(join(second, "root"), uid())).toEqual({
+      existing: real,
+      missing: ["root"],
+    });
+    const third = join(real, "r");
+    symlinkSync(chain(20, "s"), third);
+    const over = resolveChecked(join(second, "r", "root"), uid());
+    expect(over).toEqual({
+      error: `${join(second, "r", "root")} has more than 40 symbolic links`,
+    });
+    rmSync(third);
+  });
+
+  it("checks the root before it creates it", () => {
+    const shared = dir("anc-before", 0o777);
+    const root = join(shared, "root");
+    expect(() => createRunScratch(root)).toThrow(/unsafe directory/);
+    expect(existsSync(root)).toBe(false);
+    chmodSync(shared, 0o700);
+  });
+
+  it("checks the directory above an existing root too", () => {
+    const shared = dir("anc-existing", 0o777);
+    const root = join(shared, "root");
+    mkdirSync(root, { mode: 0o700 });
+    expect(checkScratchRoot(root)).toContain("unsafe directory");
+    chmodSync(shared, 0o755);
+    expect(checkScratchRoot(root)).toBeNull();
   });
 });
 
@@ -280,6 +498,37 @@ describe("placement of scratch and results", () => {
     expect(checkPlacement({ ...base, outDir: "/srv/res*ults" })).toContain(
       "pattern",
     );
+  });
+
+  it("refuses a scratch path a shell would split or end, which the canary's commands carry as they are", () => {
+    for (const ch of [
+      " ",
+      "\t",
+      "'",
+      '"',
+      "`",
+      "$",
+      ";",
+      "&",
+      "|",
+      "<",
+      ">",
+      "{",
+      "}",
+    ]) {
+      const message = checkPlacement({
+        ...base,
+        scratchRoot: `/srv/scr${ch}atch`,
+      });
+      expect(message, JSON.stringify(ch)).toContain(
+        "whitespace, a quote or a shell operator",
+      );
+    }
+    // Only the scratch path is put into commands; plain characters and other paths pass.
+    expect(
+      checkPlacement({ ...base, scratchRoot: "/srv/s-a_1.x+@" }),
+    ).toBeNull();
+    expect(checkPlacement({ ...base, outDir: "/srv/res ults" })).toBeNull();
   });
 
   it("decides containment by path segments, not by string prefix", () => {
@@ -601,6 +850,28 @@ describe("secrets and redaction", () => {
     expect(clean).toContain("<redacted: the API key>");
   });
 
+  it("treats a value as a secret by the words in its variable's name, each word alone", () => {
+    const value = "abcdefghijklmnop";
+    const hit = (name: string): boolean =>
+      secretValues({ [name]: value }).length === 1;
+    for (const name of [
+      "SERVICE_TOKEN",
+      "APP_SECRET",
+      "DB_PASSWORD",
+      "DB_PASSWD",
+      "AWS_CREDENTIALS",
+      "OPENAI_API_KEY",
+      "OPENAI_APIKEY",
+      "SIGNING_KEY",
+      "BASIC_AUTH",
+      "service_token",
+    ])
+      expect(hit(name), name).toBe(true);
+    // A bare KEY inside a name does not count; only a trailing _KEY does.
+    for (const name of ["KEYBOARD_LAYOUT", "HOMEBREW_PREFIX", "EDITOR"])
+      expect(hit(name), name).toBe(false);
+  });
+
   it("recognises exactly the git configuration pass-through names", () => {
     for (const name of [
       "GIT_CONFIG_COUNT",
@@ -856,6 +1127,37 @@ describe("guarded commands and the sweep", { timeout: 60_000 }, () => {
     expect(leftoverTotal({ guard: null, swept })).toBe(1);
   });
 
+  it("kills a process that left the root but holds a file open inside it, and says why", async () => {
+    const inside = mkdtempSync(join(work, "fd-in-"));
+    const outside = mkdtempSync(join(work, "fd-out-"));
+    const log = join(inside, "session.log");
+    const fd = openSync(log, "a");
+    // Working directory outside the root; standard output is a log file inside it.
+    const child = spawn("sleep", ["300"], {
+      cwd: outside,
+      detached: true,
+      stdio: ["ignore", fd, "ignore"],
+    });
+    child.unref();
+    closeSync(fd);
+    const bystander = spawn("sleep", ["300"], {
+      cwd: outside,
+      detached: true,
+      stdio: "ignore",
+    });
+    bystander.unref();
+    await new Promise((r) => setTimeout(r, 300));
+    const swept = sweepByCwd([inside], { PATH: process.env.PATH });
+    expect(swept.unavailable).toBeNull();
+    expect(swept.killed).toEqual([
+      { pid: child.pid, cwd: outside, via: "open_file", file: log },
+    ]);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(() => process.kill(child.pid!, 0)).toThrow();
+    expect(() => process.kill(bystander.pid!, 0)).not.toThrow();
+    process.kill(bystander.pid!, "SIGKILL");
+  });
+
   it("reports guard's timeout and a leftover it killed", async () => {
     const dir = mkdtempSync(join(work, "t-"));
     mkdirSync(join(dir, "log"));
@@ -886,5 +1188,75 @@ describe("guarded commands and the sweep", { timeout: 60_000 }, () => {
     );
     expect(leaving.guard?.reason).toBe("leftover");
     expect(leftoverTotal(leaving)).toBe(1);
+  });
+});
+
+describe("sweep matching", () => {
+  const table = (entries: [number, ProcessPlaces][]) => new Map(entries);
+
+  it("matches a working directory first, then an open file, by path segments", () => {
+    const hits = placesInside(
+      table([
+        [10, { cwd: "/scratch/run1/checkout", files: ["/scratch/run1/x"] }],
+        [11, { cwd: "/elsewhere", files: ["/etc/hosts", "/scratch/run1/log"] }],
+        [12, { cwd: "/scratch/run10/checkout", files: [] }],
+        [13, { cwd: null, files: ["/scratch/run1"] }],
+        [14, { cwd: "/elsewhere", files: ["/etc/hosts"] }],
+      ]),
+      ["/scratch/run1"],
+    );
+    expect(hits).toEqual([
+      { pid: 10, cwd: "/scratch/run1/checkout", via: "cwd" },
+      {
+        pid: 11,
+        cwd: "/elsewhere",
+        via: "open_file",
+        file: "/scratch/run1/log",
+      },
+      { pid: 13, cwd: "", via: "open_file", file: "/scratch/run1" },
+    ]);
+  });
+
+  it("never selects this process, pid 1 or lower pids", () => {
+    const inside: ProcessPlaces = { cwd: "/r/x", files: [] };
+    const hits = placesInside(
+      table([
+        [1, inside],
+        [0, inside],
+        [500, inside],
+        [501, inside],
+      ]),
+      ["/r"],
+      500,
+    );
+    expect(hits.map((h) => h.pid)).toEqual([501]);
+  });
+
+  it("reads lsof's field output: working directory, descriptors, and only absolute names", () => {
+    const parsed = parseLsofPlaces(
+      [
+        "p20",
+        "fcwd",
+        "n/scratch/run1",
+        "f0",
+        "n/dev/null",
+        "f1",
+        "n/scratch/run1/out.log",
+        "f3",
+        "n*:8080",
+        "f4",
+        "ncount->socket",
+        "p21",
+        "fcwd",
+        "n/",
+        "",
+      ].join("\n"),
+    );
+    expect(parsed.get(20)).toEqual({
+      cwd: "/scratch/run1",
+      files: ["/dev/null", "/scratch/run1/out.log"],
+    });
+    expect(parsed.get(21)).toEqual({ cwd: "/", files: [] });
+    expect(parsed.size).toBe(2);
   });
 });

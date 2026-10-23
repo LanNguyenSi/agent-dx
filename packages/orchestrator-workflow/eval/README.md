@@ -113,8 +113,20 @@ run's tmp path (`<scratch>/<8 hex>/tmp`) may not exceed 44 bytes less one for
 the separator and the bytes of `claude-<uid>` (33 bytes for uid 501), and the
 commands refuse a longer `--scratch` (see "Claude Code sandbox" below for why).
 They also refuse a scratch directory that is a symbolic link, belongs to
-another user, or that the group or others can write; one that does not exist
-yet is created with mode 0700.
+another user, or that the group or others can write, and a path with
+whitespace, a quote or a shell operator in it (the canary puts scratch paths
+into its commands as they are); one that does not exist yet is created with
+mode 0700, after the checks, by its resolved path, and checked again. The
+directories above it are checked too, up to the file system root: every
+symbolic link on the way must belong to you or root and must lead to
+something that exists (a dangling link would let whoever creates its target
+choose where the scratch root lands), and then the resolved chain is judged:
+an ancestor owned by an account that is neither you nor root, or writable by
+the group or others without the sticky bit, would let another account rename
+or replace a directory on the way down to the scratch root, so it is refused.
+A sticky shared parent such as `/tmp` or `/Users/Shared` passes (an account
+can remove only its own entries there), which is why the default location is
+safe.
 
 Run `canary` before every batch and after every Claude Code update (see
 Isolation). It exits 0 only when every check passed.
@@ -268,9 +280,19 @@ What contains a session:
   `agent-primitives guard <timeout-s> <max-rss-MiB>`, which kills the whole
   process tree at the wall-clock bound or the memory cap (`--max-rss-mib`,
   default 8192) and reports what was left running. Afterwards every process
-  still working inside the run's scratch directory is killed as well, which
-  catches a descendant that left its process group between two of guard's
-  samples. Both counts go into `result.json`.
+  of the invoking user that works inside the run's scratch directory, or holds
+  a file open there (standard streams and descriptors 0 to 31), is killed as
+  well, which catches a descendant that left its process group between two of
+  guard's samples, also one that changed its working directory out of the
+  scratch directory but kept a log or a pipe target inside it. `result.json`
+  records each swept process with the reason (`via`: `cwd` or `open_file`).
+  What the sweep cannot see: a process that closed every descriptor in the
+  scratch directory, left it and keeps no other mark there. A descendant of
+  the session stays bound by the Claude Code sandbox the session ran under; a
+  descendant of a setup command keeps the unsandboxed rights of setup commands
+  (see "Setup commands" below) after the run. The sweep does not look at
+  environments or at descriptors above 31 (a wider `lsof` range stalled for
+  ten seconds per call on macOS).
 - The scratch directory is deleted after each run (`--keep-checkout` keeps
   it); records stay in the results directory.
 
@@ -292,20 +314,64 @@ What it does not contain:
   Code does not accept is ignored without an error. The `canary` command is
   the proof that the settings took effect; run it again after a Claude Code
   update.
-- **The canary's report is partly self-reported**: the host itself checks the
-  touch target, that no settings file appeared in the session's config
-  directory, the checkout write, the evidence and home writes, the node
-  version, the permission mode and that no record holds a secret; whether ssh,
-  the file reads, curl and the Read tool failed (or, on the session's own
-  checkout, worked) comes from the session's own answer. The read probes
-  target sentinel files with random content that the host plants under the
-  home directory, the temp root and another run directory under the scratch
-  root just before the session and deletes after it, so a read that worked
-  shows up as a leak. Every credential-looking variable name the session
-  prints fails the canary, except a name the sandbox itself injects (its proxy
-  password and the git configuration it passes through the environment) that
-  the runner's own environment does not hold. An action the session declined
-  to attempt makes the canary inconclusive, never a pass.
+- **What the canary observes itself**: the canary session runs with
+  `--output-format stream-json --verbose`, and the host reads from that
+  stream the calls the session made and what each returned; the session
+  still picks the commands. A call counts as an action only when it is the
+  instructed one: the Bash command exactly as the prompt gives it (compared
+  after trimming), not run in the background, or the Read tool on the exact
+  path. Whether that call succeeded (ssh greeted an authenticated user, a
+  probe printed `READ_OK`, curl returned an HTTP status, the Read tool
+  returned content, the command exited 0), which names `env` printed (over
+  every run of the probe) and which node version came back are host
+  observations. A forbidden action is inconclusive, never a pass, when the
+  stream has no instructed call of it, when the stream holds any uninstructed
+  call, whatever it names (another command, the instructed one in the
+  background, another path, another tool or a tool the host does not know:
+  a command can reach a target without naming it, by a glob, a variable or a
+  relative path), or when the session's closing JSON report says it
+  succeeded while the stream shows it blocked. Calls of the task-list tools
+  (`TodoWrite`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`) are left
+  out, since they only keep the session's checklist; `ToolSearch` and
+  `TaskStop` are not. The check's detail names the first uninstructed call
+  (`uninstructed call: ...`), and `stream.uninstructed_calls` in
+  `canary.json` counts every non-bookkeeping tool call that is not the
+  instructed call of any action. A forbidden action the stream shows
+  succeeding fails whatever else the stream holds (except the env listing that printed only names the sandbox injects, which counts as blocked); otherwise the report is
+  only cross-checked and a disagreement is noted in the check's detail. A
+  stream with no tool call at all makes the canary inconclusive too, and the
+  printed table shows an inconclusive check as `unknown`, not `FAILED`. The
+  prompt states this rule; a session that still makes another call (a `pwd`,
+  a search for a tool) leaves the canary inconclusive, which costs a new run,
+  not a wrong pass. The host also checks files it can see: the touch target,
+  that no settings file appeared in the session's config directory, the
+  checkout write, the evidence and home writes, the
+  permission mode, that no planted hook ran and that no record holds a
+  secret. The read probes target sentinel files with random content that the
+  host plants under the home directory, the temp root and another run
+  directory under the scratch root just before the session and deletes after
+  it, so a read that worked shows up as a leak. Every credential-looking
+  variable name `env` prints fails the canary, except a name the sandbox
+  itself injects (its proxy password and the git configuration it passes
+  through the environment) that the runner's own environment does not hold.
+- **Project configuration under `--setting-sources ""`**: the canary plants a
+  `.claude/settings.json` and a `.claude/settings.local.json` in its checkout,
+  each with `SessionStart`, `UserPromptSubmit` and `PreToolUse` hooks that
+  append to a marker file outside the checkout, the local one also setting an
+  environment variable, and a project skill. It then checks that no marker
+  exists afterwards (`host:project_hooks_not_run`), that the variable is unset
+  in a Bash command (`local_settings_env`) and that the init event of the
+  stream lists the skill neither among its skills nor among its slash
+  commands (`host:project_skill_not_loaded`; no init event, or one without
+  either list, makes it inconclusive). Under `--bare` Claude Code runs no hook at all,
+  so the hook check only discriminates with `--no-bare`; the variable and the
+  skill checks hold in both modes.
+- **Which build ran**: `canary.json` records `revision` (the package version,
+  the git revision of the evaluation code and whether it had uncommitted
+  changes, the output of `claude --version`, model, effort and bare mode) and
+  `stream` (event and tool call counts, unreadable lines, and the tool and
+  skill names the init event lists), and the printed table repeats the
+  revision, so a pass is tied to the build it was measured on.
 - The sandbox runs on macOS, Linux and WSL2; on Linux it needs `bubblewrap`
   and `socat`. Some network keys (`allowUnixSockets`, `allowLocalBinding`)
   only apply on macOS, where the session's tests also cannot start a local
@@ -345,6 +411,14 @@ reviewer`) and runs as the main thread of its own session, with the
   the checkout fails in the replay where it could succeed in production.
 - No MCP servers (the production reviewer may have a tracker or code-search
   server), and the subagent, web and cross-session tools are denied.
+- The tool set differs under `--bare`: Claude Code documents its minimal mode
+  (`CLAUDE_CODE_SIMPLE`, set by `--bare`) as giving the session only the Bash,
+  file read and file edit tools, so the replay's reviewer lacks the dedicated
+  search tools (Grep, Glob) a production reviewer has and uses Bash for
+  searching. The statement comes from that documentation, not from a
+  measurement here; `canary.json` lists the tools the session's init event
+  reports (`stream.tools`), so check the build in use before reading a
+  difference between replay and production as a prompt effect.
 - Run files named by the briefing (other briefs, evidence, run notes, tracker
   pages) do not exist. The runner appends a fixed paragraph that says so and
   that missing run files are not findings; the common reviewer rules and the
@@ -362,6 +436,11 @@ reviewer`) and runs as the main thread of its own session, with the
 Cost is read from each session's own report (`total_cost_usd`) and summed per
 variant by `score`; `--budget-usd` caps one session, and the `run` command
 prints the worst case (entries times repeats times the cap) before it starts.
+A session that hits the wall-clock bound prints no result object, so its cost
+is unknown: it is recorded as null, left out of the cost total and mean, and
+counted. `score` and `compare` print how many sessions lack a cost, which makes
+the total a lower bound; each such session was capped by `--budget-usd`, so
+`sessions without a cost x budget` bounds what is missing.
 A full run costs about the number of entries times the mean per-session cost
 at the chosen model and effort; measure the mean on a few entries first. The
 judge is a short session per finding run (default model `sonnet`), and the
@@ -373,9 +452,11 @@ canary one short session.
 relative repository paths), `test/eval-score.test.ts` (return validity, judge
 prompt and answer, scoring, per-entry aggregation, failures, noise, paired
 comparison and noise floor, leak split, variants), `test/eval-isolation.test.ts`
-(scratch layout and permissions, placement checks and the tmp path limit,
-session settings, secret names, secret scan and redaction, guard envelope,
-process sweep), `test/eval-runner.test.ts`
+(scratch layout and permissions and their ancestors, placement checks and the
+tmp path limit, session settings, secret names, secret scan and redaction,
+guard envelope, process sweep), `test/eval-stream.test.ts` (stream-json
+parsing, the canary's host observation rules, planted project configuration,
+revision), `test/eval-runner.test.ts`
 (checkout isolation, environment allowlist, session flags and settings,
 timeouts and process groups, leftover processes, records, retries, blindness)
 and `test/eval-cli.test.ts` (canary, run, judge, score and compare end to

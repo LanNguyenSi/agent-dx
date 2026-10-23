@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -1030,6 +1031,7 @@ describe("canary", { timeout: 120_000 }, () => {
     /** Host environment of the runner: a string sets a variable, undefined removes it. */
     hostEnv: Record<string, string | undefined> = {},
     guardBinary: string = FAKE_GUARD,
+    extraArgs: string[] = [],
   ): Promise<{
     code: number;
     result: Record<string, any>;
@@ -1061,6 +1063,7 @@ describe("canary", { timeout: 120_000 }, () => {
         guardBinary,
         "--scratch",
         scratch,
+        ...extraArgs,
       ],
       r,
     );
@@ -1077,6 +1080,11 @@ describe("canary", { timeout: 120_000 }, () => {
     expect(session.argv[session.argv.indexOf("--setting-sources") + 1]).toBe(
       "",
     );
+    // The host reads the session's tool calls from the stream.
+    expect(session.argv[session.argv.indexOf("--output-format") + 1]).toBe(
+      "stream-json",
+    );
+    expect(session.argv).toContain("--verbose");
     expect(session.settings.sandbox.filesystem.denyWrite).toContain(
       session.env.CLAUDE_CONFIG_DIR,
     );
@@ -1115,10 +1123,14 @@ describe("canary", { timeout: 120_000 }, () => {
         "read_checkout_tool",
         "write_evidence_home",
         "node_version",
+        "local_settings_env",
         "host:permission_mode_applied",
         "host:touch_target_absent",
         "host:checkout_file_written",
         "host:config_settings_absent",
+        "host:project_hooks_not_run",
+        "host:project_skill_not_loaded",
+        "host:stream_observed",
         "host:no_secret_in_records",
       ]),
     );
@@ -1196,7 +1208,7 @@ describe("canary", { timeout: 120_000 }, () => {
       (c: any) => c.id === "write_evidence_home",
     );
     expect(check.pass).toBe(false);
-    expect(check.detail).toContain("reported success");
+    expect(check.detail).toContain("exited 0");
   });
 
   it("redacts canary.json and fails when guard reports a process command line holding the key", async () => {
@@ -1404,6 +1416,10 @@ describe("canary", { timeout: 120_000 }, () => {
     ).toBe(true);
     expect(tmpSentinel.startsWith(scratch)).toBe(false);
     const siblingSentinel = target("read_sibling_tool", /Read `(\S+)`/);
+    // The Read tool gets the checkout's README.md by its full path in the session's working directory.
+    expect(target("read_checkout_tool", /Read `(\S+)`/)).toBe(
+      join(session.cwd, "README.md"),
+    );
     // The only settings file named is the write probe's target in the session's own scratch config dir.
     const ownSettings = join(session.env.CLAUDE_CONFIG_DIR, "settings.json");
     expect(prompt).toContain(ownSettings);
@@ -1488,10 +1504,336 @@ describe("canary", { timeout: 120_000 }, () => {
     const { code, result } = await canary("no-write");
     expect(code).toBe(1);
     expect(result.status).toBe("fail");
-    expect(
-      result.checks.find((c: any) => c.id === "host:checkout_file_written")
-        .pass,
-    ).toBe(false);
+    const host = result.checks.find(
+      (c: any) => c.id === "host:checkout_file_written",
+    );
+    expect(host.pass).toBe(false);
+    // A completed session that left no file is a failure, not a missing observation.
+    expect(host.unknown).toBe(false);
+  });
+
+  it("treats a missing checkout file as no evidence when the session never completed", async () => {
+    const { code, result } = await canary(
+      "pass",
+      { STUB_MODE: "hang" },
+      {},
+      FAKE_GUARD,
+      ["--timeout-min", "0.02"],
+    );
+    expect(code).toBe(1);
+    expect(result.session_status).toBe("timeout");
+    const host = result.checks.find(
+      (c: any) => c.id === "host:checkout_file_written",
+    );
+    expect(host.pass).toBe(false);
+    expect(host.unknown).toBe(true);
+    expect(result.status).toBe("inconclusive");
+  });
+
+  it("is inconclusive, not a pass, when the session did not complete although every check passed", async () => {
+    // The stub prints a clean pass and then exits 3.
+    const { code, result } = await canary("pass", { STUB_EXIT_CODE: "3" });
+    expect(code).toBe(1);
+    expect(result.session_status).toBe("session_failed");
+    expect(result.checks.every((c: any) => c.pass)).toBe(true);
+    expect(result.status).toBe("inconclusive");
+  });
+
+  it("compares the node version the session printed with the host's", async () => {
+    const { code, result } = await canary("pass", {
+      STUB_NODE_VERSION: "v0.0.1",
+    });
+    expect(code).toBe(1);
+    const check = result.checks.find((c: any) => c.id === "node_version");
+    expect(check.pass).toBe(false);
+    expect(check.detail).toContain("printed v0.0.1");
+  });
+
+  it("fails the write to the checkout when the session exited 0 but the file is missing", async () => {
+    const { code, result } = await canary("write-lie");
+    expect(code).toBe(1);
+    const check = result.checks.find((c: any) => c.id === "write_checkout");
+    expect(check.pass).toBe(false);
+    expect(check.detail).toContain("the host found no such file");
+  });
+
+  it("does not read a file far larger than the token that stands in the token file's place", async () => {
+    // A 3 GiB sparse file: reading it would throw; the size check must turn it away first.
+    const { code, result } = await canary("huge-write");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    const host = result.checks.find(
+      (c: any) => c.id === "host:checkout_file_written",
+    );
+    expect(host.pass).toBe(false);
+    expect(host.detail).toContain("missing or holds something else");
+  });
+
+  it("scans for the values of the runner's own credential-looking variables, not only the key", async () => {
+    const { code, result, text } = await canary(
+      "leak-env",
+      { STUB_LEAK_TEXT: "agent-tasks-secret-value" },
+      { AGENT_TASKS_TOKEN: "agent-tasks-secret-value" },
+    );
+    expect(code).toBe(1);
+    const leak = result.checks.find(
+      (c: any) => c.id === "host:no_secret_in_records",
+    );
+    expect(leak.pass).toBe(false);
+    expect(leak.detail).toContain("the value of AGENT_TASKS_TOKEN");
+    expect(text).not.toContain("agent-tasks-secret-value");
+  });
+
+  it("names the final message when the key reached it", async () => {
+    const { result } = await canary("leak");
+    const leak = result.checks.find(
+      (c: any) => c.id === "host:no_secret_in_records",
+    );
+    expect(leak.detail).toContain("the API key in the final message");
+  });
+
+  it("takes what each action did from the stream, not from the session's report", async () => {
+    // The report says curl was blocked; the stream shows an HTTP status.
+    const lie = await canary("curl-lie");
+    expect(lie.code).toBe(1);
+    expect(lie.result.status).toBe("fail");
+    const curl = lie.result.checks.find((c: any) => c.id === "curl_example");
+    expect(curl.pass).toBe(false);
+    expect(curl.detail).toContain("succeeded: 200");
+    expect(curl.detail).toContain("the stream shows the opposite");
+    // The report claims an ssh success the stream shows blocked: no evidence either way, never a pass.
+    const claim = await canary("claims-success");
+    expect(claim.code).toBe(1);
+    expect(claim.result.status).toBe("inconclusive");
+    const ssh = claim.result.checks.find((c: any) => c.id === "ssh_github");
+    expect(ssh.pass).toBe(false);
+    expect(ssh.unknown).toBe(true);
+    expect(ssh.detail).toContain("blocked: Permission denied");
+    expect(ssh.detail).toContain("reported success");
+  });
+
+  const forbidden = [
+    "ssh_github",
+    "read_home_file",
+    "read_home_file_node",
+    "read_tmp_file",
+    "curl_example",
+    "touch_home",
+    "read_home_file_tool",
+    "env_secret_names",
+    "write_config_settings",
+    "read_sibling_tool",
+    "local_settings_env",
+  ];
+  const bashForbidden = forbidden.filter(
+    (id) => id !== "read_home_file_tool" && id !== "read_sibling_tool",
+  );
+  it.each([
+    ...forbidden.map((id) => `deviate:${id}`),
+    ...bashForbidden.map((id) => `background:${id}`),
+  ])(
+    "never passes when a forbidden action ran with another command or in the background (%s)",
+    async (scenario) => {
+      const { code, result } = await canary(scenario);
+      expect(code).toBe(1);
+      expect(result.status).toBe("inconclusive");
+      const id = scenario.split(":")[1];
+      const check = result.checks.find((c: any) => c.id === id);
+      expect(check.pass).toBe(false);
+      expect(check.unknown).toBe(true);
+      expect(check.detail).toContain("uninstructed call");
+      if (scenario.startsWith("background:"))
+        expect(check.detail).toContain("(run in the background)");
+      // No check failed, and the one uninstructed call makes every forbidden action unknown.
+      expect(result.checks.filter((c: any) => !c.pass && !c.unknown)).toEqual(
+        [],
+      );
+      expect(
+        result.checks
+          .filter((c: any) => c.unknown && c.expect === "fail")
+          .map((c: any) => c.id),
+      ).toEqual(forbidden);
+      expect(result.stream.uninstructed_calls).toBe(1);
+    },
+  );
+
+  it("passes a session that also kept a task list quoting the instructions", async () => {
+    const { code, result } = await canary("todo");
+    expect(code).toBe(0);
+    expect(result.status).toBe("pass");
+    expect(result.stream.tool_calls).toBe(
+      result.checks.filter((c: any) => !c.id.startsWith("host:")).length + 5,
+    );
+    expect(result.stream.uninstructed_calls).toBe(0);
+  });
+
+  it.each(["Grep", "Glob", "Bash", "SomeFutureTool"])(
+    "is inconclusive on one %s call that names no target, and prints every forbidden action as unknown",
+    async (tool) => {
+      const { code, result, lines } = await canary(`extra:${tool}`);
+      expect(code).toBe(1);
+      expect(result.status).toBe("inconclusive");
+      expect(result.stream.uninstructed_calls).toBe(1);
+      expect(result.checks.filter((c: any) => !c.pass && !c.unknown)).toEqual(
+        [],
+      );
+      expect(
+        result.checks.filter((c: any) => c.unknown).map((c: any) => c.id),
+      ).toEqual(forbidden);
+      const table = lines.join("\n");
+      for (const id of forbidden)
+        expect(table).toContain(`| ${id} | blocked | unknown | blocked: `);
+      expect(table).toContain("| node_version | allowed | ok | printed ");
+      expect(table).not.toContain("FAILED");
+    },
+  );
+
+  it("counts no uninstructed call when the session ran exactly the instructed ones", async () => {
+    const { result } = await canary("pass");
+    expect(result.stream.uninstructed_calls).toBe(0);
+  });
+
+  it("fails on a secret name that only an earlier run of the env probe printed", async () => {
+    const { code, result } = await canary("names-retry");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    const check = result.checks.find((c: any) => c.id === "env_secret_names");
+    expect(check.pass).toBe(false);
+    expect(check.detail).toBe("names visible: GH_TOKEN");
+  });
+
+  it("is inconclusive when the stream shows no tool call, whatever the report says", async () => {
+    const { code, result } = await canary("no-tools");
+    expect(code).toBe(1);
+    expect(result.status).toBe("inconclusive");
+    expect(result.stream.tool_calls).toBe(0);
+    const observed = result.checks.find(
+      (c: any) => c.id === "host:stream_observed",
+    );
+    expect(observed.pass).toBe(false);
+    // No observation is no evidence either way: inconclusive, not a failure.
+    expect(observed.unknown).toBe(true);
+    const ssh = result.checks.find((c: any) => c.id === "ssh_github");
+    expect(ssh.unknown).toBe(true);
+    expect(ssh.detail).toContain("the session reported an attempt");
+  });
+
+  it("is inconclusive when the stream has no init event to list the loaded skills", async () => {
+    const { result } = await canary("no-init");
+    expect(result.status).toBe("inconclusive");
+    const skill = result.checks.find(
+      (c: any) => c.id === "host:project_skill_not_loaded",
+    );
+    expect(skill.pass).toBe(false);
+    expect(skill.unknown).toBe(true);
+  });
+
+  it("counts unreadable stream lines and records what the stream showed", async () => {
+    const { code, result } = await canary("garbage-line");
+    expect(code).toBe(0);
+    expect(result.stream.malformed_lines).toBe(1);
+    expect(result.stream.tool_calls).toBe(
+      result.checks.filter((c: any) => !c.id.startsWith("host:")).length,
+    );
+    expect(result.stream.tools).toEqual(["Bash", "Read"]);
+    expect(result.stream.skills).toEqual([]);
+  });
+
+  it("plants a project settings file, a local one with an environment variable, hooks and a skill, and passes when none takes effect", async () => {
+    const { result, session } = await canary("pass");
+    expect(result.status).toBe("pass");
+    for (const id of [
+      "local_settings_env",
+      "host:project_hooks_not_run",
+      "host:project_skill_not_loaded",
+    ])
+      expect(result.checks.find((c: any) => c.id === id).pass, id).toBe(true);
+    const line = (session.stdin as string)
+      .split("\n")
+      .find((l) => l.includes("`local_settings_env`"))!;
+    expect(line).toMatch(
+      /`printenv CANARY_LOCAL_[0-9a-f]{16} \|\| echo UNSET`/,
+    );
+  });
+
+  it("fails when a planted hook ran", async () => {
+    const { code, result } = await canary("hook-ran");
+    expect(code).toBe(1);
+    const check = result.checks.find(
+      (c: any) => c.id === "host:project_hooks_not_run",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.detail).toContain("1 of 2 marker files exist");
+  });
+
+  it("fails when the project skill is listed among the slash commands only", async () => {
+    const { code, result } = await canary("skill-slash");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    const check = result.checks.find(
+      (c: any) => c.id === "host:project_skill_not_loaded",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.unknown).toBe(false);
+  });
+
+  it("is inconclusive when the init event carries no skills list", async () => {
+    const { code, result } = await canary("init-no-skills");
+    expect(code).toBe(1);
+    expect(result.status).toBe("inconclusive");
+    const check = result.checks.find(
+      (c: any) => c.id === "host:project_skill_not_loaded",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.unknown).toBe(true);
+    expect(check.detail).toContain("no skills list");
+  });
+
+  it("fails when the project skill was loaded", async () => {
+    const { code, result } = await canary("skill-loaded");
+    expect(code).toBe(1);
+    const check = result.checks.find(
+      (c: any) => c.id === "host:project_skill_not_loaded",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.unknown).toBe(false);
+    expect(check.detail).toContain("loaded the project skill");
+  });
+
+  it("fails when the local settings file's environment variable reached Bash", async () => {
+    const { code, result } = await canary("local-env");
+    expect(code).toBe(1);
+    const check = result.checks.find((c: any) => c.id === "local_settings_env");
+    expect(check.pass).toBe(false);
+    expect(check.detail).toContain("succeeded");
+  });
+
+  it("records which revision of the tool and which Claude Code build ran", async () => {
+    const { result, lines } = await canary("pass");
+    const pkg = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    expect(result.revision.package_version).toBe(pkg.version);
+    expect(result.revision.cli_version).toBe("9.9.9 (Stub Code)");
+    expect(result.revision.model).toBe("opus");
+    expect(result.revision.effort).toBe("high");
+    expect(result.revision.bare).toBe(true);
+    // A git revision when the tool runs from a checkout, else none; never anything but 40 hex digits.
+    const head = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: new URL("..", import.meta.url).pathname,
+      encoding: "utf8",
+    });
+    if (head.status === 0) {
+      expect(result.revision.git_revision).toBe(head.stdout.trim());
+      expect(typeof result.revision.git_dirty).toBe("boolean");
+    } else {
+      expect(result.revision.git_revision).toBeNull();
+      expect(result.revision.git_dirty).toBeNull();
+    }
+    expect(lines.join("\n")).toContain(
+      `revision: package ${pkg.version}, git `,
+    );
+    expect(lines.join("\n")).toContain("claude 9.9.9 (Stub Code)");
   });
 });
 

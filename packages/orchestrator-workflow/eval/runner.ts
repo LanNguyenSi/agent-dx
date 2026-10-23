@@ -210,7 +210,13 @@ export interface RunnerOptions {
   outDir: string;
   /** The dataset directory; its parent tree is read-denied to the session. */
   datasetDir: string;
-  /** Pass `--bare`: no hooks, no CLAUDE.md discovery, API-key auth only. */
+  /**
+   * Pass `--bare`: no hooks, plugin sync or auto-memory, API-key auth only.
+   * Project instruction files (`CLAUDE.md`, `AGENTS.md`, rules, project
+   * skills) are off in both modes, because every session runs with
+   * `--setting-sources ""` (`NO_SETTING_SOURCES`); `--bare` is not what
+   * removes them.
+   */
   bare: boolean;
   /** Name of the environment variable that holds the API key. */
   apiKeyEnv: string;
@@ -248,6 +254,8 @@ export function buildSessionArgs(options: {
   effort: string;
   budgetUsd: number;
   bare: boolean;
+  /** `stream-json` output (the canary reads the tool calls from it) instead of one `json` result. */
+  stream?: boolean;
 }): string[] {
   const args = [
     "-p",
@@ -275,7 +283,9 @@ export function buildSessionArgs(options: {
     DISALLOWED_TOOLS.join(","),
     "--no-session-persistence",
     "--output-format",
-    "json",
+    options.stream === true ? "stream-json" : "json",
+    // `claude -p --output-format stream-json` needs --verbose (Claude Code 2.1.x).
+    ...(options.stream === true ? ["--verbose"] : []),
     "--max-budget-usd",
     String(options.budgetUsd),
   ];

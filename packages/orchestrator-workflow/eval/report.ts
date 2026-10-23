@@ -48,6 +48,11 @@ export function renderAggregates(
         `${a.variant_id}: ${a.unjudged_finding_runs} finding run(s) have no judgment yet and are left out of recall.`,
       );
     }
+    if (a.n_cost_unreported > 0) {
+      notes.push(
+        `${a.variant_id}: ${a.n_cost_unreported} session(s) have no reported cost (a timed-out session prints no result), so the cost total is a lower bound; each such session was capped by --budget-usd.`,
+      );
+    }
     if (a.recall_by_repeat.length > 1) {
       notes.push(
         `${a.variant_id} recall by repeat: ${a.recall_by_repeat.map((r) => `run-${r.repeat} ${pct(r.recall)} (n=${r.entries})`).join(", ")}.`,

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The replay evaluation's isolation is hardened (`eval/`, development tooling
+  that is not part of the installed package). The canary now runs its session
+  with `--output-format stream-json --verbose` and reads the calls the session
+  made and what each returned from the stream instead of taking the session's
+  own JSON report; the session still picks the commands. Only a call exactly
+  as instructed counts as an action (the trimmed Bash command in the
+  foreground, or the Read tool on the exact path), and its success, the names
+  `env` printed over every run of the probe and the node version are host
+  observations. A forbidden action is inconclusive, never a pass, when the
+  stream has no instructed call of it, when the stream holds any other call of
+  a tool that can read, run or write, whatever it names (only the task-list
+  tools `TodoWrite`, `TaskCreate`, `TaskGet`, `TaskList` and `TaskUpdate` are
+  left out; an unknown tool counts), or when the report claims a success the
+  stream shows blocked; one the stream shows succeeding fails (except the env
+  listing that printed only names the sandbox injects), and the printed table shows an inconclusive check as `unknown`. It plants a
+  project settings file, a local settings file with an environment variable,
+  hooks and a project skill in its checkout and checks that none of them takes
+  effect under `--setting-sources ""` (live probe of the setting that so far
+  rested on reading the bundle; an init event without its skills or slash
+  command list is inconclusive). `canary.json` and the printed table record
+  the revision they ran on: package version, git revision and dirty flag,
+  `claude --version`, model, effort and bare mode, plus the tool and skill
+  names the init event lists. The process sweep also kills a process that
+  left the scratch directory but holds a file open inside it. A scratch root
+  is refused when an ancestor is owned by another account or writable by the
+  group or others without the sticky bit, when a symbolic link on its path
+  belongs to another account or dangles, or when its path holds whitespace, a
+  quote or a shell operator; it is checked before it is created and again
+  after, by its resolved path. `score` and `compare` count sessions without a
+  reported cost (timeouts) so the cost total reads as a lower bound. The
+  `bare` documentation comment and the README now say that project
+  instruction files are off in both modes and that `--bare` reduces the tool
+  set. The load-flaky SIGKILL escalation test no longer depends on how fast a
+  child starts, and the surviving mutants of the first review rounds have
+  discriminating tests.
 - The second closing option in `references/review-and-recovery.md` (the
   Docs-only closure section, still its one site) is tightened. Its test class
   is now bounded line by line: it closes a fix only when the fix changes
