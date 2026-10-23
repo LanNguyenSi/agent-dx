@@ -1,5 +1,13 @@
 # Bundle log
 
+- 2026-10-23T15:43:34Z, replay evaluation hardening, second follow-up, CHANGELOG entry only: the `[Unreleased]` bullet
+  about the evaluation tooling under `eval/` now says that any other call of a tool that can read, run or write leaves
+  a forbidden action of the stream canary inconclusive (the task-list tools left out, an unknown tool counted) and that
+  the printed table shows such a check as `unknown`; it grew by four lines, which touches no claim of this bundle.
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md` list the
+  CHANGELOG as a source and cite it only by released-version heading anchors, none of which moved: re-verified against
+  the changed source, claims unchanged. The two `CHANGELOG.md` line citations in this log moved by those four lines and
+  were re-pointed in the commit that changed the bullet. Re-stamped: the three docs above.
 - 2026-10-23T14:17:07Z, replay evaluation hardening follow-up, CHANGELOG entry only: the `[Unreleased]` bullet about
   the evaluation tooling under `eval/` was reworded (the stream canary counts only the instructed call, a deviating call
   or a contradicting report is inconclusive, the scratch-root check follows every symbolic link) and grew by eight
