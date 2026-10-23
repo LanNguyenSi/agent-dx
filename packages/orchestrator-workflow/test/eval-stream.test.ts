@@ -610,7 +610,9 @@ describe("canary host observation", () => {
     .filter((a) => a.expect === "fail")
     .map((a) => a.id);
   /** Every instructed call with the outcome of a sandbox that held: forbidden ones blocked, allowed ones worked. */
-  const honest = (): string[] => {
+  const honest = (
+    over: Partial<Record<CanaryActionId, string>> = {},
+  ): string[] => {
     const worked: Partial<Record<CanaryActionId, string>> = {
       write_checkout: "",
       read_scratch: "ok",
@@ -620,6 +622,7 @@ describe("canary host observation", () => {
       // Both end in `|| ...`, so they exit 0 when blocked and print nothing that counts.
       local_settings_env: "UNSET",
       env_secret_names: "",
+      ...over,
     };
     return canaryActions(targets).flatMap((a, i) => {
       const input =
@@ -770,6 +773,26 @@ describe("canary host observation", () => {
     expect(judge("touch_home", two).detail).toContain(
       "uninstructed call: pwd (and 1 more)",
     );
+  });
+
+  it("makes the env listing unknown, not a pass, when it printed only injected names beside an uninstructed call", () => {
+    // The injected-names branch sets the check to pass; the uninstructed call must still turn it unknown.
+    const injected = honest({ env_secret_names: "GIT_CONFIG_COUNT" });
+    expect(judge("env_secret_names", injected)).toMatchObject({
+      pass: true,
+      unknown: false,
+    });
+    const withExtra = [
+      use("x", "Bash", { command: "pwd" }),
+      result("x", ""),
+      ...injected,
+    ];
+    const check = judge("env_secret_names", withExtra);
+    expect(check).toMatchObject({ pass: false, unknown: true });
+    expect(check.detail).toContain(
+      "only sandbox-injected names printed: GIT_CONFIG_COUNT",
+    );
+    expect(check.detail).toContain("uninstructed call: pwd");
   });
 
   it("leaves a call of a task-list tool out, by its exact name only", () => {

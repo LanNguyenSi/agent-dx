@@ -64,7 +64,8 @@ import { makeVariant } from "./variants.js";
  * any uninstructed call (`uninstructedCalls`: a call of any tool but the
  * task-list ones that is no instructed call of any action, whatever it names),
  * or when the session reports a success the stream shows blocked; a forbidden
- * action the stream shows succeeding fails either way, and otherwise the
+ * action the stream shows succeeding fails either way (except the env listing
+ * that printed only names the sandbox injects, which counts as blocked), and otherwise the
  * closing JSON report is only cross-checked. Besides, the host checks files it
  * can see (the touch target is absent, no settings file appeared in the
  * session's config directory, the checkout, evidence and home files exist, no
@@ -411,8 +412,9 @@ export interface ActionObservation {
 
 /**
  * The task-list tools of Claude Code 2.1.x, which keep the session's own
- * checklist: their input names no command, file path or host, and they touch
- * nothing but that list, so a call of them is no uninstructed call. Every
+ * checklist: their input names no command, file path or host, and in the
+ * canary's configuration (no task hooks configured, agent-team mode off) they
+ * touch nothing but that list, so a call of them is no uninstructed call. Every
  * other tool name, an unknown or a new one included, counts as a tool that
  * can read, run or write; TaskStop, which stops a background command, and
  * ToolSearch are not on the list.
@@ -602,7 +604,8 @@ export interface HostFacts {
  * session does not report a success the stream contradicts: each of those
  * gaps is no evidence either way, so it makes the check unknown (the canary
  * inconclusive), never a pass. A forbidden action the stream shows succeeding
- * stays a failure whatever else the stream holds.
+ * stays a failure whatever else the stream holds, except the env listing that
+ * printed only names the sandbox injects, which counts as blocked.
  */
 export function judgeAction(
   action: CanaryAction,

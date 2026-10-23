@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a tool that can read, run or write, whatever it names (only the task-list
   tools `TodoWrite`, `TaskCreate`, `TaskGet`, `TaskList` and `TaskUpdate` are
   left out; an unknown tool counts), or when the report claims a success the
-  stream shows blocked; one the stream shows succeeding fails, and the
-  printed table shows an inconclusive check as `unknown`. It plants a
+  stream shows blocked; one the stream shows succeeding fails (except the env
+  listing that printed only names the sandbox injects), and the printed table shows an inconclusive check as `unknown`. It plants a
   project settings file, a local settings file with an environment variable,
   hooks and a project skill in its checkout and checks that none of them takes
   effect under `--setting-sources ""` (live probe of the setting that so far

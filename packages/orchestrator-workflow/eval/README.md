@@ -337,7 +337,7 @@ What it does not contain:
   (`uninstructed call: ...`), and `stream.uninstructed_calls` in
   `canary.json` counts every non-bookkeeping tool call that is not the
   instructed call of any action. A forbidden action the stream shows
-  succeeding fails whatever else the stream holds; otherwise the report is
+  succeeding fails whatever else the stream holds (except the env listing that printed only names the sandbox injects, which counts as blocked); otherwise the report is
   only cross-checked and a disagreement is noted in the check's detail. A
   stream with no tool call at all makes the canary inconclusive too, and the
   printed table shows an inconclusive check as `unknown`, not `FAILED`. The
