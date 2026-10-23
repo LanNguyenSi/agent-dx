@@ -344,6 +344,17 @@ describe("canary host observation", () => {
         result("1", "cat: Operation not permitted", true),
       ]).succeeded,
     ).toBe(false);
+    // A clean exit without READ_OK is no read either, for each of the three read probes.
+    for (const id of [
+      "read_home_file",
+      "read_home_file_node",
+      "read_tmp_file",
+    ] as const)
+      expect(
+        observe(id, [use("1", "Bash", { command: exact(id) }), result("1", "")])
+          .succeeded,
+        id,
+      ).toBe(false);
     // The node probe and the cat probe name the same file and are told apart by their exact commands.
     const nodeCmd = exact("read_home_file_node");
     const both = [
