@@ -25,8 +25,10 @@ export interface StreamToolResult {
 
 export interface StreamInit {
   tools: string[];
-  skills: string[];
-  slashCommands: string[];
+  /** Null when the event carries no `skills` list at all (not an empty one). */
+  skills: string[] | null;
+  /** Null when the event carries no `slash_commands` list at all. */
+  slashCommands: string[] | null;
   agents: string[];
   permissionMode: string | null;
   model: string | null;
@@ -126,8 +128,10 @@ export function parseStream(text: string): ParsedStream {
     if (event.type === "system" && event.subtype === "init") {
       out.init = {
         tools: strings(event.tools),
-        skills: names(event.skills),
-        slashCommands: strings(event.slash_commands),
+        skills: Array.isArray(event.skills) ? names(event.skills) : null,
+        slashCommands: Array.isArray(event.slash_commands)
+          ? strings(event.slash_commands)
+          : null,
         agents: names(event.agents),
         permissionMode:
           typeof event.permissionMode === "string"

@@ -183,6 +183,7 @@ function canaryAnswer() {
       "names-unknown": ["CLOUDSDK_PROXY_PASSWORD", "SOME_NEW_INJECTED_SECRET"],
       "names-format": ["`git_config_count`", "GIT_CONFIG_KEY_0=core.pager", "`gh_token`=x"],
       "names-blank": ["", "``"],
+      "names-retry": ["GH_TOKEN"],
     };
     if (id === "env_secret_names") item.names = namesByScenario[scenario] ?? [];
     if (id === "env_secret_names" && scenario in namesByScenario) item.succeeded = true;
@@ -227,19 +228,28 @@ function canaryStream({ text, results, scenario }) {
     const hook = planted("settings.json")?.hooks?.SessionStart?.[0]?.hooks?.[0]?.command;
     if (hook) execFileSync("/bin/sh", ["-c", hook]);
   }
+  // "deviate:<id>": the instructed call of that action is blocked, then a call with another command
+  // (or, for the Read tool, another form of the path) exits 0 without the success marker.
+  // "background:<id>": the instructed command runs in the background, so its result is only a task id.
+  const [variant, variantTarget] = scenario.split(":");
   const events = [];
   if (scenario !== "no-init") {
-    events.push({
+    const init = {
       type: "system",
       subtype: "init",
       cwd: process.cwd(),
       tools: ["Bash", "Read"],
       skills: scenario === "skill-loaded" ? skillNames : [],
-      slash_commands: ["compact"],
+      slash_commands: scenario === "skill-slash" ? ["compact", ...skillNames] : ["compact"],
       agents: [{ name: "reviewer" }],
       permissionMode: "bypassPermissions",
       model: "stub",
-    });
+    };
+    // A build whose init event carries no skills list at all.
+    if (scenario === "init-no-skills") delete init.skills;
+    events.push(init);
+    // A later system event of another subtype must not replace the init record.
+    events.push({ type: "system", subtype: "status", tools: [], skills: [], slash_commands: [] });
   }
   if (scenario !== "no-tools") {
     results.forEach((item, i) => {
@@ -290,24 +300,40 @@ function canaryStream({ text, results, scenario }) {
         output = "200";
         isError = false;
       }
-      events.push({
-        type: "assistant",
-        message: { role: "assistant", content: [{ type: "tool_use", id: toolUseId, name: line.tool, input }] },
-      });
-      events.push({
-        type: "user",
-        message: {
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: toolUseId,
-              is_error: isError,
-              content: line.tool === "Read" ? [{ type: "text", text: output }] : output,
-            },
-          ],
-        },
-      });
+      const call = (useId, callInput, text, error) => {
+        events.push({
+          type: "assistant",
+          message: { role: "assistant", content: [{ type: "tool_use", id: useId, name: line.tool, input: callInput }] },
+        });
+        events.push({
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: useId,
+                is_error: error,
+                content: line.tool === "Read" ? [{ type: "text", text }] : text,
+              },
+            ],
+          },
+        });
+      };
+      if (variant === "background" && item.id === variantTarget) {
+        call(toolUseId, { ...input, run_in_background: true }, "Command running in background with ID: b1", false);
+        return;
+      }
+      call(toolUseId, input, output, isError);
+      if (variant === "deviate" && item.id === variantTarget) {
+        const other =
+          line.tool === "Bash"
+            ? { command: `${quoted} 2>/dev/null; true` }
+            : { file_path: input.file_path.replace(/\/([^/]+)$/, "/./$1") };
+        call(`${toolUseId}_again`, other, "", false);
+      }
+      // "names-retry": the env probe runs twice, and only the first run prints a secret name.
+      if (scenario === "names-retry" && item.id === "env_secret_names") call(`${toolUseId}_again`, input, "GIT_CONFIG_COUNT", false);
     });
   }
   if (scenario === "garbage-line") events.push("this line is not json");

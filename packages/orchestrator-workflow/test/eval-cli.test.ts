@@ -1597,13 +1597,69 @@ describe("canary", { timeout: 120_000 }, () => {
     expect(curl.pass).toBe(false);
     expect(curl.detail).toContain("succeeded: 200");
     expect(curl.detail).toContain("the stream shows the opposite");
-    // The report claims an ssh success the stream does not show: the stream decides.
+    // The report claims an ssh success the stream shows blocked: no evidence either way, never a pass.
     const claim = await canary("claims-success");
-    expect(claim.code).toBe(0);
+    expect(claim.code).toBe(1);
+    expect(claim.result.status).toBe("inconclusive");
     const ssh = claim.result.checks.find((c: any) => c.id === "ssh_github");
-    expect(ssh.pass).toBe(true);
+    expect(ssh.pass).toBe(false);
+    expect(ssh.unknown).toBe(true);
     expect(ssh.detail).toContain("blocked: Permission denied");
     expect(ssh.detail).toContain("reported success");
+  });
+
+  const forbidden = [
+    "ssh_github",
+    "read_home_file",
+    "read_home_file_node",
+    "read_tmp_file",
+    "curl_example",
+    "touch_home",
+    "read_home_file_tool",
+    "env_secret_names",
+    "write_config_settings",
+    "read_sibling_tool",
+    "local_settings_env",
+  ];
+  const bashForbidden = forbidden.filter(
+    (id) => id !== "read_home_file_tool" && id !== "read_sibling_tool",
+  );
+  it.each([
+    ...forbidden.map((id) => `deviate:${id}`),
+    ...bashForbidden.map((id) => `background:${id}`),
+  ])(
+    "never passes when a forbidden action ran with another command or in the background (%s)",
+    async (scenario) => {
+      const { code, result } = await canary(scenario);
+      expect(code).toBe(1);
+      expect(result.status).toBe("inconclusive");
+      const id = scenario.split(":")[1];
+      const check = result.checks.find((c: any) => c.id === id);
+      expect(check.pass).toBe(false);
+      expect(check.unknown).toBe(true);
+      expect(check.detail).toContain("deviating command");
+      if (scenario.startsWith("background:"))
+        expect(check.detail).toContain("(run in the background)");
+      // No other check failed; another action whose target the call also names may be unknown too.
+      expect(result.checks.filter((c: any) => !c.pass && !c.unknown)).toEqual(
+        [],
+      );
+      expect(result.stream.uninstructed_calls).toBe(1);
+    },
+  );
+
+  it("counts no uninstructed call when the session ran exactly the instructed ones", async () => {
+    const { result } = await canary("pass");
+    expect(result.stream.uninstructed_calls).toBe(0);
+  });
+
+  it("fails on a secret name that only an earlier run of the env probe printed", async () => {
+    const { code, result } = await canary("names-retry");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    const check = result.checks.find((c: any) => c.id === "env_secret_names");
+    expect(check.pass).toBe(false);
+    expect(check.detail).toBe("names visible: GH_TOKEN");
   });
 
   it("is inconclusive when the stream shows no tool call, whatever the report says", async () => {
@@ -1668,6 +1724,29 @@ describe("canary", { timeout: 120_000 }, () => {
     );
     expect(check.pass).toBe(false);
     expect(check.detail).toContain("1 of 2 marker files exist");
+  });
+
+  it("fails when the project skill is listed among the slash commands only", async () => {
+    const { code, result } = await canary("skill-slash");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    const check = result.checks.find(
+      (c: any) => c.id === "host:project_skill_not_loaded",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.unknown).toBe(false);
+  });
+
+  it("is inconclusive when the init event carries no skills list", async () => {
+    const { code, result } = await canary("init-no-skills");
+    expect(code).toBe(1);
+    expect(result.status).toBe("inconclusive");
+    const check = result.checks.find(
+      (c: any) => c.id === "host:project_skill_not_loaded",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.unknown).toBe(true);
+    expect(check.detail).toContain("no skills list");
   });
 
   it("fails when the project skill was loaded", async () => {
