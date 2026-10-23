@@ -117,7 +117,8 @@ export interface ResolvedPath {
  * whoever creates its target choose where the directories below it land).
  * Returns the resolved path, or an error fragment. `..` in the path itself
  * is applied before resolving, as `path.resolve` does; in a link's target it
- * goes up from the link's resolved directory.
+ * goes up from the link's resolved directory, because every component is
+ * joined to a directory that has no link left in it.
  */
 export function resolveChecked(
   path: string,
@@ -130,11 +131,7 @@ export function resolveChecked(
   let links = 0;
   while (pending.length > 0) {
     const part = pending.shift()!;
-    if (part === ".") continue;
-    if (part === "..") {
-      current = dirname(current);
-      continue;
-    }
+    // `join` applies `.` and `..` (from a link's target) to the resolved directory.
     const next = join(current, part);
     let st: ReturnType<typeof lstatSync>;
     try {
@@ -257,12 +254,12 @@ export function checkScratchRoot(
  * Creates a fresh run directory with an opaque name under `scratchRoot`, with
  * mode 0700 (and the root too, if it has to be created). Throws when the root
  * fails `checkScratchRoot`, before anything is created and again after the
- * root was created, or when its resolved path changed in between.
+ * root was created.
  */
 export function createRunScratch(scratchRoot: string): RunScratch {
   // Checked before anything is created, then resolved once: the root is
-  // created, checked again and entered by its resolved path only, so no link
-  // in the path is followed after the check.
+  // created and entered by its resolved path only, so no link in the path is
+  // followed after the check.
   const before = checkScratchRoot(scratchRoot);
   if (before !== null) throw new Error(before);
   const resolvedRoot = resolvedOrThrow(scratchRoot, currentUidOrNull());
@@ -271,13 +268,11 @@ export function createRunScratch(scratchRoot: string): RunScratch {
     undefined
   )
     chmodSync(resolvedRoot, SCRATCH_DIR_MODE);
-  const refused = checkScratchRoot(resolvedRoot);
-  if (refused !== null) throw new Error(refused);
+  // Checked again where it now is: a directory another account made there in
+  // the meantime (`mkdirSync` adopts an existing one) is refused.
   const base = realpathSync(resolvedRoot);
-  if (base !== resolvedRoot)
-    throw new Error(
-      `--scratch ${scratchRoot} resolved to ${resolvedRoot} when it was checked and to ${base} after it was created; choose a directory whose parents only you and root can change`,
-    );
+  const refused = checkScratchRoot(base);
+  if (refused !== null) throw new Error(refused);
   for (;;) {
     const id = randomBytes(ID_BYTES).toString("hex");
     const root = join(base, id);
