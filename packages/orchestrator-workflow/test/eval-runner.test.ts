@@ -12,12 +12,22 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import {
   DISALLOWED_TOOLS,
   buildSessionArgs,
   composePrompt,
+  forbiddenStrings,
+  prepareCheckout,
   runEntry,
   runGrouped,
 } from "../eval/runner.js";
@@ -28,10 +38,12 @@ import {
   sessionNpmCache,
   setupEnv,
 } from "../eval/isolation.js";
+import { runGuarded } from "../eval/processes.js";
 import { makeVariant, sha256 } from "../eval/variants.js";
 import {
   FAKE_GUARD,
   STUB,
+  guardBin,
   makeEntry,
   makeFixtureRepo,
   reviewerReturn,
@@ -596,6 +608,49 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
     expect(garbage.failure).toBe("no JSON result on stdout");
   });
 
+  it("keeps the API key out of the run record, whatever the session printed", async () => {
+    const leaky = join(work, "leaky-final.txt");
+    writeFileSync(
+      leaky,
+      `${reviewerReturn([{ severity: "medium" }])}\nthe key is @@KEY@@\n`,
+    );
+    const opts = options({
+      claudeBin: claude({
+        STUB_FINAL_TEXT_FILE: leaky,
+        STUB_STDERR: "warning: using @@KEY@@",
+      }),
+      env: { ...process.env, ANTHROPIC_API_KEY: "sk-test-record-key-value" },
+    });
+    const result = await runEntry(makeEntry(repo), variant, 1, opts);
+    const dir = join(opts.outDir, "stub-variant", "entry-a", "run-1");
+    // The session did print the key: the stub's own record of the call shows it was given.
+    expect(call().env.ANTHROPIC_API_KEY).toBe("sk-test-record-key-value");
+    expect(result.final_text).toContain("the key is <redacted: the API key>");
+    expect(result.final_text).not.toContain("sk-test-record-key-value");
+    for (const name of ["session.json", "stderr.log"]) {
+      const text = readFileSync(join(dir, name), "utf8");
+      expect(text, name).toContain("<redacted: the API key>");
+      expect(text, name).not.toContain("sk-test-record-key-value");
+    }
+    expect(readFileSync(join(dir, "result.json"), "utf8")).not.toContain(
+      "sk-test-record-key-value",
+    );
+  });
+
+  it("records a memory cap reported by guard as a failed session", async () => {
+    const result = await runEntry(
+      makeEntry(repo, { setup: [] }),
+      variant,
+      1,
+      options({
+        guardBin: guardBin(work, { FAKE_GUARD_FORCE_REASON: "rss_cap" }),
+      }),
+    );
+    expect(result.status).toBe("session_failed");
+    expect(result.failure).toBe("memory cap");
+    expect(result.processes.session?.guard_reason).toBe("rss_cap");
+  });
+
   it("records a JSON error result that exits 0 as a failed session", async () => {
     const result = await runEntry(
       makeEntry(repo),
@@ -695,25 +750,77 @@ describe.runIf(realGuard !== null)(
 
 describe("runGrouped", () => {
   it("escalates to SIGKILL when the group ignores SIGTERM, and leaves nothing running", async () => {
+    // Deterministic on a loaded host: the wall clock never decides. The timers are
+    // faked, the group reports that it is set up before the clock moves, and both
+    // the shell and its sleep ignore SIGTERM from their first instruction (an
+    // ignored signal survives exec), so only the SIGKILL after the grace period
+    // can end them.
     const out = join(work, "g.out");
-    const started = Date.now();
-    const result = await runGrouped(STUB, [], {
-      cwd: work,
-      env: {
-        ...process.env,
-        STUB_MODE: "hang-stubborn",
-        STUB_RECORD_DIR: recordDir,
-      },
-      timeoutMs: 600,
-      killGraceMs: 400,
-      stdoutFile: out,
-      stderrFile: out,
-    });
-    expect(result.timedOut).toBe(true);
-    expect(Date.now() - started).toBeLessThan(10_000);
-    const childPid = Number(readFileSync(join(recordDir, "child.pid"), "utf8"));
+    const ready = join(work, "g.ready");
+    const pidFile = join(work, "g.pid");
+    const realSetTimeout = globalThis.setTimeout;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let sleepPid = 0;
+    try {
+      const pending = runGrouped(
+        "/bin/sh",
+        [
+          "-c",
+          `trap '' TERM; sleep 300 & echo $! > '${pidFile}'; echo up > '${ready}'; wait`,
+        ],
+        {
+          cwd: work,
+          env: process.env,
+          timeoutMs: 600,
+          killGraceMs: 400,
+          stdoutFile: out,
+          stderrFile: out,
+        },
+      );
+      const waitStarted = Date.now();
+      while (!existsSync(ready)) {
+        if (Date.now() - waitStarted > 20_000)
+          throw new Error("the group never reported ready");
+        await new Promise((r) => setImmediate(r));
+      }
+      sleepPid = Number(readFileSync(pidFile, "utf8"));
+      // The bound: SIGTERM goes to the group, which ignores it.
+      vi.advanceTimersByTime(600);
+      // The grace period: SIGKILL goes to the group.
+      vi.advanceTimersByTime(400);
+      const result = await Promise.race([
+        pending,
+        new Promise<never>((_, reject) =>
+          realSetTimeout(
+            () => reject(new Error("the group outlived the SIGKILL")),
+            10_000,
+          ),
+        ),
+      ]);
+      expect(result.timedOut).toBe(true);
+      expect(result.signal).toBe("SIGKILL");
+    } finally {
+      vi.useRealTimers();
+      if (sleepPid > 0) {
+        const survived = (() => {
+          try {
+            process.kill(sleepPid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        })();
+        try {
+          process.kill(sleepPid, "SIGKILL");
+        } catch {
+          // Gone.
+        }
+        // A survivor of the escalation is a failure; the kill above only keeps it from leaking.
+        expect(survived).toBe(false);
+      }
+    }
     await new Promise((r) => setTimeout(r, 200));
-    expect(() => process.kill(childPid, 0)).toThrow();
+    expect(() => process.kill(sleepPid, 0)).toThrow();
   }, 30_000);
 
   it("ends a cooperative group on SIGTERM without waiting for the kill grace", async () => {
@@ -883,5 +990,120 @@ describe("environment allowlist, buildSessionArgs, composePrompt", () => {
     expect(iBrief).toBeGreaterThanOrEqual(0);
     expect(iTarget).toBeGreaterThan(iBrief);
     expect(iSpec).toBeGreaterThan(iTarget);
+  });
+});
+
+describe("runGuarded outcomes reported by guard", () => {
+  const common = (dir: string, bin: string) => ({
+    guardBin: bin,
+    cwd: dir,
+    env: { PATH: process.env.PATH },
+    timeoutMs: 20_000,
+    maxRssMiB: 512,
+    stdinFile: null,
+    stdoutFile: join(dir, "o"),
+    stderrFile: join(dir, "e"),
+    logDir: join(dir, "log"),
+    sweepRoots: [],
+  });
+
+  it("reports a command guard could not start, or a platform it does not support, as a spawn error", async () => {
+    for (const reason of ["spawn_failed", "unsupported_platform"]) {
+      const dir = mkdtempSync(join(work, "gr-"));
+      const result = await runGuarded(
+        "true",
+        [],
+        common(dir, guardBin(work, { FAKE_GUARD_FORCE_REASON: reason })),
+      );
+      expect(result.spawnError, reason).toBe(
+        `guard could not run the command (${reason})`,
+      );
+      expect(result.rssCapHit, reason).toBe(false);
+    }
+  });
+
+  it("reports the memory cap, and no spawn error, when guard hit it", async () => {
+    const dir = mkdtempSync(join(work, "gr-"));
+    const result = await runGuarded(
+      "true",
+      [],
+      common(dir, guardBin(work, { FAKE_GUARD_FORCE_REASON: "rss_cap" })),
+    );
+    expect(result.rssCapHit).toBe(true);
+    expect(result.spawnError).toBeNull();
+    expect(result.timedOut).toBe(false);
+  });
+
+  it("reports guard's own timeout as a timeout", async () => {
+    const dir = mkdtempSync(join(work, "gr-"));
+    const result = await runGuarded(
+      "true",
+      [],
+      common(dir, guardBin(work, { FAKE_GUARD_FORCE_REASON: "timeout" })),
+    );
+    expect(result.timedOut).toBe(true);
+    expect(result.rssCapHit).toBe(false);
+  });
+});
+
+describe("blindness and checkout guards", () => {
+  it("lists the entry id and every protected path, the home included", () => {
+    const forbidden = forbiddenStrings("entry-secret-1", {
+      outDir: "/results/out",
+      datasetDir: "/data/sets/dataset",
+      env: { HOME: "/home/someone" },
+    });
+    expect(forbidden).toEqual(
+      expect.arrayContaining([
+        "entry-secret-1",
+        "/results/out",
+        "/data/sets/dataset",
+        "/data/sets",
+        "/home/someone",
+      ]),
+    );
+  });
+
+  it("refuses a checkout in which a git remote is still configured after its removal", async () => {
+    const realGit = spawnSync("sh", ["-c", "command -v git"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    const shims = mkdtempSync(join(work, "shim-"));
+    // A git that reports success for `remote remove` without removing anything.
+    writeFileSync(
+      join(shims, "git"),
+      `#!/bin/sh\nif [ "$1" = remote ] && [ "$2" = remove ]; then exit 0; fi\nexec '${realGit}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    const env = (path: string): NodeJS.ProcessEnv => ({
+      PATH: path,
+      HOME: work,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    });
+    const guard = {
+      bin: FAKE_GUARD,
+      maxRssMiB: 512,
+      logDir: join(work, "guard-log"),
+      sweepRoots: [],
+    };
+    const entry = makeEntry(repo, { setup: [] });
+    const shimmed = await prepareCheckout(
+      entry,
+      mkdtempSync(join(work, "co-")),
+      env(`${shims}:${process.env.PATH}`),
+      join(work, "co.log"),
+      guard,
+    );
+    expect(shimmed.setupOk).toBe(false);
+    expect(shimmed.error).toContain("a git remote is still configured");
+    const plain = await prepareCheckout(
+      entry,
+      mkdtempSync(join(work, "co-")),
+      env(process.env.PATH ?? ""),
+      join(work, "co.log"),
+      guard,
+    );
+    expect(plain.setupOk).toBe(true);
   });
 });

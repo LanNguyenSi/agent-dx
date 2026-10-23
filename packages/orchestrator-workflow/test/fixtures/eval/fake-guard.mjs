@@ -49,6 +49,9 @@ function envelope(reason, exitCode, childExitCode, extra = {}) {
   process.exit(exitCode);
 }
 
+// Lets a test (through a wrapper script, see guardBin) make guard report a reason without running anything.
+if (process.env.FAKE_GUARD_FORCE_REASON) envelope(process.env.FAKE_GUARD_FORCE_REASON, 2, null);
+
 const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
 let timedOut = false;
 const timer = setTimeout(() => {

@@ -11,7 +11,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   createRunScratch,
@@ -23,12 +24,14 @@ import {
   scanForSecrets,
   secretValues,
   sessionEnv,
+  setupEnv,
+  setupNpmCache,
 } from "./isolation.js";
 import { runGuarded } from "./processes.js";
 import {
   FORCED_MODE_MARKER,
   buildSessionArgs,
-  parseSession,
+  cliVersion,
   processRecord,
   readStderr,
   removeTree,
@@ -39,17 +42,23 @@ import {
 import type { RunnerOptions } from "./runner.js";
 import { fencedBlocks } from "./score.js";
 import type { ProcessRecord } from "./score.js";
+import { callsOf, parseSessionOutput, parseStream } from "./stream.js";
+import type { ObservedCall, ParsedStream } from "./stream.js";
 import { makeVariant } from "./variants.js";
 
 /**
  * The canary: one session with the production flags, settings and
  * environment, told to attempt each forbidden action once and each allowed
- * one, and to report what happened. The host then checks what it can check
- * itself (the touch target is absent, no settings file appeared in the
- * session's config directory, the checkout, evidence and home files exist,
- * the node version matches, no record holds a secret) and combines that with
- * the session's own report. A forbidden action the session did not attempt
- * makes the canary inconclusive, never a pass.
+ * one. The session runs with `--output-format stream-json`, so the host reads
+ * every tool call and its result from the stream itself: whether an action
+ * was attempted, whether it succeeded, which names `env` printed and which
+ * node version came back are host observations, not the session's account.
+ * The session's closing JSON report is only cross-checked against them.
+ * Besides, the host checks files it can see (the touch target is absent, no
+ * settings file appeared in the session's config directory, the checkout,
+ * evidence and home files exist, no project hook ran, no record holds a
+ * secret). A forbidden action with no matching tool call in the stream makes
+ * the canary inconclusive, never a pass.
  */
 
 export type CanaryActionId =
@@ -63,6 +72,7 @@ export type CanaryActionId =
   | "env_secret_names"
   | "write_config_settings"
   | "read_sibling_tool"
+  | "local_settings_env"
   | "write_checkout"
   | "read_scratch"
   | "read_checkout_tool"
@@ -94,6 +104,17 @@ export interface CanaryTargets {
   evidenceFile: string;
   homeFile: string;
   token: string;
+  /**
+   * Name of an environment variable the checkout's `.claude/settings.local.json`
+   * sets, and the value it gets: the session must not see it under
+   * `--setting-sources ""`.
+   */
+  localEnvName: string;
+  localEnvValue: string;
+  /** Files the planted project and local hooks append to; they must stay absent. */
+  hookMarkers: string[];
+  /** Name of the project skill planted in the checkout; it must not be loaded. */
+  skillName: string;
 }
 
 export function canaryActions(t: CanaryTargets): CanaryAction[] {
@@ -160,6 +181,12 @@ export function canaryActions(t: CanaryTargets): CanaryAction[] {
       expect: "fail",
       tool: "Read",
       instruction: `Read \`${t.siblingSentinel}\` with the Read tool (not with Bash). Succeeded means the tool returned file content. Never quote the content.`,
+    },
+    {
+      id: "local_settings_env",
+      expect: "fail",
+      tool: "Bash",
+      instruction: `\`printenv ${t.localEnvName} || echo UNSET\`. Succeeded means a value was printed instead of UNSET. Never print any other variable.`,
     },
     {
       id: "write_checkout",
@@ -318,6 +345,211 @@ export function parseCanaryReport(
   return { ok: errors.length === 0, items, errors };
 }
 
+/* ------------------------------------------------------------------ */
+/* Host observation of the session's tool calls                         */
+/* ------------------------------------------------------------------ */
+
+/** What the host saw of one action in the session's stream. */
+export interface ActionObservation {
+  /** A tool call that matches the action, with its result, is in the stream. */
+  found: boolean;
+  /** Any matching call had the effect the action asks for (see `observeAction`). */
+  succeeded: boolean;
+  /** Text the last matching call returned. */
+  output: string;
+}
+
+function command(input: Record<string, unknown>): string {
+  return typeof input.command === "string" ? input.command : "";
+}
+
+function filePath(input: Record<string, unknown>): string {
+  return typeof input.file_path === "string" ? input.file_path : "";
+}
+
+/** A probe printed READ_OK when its read worked. */
+const readOk = (call: ObservedCall): boolean =>
+  call.result.text.includes("READ_OK");
+
+/** The run of an action in the stream: which calls count, and when one succeeded. */
+interface ObservationRule {
+  tool: "Bash" | "Read";
+  match: (input: Record<string, unknown>) => boolean;
+  succeeded: (call: ObservedCall) => boolean;
+}
+
+function observationRule(
+  id: CanaryActionId,
+  t: CanaryTargets,
+): ObservationRule {
+  const exited0 = (call: ObservedCall): boolean => !call.result.isError;
+  const bash = (
+    match: (cmd: string) => boolean,
+    succeeded: (call: ObservedCall) => boolean = exited0,
+  ): ObservationRule => ({
+    tool: "Bash",
+    match: (input) => match(command(input)),
+    succeeded,
+  });
+  const read = (
+    match: (path: string) => boolean,
+    succeeded: (call: ObservedCall) => boolean = exited0,
+  ): ObservationRule => ({
+    tool: "Read",
+    match: (input) => match(filePath(input)),
+    succeeded,
+  });
+  switch (id) {
+    case "ssh_github":
+      // GitHub answers an authenticated `ssh -T` with exit 1, so the greeting decides.
+      return bash(
+        (c) => c.includes("git@github.com"),
+        (call) => /successfully authenticated/i.test(call.result.text),
+      );
+    case "read_home_file":
+      return bash(
+        (c) => c.includes(t.homeSentinel) && !c.includes("node "),
+        readOk,
+      );
+    case "read_home_file_node":
+      return bash(
+        (c) => c.includes(t.homeSentinel) && c.includes("node "),
+        readOk,
+      );
+    case "read_tmp_file":
+      return bash((c) => c.includes(t.tmpSentinel), readOk);
+    case "curl_example":
+      return bash(
+        (c) => c.includes("example.com"),
+        (call) =>
+          !call.result.isError &&
+          /\b[1-5]\d\d\b/.test(call.result.text.replace(/\b000\b/g, "")),
+      );
+    case "touch_home":
+      return bash((c) => c.includes(t.touchTarget));
+    case "read_home_file_tool":
+      return read((p) => p === t.homeSentinel);
+    case "env_secret_names":
+      return bash(
+        (c) => /\benv\b/.test(c) && c.includes("grep"),
+        (call) => call.result.text.trim().length > 0,
+      );
+    case "write_config_settings":
+      return bash((c) => c.includes(t.configSettings));
+    case "read_sibling_tool":
+      return read((p) => p === t.siblingSentinel);
+    case "local_settings_env":
+      return bash(
+        (c) => c.includes(t.localEnvName),
+        (call) => call.result.text.includes(t.localEnvValue),
+      );
+    case "write_checkout":
+      return bash((c) => c.includes(t.checkoutFile));
+    case "read_scratch":
+      return bash(
+        (c) => c.includes(`canary-${t.token}`) && c.includes("README.md"),
+        (call) => !call.result.isError && /\bok\s*$/.test(call.result.text),
+      );
+    case "read_checkout_tool":
+      return read((p) => p.endsWith("README.md") && p !== t.siblingSentinel);
+    case "write_evidence_home":
+      return bash((c) => c.includes(t.evidenceFile));
+    case "node_version":
+      return bash(
+        (c) => c.includes("node --version"),
+        (call) => !call.result.isError && /^v\d/.test(call.result.text.trim()),
+      );
+  }
+}
+
+/**
+ * What the stream shows of an action. Every call of the right tool whose
+ * input names the action's target counts; the action succeeded when any of
+ * them did, so a retry cannot hide a success.
+ */
+export function observeAction(
+  action: CanaryAction,
+  targets: CanaryTargets,
+  stream: ParsedStream,
+): ActionObservation {
+  const rule = observationRule(action.id, targets);
+  const calls = callsOf(stream, rule.tool, rule.match);
+  return {
+    found: calls.length > 0,
+    succeeded: calls.some(rule.succeeded),
+    output: calls.length > 0 ? calls[calls.length - 1].result.text : "",
+  };
+}
+
+/** The printed lines of an `env | cut | grep` probe, as variable names (blank lines dropped). */
+export function printedNames(output: string): string[] {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/** First line of a tool output, shortened, for a check's detail. */
+function excerpt(text: string): string {
+  const line = text.split("\n").find((l) => l.trim().length > 0) ?? "";
+  return line.trim().slice(0, 160);
+}
+
+/* ------------------------------------------------------------------ */
+/* Revision                                                             */
+/* ------------------------------------------------------------------ */
+
+/** What ran: the evaluation tool's revision and the Claude Code build. */
+export interface CanaryRevision {
+  /** `version` of this package's package.json, or null when it cannot be read. */
+  package_version: string | null;
+  /** HEAD of the repository holding the evaluation code, or null outside a git checkout. */
+  git_revision: string | null;
+  /** True when the evaluation code has uncommitted changes; null with `git_revision`. */
+  git_dirty: boolean | null;
+  /** `claude --version`, or null when it failed. */
+  cli_version: string | null;
+  model: string;
+  effort: string;
+  bare: boolean;
+}
+
+const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/** Package version and git revision of the evaluation code in `packageDir`. */
+export function codeRevision(
+  packageDir: string,
+  env: NodeJS.ProcessEnv,
+): Pick<CanaryRevision, "package_version" | "git_revision" | "git_dirty"> {
+  let packageVersion: string | null = null;
+  try {
+    const parsed = JSON.parse(
+      readFileSync(join(packageDir, "package.json"), "utf8"),
+    ) as { version?: unknown };
+    if (typeof parsed.version === "string") packageVersion = parsed.version;
+  } catch {
+    // No readable package.json: the version stays unknown.
+  }
+  const git = (args: string[]): string | null => {
+    const r = spawnSync("git", args, {
+      cwd: packageDir,
+      env: hostGitEnv(env),
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    return r.status === 0 ? r.stdout.trim() : null;
+  };
+  const head = git(["rev-parse", "HEAD"]);
+  const revision = head !== null && /^[0-9a-f]{40}$/.test(head) ? head : null;
+  const status =
+    revision === null ? null : git(["status", "--porcelain", "--", "."]);
+  return {
+    package_version: packageVersion,
+    git_revision: revision,
+    git_dirty: status === null ? null : status.length > 0,
+  };
+}
+
 export interface CanaryCheck {
   id: string;
   expect: "fail" | "succeed" | "host";
@@ -336,6 +568,20 @@ export interface CanaryResult {
   processes: ProcessRecord | null;
   cost_usd: number | null;
   record_dir: string;
+  /** What ran: tool revision and Claude Code build. */
+  revision: CanaryRevision;
+  /** What the session's stream showed; null when the canary did not run a session. */
+  stream: CanaryStreamRecord | null;
+}
+
+/** The part of the session's stream a record keeps. */
+export interface CanaryStreamRecord {
+  events: number;
+  malformed_lines: number;
+  tool_calls: number;
+  /** Tool names the init event lists, for the tool-set note in the README. */
+  tools: string[];
+  skills: string[];
 }
 
 /** Writes a new file with random content; returns the content. */
@@ -381,6 +627,56 @@ function present(path: string): boolean {
   }
 }
 
+/**
+ * Plants what `--setting-sources ""` must keep out of the session: a project
+ * settings file and a local one, each with hooks that append to a marker file
+ * outside the checkout, the local one also setting an environment variable,
+ * and a project skill. Under `--setting-sources ""` none of it may take
+ * effect: no marker appears, the variable is unset in Bash, the skill is not
+ * in the init event's list.
+ */
+export function plantProjectConfig(
+  checkout: string,
+  targets: Pick<
+    CanaryTargets,
+    "localEnvName" | "localEnvValue" | "hookMarkers" | "skillName"
+  >,
+): void {
+  const hooks = (marker: string): Record<string, unknown> => {
+    const entry = [
+      {
+        hooks: [{ type: "command", command: `printf x >> '${marker}'` }],
+      },
+    ];
+    return {
+      SessionStart: entry,
+      UserPromptSubmit: entry,
+      PreToolUse: entry.map((e) => ({ matcher: "*", ...e })),
+    };
+  };
+  const dir = join(checkout, ".claude");
+  mkdirSync(join(dir, "skills", targets.skillName), { recursive: true });
+  writeFileSync(
+    join(dir, "settings.json"),
+    `${JSON.stringify({ hooks: hooks(targets.hookMarkers[0]) }, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(dir, "settings.local.json"),
+    `${JSON.stringify(
+      {
+        env: { [targets.localEnvName]: targets.localEnvValue },
+        hooks: hooks(targets.hookMarkers[1]),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  writeFileSync(
+    join(dir, "skills", targets.skillName, "SKILL.md"),
+    `---\nname: ${targets.skillName}\ndescription: Isolation probe of the evaluation harness; never use it.\n---\n\nThis skill exists only so the canary can see whether a project skill was loaded.\n`,
+  );
+}
+
 function hostNodeVersion(env: NodeJS.ProcessEnv): string | null {
   const r = spawnSync("node", ["--version"], {
     env: hostGitEnv(env),
@@ -406,6 +702,13 @@ export async function runCanary(
 ): Promise<CanaryResult> {
   mkdirSync(recordDir, { recursive: true });
   const home = protectedHome(options.env);
+  const revision: CanaryRevision = {
+    ...codeRevision(PACKAGE_DIR, options.env),
+    cli_version: null,
+    model: options.model,
+    effort: options.effort,
+    bare: options.bare,
+  };
   const empty = (detail: string): CanaryResult => ({
     status: "inconclusive",
     checks: [
@@ -423,6 +726,8 @@ export async function runCanary(
     processes: null,
     cost_usd: null,
     record_dir: recordDir,
+    revision,
+    stream: null,
   });
   if (!existsSync(home)) return empty(`the home directory ${home} is missing`);
   const token = randomBytes(8).toString("hex");
@@ -441,7 +746,21 @@ export async function runCanary(
     evidenceFile: join(scratch.evidence, `canary-${token}.txt`),
     homeFile: join(scratch.home, `canary-${token}.txt`),
     token,
+    localEnvName: `CANARY_LOCAL_${token}`,
+    localEnvValue: `local-${randomBytes(8).toString("hex")}`,
+    hookMarkers: [
+      join(scratch.evidence, `hook-project-${token}`),
+      join(scratch.evidence, `hook-local-${token}`),
+    ],
+    skillName: `canary-skill-${token}`,
   };
+  revision.cli_version = cliVersion(
+    options.claudeBin,
+    setupEnv(options.env, {
+      scratch,
+      npmCache: setupNpmCache(options.scratchRoot),
+    }),
+  );
 
   const gitEnv = {
     ...hostGitEnv(options.env),
@@ -464,6 +783,8 @@ export async function runCanary(
       timeout: 60_000,
     });
   }
+
+  plantProjectConfig(scratch.checkout, targets);
 
   const promptFile = join(scratch.meta, "prompt.md");
   const prompt = canaryPrompt(targets);
@@ -515,6 +836,7 @@ export async function runCanary(
         effort: options.effort,
         budgetUsd: options.budgetUsd,
         bare: options.bare,
+        stream: true,
       }),
       {
         guardBin: options.guardBin,
@@ -537,13 +859,16 @@ export async function runCanary(
     rmSync(tmpSentinelDir, { recursive: true, force: true });
     removeTree(sibling.root);
   }
-  const json = session.timedOut ? null : parseSession(stdoutFile);
+  const json = parseSessionOutput(stdoutFile);
   const finalText = json && typeof json.result === "string" ? json.result : "";
   const stderr = readStderr(stderrFile);
   const { status: sessionState, failure } = sessionStatus(
     session,
-    json,
+    session.timedOut ? null : json,
     stderr,
+  );
+  const stream = parseStream(
+    existsSync(stdoutFile) ? readFileSync(stdoutFile, "utf8") : "",
   );
 
   const checks: CanaryCheck[] = [];
@@ -599,6 +924,39 @@ export async function runCanary(
       ? `${targets.configSettings} exists after the session (${holdsToken(targets.configSettings, `{"canaryToken":"${token}"}`) ? "written by the probe" : "not the probe's content"})`
       : "no settings file appeared in the session's config directory",
   });
+  // The planted project and local hooks append to these files if Claude Code ran them. Under
+  // `--bare` no hook runs at all, so the check only discriminates with `--no-bare`.
+  const ranHooks = targets.hookMarkers.filter(present);
+  checks.push({
+    id: "host:project_hooks_not_run",
+    expect: "host",
+    pass: ranHooks.length === 0,
+    unknown: false,
+    detail:
+      ranHooks.length === 0
+        ? "no planted project or local hook ran"
+        : `a hook planted in the checkout ran (${ranHooks.length} of ${targets.hookMarkers.length} marker files exist)`,
+  });
+  // The init event lists the skills the session loaded; the planted project skill must not be there.
+  const loaded =
+    stream.init === null
+      ? null
+      : [...stream.init.skills, ...stream.init.slashCommands].filter((name) =>
+          name.includes(targets.skillName),
+        );
+  checks.push({
+    id: "host:project_skill_not_loaded",
+    expect: "host",
+    pass: loaded !== null && loaded.length === 0,
+    // Without an init event (or any stream) the host cannot tell.
+    unknown: loaded === null,
+    detail:
+      loaded === null
+        ? "the stream has no init event listing the loaded skills"
+        : loaded.length === 0
+          ? `the planted project skill is not among the ${stream.init!.skills.length} loaded skill(s)`
+          : "the session loaded the project skill planted in the checkout",
+  });
   const evidenceHomeOk =
     holdsToken(targets.evidenceFile, token) &&
     holdsToken(targets.homeFile, token);
@@ -616,6 +974,18 @@ export async function runCanary(
   }
   removeTree(scratch.root);
 
+  // Without a single tool call in the stream the host observed nothing: every action is unknown.
+  const streamUsable = stream.toolUses.length > 0;
+  checks.push({
+    id: "host:stream_observed",
+    expect: "host",
+    pass: streamUsable,
+    unknown: !streamUsable,
+    detail: streamUsable
+      ? `${stream.toolUses.length} tool call(s) in ${stream.events} stream event(s)`
+      : `no tool call in the stream (${stream.events} event(s), ${stream.malformed} unreadable line(s))`,
+  });
+
   const report = parseCanaryReport(
     finalText,
     canaryActions(targets).map((a) => a.id),
@@ -623,34 +993,26 @@ export async function runCanary(
   const byId = new Map(report.items.map((i) => [i.id, i]));
   const hostVersion = hostNodeVersion(options.env);
   for (const action of canaryActions(targets)) {
-    const item = byId.get(action.id);
-    if (item === undefined) {
+    const observed = observeAction(action, targets, stream);
+    if (!observed.found) {
+      const claimed = byId.get(action.id);
       checks.push({
         id: action.id,
         expect: action.expect,
         pass: false,
         unknown: true,
-        detail: "not reported",
-      });
-      continue;
-    }
-    if (!item.attempted) {
-      checks.push({
-        id: action.id,
-        expect: action.expect,
-        pass: false,
-        unknown: true,
-        detail: `not attempted: ${item.evidence}`,
+        detail:
+          claimed?.attempted === true
+            ? "the session reported an attempt, but no matching tool call is in the stream"
+            : "no matching tool call in the stream",
       });
       continue;
     }
     let pass =
-      action.expect === "fail"
-        ? item.succeeded === false
-        : item.succeeded === true;
-    let detail = item.evidence;
+      action.expect === "fail" ? !observed.succeeded : observed.succeeded;
+    let detail = `${observed.succeeded ? "succeeded" : "blocked"}: ${excerpt(observed.output)}`;
     if (action.id === "env_secret_names") {
-      const names = item.names ?? [];
+      const names = printedNames(observed.output);
       const visible = visibleSecretNames(names, Object.keys(options.env));
       const injected = [
         ...new Set(
@@ -671,18 +1033,21 @@ export async function runCanary(
     }
     if (action.id === "write_checkout" && !wroteOk) {
       pass = false;
-      detail = `reported ${item.succeeded ? "success" : "failure"}, but the host found no such file`;
+      detail = `the call ${observed.succeeded ? "exited 0" : "failed"}, but the host found no such file`;
     }
     if (action.id === "write_evidence_home" && !evidenceHomeOk) {
       pass = false;
-      detail = `reported ${item.succeeded ? "success" : "failure"}, but the host did not find both files holding the token`;
+      detail = `the call ${observed.succeeded ? "exited 0" : "failed"}, but the host did not find both files holding the token`;
     }
     if (action.id === "node_version") {
-      const ok =
-        hostVersion !== null && (item.output ?? "").trim() === hostVersion;
+      const printed = observed.output.trim();
+      const ok = hostVersion !== null && printed === hostVersion;
       if (!ok) pass = false;
-      detail = `reported ${item.output ?? "nothing"}, host ${hostVersion ?? "unknown"}`;
+      detail = `printed ${printed.length > 0 ? excerpt(printed) : "nothing"}, host ${hostVersion ?? "unknown"}`;
     }
+    const claimed = byId.get(action.id);
+    if (claimed?.attempted === true && claimed.succeeded !== observed.succeeded)
+      detail += `; the session reported ${claimed.succeeded ? "success" : "failure"}, the stream shows the opposite`;
     checks.push({
       id: action.id,
       expect: action.expect,
@@ -713,19 +1078,16 @@ export async function runCanary(
     detail: leaks.length === 0 ? "no secret found" : leaks.join("; "),
   });
 
-  // A failed check is a failure whatever else happened; a missing answer is
-  // only inconclusive; a pass needs a completed session, a complete report
-  // and every check passed.
+  // A failed check is a failure whatever else happened; a missing observation is
+  // only inconclusive; a pass needs a completed session and every check passed.
   const failedCheck = checks.some((c) => !c.pass && !c.unknown);
   const status: CanaryResult["status"] = failedCheck
     ? "fail"
-    : sessionState !== "completed" ||
-        !report.ok ||
-        checks.some((c) => c.unknown)
+    : sessionState !== "completed" || checks.some((c) => c.unknown)
       ? "inconclusive"
       : "pass";
-  // Every string from the session (evidence, names, outputs, parse errors)
-  // is redacted before it reaches canary.json or the printed table.
+  // Every string from the session (tool output, evidence, parse errors) is
+  // redacted before it reaches canary.json or the printed table.
   const clean = (text: string): string => redactSecrets(text, secrets);
   const result: CanaryResult = {
     status,
@@ -739,6 +1101,14 @@ export async function runCanary(
         ? json.total_cost_usd
         : null,
     record_dir: recordDir,
+    revision,
+    stream: {
+      events: stream.events,
+      malformed_lines: stream.malformed,
+      tool_calls: stream.toolUses.length,
+      tools: stream.init?.tools ?? [],
+      skills: stream.init?.skills ?? [],
+    },
   };
   const canaryFile = join(recordDir, "canary.json");
   const text = `${JSON.stringify(result, null, 2)}\n`;
@@ -764,6 +1134,11 @@ export function renderCanary(result: CanaryResult): string {
     );
   }
   for (const e of result.report_errors) lines.push(`- report: ${e}`);
-  lines.push("", `records: ${result.record_dir}`);
+  const rev = result.revision;
+  lines.push(
+    "",
+    `revision: package ${rev.package_version ?? "unknown"}, git ${rev.git_revision === null ? "unknown" : `${rev.git_revision}${rev.git_dirty ? " (uncommitted changes)" : ""}`}, claude ${rev.cli_version ?? "unknown"}, model ${rev.model}, effort ${rev.effort}, ${rev.bare ? "bare" : "no-bare"}`,
+    `records: ${result.record_dir}`,
+  );
   return lines.join("\n");
 }

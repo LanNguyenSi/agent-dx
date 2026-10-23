@@ -869,6 +869,26 @@ describe("report rendering", () => {
     expect(text).toContain("noise over 2 repeats");
   });
 
+  it("says how many sessions have no reported cost, so the cost total reads as a lower bound", () => {
+    const sessions = [
+      s({ entry_id: "e1", cost_usd: 2 }),
+      s({ entry_id: "e2", status: "timeout", valid: false, cost_usd: null }),
+      s({ entry_id: "e3", status: "timeout", valid: false, cost_usd: null }),
+    ];
+    const agg = aggregate("v1", sessions);
+    expect(agg.n_cost_unreported).toBe(2);
+    expect(agg.cost_total_usd).toBe(2);
+    const text = renderAggregates([{ aggregate: agg, noise: null }]);
+    expect(text).toContain("v1: 2 session(s) have no reported cost");
+    expect(text).toContain("a lower bound");
+    // No note when every session reported its cost.
+    const full = aggregate("v2", [s({ entry_id: "e1", cost_usd: 1 })]);
+    expect(full.n_cost_unreported).toBe(0);
+    expect(renderAggregates([{ aggregate: full, noise: null }])).not.toContain(
+      "no reported cost",
+    );
+  });
+
   it("never prints a negative zero for a tiny negative delta", () => {
     const a = [s({ wall_ms: 10_200 })];
     const b = [s({ wall_ms: 10_000 })];

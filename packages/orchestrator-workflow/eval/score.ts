@@ -180,8 +180,17 @@ export interface ProcessRecord {
   guard_killed: number;
   leftover_check_failed: boolean;
   peak_rss_mib: number | null;
-  /** Processes still working inside the run's scratch afterwards, killed by the sweep. */
-  swept: { pid: number; cwd: string }[];
+  /**
+   * Processes still working inside the run's scratch afterwards, or holding a
+   * file open there, killed by the sweep. `via` and `file` are absent from
+   * records written before the open-file match existed.
+   */
+  swept: {
+    pid: number;
+    cwd: string;
+    via?: "cwd" | "open_file";
+    file?: string;
+  }[];
   sweep_unavailable: string | null;
   /** First entries of guard's own process lists. */
   processes: { pid: number; in_group: boolean; command: string }[];
@@ -560,6 +569,11 @@ export interface VariantAggregate {
   controls_with_false_positive: number;
   cost_total_usd: number;
   cost_mean_usd: number | null;
+  /**
+   * Sessions without a reported cost (a timeout prints no result object, so
+   * its cost is unknown). `cost_total_usd` and `cost_mean_usd` leave them out.
+   */
+  n_cost_unreported: number;
   wall_total_s: number;
   wall_mean_s: number | null;
 }
@@ -647,6 +661,7 @@ export function aggregate(
       .length,
     cost_total_usd: costs.reduce((a, b) => a + b, 0),
     cost_mean_usd: mean(costs),
+    n_cost_unreported: sessions.length - costs.length,
     wall_total_s: wallTotal,
     wall_mean_s: sessions.length === 0 ? null : wallTotal / sessions.length,
   };

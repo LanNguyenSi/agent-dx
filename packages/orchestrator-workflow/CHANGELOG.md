@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The replay evaluation's isolation is hardened (`eval/`, development tooling
+  that is not part of the installed package). The canary now runs its session
+  with `--output-format stream-json --verbose` and takes each action's outcome
+  from the stream's tool calls and results instead of the session's own JSON
+  report: attempted, succeeded, the names `env` printed and the node version
+  are host observations, a disagreement with the report is noted in the check,
+  and an action with no matching tool call makes the canary inconclusive. It
+  plants a project settings file, a local settings file with an environment
+  variable, hooks and a project skill in its checkout and checks that none of
+  them takes effect under `--setting-sources ""` (live probe of the setting
+  that so far rested on reading the bundle). `canary.json` and the printed
+  table record the revision they ran on: package version, git revision and
+  dirty flag, `claude --version`, model, effort and bare mode, plus the tool
+  and skill names the init event lists. The process sweep also kills a process
+  that left the scratch directory but holds a file open inside it. A scratch
+  root is refused when an ancestor is owned by another account or writable by
+  the group or others without the sticky bit. `score` and `compare` count
+  sessions without a reported cost (timeouts) so the cost total reads as a
+  lower bound. The `bare` documentation comment and the README now say that
+  project instruction files are off in both modes and that `--bare` reduces
+  the tool set. The load-flaky SIGKILL escalation test no longer depends on
+  how fast a child starts, and the surviving mutants of the first review
+  rounds have discriminating tests.
 - The second closing option in `references/review-and-recovery.md` (the
   Docs-only closure section, still its one site) is tightened. Its test class
   is now bounded line by line: it closes a fix only when the fix changes

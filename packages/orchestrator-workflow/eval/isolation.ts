@@ -90,32 +90,84 @@ export function scratchTmpPathBytes(scratchRoot: string): number {
 /** Mode of the scratch root and of every run directory: only the owner can enter them. */
 export const SCRATCH_DIR_MODE = 0o700;
 
+const STICKY = 0o1000;
+
+/**
+ * The first ancestor of `path` (nearest first, `path` itself excluded) that
+ * another account can write, as an error fragment, or null. An ancestor is
+ * unsafe when it is neither yours nor root's, or when the group or others can
+ * write it without the sticky bit: either lets another account rename or
+ * replace the next directory down the chain, and with it the scratch root.
+ * A sticky directory (`/tmp`, `/Users/Shared`) only lets an account remove
+ * its own entries, so it passes. The chain is followed through the resolved
+ * path of the nearest existing directory, so symlinks in the path are
+ * followed, not trusted.
+ */
+export function unsafeAncestor(
+  path: string,
+  uid: number | null,
+): string | null {
+  // `path` itself is judged by the caller. Start at its parent, or, when it
+  // does not exist yet, at the nearest existing directory (where it will be
+  // created); both through the resolved path.
+  let dir = resolve(path);
+  const exists = existsSync(dir);
+  while (!existsSync(dir)) {
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  let current = exists ? dirname(realpathSync(dir)) : realpathSync(dir);
+  for (;;) {
+    let st: ReturnType<typeof lstatSync>;
+    try {
+      st = lstatSync(current);
+    } catch {
+      return null;
+    }
+    if (uid !== null && st.uid !== uid && st.uid !== 0)
+      return `${current} is owned by uid ${st.uid}, who could replace the directories below it`;
+    if ((st.mode & 0o022) !== 0 && (st.mode & STICKY) === 0)
+      return `${current} can be written by the group or others without the sticky bit (mode ${(st.mode & 0o7777).toString(8)}), so another account could rename or replace the directories below it`;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
 /**
  * Refuses a scratch root another account could control: a symbolic link, a
- * directory owned by another uid, or one the group or others can write (the
- * default root sits in the world-writable `/Users/Shared`, where another
- * account could create it first). A root that does not exist yet passes:
- * `createRunScratch` creates it with mode 0700. Returns an error message, or
- * null.
+ * directory owned by another uid, one the group or others can write (the
+ * default root sits in the world-writable, sticky `/Users/Shared`, where
+ * another account could create it first), or one below an ancestor another
+ * account can write without the sticky bit (see `unsafeAncestor`). A root that
+ * does not exist yet passes its own checks: `createRunScratch` creates it with
+ * mode 0700; the ancestors are still checked, from the directory it will be
+ * created in. Returns an error message, or null.
  */
 export function checkScratchRoot(
   scratchRoot: string,
   uid: number | null = process.getuid?.() ?? null,
 ): string | null {
-  let st: ReturnType<typeof lstatSync>;
+  let st: ReturnType<typeof lstatSync> | null = null;
   try {
     st = lstatSync(scratchRoot);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    return `--scratch ${scratchRoot} cannot be inspected: ${error instanceof Error ? error.message : error}`;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+      return `--scratch ${scratchRoot} cannot be inspected: ${error instanceof Error ? error.message : error}`;
   }
-  if (st.isSymbolicLink())
-    return `--scratch ${scratchRoot} is a symbolic link; pass the directory itself, owned by you and writable only by you`;
-  if (!st.isDirectory()) return `--scratch ${scratchRoot} is not a directory`;
-  if (uid !== null && st.uid !== uid)
-    return `--scratch ${scratchRoot} is owned by uid ${st.uid}, not by you (uid ${uid}); another account could read or replace the runs in it`;
-  if ((st.mode & 0o022) !== 0)
-    return `--scratch ${scratchRoot} can be written by the group or others (mode ${(st.mode & 0o777).toString(8)}); run chmod go-w on it or choose another directory`;
+  if (st !== null) {
+    if (st.isSymbolicLink())
+      return `--scratch ${scratchRoot} is a symbolic link; pass the directory itself, owned by you and writable only by you`;
+    if (!st.isDirectory()) return `--scratch ${scratchRoot} is not a directory`;
+    if (uid !== null && st.uid !== uid)
+      return `--scratch ${scratchRoot} is owned by uid ${st.uid}, not by you (uid ${uid}); another account could read or replace the runs in it`;
+    if ((st.mode & 0o022) !== 0)
+      return `--scratch ${scratchRoot} can be written by the group or others (mode ${(st.mode & 0o777).toString(8)}); run chmod go-w on it or choose another directory`;
+  }
+  const ancestor = unsafeAncestor(scratchRoot, uid);
+  if (ancestor !== null)
+    return `--scratch ${scratchRoot} lies below an unsafe directory: ${ancestor}; choose a directory whose parents only you and root can change`;
   return null;
 }
 

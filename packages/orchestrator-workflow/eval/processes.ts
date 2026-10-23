@@ -112,32 +112,78 @@ export function runGrouped(
 }
 
 /* ------------------------------------------------------------------ */
-/* Sweep by working directory                                           */
+/* Sweep by working directory and open files                            */
 /* ------------------------------------------------------------------ */
+
+/** How a process was found inside a root. */
+export type SweepVia = "cwd" | "open_file";
 
 export interface SweptProcess {
   pid: number;
+  /** Working directory of the process; it can lie outside every root when `via` is `open_file`. */
   cwd: string;
+  /** What put the process inside a root: its working directory or a file it holds open. */
+  via?: SweepVia;
+  /** The open file that matched, for `via` `open_file`. */
+  file?: string;
 }
 
 export interface SweepResult {
-  /** Processes found with a working directory inside a root, and killed. */
+  /** Processes found with a working directory or an open file inside a root, and killed. */
   killed: SweptProcess[];
   /** Why the process table could not be read, or null. */
   unavailable: string | null;
 }
 
-/** Working directories of the user's processes, from /proc or lsof. */
-function processCwds(env: NodeJS.ProcessEnv): Map<number, string> | string {
-  const found = new Map<number, string>();
+/**
+ * Descriptors lsof lists: the working directory and descriptors 0 to 31. A
+ * wider range made lsof stall for ten seconds per call on macOS (measured with
+ * 0-63), and a sweep runs after every command.
+ */
+const LSOF_DESCRIPTORS = "cwd,0-31";
+const MAX_FD_LISTED = 32;
+
+/** What the sweep knows about one process. */
+export interface ProcessPlaces {
+  /** Working directory, or null when it could not be read. */
+  cwd: string | null;
+  /** Absolute paths of files the process holds open (its standard streams included). */
+  files: string[];
+}
+
+/**
+ * Working directories and open files of the user's processes, from /proc or
+ * lsof. Open files catch a process that changed its working directory out of
+ * the root but still holds a log, a pipe target or a lock file inside it.
+ */
+function processTable(
+  env: NodeJS.ProcessEnv,
+): Map<number, ProcessPlaces> | string {
+  const found = new Map<number, ProcessPlaces>();
   if (process.platform === "linux" && existsSync("/proc/self/cwd")) {
     for (const name of readdirSync("/proc")) {
       if (!/^\d+$/.test(name)) continue;
+      const places: ProcessPlaces = { cwd: null, files: [] };
       try {
-        found.set(Number(name), readlinkSync(`/proc/${name}/cwd`));
+        places.cwd = readlinkSync(`/proc/${name}/cwd`);
       } catch {
         // Gone, or another user's process.
       }
+      try {
+        for (const fd of readdirSync(`/proc/${name}/fd`)) {
+          if (Number(fd) >= MAX_FD_LISTED) continue;
+          try {
+            const target = readlinkSync(`/proc/${name}/fd/${fd}`);
+            if (target.startsWith("/")) places.files.push(target);
+          } catch {
+            // The descriptor closed meanwhile.
+          }
+        }
+      } catch {
+        // Gone, or another user's process.
+      }
+      if (places.cwd !== null || places.files.length > 0)
+        found.set(Number(name), places);
     }
     return found;
   }
@@ -148,19 +194,19 @@ function processCwds(env: NodeJS.ProcessEnv): Map<number, string> | string {
       [
         "-a",
         "-d",
-        "cwd",
+        LSOF_DESCRIPTORS,
         "-u",
         String(process.getuid?.() ?? 0),
         "-F",
-        "pn",
+        "pfn",
         "-w",
       ],
       {
         encoding: "utf8",
         env: { PATH: env.PATH ?? "/usr/sbin:/usr/bin:/bin" },
         stdio: ["ignore", "pipe", "ignore"],
-        timeout: 20_000,
-        maxBuffer: 64 * 1024 * 1024,
+        timeout: 30_000,
+        maxBuffer: 256 * 1024 * 1024,
       },
     );
   } catch (error) {
@@ -171,35 +217,86 @@ function processCwds(env: NodeJS.ProcessEnv): Map<number, string> | string {
     }
     text = out;
   }
+  return parseLsofPlaces(text);
+}
+
+/** Parses `lsof -F pfn` output: `p<pid>`, then per descriptor `f<fd>` and `n<name>`. */
+export function parseLsofPlaces(text: string): Map<number, ProcessPlaces> {
+  const found = new Map<number, ProcessPlaces>();
   let pid: number | null = null;
+  let fd: string | null = null;
   for (const line of text.split("\n")) {
-    if (line.startsWith("p")) pid = Number(line.slice(1));
-    else if (line.startsWith("n") && pid !== null)
-      found.set(pid, line.slice(1));
+    if (line.startsWith("p")) {
+      pid = Number(line.slice(1));
+      fd = null;
+    } else if (line.startsWith("f")) {
+      fd = line.slice(1);
+    } else if (line.startsWith("n") && pid !== null && fd !== null) {
+      const name = line.slice(1);
+      let places = found.get(pid);
+      if (places === undefined) {
+        places = { cwd: null, files: [] };
+        found.set(pid, places);
+      }
+      if (fd === "cwd") places.cwd = name;
+      else if (name.startsWith("/")) places.files.push(name);
+    }
   }
   return found;
 }
 
 /**
+ * The processes of `table` that work inside one of `roots` or hold a file
+ * open there, except this process and pid 1 and below. A working directory
+ * match wins over an open file.
+ */
+export function placesInside(
+  table: Map<number, ProcessPlaces>,
+  roots: string[],
+  selfPid: number = process.pid,
+): SweptProcess[] {
+  const hits: SweptProcess[] = [];
+  for (const [pid, places] of table) {
+    if (pid === selfPid || pid <= 1) continue;
+    if (
+      places.cwd !== null &&
+      roots.some((root) => isInside(places.cwd!, root))
+    ) {
+      hits.push({ pid, cwd: places.cwd, via: "cwd" });
+      continue;
+    }
+    const file = places.files.find((f) =>
+      roots.some((root) => isInside(f, root)),
+    );
+    if (file !== undefined)
+      hits.push({ pid, cwd: places.cwd ?? "", via: "open_file", file });
+  }
+  return hits;
+}
+
+/**
  * Kills every process of this user whose working directory lies inside one
- * of `roots`, except this process. Catches what a session or a setup command
- * left running in its checkout even after it left its process group and its
- * parent chain (a `setsid` child of a short-lived parent), which a tree walk
- * from the group leader can no longer find.
+ * of `roots` or that holds a file open inside one, except this process.
+ * Catches what a session or a setup command left running in its checkout even
+ * after it left its process group and its parent chain (a `setsid` child of a
+ * short-lived parent), which a tree walk from the group leader can no longer
+ * find; the open-file match also catches such a process after it changed its
+ * working directory out of the root, as long as it keeps a stream or a file
+ * there. A process that did both (closed everything, left the root, cleared
+ * its environment) stays invisible to the sweep; it remains bound by the
+ * sandbox the session ran under.
  */
 export function sweepByCwd(
   roots: string[],
   env: NodeJS.ProcessEnv,
 ): SweepResult {
-  const table = processCwds(env);
+  const table = processTable(env);
   if (typeof table === "string") return { killed: [], unavailable: table };
   const killed: SweptProcess[] = [];
-  for (const [pid, cwd] of table) {
-    if (pid === process.pid || pid <= 1) continue;
-    if (!roots.some((root) => isInside(cwd, root))) continue;
+  for (const hit of placesInside(table, roots)) {
     try {
-      process.kill(pid, "SIGKILL");
-      killed.push({ pid, cwd });
+      process.kill(hit.pid, "SIGKILL");
+      killed.push(hit);
     } catch {
       // Already gone.
     }
