@@ -1,4 +1,12 @@
-import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,12 +21,20 @@ import { createRunScratch } from "../eval/isolation.js";
  */
 const raced = vi.hoisted(() => new Set<string>());
 
+/** Links re-pointed just before the next `mkdirSync`: link path and its new target. */
+const repoint = vi.hoisted(() => new Map<string, string>());
+
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
     mkdirSync: (...args: Parameters<typeof actual.mkdirSync>) => {
       const path = String(args[0]);
+      for (const [link, target] of repoint) {
+        actual.rmSync(link);
+        actual.symlinkSync(target, link);
+      }
+      repoint.clear();
       if (raced.has(path)) {
         actual.mkdirSync(path);
         actual.chmodSync(path, 0o777);
@@ -49,5 +65,20 @@ describe("scratch root race", () => {
     const fair = join(parent, "fair");
     const scratch = createRunScratch(fair);
     expect(scratch.root.startsWith(`${fair}/`)).toBe(true);
+  });
+
+  it("creates the root where it was checked, by its resolved path, even if a link on the way changes afterwards", () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "ow-eval-race-")));
+    dirs.push(parent);
+    const checked = join(parent, "checked");
+    const other = join(parent, "other");
+    mkdirSync(checked, { mode: 0o700 });
+    mkdirSync(other, { mode: 0o700 });
+    const link = join(parent, "link");
+    symlinkSync(checked, link);
+    repoint.set(link, other);
+    const scratch = createRunScratch(join(link, "root"));
+    expect(scratch.root.startsWith(join(checked, "root") + "/")).toBe(true);
+    expect(existsSync(join(other, "root"))).toBe(false);
   });
 });
