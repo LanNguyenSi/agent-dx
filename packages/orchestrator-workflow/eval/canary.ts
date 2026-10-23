@@ -422,8 +422,7 @@ function observationRule(
       return bash(
         (c) => c.includes("example.com"),
         (call) =>
-          !call.result.isError &&
-          /\b[1-5]\d\d\b/.test(call.result.text.replace(/\b000\b/g, "")),
+          !call.result.isError && /\b[1-5]\d\d\b/.test(call.result.text),
       );
     case "touch_home":
       return bash((c) => c.includes(t.touchTarget));

@@ -33,6 +33,7 @@ import {
   scratchPathForms,
   scratchTmpPathBytes,
   sessionNpmCache,
+  unsafeAncestor,
   hostGitEnv,
   isGitConfigEnvName,
   isInside,
@@ -233,6 +234,17 @@ describe("scratch root ancestors", () => {
     const message = checkScratchRoot(join(link, "root"));
     expect(message).toContain("unsafe directory");
     expect(message).toContain(open);
+    chmodSync(open, 0o700);
+  });
+
+  it("judges the ancestors only: the path itself is the caller's to check", () => {
+    const parent = dir("anc-self", 0o755);
+    const open = join(parent, "open");
+    mkdirSync(open);
+    chmodSync(open, 0o777);
+    // The path is writable by others, its parent is not: not an ancestor problem.
+    expect(unsafeAncestor(open, uid())).toBeNull();
+    expect(unsafeAncestor(join(open, "child"), uid())).toContain(open);
     chmodSync(open, 0o700);
   });
 
