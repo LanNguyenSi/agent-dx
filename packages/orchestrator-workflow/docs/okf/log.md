@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-10-23T16:35:17Z, replay evaluation hardening, CHANGELOG wording only: the `[Unreleased]` bullet about the evaluation
+  tooling under `eval/` now names the env listing that printed only sandbox-injected names as the one forbidden action
+  whose success counts as blocked; the bullet keeps its line count, so no line citation in this log moved.
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md` list the
+  CHANGELOG as a source and cite it only by released-version heading anchors: re-verified against the changed source,
+  claims unchanged. Re-stamped: the three docs above.
 - 2026-10-23T15:43:34Z, replay evaluation hardening, second follow-up, CHANGELOG entry only: the `[Unreleased]` bullet
   about the evaluation tooling under `eval/` now says that any other call of a tool that can read, run or write leaves
   a forbidden action of the stream canary inconclusive (the task-list tools left out, an unknown tool counted) and that
