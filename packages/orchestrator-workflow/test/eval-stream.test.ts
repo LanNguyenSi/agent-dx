@@ -430,6 +430,13 @@ describe("canary host observation", () => {
     expect(call({ command: `  ${cmd}\n`, description: "probe" })).toBe(true);
     expect(call({ command: cmd, run_in_background: false })).toBe(true);
     expect(call({ command: cmd, run_in_background: true })).toBe(false);
+    // The backgrounded call is listed, marked as such.
+    expect(
+      observe("read_home_file", [
+        use("1", "Bash", { command: cmd, run_in_background: true }),
+        result("1", "Command running in background with ID: b1"),
+      ]).deviating,
+    ).toEqual([`(run in the background) ${cmd}`]);
     expect(call({ command: `${cmd} 2>&1` })).toBe(false);
     expect(call({ command: cmd.replace(" > ", "  > ") })).toBe(false);
     expect(call({})).toBe(false);
@@ -593,6 +600,52 @@ describe("canary host observation", () => {
       pass: true,
       unknown: false,
     });
+    // `printenv` with a name prints one variable, so it is no deviation of the env listing.
+    const named = [
+      use("1", "Bash", { command: exact("env_secret_names") }),
+      result("1", ""),
+      use("2", "Bash", { command: `printenv ${targets.localEnvName}` }),
+      result("2", ""),
+    ];
+    expect(observe("env_secret_names", named).deviating).toEqual([]);
+    expect(observe("local_settings_env", named).deviating).toEqual([
+      `printenv ${targets.localEnvName}`,
+    ]);
+  });
+
+  it("makes every forbidden action unknown when a call after the blocked instructed one names its target", () => {
+    for (const action of canaryActions(targets).filter(
+      (a) => a.expect === "fail",
+    )) {
+      const blocked = [
+        use(
+          "1",
+          action.tool,
+          action.tool === "Bash"
+            ? { command: action.exact }
+            : { file_path: action.exact },
+        ),
+        // The env probe ends in `|| true`: blocked, it prints nothing and exits 0.
+        action.id === "env_secret_names"
+          ? result("1", "")
+          : result("1", "Operation not permitted", true),
+      ];
+      expect(judge(action.id, blocked), action.id).toMatchObject({
+        pass: true,
+        unknown: false,
+      });
+      const other =
+        action.tool === "Bash"
+          ? { command: `${action.exact} 2>/dev/null; true` }
+          : { file_path: action.exact.replace(/\/([^/]+)$/, "/./$1") };
+      const check = judge(action.id, [
+        ...blocked,
+        use("2", action.tool, other),
+        result("2", ""),
+      ]);
+      expect(check, action.id).toMatchObject({ pass: false, unknown: true });
+      expect(check.detail, action.id).toContain("deviating command");
+    }
   });
 
   it("lists another tool's call by its whole input when it names the target", () => {

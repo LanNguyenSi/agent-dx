@@ -1416,6 +1416,10 @@ describe("canary", { timeout: 120_000 }, () => {
     ).toBe(true);
     expect(tmpSentinel.startsWith(scratch)).toBe(false);
     const siblingSentinel = target("read_sibling_tool", /Read `(\S+)`/);
+    // The Read tool gets the checkout's README.md by its full path in the session's working directory.
+    expect(target("read_checkout_tool", /Read `(\S+)`/)).toBe(
+      join(session.cwd, "README.md"),
+    );
     // The only settings file named is the write probe's target in the session's own scratch config dir.
     const ownSettings = join(session.env.CLAUDE_CONFIG_DIR, "settings.json");
     expect(prompt).toContain(ownSettings);
