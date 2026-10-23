@@ -44,7 +44,10 @@ name: Move an npm dist-tag
 # as npm-deprecate.yml): the dist-tag step does not gate the job
 # (continue-on-error) and the AFTER assertion, `npm view <pkg> dist-tags`
 # showing the tag at the requested version, is the sole verdict, with backoff
-# polling against registry/CDN lag.
+# polling against registry/CDN lag. The read-back body is resolved through
+# .github/scripts/dist-tag-version.mjs, which accepts both the pre-npm-12
+# object shape and the npm 12 array shape of `dist-tags --json` and reports a
+# parse failure as a distinct warning instead of as an absent tag.
 
 on:
   workflow_dispatch:
@@ -75,6 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v5
+
       - name: Validate inputs
         env:
           PACKAGE: ${{ inputs.package }}
@@ -121,6 +126,12 @@ jobs:
         with:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
+
+      - name: Self-test the read-back filter
+        # The AFTER assertion is the sole verdict, so prove its filter still
+        # resolves both npm response shapes before touching the registry
+        # (same pattern as npm-deprecate.yml's self-test step).
+        run: node .github/scripts/dist-tag-version.mjs --self-test
 
       - name: Preflight, verify NPM_AGENT_DX_TOKEN secret is set
         env:
@@ -172,23 +183,27 @@ jobs:
         run: |
           set -euo pipefail
           echo "npm dist-tag step outcome: ${{ steps.move.outcome }} (not the verdict; the registry is)"
-          # jq is preinstalled on GitHub-hosted ubuntu-latest; fail with a
-          # clear message rather than a pipeline abort if a future runner
-          # lacks it.
-          command -v jq >/dev/null || { echo "::error::jq not available on this runner" >&2; exit 1; }
           # Backoff polling against registry/CDN lag; the read-back is the
-          # sole verdict. The || true guard keeps a transient view failure
-          # inside the retry loop (pipefail would otherwise abort the step,
-          # defeating the loop's purpose).
+          # sole verdict. The || true guard on the view and the if-guard on
+          # the resolver keep a transient view failure OR a parse failure
+          # inside the retry loop (set -e / pipefail would otherwise abort
+          # the step, defeating the loop's purpose). A parse failure prints
+          # its own ::warning:: line, so the log tells "could not read the
+          # response" apart from "tag not yet visible"; the final verdict
+          # stays "did not land" for either.
           for delay in 0 5 10 20 40; do
             sleep "$delay"
-            actual=$(npm view "$PACKAGE" dist-tags --json 2>/dev/null | jq -r --arg t "$TAG" '.[$t] // empty' || true)
-            if [ "$actual" = "$VERSION" ]; then
-              echo "Registry confirms ${PACKAGE}@${TAG} -> ${VERSION}"
-              npm view "$PACKAGE" dist-tags --json
-              exit 0
+            raw=$(npm view "$PACKAGE" dist-tags --json 2>/dev/null || true)
+            if actual=$(printf '%s' "$raw" | node .github/scripts/dist-tag-version.mjs "$TAG"); then
+              if [ "$actual" = "$VERSION" ]; then
+                echo "Registry confirms ${PACKAGE}@${TAG} -> ${VERSION}"
+                npm view "$PACKAGE" dist-tags --json
+                exit 0
+              fi
+              echo "not yet visible: ${TAG} -> '${actual:-<absent>}' (want ${VERSION}); retrying"
+            else
+              echo "could not read the dist-tags response; retrying"
             fi
-            echo "not yet visible: ${TAG} -> '${actual:-<absent>}' (want ${VERSION}); retrying"
           done
           echo "::error::${PACKAGE}@${TAG} still does not point at ${VERSION} after polling; the write did not land; if ${PACKAGE} was recently added to the allowlist, check that NPM_AGENT_DX_TOKEN on npmjs.com can write it and has not expired." >&2
           npm view "$PACKAGE" dist-tags --json || true
