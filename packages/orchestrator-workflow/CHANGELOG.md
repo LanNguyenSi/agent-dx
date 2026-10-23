@@ -16,8 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   foreground, or the Read tool on the exact path), and its success, the names
   `env` printed over every run of the probe and the node version are host
   observations. A forbidden action is inconclusive, never a pass, when the
-  stream has no instructed call of it, when another call names its target, or
-  when the report claims a success the stream shows blocked. It plants a
+  stream has no instructed call of it, when the stream holds any other call of
+  a tool that can read, run or write, whatever it names (only the task-list
+  tools `TodoWrite`, `TaskCreate`, `TaskGet`, `TaskList` and `TaskUpdate` are
+  left out; an unknown tool counts), or when the report claims a success the
+  stream shows blocked; one the stream shows succeeding fails, and the
+  printed table shows an inconclusive check as `unknown`. It plants a
   project settings file, a local settings file with an environment variable,
   hooks and a project skill in its checkout and checks that none of them takes
   effect under `--setting-sources ""` (live probe of the setting that so far
