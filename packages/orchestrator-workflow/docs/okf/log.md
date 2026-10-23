@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-10-23T10:48:33Z, replay evaluation hardening, CHANGELOG entry only: the package's `[Unreleased]` section gained one bullet about the
+  evaluation tooling under `eval/` (canary observation from the session stream, scratch-root ancestor check, sweep
+  by open files, cost count), which touches no claim of this bundle. `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md` list the CHANGELOG as a source and cite
+  it only by released-version heading anchors (`CHANGELOG.md:#[0.9.0]` and the like), none of which moved:
+  re-verified against the changed source, claims unchanged. The `CHANGELOG.md` line citations in this log moved by
+  the 23 lines the bullet adds above them and were re-pointed. Re-stamped: the three docs above.
 - 2026-10-21T06:30:47Z, closing options, module mocks: `review-and-recovery.md` (Docs-only closure section) now names a module mock
   (`vi.mock` or `jest.mock`) as keeping the reviewer round wherever it is written, because the runner hoists it to module
   level, and adds a Go `TestMain` and a pytest `setup_module` or autouse fixture to the hook examples; the adversarial
