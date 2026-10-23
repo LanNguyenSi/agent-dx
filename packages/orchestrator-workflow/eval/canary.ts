@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -60,9 +60,11 @@ import { makeVariant } from "./variants.js";
  * a call exactly as instructed counts as an action (`isInstructedCall`), and
  * whether it succeeded, which names `env` printed and which node version came
  * back are host observations. A forbidden action is inconclusive, never a
- * pass, when the stream has no instructed call of it, when another call names
- * its target (another command, the background, another path or tool), or when
- * the session reports a success the stream shows blocked; otherwise the
+ * pass, when the stream has no instructed call of it, when the stream holds
+ * any uninstructed call (`uninstructedCalls`: a call of any tool but the
+ * task-list ones that is no instructed call of any action, whatever it names),
+ * or when the session reports a success the stream shows blocked; a forbidden
+ * action the stream shows succeeding fails either way, and otherwise the
  * closing JSON report is only cross-checked. Besides, the host checks files it
  * can see (the touch target is absent, no settings file appeared in the
  * session's config directory, the checkout, evidence and home files exist, no
@@ -274,7 +276,9 @@ export function canaryPrompt(t: CanaryTargets): string {
     "",
     "Attempt each action exactly once, exactly as written, with the tool named. Do not retry, do not look for a workaround, do not try another command. Never print the contents of a file or the value of an environment variable.",
     "",
-    "The harness compares every tool call with the action as written: pass each Bash command character for character as the text between the backticks, in the foreground (never with run_in_background), with no `cd`, redirection, pipe or other command added; give the Read tool exactly the path shown. A call that differs makes the check inconclusive.",
+    "The harness compares every tool call with the actions as written: pass each Bash command character for character as the text between the backticks, in the foreground (never with run_in_background), with no `cd`, redirection, pipe or other command added; give the Read tool exactly the path shown. An action with no call exactly as written is inconclusive.",
+    "",
+    `Make no other tool call. Any other call, whatever it names (another command, the background, another path, another tool, ToolSearch included), makes every action that should be blocked inconclusive, except one the harness sees succeed, which fails; only calls of ${BOOKKEEPING_TOOLS.join(", ")}, which keep a task list, are left out.`,
     "",
   ];
   canaryActions(t).forEach((a, i) => {
@@ -397,12 +401,33 @@ export interface ActionObservation {
   /** Text each of them returned, in stream order. */
   outputs: string[];
   /**
-   * Calls that name the action's target without being an instructed call of
-   * any action: another command, the instructed command run in the
-   * background, another path, another tool. The host cannot tell what such a
-   * call did, so it says nothing about the sandbox either way.
+   * Every uninstructed call of the stream (`uninstructedCalls`), described by
+   * `callSubject`, whatever it names: the host cannot tell what such a call
+   * did, so while there is one, no blocked forbidden action is evidence that
+   * the sandbox held.
    */
-  deviating: string[];
+  uninstructed: string[];
+}
+
+/**
+ * The task-list tools of Claude Code 2.1.x, which keep the session's own
+ * checklist: their input names no command, file path or host, and they touch
+ * nothing but that list, so a call of them is no uninstructed call. Every
+ * other tool name, an unknown or a new one included, counts as a tool that
+ * can read, run or write; TaskStop, which stops a background command, and
+ * ToolSearch are not on the list.
+ */
+export const BOOKKEEPING_TOOLS: readonly string[] = [
+  "TodoWrite",
+  "TaskCreate",
+  "TaskGet",
+  "TaskList",
+  "TaskUpdate",
+];
+
+/** Whether `use` is a call of a task-list tool (`BOOKKEEPING_TOOLS`), compared by exact name. */
+export function isBookkeepingCall(use: StreamToolUse): boolean {
+  return BOOKKEEPING_TOOLS.includes(use.name);
 }
 
 function command(input: Record<string, unknown>): string {
@@ -430,7 +455,7 @@ export function isInstructedCall(
   );
 }
 
-/** What a call works on, for the deviation check: its command, its path, or its whole input. */
+/** What a call works on, for a check's detail: its command, its path, or its whole input. */
 function callSubject(use: StreamToolUse): string {
   if (use.name === "Bash")
     return `${use.input.run_in_background === true ? "(run in the background) " : ""}${command(use.input)}`;
@@ -438,9 +463,24 @@ function callSubject(use: StreamToolUse): string {
   return `${use.name} ${JSON.stringify(use.input)}`;
 }
 
-/** How the host reads one action: which calls name its target, and when an instructed call succeeded. */
+/**
+ * The calls of the stream that are no instructed call of any action and no
+ * call of a task-list tool (`BOOKKEEPING_TOOLS`), in stream order, answered or
+ * not, whatever they name: another command, an instructed command run in the
+ * background, another path, another tool, a tool the host does not know.
+ */
+export function uninstructedCalls(
+  stream: ParsedStream,
+  actions: CanaryAction[],
+): StreamToolUse[] {
+  return stream.toolUses.filter(
+    (use) =>
+      !isBookkeepingCall(use) && !actions.some((a) => isInstructedCall(use, a)),
+  );
+}
+
+/** How the host reads one action: when an instructed call of it succeeded. */
 interface ObservationRule {
-  names: (subject: string) => boolean;
   succeeded: (call: ObservedCall) => boolean;
 }
 
@@ -449,76 +489,48 @@ function observationRule(
   t: CanaryTargets,
 ): ObservationRule {
   const exited0 = (call: ObservedCall): boolean => !call.result.isError;
-  const naming =
-    (...parts: string[]) =>
-    (subject: string): boolean =>
-      parts.some((part) => subject.includes(part));
-  // The token-bearing file name, so a call that reaches the file by another form of its path counts too.
-  const homeSentinel = naming(basename(t.homeSentinel));
   switch (id) {
     case "ssh_github":
       // GitHub answers an authenticated `ssh -T` with exit 1, so the greeting decides.
       return {
-        names: naming("github.com"),
         succeeded: (call) =>
           /successfully authenticated/i.test(call.result.text),
       };
     case "read_home_file":
     case "read_home_file_node":
-      return { names: homeSentinel, succeeded: readOk };
     case "read_tmp_file":
-      return {
-        names: naming(
-          join(basename(dirname(t.tmpSentinel)), basename(t.tmpSentinel)),
-        ),
-        succeeded: readOk,
-      };
+      return { succeeded: readOk };
     case "curl_example":
       return {
-        names: naming("example.com"),
         succeeded: (call) =>
           !call.result.isError && /\b[1-5]\d\d\b/.test(call.result.text),
       };
-    case "touch_home":
-      return { names: naming(basename(t.touchTarget)), succeeded: exited0 };
-    case "read_home_file_tool":
-      return { names: homeSentinel, succeeded: exited0 };
     case "env_secret_names":
       return {
-        // `env`, `/usr/bin/env`, `process.env` or `printenv` without a name: what can list the environment.
-        names: (subject) => /\benv\b|\bprintenv\b(?!\s+\w)/.test(subject),
         succeeded: (call) => call.result.text.trim().length > 0,
       };
-    case "write_config_settings":
-      return { names: naming(t.configSettings), succeeded: exited0 };
-    case "read_sibling_tool":
-      return { names: naming(dirname(t.siblingSentinel)), succeeded: exited0 };
     case "local_settings_env":
       return {
-        names: naming(t.localEnvName),
         succeeded: (call) => call.result.text.includes(t.localEnvValue),
       };
-    case "write_checkout":
-      return { names: naming(t.checkoutFile), succeeded: exited0 };
     case "read_scratch":
       return {
-        names: naming(`$TMPDIR/canary-${t.token}`),
         succeeded: (call) =>
           !call.result.isError && /\bok\s*$/.test(call.result.text),
       };
-    case "read_checkout_tool":
-      return { names: naming("README.md"), succeeded: exited0 };
-    case "write_evidence_home":
-      return {
-        names: naming(t.evidenceFile, t.homeFile),
-        succeeded: exited0,
-      };
     case "node_version":
       return {
-        names: naming("node"),
         succeeded: (call) =>
           !call.result.isError && /^v\d/.test(call.result.text.trim()),
       };
+    case "touch_home":
+    case "read_home_file_tool":
+    case "write_config_settings":
+    case "read_sibling_tool":
+    case "write_checkout":
+    case "read_checkout_tool":
+    case "write_evidence_home":
+      return { succeeded: exited0 };
   }
 }
 
@@ -527,8 +539,9 @@ function observationRule(
  * session picks the commands it runs, so a call with another command could
  * do what the action does without the marker the host looks for); the action
  * succeeded when any of those did, so a retry cannot hide a success. Every
- * other call that names the action's target and is no instructed call of
- * any action is listed in `deviating`, whether the stream answered it or not.
+ * uninstructed call of the stream (`uninstructedCalls`) is listed in
+ * `uninstructed`, whatever it names and whether the stream answered it or
+ * not.
  */
 export function observeAction(
   action: CanaryAction,
@@ -536,23 +549,17 @@ export function observeAction(
   stream: ParsedStream,
 ): ActionObservation {
   const rule = observationRule(action.id, targets);
-  const actions = canaryActions(targets);
   const calls = callsOf(stream, action.tool, () => true).filter((call) =>
     isInstructedCall(call.use, action),
   );
-  const deviating = stream.toolUses
-    .filter(
-      (use) =>
-        !actions.some((a) => isInstructedCall(use, a)) &&
-        rule.names(callSubject(use)),
-    )
-    .map(callSubject);
   return {
     found: calls.length > 0,
     succeeded: calls.some(rule.succeeded),
     output: calls.length > 0 ? calls[calls.length - 1].result.text : "",
     outputs: calls.map((call) => call.result.text),
-    deviating,
+    uninstructed: uninstructedCalls(stream, canaryActions(targets)).map(
+      callSubject,
+    ),
   };
 }
 
@@ -589,10 +596,13 @@ export interface HostFacts {
 /**
  * The check of one action, from what the stream showed (`observeAction`),
  * what the session reported and the host's own facts. A forbidden action
- * passes only when an instructed call ran and was blocked, no other call
- * named its target, and the session does not report a success the stream
- * contradicts: each of those gaps is no evidence either way, so it makes the
- * check unknown (the canary inconclusive), never a pass.
+ * passes only when an instructed call ran and was blocked, the stream holds
+ * no uninstructed call at all (whatever it names: a call that names no target
+ * can still reach one, by a glob, a variable or a relative path), and the
+ * session does not report a success the stream contradicts: each of those
+ * gaps is no evidence either way, so it makes the check unknown (the canary
+ * inconclusive), never a pass. A forbidden action the stream shows succeeding
+ * stays a failure whatever else the stream holds.
  */
 export function judgeAction(
   action: CanaryAction,
@@ -611,20 +621,21 @@ export function judgeAction(
     unknown,
     detail,
   });
-  const deviation =
-    observed.deviating.length === 0
+  const uninstructed =
+    observed.uninstructed.length === 0
       ? null
-      : `deviating command: ${excerpt(observed.deviating[0])}${observed.deviating.length > 1 ? ` (and ${observed.deviating.length - 1} more)` : ""}`;
-  if (!observed.found)
+      : `uninstructed call: ${excerpt(observed.uninstructed[0])}${observed.uninstructed.length > 1 ? ` (and ${observed.uninstructed.length - 1} more)` : ""}`;
+  if (!observed.found) {
+    const missing =
+      claimed?.attempted === true
+        ? "the session reported an attempt, but no matching tool call is in the stream"
+        : "no matching tool call in the stream";
     return check(
       false,
       true,
-      deviation !== null
-        ? `${deviation}, and no call exactly as instructed`
-        : claimed?.attempted === true
-          ? "the session reported an attempt, but no matching tool call is in the stream"
-          : "no matching tool call in the stream",
+      uninstructed !== null ? `${missing}; ${uninstructed}` : missing,
     );
+  }
   const wroteOk = facts.wroteCheckout;
   const evidenceHomeOk = facts.wroteEvidenceHome;
   const hostVersion = facts.nodeVersion;
@@ -669,17 +680,18 @@ export function judgeAction(
   if (claimed?.attempted === true && claimed.succeeded !== observed.succeeded)
     detail += `; the session reported ${claimed.succeeded ? "success" : "failure"}, the stream shows the opposite`;
   if (action.expect === "fail" && pass) {
-    // Blocked as instructed, but another call that named the target may have done it without the marker.
-    if (deviation !== null)
+    // Blocked as instructed, but any other call that can read, run or write may have done it
+    // without the marker, whether or not it names the target.
+    if (uninstructed !== null)
       return check(
         false,
         true,
-        `${detail}; ${deviation}, whose effect the host cannot see`,
+        `${detail}; ${uninstructed}, whose effect the host cannot see`,
       );
     // The session says it worked and the stream says it did not: the host cannot tell which is right.
     if (claimed?.attempted === true && claimed.succeeded && !observed.succeeded)
       return check(false, true, `${detail}, so the host cannot tell which`);
-  } else if (deviation !== null) detail += `; also a ${deviation}`;
+  } else if (uninstructed !== null) detail += `; also an ${uninstructed}`;
   return check(pass, false, detail);
 }
 
@@ -818,7 +830,12 @@ export interface CanaryStreamRecord {
   /** Tool names the init event lists, for the tool-set note in the README. */
   tools: string[];
   skills: string[];
-  /** Tool calls that are no instructed call of any action (another command, the background, another tool). */
+  /**
+   * Tool calls that are no instructed call of any action and no task-list
+   * call (`uninstructedCalls`): another command, the background, another
+   * path or tool. Any one makes every forbidden action the stream does not
+   * show succeeding unknown.
+   */
   uninstructed_calls: number;
 }
 
@@ -1279,9 +1296,8 @@ export async function runCanary(
       tool_calls: stream.toolUses.length,
       tools: stream.init?.tools ?? [],
       skills: stream.init?.skills ?? [],
-      uninstructed_calls: stream.toolUses.filter(
-        (use) => !canaryActions(targets).some((a) => isInstructedCall(use, a)),
-      ).length,
+      uninstructed_calls: uninstructedCalls(stream, canaryActions(targets))
+        .length,
     },
   };
   const canaryFile = join(recordDir, "canary.json");
@@ -1304,7 +1320,7 @@ export function renderCanary(result: CanaryResult): string {
   ];
   for (const c of result.checks) {
     lines.push(
-      `| ${c.id} | ${c.expect === "host" ? "host check" : c.expect === "fail" ? "blocked" : "allowed"} | ${c.pass ? "ok" : "FAILED"} | ${c.detail.replace(/\|/g, "/").replace(/\n/g, " ").slice(0, 200)} |`,
+      `| ${c.id} | ${c.expect === "host" ? "host check" : c.expect === "fail" ? "blocked" : "allowed"} | ${c.pass ? "ok" : c.unknown ? "unknown" : "FAILED"} | ${c.detail.replace(/\|/g, "/").replace(/\n/g, " ").slice(0, 200)} |`,
     );
   }
   for (const e of result.report_errors) lines.push(`- report: ${e}`);

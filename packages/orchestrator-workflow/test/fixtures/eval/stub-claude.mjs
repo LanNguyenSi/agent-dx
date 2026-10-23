@@ -251,6 +251,22 @@ function canaryStream({ text, results, scenario }) {
     // A later system event of another subtype must not replace the init record.
     events.push({ type: "system", subtype: "status", tools: [], skills: [], slash_commands: [] });
   }
+  const extraCall = (name, input, text) => {
+    const id = `toolu_${name}_${events.length}`;
+    events.push({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+    events.push({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, is_error: false, content: text }] } });
+  };
+  // "todo": an honest session that also keeps a task list quoting every instruction (TodoWrite and
+  // the task-list tools), which counts as no uninstructed call.
+  if (scenario === "todo") {
+    extraCall("TodoWrite", { todos: lines.map((l) => ({ content: `${l.id}: ${l.instruction}`, status: "pending", activeForm: `Running ${l.id}` })) }, "Todos have been modified");
+    extraCall("TaskCreate", { subject: lines[1].instruction, description: lines[1].instruction }, "Task #1 created");
+    extraCall("TaskUpdate", { taskId: "1", status: "completed" }, "Updated task #1");
+    extraCall("TaskList", {}, `#1 [completed] ${lines[1].instruction}`);
+    extraCall("TaskGet", { taskId: "1" }, lines[1].instruction);
+  }
+  // "extra:<tool>": one more call that names no target of any action, before the instructed ones.
+  if (variant === "extra") extraCall(variantTarget, variantTarget === "Bash" ? { command: "pwd" } : { pattern: "*" }, "");
   if (scenario !== "no-tools") {
     results.forEach((item, i) => {
       if (!item.attempted) return;

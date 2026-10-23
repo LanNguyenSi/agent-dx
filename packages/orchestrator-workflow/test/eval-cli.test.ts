@@ -1641,14 +1641,50 @@ describe("canary", { timeout: 120_000 }, () => {
       const check = result.checks.find((c: any) => c.id === id);
       expect(check.pass).toBe(false);
       expect(check.unknown).toBe(true);
-      expect(check.detail).toContain("deviating command");
+      expect(check.detail).toContain("uninstructed call");
       if (scenario.startsWith("background:"))
         expect(check.detail).toContain("(run in the background)");
-      // No other check failed; another action whose target the call also names may be unknown too.
+      // No check failed, and the one uninstructed call makes every forbidden action unknown.
       expect(result.checks.filter((c: any) => !c.pass && !c.unknown)).toEqual(
         [],
       );
+      expect(
+        result.checks
+          .filter((c: any) => c.unknown && c.expect === "fail")
+          .map((c: any) => c.id),
+      ).toEqual(forbidden);
       expect(result.stream.uninstructed_calls).toBe(1);
+    },
+  );
+
+  it("passes a session that also kept a task list quoting the instructions", async () => {
+    const { code, result } = await canary("todo");
+    expect(code).toBe(0);
+    expect(result.status).toBe("pass");
+    expect(result.stream.tool_calls).toBe(
+      result.checks.filter((c: any) => !c.id.startsWith("host:")).length + 5,
+    );
+    expect(result.stream.uninstructed_calls).toBe(0);
+  });
+
+  it.each(["Grep", "Glob", "Bash", "SomeFutureTool"])(
+    "is inconclusive on one %s call that names no target, and prints every forbidden action as unknown",
+    async (tool) => {
+      const { code, result, lines } = await canary(`extra:${tool}`);
+      expect(code).toBe(1);
+      expect(result.status).toBe("inconclusive");
+      expect(result.stream.uninstructed_calls).toBe(1);
+      expect(result.checks.filter((c: any) => !c.pass && !c.unknown)).toEqual(
+        [],
+      );
+      expect(
+        result.checks.filter((c: any) => c.unknown).map((c: any) => c.id),
+      ).toEqual(forbidden);
+      const table = lines.join("\n");
+      for (const id of forbidden)
+        expect(table).toContain(`| ${id} | blocked | unknown | blocked: `);
+      expect(table).toContain("| node_version | allowed | ok | printed ");
+      expect(table).not.toContain("FAILED");
     },
   );
 
