@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
   chmodSync,
   closeSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -31,6 +32,7 @@ import {
   maxTmpPathBytes,
   normalizeEnvName,
   scratchPathForms,
+  resolveChecked,
   scratchTmpPathBytes,
   sessionNpmCache,
   unsafeAncestor,
@@ -248,6 +250,126 @@ describe("scratch root ancestors", () => {
     chmodSync(open, 0o700);
   });
 
+  it("refuses a dangling symbolic link in the path, and creates nothing where it points", () => {
+    const parent = dir("anc-dangling", 0o755);
+    const target = join(parent, "later");
+    const link = join(parent, "dl");
+    symlinkSync(target, link);
+    const root = join(link, "oe");
+    const message = checkScratchRoot(root);
+    expect(message).toContain(
+      `${link} is a symbolic link to ${target}, which does not exist`,
+    );
+    expect(() => createRunScratch(root)).toThrow(/does not exist/);
+    expect(existsSync(target)).toBe(false);
+    // Once the target exists (and is safe), the same path is accepted.
+    mkdirSync(target, { mode: 0o700 });
+    expect(checkScratchRoot(root)).toBeNull();
+    // A dangling link as the last component is the caller's: the root itself is a link.
+    rmSync(target, { recursive: true });
+    expect(unsafeAncestor(link, uid())).toContain("does not exist");
+  });
+
+  it("refuses a symbolic link in the path that another account owns", () => {
+    const parent = dir("anc-link-owner", 0o755);
+    const real = join(parent, "real");
+    mkdirSync(real, { mode: 0o700 });
+    const link = join(parent, "link");
+    symlinkSync(real, link);
+    // As seen by another uid, the link (owned by this test's uid) is foreign: it is refused as a link.
+    const message = unsafeAncestor(join(link, "root"), uid() + 1);
+    expect(message).toBe(
+      `${link} is a symbolic link owned by uid ${uid()}, who could point it elsewhere`,
+    );
+    expect(unsafeAncestor(join(link, "root"), uid())).toBeNull();
+  });
+
+  it("resolves relative links and chains of links before it judges the ancestors", () => {
+    const parent = dir("anc-chain", 0o755);
+    const open = join(parent, "open");
+    mkdirSync(open);
+    chmodSync(open, 0o777);
+    const closed = join(parent, "closed");
+    mkdirSync(closed, { mode: 0o700 });
+    // first -> second -> ../closed (relative), so the root lands in the closed directory.
+    mkdirSync(join(parent, "sub"), { mode: 0o755 });
+    symlinkSync("../closed", join(parent, "sub", "second"));
+    symlinkSync(join(parent, "sub", "second"), join(parent, "first"));
+    expect(resolveChecked(join(parent, "first", "root"), uid())).toEqual({
+      existing: closed,
+      missing: ["root"],
+    });
+    expect(checkScratchRoot(join(parent, "first", "root"))).toBeNull();
+    // The same chain into the open directory is refused at the open directory.
+    symlinkSync("../open", join(parent, "sub", "third"));
+    symlinkSync(join(parent, "sub", "third"), join(parent, "fourth"));
+    expect(checkScratchRoot(join(parent, "fourth", "root"))).toContain(
+      `${open} can be written by the group or others`,
+    );
+    chmodSync(open, 0o700);
+  });
+
+  it("stops at a loop of symbolic links and at a path below a file", () => {
+    const parent = dir("anc-loop", 0o755);
+    symlinkSync(join(parent, "b"), join(parent, "a"));
+    symlinkSync(join(parent, "a"), join(parent, "b"));
+    // Both links point at each other: stat fails, so the link counts as dangling.
+    expect(unsafeAncestor(join(parent, "a", "root"), uid())).toContain(
+      "which does not exist",
+    );
+    const file = join(parent, "file");
+    writeFileSync(file, "");
+    const below = resolveChecked(join(file, "root"), uid());
+    expect(below).toHaveProperty("error");
+    expect((below as { error: string }).error).toContain(
+      `${join(file, "root")} cannot be inspected`,
+    );
+    expect(checkScratchRoot(join(file, "root"))).toContain(
+      "cannot be inspected",
+    );
+  });
+
+  it("follows at most 40 symbolic links", () => {
+    const parent = dir("anc-many", 0o755);
+    const real = join(parent, "real");
+    mkdirSync(real, { mode: 0o700 });
+    // A chain of n links, each pointing at the next, the last at the real directory.
+    const chain = (n: number, name: string): string => {
+      let next = real;
+      for (let i = n; i >= 1; i -= 1) {
+        const link = join(parent, `${name}${i}`);
+        symlinkSync(next, link);
+        next = link;
+      }
+      return next;
+    };
+    // stat itself follows at most 32 links on macOS, so the bound is reached through the path, part by part.
+    const mid = chain(20, "p");
+    const deep = join(parent, "deep");
+    mkdirSync(deep, { mode: 0o700 });
+    const second = join(deep, "q");
+    symlinkSync(mid, second);
+    expect(resolveChecked(join(second, "root"), uid())).toEqual({
+      existing: real,
+      missing: ["root"],
+    });
+    const third = join(real, "r");
+    symlinkSync(chain(20, "s"), third);
+    const over = resolveChecked(join(second, "r", "root"), uid());
+    expect(over).toEqual({
+      error: `${join(second, "r", "root")} has more than 40 symbolic links`,
+    });
+    rmSync(third);
+  });
+
+  it("checks the root before it creates it", () => {
+    const shared = dir("anc-before", 0o777);
+    const root = join(shared, "root");
+    expect(() => createRunScratch(root)).toThrow(/unsafe directory/);
+    expect(existsSync(root)).toBe(false);
+    chmodSync(shared, 0o700);
+  });
+
   it("checks the directory above an existing root too", () => {
     const shared = dir("anc-existing", 0o777);
     const root = join(shared, "root");
@@ -376,6 +498,37 @@ describe("placement of scratch and results", () => {
     expect(checkPlacement({ ...base, outDir: "/srv/res*ults" })).toContain(
       "pattern",
     );
+  });
+
+  it("refuses a scratch path a shell would split or end, which the canary's commands carry as they are", () => {
+    for (const ch of [
+      " ",
+      "\t",
+      "'",
+      '"',
+      "`",
+      "$",
+      ";",
+      "&",
+      "|",
+      "<",
+      ">",
+      "{",
+      "}",
+    ]) {
+      const message = checkPlacement({
+        ...base,
+        scratchRoot: `/srv/scr${ch}atch`,
+      });
+      expect(message, JSON.stringify(ch)).toContain(
+        "whitespace, a quote or a shell operator",
+      );
+    }
+    // Only the scratch path is put into commands; plain characters and other paths pass.
+    expect(
+      checkPlacement({ ...base, scratchRoot: "/srv/s-a_1.x+@" }),
+    ).toBeNull();
+    expect(checkPlacement({ ...base, outDir: "/srv/res ults" })).toBeNull();
   });
 
   it("decides containment by path segments, not by string prefix", () => {

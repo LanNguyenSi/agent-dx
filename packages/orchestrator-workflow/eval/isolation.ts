@@ -4,6 +4,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readlinkSync,
   realpathSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -87,10 +88,94 @@ export function scratchTmpPathBytes(scratchRoot: string): number {
   return longest + 1 + RUN_ID_LENGTH + "/tmp".length;
 }
 
+/** The uid the scratch root checks hold paths against, or null where the platform has none. */
+function currentUidOrNull(): number | null {
+  return process.getuid?.() ?? null;
+}
+
 /** Mode of the scratch root and of every run directory: only the owner can enter them. */
 export const SCRATCH_DIR_MODE = 0o700;
 
 const STICKY = 0o1000;
+
+/** Symbolic links followed at most while resolving a path, so a loop of links ends. */
+const MAX_LINKS = 40;
+
+/** `resolveChecked`: the path with every symbolic link followed, split where it stops existing. */
+export interface ResolvedPath {
+  /** The deepest existing directory (or file) of the path, with no symbolic link left in it. */
+  existing: string;
+  /** The components below `existing` that do not exist yet, in order. */
+  missing: string[];
+}
+
+/**
+ * Resolves `path` component by component, as the kernel would, and checks
+ * every symbolic link on the way, the last component included: a link must
+ * be yours or root's (another account could replace it with one pointing
+ * elsewhere) and must lead to something that exists (a dangling link lets
+ * whoever creates its target choose where the directories below it land).
+ * Returns the resolved path, or an error fragment. `..` in the path itself
+ * is applied before resolving, as `path.resolve` does; in a link's target it
+ * goes up from the link's resolved directory.
+ */
+export function resolveChecked(
+  path: string,
+  uid: number | null,
+): ResolvedPath | { error: string } {
+  let pending = resolve(path)
+    .split("/")
+    .filter((part) => part.length > 0);
+  let current = "/";
+  let links = 0;
+  while (pending.length > 0) {
+    const part = pending.shift()!;
+    if (part === ".") continue;
+    if (part === "..") {
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, part);
+    let st: ReturnType<typeof lstatSync>;
+    try {
+      st = lstatSync(next);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        return { existing: current, missing: [part, ...pending] };
+      return {
+        error: `${next} cannot be inspected: ${error instanceof Error ? error.message : error}`,
+      };
+    }
+    if (!st.isSymbolicLink()) {
+      current = next;
+      continue;
+    }
+    links += 1;
+    if (links > MAX_LINKS)
+      return { error: `${path} has more than ${MAX_LINKS} symbolic links` };
+    if (uid !== null && st.uid !== uid && st.uid !== 0)
+      return {
+        error: `${next} is a symbolic link owned by uid ${st.uid}, who could point it elsewhere`,
+      };
+    if (!existsSync(next))
+      return {
+        error: `${next} is a symbolic link to ${readlinkSync(next)}, which does not exist, so whoever creates it chooses where the directories below it land`,
+      };
+    const target = readlinkSync(next);
+    // The target replaces the link; a relative one starts from the link's own directory.
+    pending = [...target.split("/").filter((p) => p.length > 0), ...pending];
+    if (isAbsolute(target)) current = "/";
+  }
+  return { existing: current, missing: [] };
+}
+
+/** `resolveChecked` as one path, the missing components appended; throws its error. */
+function resolvedOrThrow(path: string, uid: number | null): string {
+  const resolved = resolveChecked(path, uid);
+  if ("error" in resolved)
+    throw new Error(`--scratch ${path} cannot be used: ${resolved.error}`);
+  return join(resolved.existing, ...resolved.missing);
+}
 
 /**
  * The first ancestor of `path` (nearest first, `path` itself excluded) that
@@ -99,25 +184,21 @@ const STICKY = 0o1000;
  * write it without the sticky bit: either lets another account rename or
  * replace the next directory down the chain, and with it the scratch root.
  * A sticky directory (`/tmp`, `/Users/Shared`) only lets an account remove
- * its own entries, so it passes. The chain is followed through the resolved
- * path of the nearest existing directory, so symlinks in the path are
- * followed, not trusted.
+ * its own entries, so it passes. The chain is the one `resolveChecked`
+ * resolves, so every symbolic link in the path is checked too (yours or
+ * root's, and not dangling) and then followed, not trusted.
  */
 export function unsafeAncestor(
   path: string,
   uid: number | null,
 ): string | null {
+  const resolved = resolveChecked(path, uid);
+  if ("error" in resolved) return resolved.error;
   // `path` itself is judged by the caller. Start at its parent, or, when it
   // does not exist yet, at the nearest existing directory (where it will be
-  // created); both through the resolved path.
-  let dir = resolve(path);
-  const exists = existsSync(dir);
-  while (!existsSync(dir)) {
-    const parent = dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-  let current = exists ? dirname(realpathSync(dir)) : realpathSync(dir);
+  // created).
+  const exists = resolved.missing.length === 0;
+  let current = exists ? dirname(resolved.existing) : resolved.existing;
   for (;;) {
     let st: ReturnType<typeof lstatSync>;
     try {
@@ -140,14 +221,15 @@ export function unsafeAncestor(
  * directory owned by another uid, one the group or others can write (the
  * default root sits in the world-writable, sticky `/Users/Shared`, where
  * another account could create it first), or one below an ancestor another
- * account can write without the sticky bit (see `unsafeAncestor`). A root that
- * does not exist yet passes its own checks: `createRunScratch` creates it with
- * mode 0700; the ancestors are still checked, from the directory it will be
- * created in. Returns an error message, or null.
+ * account can write without the sticky bit, or one whose path holds a
+ * symbolic link of another account or a dangling one (see `unsafeAncestor`).
+ * A root that does not exist yet passes its own checks: `createRunScratch`
+ * creates it with mode 0700; the ancestors are still checked, from the
+ * directory it will be created in. Returns an error message, or null.
  */
 export function checkScratchRoot(
   scratchRoot: string,
-  uid: number | null = process.getuid?.() ?? null,
+  uid: number | null = currentUidOrNull(),
 ): string | null {
   let st: ReturnType<typeof lstatSync> | null = null;
   try {
@@ -174,17 +256,28 @@ export function checkScratchRoot(
 /**
  * Creates a fresh run directory with an opaque name under `scratchRoot`, with
  * mode 0700 (and the root too, if it has to be created). Throws when the root
- * fails `checkScratchRoot`.
+ * fails `checkScratchRoot`, before anything is created and again after the
+ * root was created, or when its resolved path changed in between.
  */
 export function createRunScratch(scratchRoot: string): RunScratch {
+  // Checked before anything is created, then resolved once: the root is
+  // created, checked again and entered by its resolved path only, so no link
+  // in the path is followed after the check.
+  const before = checkScratchRoot(scratchRoot);
+  if (before !== null) throw new Error(before);
+  const resolvedRoot = resolvedOrThrow(scratchRoot, currentUidOrNull());
   if (
-    mkdirSync(scratchRoot, { recursive: true, mode: SCRATCH_DIR_MODE }) !==
+    mkdirSync(resolvedRoot, { recursive: true, mode: SCRATCH_DIR_MODE }) !==
     undefined
   )
-    chmodSync(scratchRoot, SCRATCH_DIR_MODE);
-  const refused = checkScratchRoot(scratchRoot);
+    chmodSync(resolvedRoot, SCRATCH_DIR_MODE);
+  const refused = checkScratchRoot(resolvedRoot);
   if (refused !== null) throw new Error(refused);
-  const base = realpathSync(scratchRoot);
+  const base = realpathSync(resolvedRoot);
+  if (base !== resolvedRoot)
+    throw new Error(
+      `--scratch ${scratchRoot} resolved to ${resolvedRoot} when it was checked and to ${base} after it was created; choose a directory whose parents only you and root can change`,
+    );
   for (;;) {
     const id = randomBytes(ID_BYTES).toString("hex");
     const root = join(base, id);
@@ -398,6 +491,13 @@ export function protectedHome(env: NodeJS.ProcessEnv): string {
 const RULE_UNSAFE = /[*?[\]\\()]/;
 
 /**
+ * Characters a shell would not keep as part of a word: the canary puts paths
+ * under the scratch root into its Bash commands as they are, and its planted
+ * hooks into single quotes.
+ */
+const SHELL_UNSAFE = /[\s'"`$;&|<>{}]/;
+
+/**
  * Refuses a scratch or results directory that the session's deny rules would
  * cover (so its own checkout would be unreadable) or that sits in the
  * dataset's parent tree (where the session's paths would name the dataset).
@@ -439,6 +539,10 @@ export function checkPlacement(options: {
   for (const path of [...scratch, ...out, ...datasetParent, ...home]) {
     if (RULE_UNSAFE.test(path))
       return `path ${path} contains a character that permission rules treat as a pattern`;
+  }
+  for (const path of scratch) {
+    if (SHELL_UNSAFE.test(path))
+      return `--scratch ${options.scratchRoot} contains whitespace, a quote or a shell operator, which the canary's commands and hooks would not keep as part of the path; choose a plain directory`;
   }
   return null;
 }
