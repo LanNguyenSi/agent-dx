@@ -113,14 +113,20 @@ run's tmp path (`<scratch>/<8 hex>/tmp`) may not exceed 44 bytes less one for
 the separator and the bytes of `claude-<uid>` (33 bytes for uid 501), and the
 commands refuse a longer `--scratch` (see "Claude Code sandbox" below for why).
 They also refuse a scratch directory that is a symbolic link, belongs to
-another user, or that the group or others can write; one that does not exist
-yet is created with mode 0700. The directories above it are checked too, up
-to the file system root, through their resolved paths: an ancestor owned by
-an account that is neither you nor root, or writable by the group or others
-without the sticky bit, would let another account rename or replace a
-directory on the way down to the scratch root, so it is refused. A sticky
-shared parent such as `/tmp` or `/Users/Shared` passes (an account can remove
-only its own entries there), which is why the default location is safe.
+another user, or that the group or others can write, and a path with
+whitespace, a quote or a shell operator in it (the canary puts scratch paths
+into its commands as they are); one that does not exist yet is created with
+mode 0700, after the checks, by its resolved path, and checked again. The
+directories above it are checked too, up to the file system root: every
+symbolic link on the way must belong to you or root and must lead to
+something that exists (a dangling link would let whoever creates its target
+choose where the scratch root lands), and then the resolved chain is judged:
+an ancestor owned by an account that is neither you nor root, or writable by
+the group or others without the sticky bit, would let another account rename
+or replace a directory on the way down to the scratch root, so it is refused.
+A sticky shared parent such as `/tmp` or `/Users/Shared` passes (an account
+can remove only its own entries there), which is why the default location is
+safe.
 
 Run `canary` before every batch and after every Claude Code update (see
 Isolation). It exits 0 only when every check passed.
@@ -281,10 +287,12 @@ What contains a session:
   scratch directory but kept a log or a pipe target inside it. `result.json`
   records each swept process with the reason (`via`: `cwd` or `open_file`).
   What the sweep cannot see: a process that closed every descriptor in the
-  scratch directory, left it and keeps no other mark there; it stays bound by
-  the Claude Code sandbox the session ran under, and the sweep does not look
-  at environments or at descriptors above 31 (a wider `lsof` range stalled
-  for ten seconds per call on macOS).
+  scratch directory, left it and keeps no other mark there. A descendant of
+  the session stays bound by the Claude Code sandbox the session ran under; a
+  descendant of a setup command keeps the unsandboxed rights of setup commands
+  (see "Setup commands" below) after the run. The sweep does not look at
+  environments or at descriptors above 31 (a wider `lsof` range stalled for
+  ten seconds per call on macOS).
 - The scratch directory is deleted after each run (`--keep-checkout` keeps
   it); records stay in the results directory.
 
@@ -307,15 +315,26 @@ What it does not contain:
   the proof that the settings took effect; run it again after a Claude Code
   update.
 - **What the canary observes itself**: the canary session runs with
-  `--output-format stream-json --verbose`, and the host reads every tool call
-  and its result from that stream. Whether an action was attempted, whether it
-  succeeded (ssh greeted an authenticated user, a probe printed `READ_OK`,
-  curl returned an HTTP status, the Read tool returned content, the command
-  exited 0), which names `env` printed and which node version came back are
-  host observations; the session's closing JSON report is only cross-checked
-  and a disagreement is noted in the check's detail. An action with no
-  matching tool call in the stream, or a stream with no tool call at all,
-  makes the canary inconclusive, never a pass. The host also checks files it
+  `--output-format stream-json --verbose`, and the host reads from that
+  stream the calls the session made and what each returned; the session
+  still picks the commands. A call counts as an action only when it is the
+  instructed one: the Bash command exactly as the prompt gives it (compared
+  after trimming), not run in the background, or the Read tool on the exact
+  path. Whether that call succeeded (ssh greeted an authenticated user, a
+  probe printed `READ_OK`, curl returned an HTTP status, the Read tool
+  returned content, the command exited 0), which names `env` printed (over
+  every run of the probe) and which node version came back are host
+  observations. A forbidden action is inconclusive, never a pass, when the
+  stream has no instructed call of it, when another call names its target
+  (another command, the instructed one in the background, another path or
+  tool: `deviating command` in the detail, and `stream.uninstructed_calls`
+  in `canary.json` counts such calls), or when the session's closing JSON
+  report says it succeeded while the stream shows it blocked; otherwise the
+  report is only cross-checked and a disagreement is noted in the check's
+  detail. A stream with no tool call at all makes the canary inconclusive
+  too. A command that reaches a target without naming it (a glob, a
+  variable) is not recognised as a deviation; the prompt forbids any command
+  but the instructed ones. The host also checks files it
   can see: the touch target, that no settings file appeared in the session's
   config directory, the checkout write, the evidence and home writes, the
   permission mode, that no planted hook ran and that no record holds a
@@ -333,8 +352,9 @@ What it does not contain:
   environment variable, and a project skill. It then checks that no marker
   exists afterwards (`host:project_hooks_not_run`), that the variable is unset
   in a Bash command (`local_settings_env`) and that the init event of the
-  stream does not list the skill (`host:project_skill_not_loaded`; no init
-  event makes it inconclusive). Under `--bare` Claude Code runs no hook at all,
+  stream lists the skill neither among its skills nor among its slash
+  commands (`host:project_skill_not_loaded`; no init event, or one without
+  either list, makes it inconclusive). Under `--bare` Claude Code runs no hook at all,
   so the hook check only discriminates with `--no-bare`; the variable and the
   skill checks hold in both modes.
 - **Which build ran**: `canary.json` records `revision` (the package version,
