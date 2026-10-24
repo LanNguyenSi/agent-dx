@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`zod` ^4.6.7** (GHSA-mrhx-c7xc-m3w5): the dependency range and lockfile now resolve the v4 core, which is where the advisory is fixed. `src/config.ts` and `src/mcp.ts` moved to the native v4 API (`z.partialRecord` keeps `packs:` partial; value-dependent `.refine` messages became `.superRefine`, since v4 silently drops the v3 function-parameter form). Config validation accepts and rejects exactly what it accepted and rejected before; the issue JSON inside the `Invalid config at ...` message changed zod's default fields (for example an unknown pack id now reports `unrecognized_keys` instead of `invalid_enum_value`). The `slop_check` tool schema is unchanged except for the `additionalProperties: false` key the SDK no longer emits for stripping objects.
+
 ## [0.9.0] - 2026-10-12
 
 ### Changed

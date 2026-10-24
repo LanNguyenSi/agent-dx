@@ -50,32 +50,28 @@ const EntrypointGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
 // finding.
 const RegexPatternSchema = z
   .string()
-  .refine(
-    (pattern) => {
-      try {
-        new RegExp(pattern);
-        return true;
-      } catch {
-        return false;
+  .superRefine((pattern, ctx) => {
+    try {
+      new RegExp(pattern);
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        message: `Invalid regular expression in placement config: "${pattern}"`,
+      });
+    }
+  })
+  .superRefine((pattern, ctx) => {
+    try {
+      if (new RegExp(pattern).test("")) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Regular expression in placement config matches the empty string, which would match every position in every scanned line: "${pattern}"`,
+        });
       }
-    },
-    (pattern) => ({
-      message: `Invalid regular expression in placement config: "${pattern}"`,
-    }),
-  )
-  .refine(
-    (pattern) => {
-      try {
-        return !new RegExp(pattern).test("");
-      } catch {
-        // Already reported by the first `.refine` above; don't double-report.
-        return true;
-      }
-    },
-    (pattern) => ({
-      message: `Regular expression in placement config matches the empty string, which would match every position in every scanned line: "${pattern}"`,
-    }),
-  );
+    } catch {
+      // Already reported by the first `.superRefine` above; don't double-report.
+    }
+  });
 
 // `placement.instructionGlobs` is matched against a path already made
 // relative to the scan root (see `isInstructionFile` in
@@ -99,12 +95,14 @@ const PlacementConfigSchema = z.object({
 // packs/workflow-slop.ts) — an entry that still carries the wrapper can
 // never match anything, which would otherwise fail silently exactly like
 // the other misconfigurations this file rejects at load time.
-const AllowExpressionSchema = z.string().refine(
-  (e) => !e.includes("${{") && !e.includes("}}"),
-  (e) => ({
-    message: `workflow.allowExpressions entries are the bare expression body only (e.g. "matrix.node"), not the "\${{ ... }}" wrapper, remove the "\${{"/"}}" from "${e}"`,
-  }),
-);
+const AllowExpressionSchema = z.string().superRefine((e, ctx) => {
+  if (e.includes("${{") || e.includes("}}")) {
+    ctx.addIssue({
+      code: "custom",
+      message: `workflow.allowExpressions entries are the bare expression body only (e.g. "matrix.node"), not the "\${{ ... }}" wrapper, remove the "\${{"/"}}" from "${e}"`,
+    });
+  }
+});
 
 // `workflow.node20Majors`/`node20MajorsIgnore` entries are the exact
 // `owner/repo@vN` match key `workflow-slop/node20-action-major` compares a
@@ -113,12 +111,14 @@ const AllowExpressionSchema = z.string().refine(
 // that cannot possibly be that shape at config-load time, the same
 // fail-fast treatment `AllowExpressionSchema` gives a malformed
 // `allowExpressions` entry.
-const Node20MajorSchema = z.string().refine(
-  (e) => /^[^/\s@]+\/[^/\s@]+@v\d+$/.test(e),
-  (e) => ({
-    message: `workflow.node20Majors/node20MajorsIgnore entries are "owner/repo@vN" (e.g. "actions/checkout@v4"), got "${e}"`,
-  }),
-);
+const Node20MajorSchema = z.string().superRefine((e, ctx) => {
+  if (!/^[^/\s@]+\/[^/\s@]+@v\d+$/.test(e)) {
+    ctx.addIssue({
+      code: "custom",
+      message: `workflow.node20Majors/node20MajorsIgnore entries are "owner/repo@vN" (e.g. "actions/checkout@v4"), got "${e}"`,
+    });
+  }
+});
 
 // A `workflow.auditGateTemplates` entry registers one exact npm-audit
 // gate block as recognised by `workflow-slop/audit-gate-shape` (see that
@@ -141,16 +141,17 @@ const AuditGateTemplateSchema = z
       .optional(),
     statements: z.array(z.string()).min(1).optional(),
   })
-  .refine(
-    (t) => (t.sha256 === undefined) !== (t.statements === undefined),
-    (t) => ({
+  .superRefine((t, ctx) => {
+    if ((t.sha256 === undefined) !== (t.statements === undefined)) return;
+    ctx.addIssue({
+      code: "custom",
       message: `workflow.auditGateTemplates entries carry exactly one of "sha256" or "statements", got ${
         t.sha256 === undefined && t.statements === undefined
           ? "neither"
           : "both"
       } for "${t.name}"`,
-    }),
-  );
+    });
+  });
 
 // `workflow.executedActionInputs` entries are the exact `owner/repo:input`
 // match key `workflow-slop/run-expression` compares a `uses:` step's
@@ -171,12 +172,14 @@ const AuditGateTemplateSchema = z
 // author might write a literal space (`acme/run-code:my_input` still
 // matches a workflow step written `with: my input:`), and an ASCII entry
 // matches every ASCII casing of the same key.
-const ExecutedActionInputSchema = z.string().refine(
-  (e) => /^[^/\s:@]+\/[^/\s:@]+:[^\s:@]+$/.test(e),
-  (e) => ({
-    message: `workflow.executedActionInputs entries are "owner/repo:input" (e.g. "actions/github-script:script"), no "@ref" (matching is ref-independent); the first colon after owner/repo separates it from the input name, so the input name cannot itself contain a colon or a space (write "_" for a literal space; matching folds case and space/underscore), got "${e}"`,
-  }),
-);
+const ExecutedActionInputSchema = z.string().superRefine((e, ctx) => {
+  if (!/^[^/\s:@]+\/[^/\s:@]+:[^\s:@]+$/.test(e)) {
+    ctx.addIssue({
+      code: "custom",
+      message: `workflow.executedActionInputs entries are "owner/repo:input" (e.g. "actions/github-script:script"), no "@ref" (matching is ref-independent); the first colon after owner/repo separates it from the input name, so the input name cannot itself contain a colon or a space (write "_" for a literal space; matching folds case and space/underscore), got "${e}"`,
+    });
+  }
+});
 
 const WorkflowConfigSchema = z.object({
   allowExpressions: z.array(AllowExpressionSchema).optional(),
@@ -209,7 +212,12 @@ function stripLeadingDotSlash(glob: string): string {
 }
 
 const ConfigFileSchema = z.object({
-  packs: z.record(PackIdSchema, z.boolean()).optional(),
+  // `packs` is a partial map: omitted keys keep their DEFAULT_PACKS value in
+  // `mergeConfig`. A plain `z.record(PackIdSchema, ...)` would be exhaustive
+  // here (zod requires every enum key when the key schema is an enum), so
+  // `partialRecord` keeps the v3 semantics: any subset of known pack ids,
+  // unknown pack ids rejected.
+  packs: z.partialRecord(PackIdSchema, z.boolean()).optional(),
   rules: z.record(z.string(), RuleOverrideSchema).optional(),
   ignorePaths: z.array(z.string()).optional(),
   treatAsProse: z.array(z.string()).optional(),

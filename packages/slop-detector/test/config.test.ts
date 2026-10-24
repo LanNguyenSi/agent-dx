@@ -128,6 +128,51 @@ describe("config", () => {
     expect(() => loadConfig(file)).toThrow(/ui-slp/);
   });
 
+  it("loadConfig accepts a partial packs map (omitted keys keep their defaults)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs:\n  prose-slop: false\n`);
+    const cfg = loadConfig(file);
+    expect(cfg.packs["prose-slop"]).toBe(false);
+    expect(cfg.packs["agent-tics"]).toBe(true);
+    expect(cfg.packs["workflow-slop"]).toBe(false);
+  });
+
+  it("loadConfig accepts an empty packs map", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs: {}\n`);
+    const cfg = loadConfig(file);
+    expect(cfg.packs["agent-tics"]).toBe(true);
+    expect(cfg.packs["prose-slop"]).toBe(true);
+  });
+
+  it("loadConfig rejects a packs value that is not a boolean", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs:\n  prose-slop: nope\n`);
+    expect(() => loadConfig(file)).toThrow(/expected boolean/);
+  });
+
+  it("loadConfig rejects a node20Majors entry that is not owner/repo@vN", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  node20Majors:\n    - "actions/checkout"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/owner\/repo@vN/);
+  });
+
+  it("loadConfig reports the exact invalid-regex message for placement.markers", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `placement:\n  markers:\n    - "("\n`);
+    expect(() => loadConfig(file)).toThrow(
+      'Invalid regular expression in placement config: \\"(\\"',
+    );
+  });
+
   it("loadConfig rejects an invalid regex in placement.markers", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
     const file = path.join(tmp, "slop.config.yml");
