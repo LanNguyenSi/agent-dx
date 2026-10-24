@@ -290,7 +290,9 @@ describe("config", () => {
       file,
       `workflow:\n  auditGateTemplates:\n    - name: canonical\n`,
     );
-    expect(() => loadConfig(file)).toThrow(/entries carry exactly one of/);
+    expect(() => loadConfig(file)).toThrow(
+      /entries carry exactly one of .*got neither for \\"canonical\\"/,
+    );
   });
 
   it("loadConfig rejects a workflow.auditGateTemplates entry carrying both", () => {
@@ -300,7 +302,9 @@ describe("config", () => {
       file,
       `workflow:\n  auditGateTemplates:\n    - name: canonical\n      sha256: ${"b".repeat(64)}\n      statements: ["set +e"]\n`,
     );
-    expect(() => loadConfig(file)).toThrow(/entries carry exactly one of/);
+    expect(() => loadConfig(file)).toThrow(
+      /entries carry exactly one of .*got both for \\"canonical\\"/,
+    );
   });
 
   it("loadConfig rejects a workflow.auditGateTemplates sha256 that is not a 64-char hex digest", () => {
