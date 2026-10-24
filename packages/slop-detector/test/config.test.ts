@@ -128,6 +128,51 @@ describe("config", () => {
     expect(() => loadConfig(file)).toThrow(/ui-slp/);
   });
 
+  it("loadConfig accepts a partial packs map (omitted keys keep their defaults)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs:\n  prose-slop: false\n`);
+    const cfg = loadConfig(file);
+    expect(cfg.packs["prose-slop"]).toBe(false);
+    expect(cfg.packs["agent-tics"]).toBe(true);
+    expect(cfg.packs["workflow-slop"]).toBe(false);
+  });
+
+  it("loadConfig accepts an empty packs map", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs: {}\n`);
+    const cfg = loadConfig(file);
+    expect(cfg.packs["agent-tics"]).toBe(true);
+    expect(cfg.packs["prose-slop"]).toBe(true);
+  });
+
+  it("loadConfig rejects a packs value that is not a boolean", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs:\n  prose-slop: nope\n`);
+    expect(() => loadConfig(file)).toThrow(/expected boolean/);
+  });
+
+  it("loadConfig rejects a node20Majors entry that is not owner/repo@vN", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  node20Majors:\n    - "actions/checkout"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/owner\/repo@vN/);
+  });
+
+  it("loadConfig reports the exact invalid-regex message for placement.markers", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `placement:\n  markers:\n    - "("\n`);
+    expect(() => loadConfig(file)).toThrow(
+      'Invalid regular expression in placement config: \\"(\\"',
+    );
+  });
+
   it("loadConfig rejects an invalid regex in placement.markers", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
     const file = path.join(tmp, "slop.config.yml");
@@ -245,7 +290,9 @@ describe("config", () => {
       file,
       `workflow:\n  auditGateTemplates:\n    - name: canonical\n`,
     );
-    expect(() => loadConfig(file)).toThrow(/entries carry exactly one of/);
+    expect(() => loadConfig(file)).toThrow(
+      /entries carry exactly one of .*got neither for \\"canonical\\"/,
+    );
   });
 
   it("loadConfig rejects a workflow.auditGateTemplates entry carrying both", () => {
@@ -255,7 +302,9 @@ describe("config", () => {
       file,
       `workflow:\n  auditGateTemplates:\n    - name: canonical\n      sha256: ${"b".repeat(64)}\n      statements: ["set +e"]\n`,
     );
-    expect(() => loadConfig(file)).toThrow(/entries carry exactly one of/);
+    expect(() => loadConfig(file)).toThrow(
+      /entries carry exactly one of .*got both for \\"canonical\\"/,
+    );
   });
 
   it("loadConfig rejects a workflow.auditGateTemplates sha256 that is not a 64-char hex digest", () => {
