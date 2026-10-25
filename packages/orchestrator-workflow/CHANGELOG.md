@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-10-25
+
 - The replay evaluation's isolation is hardened (`eval/`, development tooling
   that is not part of the installed package). The canary now runs its session
   with `--output-format stream-json --verbose` and reads the calls the session
