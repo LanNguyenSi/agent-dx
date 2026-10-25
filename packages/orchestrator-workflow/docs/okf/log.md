@@ -1,5 +1,13 @@
 # Bundle log
 
+- 2026-10-25T07:33:42Z, release 0.48.0: the `[Unreleased]` entries move under a new `## [0.48.0]` heading,
+  which shifts every later `CHANGELOG.md` line by two; each anchored log citation into those
+  lines was re-pointed (`CHANGELOG.md:1250#"The implementer"`,
+  `CHANGELOG.md:1627#"Citation scanning is paragraph-joined"`) and its anchor text confirmed on
+  the new line. The docs that list `CHANGELOG.md` as a source make no claim about line positions,
+  so their claims are unchanged and only the timestamps move. Re-stamped:
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`.
 - 2026-10-23T16:35:17Z, replay evaluation hardening, CHANGELOG wording only: the `[Unreleased]` bullet about the evaluation
   tooling under `eval/` now names the env listing that printed only sandbox-injected names as the one forbidden action
   whose success counts as blocked; the bullet keeps its line count, so no line citation in this log moved.
