@@ -748,6 +748,39 @@ describe.runIf(realGuard !== null)(
   },
 );
 
+/** True when the pid is gone or a zombie (dead, only waiting to be reaped). */
+function isNotRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return true;
+  }
+  let state = "";
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    state = stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3);
+  } catch {
+    const ps = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
+      encoding: "utf8",
+    });
+    if (ps.status !== 0) return true; // ps finds no such process
+    state = ps.stdout.trim()[0] ?? "";
+  }
+  return state === "Z" || state === "X";
+}
+
+async function waitUntilNotRunning(
+  pid: number,
+  boundMs: number,
+): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < boundMs) {
+    if (isNotRunning(pid)) return true;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return isNotRunning(pid);
+}
+
 describe("runGrouped", () => {
   it("escalates to SIGKILL when the group ignores SIGTERM, and leaves nothing running", async () => {
     // Deterministic on a loaded host: the wall clock never decides. The timers are
@@ -802,14 +835,11 @@ describe("runGrouped", () => {
     } finally {
       vi.useRealTimers();
       if (sleepPid > 0) {
-        const survived = (() => {
-          try {
-            process.kill(sleepPid, 0);
-            return true;
-          } catch {
-            return false;
-          }
-        })();
+        // A SIGKILLed orphan is a zombie until its new parent reaps it, which
+        // a container without an init process may never do; the group is
+        // gone once the process is no longer running, so a bounded poll
+        // accepts a zombie and still fails on a real survivor.
+        const survived = !(await waitUntilNotRunning(sleepPid, 5_000));
         try {
           process.kill(sleepPid, "SIGKILL");
         } catch {
@@ -819,8 +849,6 @@ describe("runGrouped", () => {
         expect(survived).toBe(false);
       }
     }
-    await new Promise((r) => setTimeout(r, 200));
-    expect(() => process.kill(sleepPid, 0)).toThrow();
   }, 30_000);
 
   it("ends a cooperative group on SIGTERM without waiting for the kill grace", async () => {
