@@ -3101,3 +3101,134 @@ describe("citations-resolve: log.md step-5 per-entry scoping", () => {
     }
   });
 });
+
+describe("citations-resolve: log.md continuation per-entry scoping", () => {
+  // Same append-at-top geometry as the step-5 scoping above, applied to the
+  // continuation `governing` state: in log.md only, a continuation chains
+  // off a full citation only within the entry that citation sits in, so a
+  // full path in a newer entry must not govern a bare continuation tail in
+  // an older entry below it. Other docs keep the document-wide chain.
+  const SRC = ["const a = 1;", "const b = 2;", "const c = 3;", ""].join("\n");
+
+  function writeFoo(tmpRoot: string) {
+    fs.mkdirSync(path.join(tmpRoot, "src/a"), { recursive: true });
+    fs.writeFileSync(path.join(tmpRoot, "src/a/foo.ts"), SRC);
+  }
+
+  function writeLog(tmpRoot: string, lines: string[]) {
+    fs.writeFileSync(path.join(tmpRoot, "docs/okf/log.md"), lines.join("\n"));
+  }
+
+  it("a full path in a newer log.md entry does not govern an older entry's bare continuation tail", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-cont-scope-"),
+    );
+    try {
+      writeFoo(tmpRoot);
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+
+      // The older entry carries ONLY a bare continuation tail: no full
+      // citation of its own, so on its own it has nothing to chain to.
+      const OLD_ENTRY = [
+        "## 2026-10-24",
+        "",
+        "- 2026-10-24T10:00:00Z, patched the tail of an old note (`999`).",
+        "",
+      ];
+      const NEW_ENTRY = [
+        "## 2026-10-25",
+        "",
+        "- 2026-10-25T18:33:20Z, added `src/a/foo.ts:1` wiring.",
+        "",
+      ];
+
+      writeLog(tmpRoot, [...NEW_ENTRY, ...OLD_ENTRY]);
+      const withNewEntry = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      writeLog(tmpRoot, OLD_ENTRY);
+      const withoutNewEntry = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+
+      // The regression: adding the newer entry must change nothing. Before
+      // the per-entry governing reset the tail chained to `src/a/foo.ts:1`
+      // and reported `src/a/foo.ts:999 (continuation)` [range-exceeds-file].
+      expect(withNewEntry).toEqual(withoutNewEntry);
+      expect(
+        findingFor(withNewEntry, "src/a/foo.ts:999 (continuation)"),
+      ).toBeUndefined();
+      expect(
+        findingFor(withoutNewEntry, "src/a/foo.ts:999 (continuation)"),
+      ).toBeUndefined();
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("a continuation in the SAME log.md entry as its full citation is still checked", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-cont-same-entry-"),
+    );
+    try {
+      writeFoo(tmpRoot);
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      writeLog(tmpRoot, [
+        "## 2026-10-25",
+        "",
+        "- 2026-10-25T10:00:00Z, patched `src/a/foo.ts:1`, tail (`999`).",
+        "",
+      ]);
+
+      const findings = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      // Per entry, not per file: within one entry the chain survives, so
+      // the tail is checked against src/a/foo.ts and drifts past its
+      // 3-line end.
+      const f = findingFor(findings, "src/a/foo.ts:999 (continuation)");
+      expect(f).toBeDefined();
+      expect(f?.message).toContain("[range-exceeds-file]");
+      expect(f?.detail).toBe("resolvedTo: src/a/foo.ts");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("a non-log doc keeps document-wide continuation chaining across entry-shaped lines", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-cont-nonlog-"),
+    );
+    try {
+      writeFoo(tmpRoot);
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "---",
+          "",
+          "Section one names `src/a/foo.ts:1` here.",
+          "",
+          "- A later bullet cites only its tail (`999`), still chained.",
+          "",
+        ].join("\n"),
+      );
+
+      const findings = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      // The column-0 bullet line is exactly the entry boundary that would
+      // cut the chain off if log.md's per-entry governing reset leaked to
+      // other docs; the chain survives it here, pinning document-wide
+      // behaviour for non-log docs.
+      const f = findingFor(findings, "src/a/foo.ts:999 (continuation)");
+      expect(f).toBeDefined();
+      expect(f?.message).toContain("[range-exceeds-file]");
+      expect(f?.detail).toBe("resolvedTo: src/a/foo.ts");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+});

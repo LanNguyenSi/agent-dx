@@ -132,8 +132,12 @@ const RULE_ID = "citations-resolve";
  * scanned in document order. `governing` resets to none whenever the
  * citation immediately before it failed to resolve, was ambiguous, or was
  * out of scope (leading `/`) -- a continuation never silently inherits a
- * stale or unrelated path from further up the doc. A continuation with no
- * governing citation at all (e.g. very start of a doc) is skipped, not
+ * stale or unrelated path from further up the doc. In `log.md` only,
+ * `governing` is additionally scoped per entry (the same entry boundary as
+ * step 5 above): a continuation in one entry never chains to a citation in
+ * another, so a full path in a newer entry does not govern an older entry's
+ * bare tails. A continuation with no governing citation at all (e.g. very
+ * start of a doc, or none in its own entry in `log.md`) is skipped, not
  * flagged: there is nothing to validate it against.
  *
  * A continuation is further split into two roles (see
@@ -981,14 +985,15 @@ function findPriorQualifiedCitation(
  * is a top-level list item (a line starting `- ` at column 0, the append-
  * at-top convention); entries group under `#`/`##` heading lines. The entry
  * scope therefore begins at the nearest preceding (or containing) line that
- * starts with `- ` or `#` at column 0, or at 0 if there is none. Step 5 of
- * path resolution uses this for log.md only: a full path in a NEWER entry
- * (top of the file) must not re-resolve a bare-basename citation in an OLDER
- * entry below, where the whole-doc "nearest earlier citation" scan would
- * otherwise pair them (observed in the dogfood bundle: one new entry's full
- * path re-resolved 13 old bare citations, warnings 45 -> 58). Fenced code
- * blocks are not tracked here on purpose: a `- `- or `#`-led line at column
- * 0 inside one merely narrows the scope a little further, never widens it.
+ * starts with `- ` or `#` at column 0, or at 0 if there is none. `log.md`
+ * uses this scope for two things: step 5 of path resolution scans only the
+ * entry containing the citation, and a continuation chains off `governing`
+ * only within the entry that set it -- a full path in a NEWER entry (top of
+ * the file) must neither re-resolve a bare-basename citation in an OLDER
+ * entry below nor govern that entry's bare tails, where the two whole-doc
+ * scans would otherwise pair them. Fenced code blocks are not tracked here
+ * on purpose: a `- `- or `#`-led line at column 0 inside one merely narrows
+ * the scope a little further, never widens it.
  */
 function findLogEntryScopeStart(content: string, beforeIndex: number): number {
   let lineStart = content.lastIndexOf("\n", beforeIndex - 1) + 1;
@@ -2388,7 +2393,8 @@ function scanDoc(
   // is "earlier in the doc" than every older entry and would re-resolve
   // their bare-basename citations across entries; for log.md only, step 5
   // therefore scans from the start of the entry containing the citation
-  // (see findLogEntryScopeStart). Every other doc keeps the whole-doc scan.
+  // (see findLogEntryScopeStart). The continuation `governing` state below
+  // records the same scope start. Every other doc keeps the whole-doc scan.
   const priorScopeStartFor = (index: number): number =>
     doc.basename === "log.md" ? findLogEntryScopeStart(content, index) : 0;
 
@@ -2460,7 +2466,10 @@ function scanDoc(
   // above) can name "the governing citation" the same way it was actually
   // written. `lastStartLine`: the start line a "cont-ext" atom extends into
   // a range; tracks the most recent full or cont-fresh atom's own
-  // startLine, scoped together with `governing`.
+  // startLine, scoped together with `governing`. `governingScopeStart`: the
+  // entry start `governing` was set in (see findLogEntryScopeStart), used
+  // for log.md only to drop a governing citation that lives in a different
+  // entry than the continuation being looked at.
   let governing: {
     citedPath: string;
     resolvedPath: string;
@@ -2468,8 +2477,24 @@ function scanDoc(
     endLine: number | null;
   } | null = null;
   let lastStartLine: number | null = null;
+  let governingScopeStart: number | null = null;
 
   for (const atom of atoms) {
+    // Continuation scope (log.md only, the same entry boundary as step 5
+    // above): a `governing` set in a different entry than this atom does not
+    // govern it; reset, and let the "no governing citation" checks below
+    // skip this atom exactly like a continuation at the very start of a doc.
+    // Every other doc keeps the document-wide chain.
+    if (
+      doc.basename === "log.md" &&
+      governing !== null &&
+      findLogEntryScopeStart(content, atom.index) !== governingScopeStart
+    ) {
+      governing = null;
+      lastStartLine = null;
+      governingScopeStart = null;
+    }
+
     if (atom.kind === "cont-ext") {
       if (!governing || lastStartLine === null) continue; // nothing to extend
       const citation = `${governing.citedPath}:${lastStartLine}-${atom.value} (continuation)`;
@@ -2568,6 +2593,7 @@ function scanDoc(
       );
       governing = null;
       lastStartLine = null;
+      governingScopeStart = null;
       continue;
     }
 
@@ -2592,17 +2618,20 @@ function scanDoc(
       );
       governing = null;
       lastStartLine = null;
+      governingScopeStart = null;
       continue;
     }
     if ("skip" in resolution) {
       governing = null;
       lastStartLine = null;
+      governingScopeStart = null;
       continue;
     }
     if ("ambiguous" in resolution) {
       pushAmbiguous(findings, doc.relPath, citation, resolution.candidates);
       governing = null;
       lastStartLine = null;
+      governingScopeStart = null;
       continue;
     }
 
@@ -2683,6 +2712,7 @@ function scanDoc(
       endLine,
     };
     lastStartLine = startLine;
+    governingScopeStart = priorScopeStartFor(atom.index);
   }
 
   // Heading-section citations -- see the "Heading-section citations" doc

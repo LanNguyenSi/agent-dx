@@ -19,7 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preceding top-level list item (`- ` at column 0) or heading line (`#` at
   column 0), whichever is nearer. A same-entry full path still resolves
   through step 5; a bare citation without one falls through to the repo-wide
-  step 6 search as before. Every other doc keeps the whole-doc scan (task
+  step 6 search as before. Continuation citations (`` `:N` ``, `` -`M` ``,
+  `` (`N`) ``) are scoped per entry the same way: a bare continuation tail in
+  an older entry no longer chains to a full path in a newer entry above it
+  (it used to be checked against that path, so adding the newer entry could
+  mint a `range-exceeds-file` warning in the older entry), and a
+  continuation with no same-entry citation to chain to is skipped like one
+  at the very start of a doc. Every other doc keeps the whole-doc scan and
+  the document-wide continuation chain (task
   41b604f0). See [Citations](docs/citations.md).
 
 ## [0.19.1] - 2026-10-18
