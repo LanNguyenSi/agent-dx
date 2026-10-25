@@ -2967,3 +2967,137 @@ describe("computeFencedSpans (citing-doc side)", () => {
     expect(computeFencedSpans(content)).toEqual([[line3Start, content.length]]);
   });
 });
+
+describe("citations-resolve: log.md step-5 per-entry scoping", () => {
+  // log.md is append-at-top, so a full path written in a NEWER entry (top
+  // of the file) is "earlier in the doc" than every older entry. Step 5
+  // ("nearest earlier citation in the same doc") must therefore scan, for
+  // log.md only, the entry that contains the bare citation, never the whole
+  // doc: one new entry's `src/a/foo.ts` must not re-resolve (or keep
+  // resolving) an old entry's bare `foo.ts` against it. Other docs keep the
+  // whole-doc scan.
+  const SRC = ["const a = 1;", "const b = 2;", "const c = 3;", ""].join("\n");
+
+  function writeTwoFooFiles(tmpRoot: string) {
+    fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+    for (const dir of ["src/a", "src/b"]) {
+      fs.mkdirSync(path.join(tmpRoot, dir), { recursive: true });
+      fs.writeFileSync(path.join(tmpRoot, dir, "foo.ts"), SRC);
+    }
+  }
+
+  function writeLog(tmpRoot: string, lines: string[]) {
+    fs.writeFileSync(path.join(tmpRoot, "docs/okf/log.md"), lines.join("\n"));
+  }
+
+  it("a full path in a newer log.md entry does not re-resolve an older entry's bare citation", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-log-scope-"),
+    );
+    try {
+      writeTwoFooFiles(tmpRoot);
+
+      const OLD_ENTRY = [
+        "## 2026-10-24",
+        "",
+        "- 2026-10-24T10:00:00Z, patched `foo.ts:1`, then its tail (`999`).",
+        "",
+      ];
+      const NEW_ENTRY = [
+        "## 2026-10-25",
+        "",
+        "- 2026-10-25T18:33:20Z, added `src/a/foo.ts:1` wiring.",
+        "",
+      ];
+
+      writeLog(tmpRoot, [...NEW_ENTRY, ...OLD_ENTRY]);
+      const withNewEntry = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      writeLog(tmpRoot, OLD_ENTRY);
+      const withoutNewEntry = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+
+      // The regression: adding the newer entry must change nothing.
+      expect(withNewEntry).toEqual(withoutNewEntry);
+      // And the old entry is still checked: with two foo.ts files the bare
+      // citation reaches step 6 and lands as ambiguous (an unresolved
+      // notice, not a silently re-resolved file), rather than vanishing.
+      const f = findingFor(withoutNewEntry, "foo.ts:1");
+      expect(f).toBeDefined();
+      expect(f?.message).toContain("[unresolved-ambiguous]");
+      expect(
+        findingFor(withNewEntry, "foo.ts:999 (continuation)"),
+      ).toBeUndefined();
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("a bare citation in the SAME entry as its full path still resolves through step 5", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-log-same-entry-"),
+    );
+    try {
+      writeTwoFooFiles(tmpRoot);
+      writeLog(tmpRoot, [
+        "## 2026-10-25",
+        "",
+        "- 2026-10-25T10:00:00Z, patched `src/a/foo.ts:1` and `foo.ts:999` in one entry.",
+        "",
+      ]);
+
+      const findings = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      // Step 5 is narrowed to the entry, not removed from log.md: within
+      // one entry the "last full path mentioned" convention still binds,
+      // so `foo.ts:999` resolves to src/a/foo.ts (not the step-6 ambiguity
+      // the two same-named files would otherwise give) and drifts.
+      const f = findingFor(findings, "foo.ts:999");
+      expect(f).toBeDefined();
+      expect(f?.message).toContain("[range-exceeds-file]");
+      expect(f?.detail).toBe("resolvedTo: src/a/foo.ts");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("a non-log doc keeps the whole-doc step 5 across paragraphs and list items", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-nonlog-scope-"),
+    );
+    try {
+      writeTwoFooFiles(tmpRoot);
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "---",
+          "",
+          "Section one names `src/a/foo.ts:1` here.",
+          "",
+          "- An unrelated bullet line in between.",
+          "",
+          "Section three later cites `foo.ts:999`, still whole-doc step 5.",
+          "",
+        ].join("\n"),
+      );
+
+      const findings = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      // The bullet line above is exactly the boundary that would cut the
+      // scan off if log.md's per-entry scope leaked to other docs; the
+      // binding survives it here, pinning the whole-doc behaviour.
+      const f = findingFor(findings, "foo.ts:999");
+      expect(f).toBeDefined();
+      expect(f?.message).toContain("[range-exceeds-file]");
+      expect(f?.detail).toBe("resolvedTo: src/a/foo.ts");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+});

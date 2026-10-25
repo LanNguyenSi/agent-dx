@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `citations-resolve` step 5 ("the nearest earlier citation in the same doc")
+  is per entry in `log.md`. `log.md` grows by appending at the TOP, so one
+  backticked full path in a new entry (e.g. `src/cli/apply/generate-settings.ts`)
+  sat earlier in the doc than every older entry and silently re-resolved 13
+  old bare-basename citations (`generate-settings.ts:NNN`) against it (observed
+  in the dogfood bundle: warnings 45 -> 58 on a single log entry). For `log.md`
+  only, the scan now starts at the entry containing the citation: the nearest
+  preceding top-level list item (`- ` at column 0) or heading line (`#` at
+  column 0), whichever is nearer. A same-entry full path still resolves
+  through step 5; a bare citation without one falls through to the repo-wide
+  step 6 search as before. Every other doc keeps the whole-doc scan (task
+  41b604f0). See [Citations](docs/citations.md).
+
 ## [0.19.1] - 2026-10-18
 
 - `citations-resolve` now recognises `.prisma` among its citation target
