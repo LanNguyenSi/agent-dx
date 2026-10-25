@@ -99,7 +99,13 @@ const RULE_ID = "citations-resolve";
  *      resolution attempt for a `/`-containing one
  *   5. the nearest earlier citation *in the same doc* whose path contains a
  *      `/` and ends with the same suffix as citedPath (the "last full path
- *      mentioned" convention)
+ *      mentioned" convention). In `log.md` only, "in the same doc" narrows
+ *      to "in the same entry": log.md appends new entries at the TOP, so a
+ *      full path in a newer entry sits earlier in the doc than every older
+ *      entry and would re-resolve their bare-basename citations across
+ *      entries; there the scan starts at the nearest preceding line that is
+ *      a top-level list item (`- ` at column 0) or a heading line (`#` at
+ *      column 0), whichever is nearer the citation
  *   6. a repo-wide search for a file whose path ends with citedPath (or,
  *      for a bare filename, whose basename equals it)
  * A citedPath starting with `/` is treated as out of scope (an absolute or
@@ -126,8 +132,12 @@ const RULE_ID = "citations-resolve";
  * scanned in document order. `governing` resets to none whenever the
  * citation immediately before it failed to resolve, was ambiguous, or was
  * out of scope (leading `/`) -- a continuation never silently inherits a
- * stale or unrelated path from further up the doc. A continuation with no
- * governing citation at all (e.g. very start of a doc) is skipped, not
+ * stale or unrelated path from further up the doc. In `log.md` only,
+ * `governing` is additionally scoped per entry (the same entry boundary as
+ * step 5 above): a continuation in one entry never chains to a citation in
+ * another, so a full path in a newer entry does not govern an older entry's
+ * bare tails. A continuation with no governing citation at all (e.g. very
+ * start of a doc, or none in its own entry in `log.md`) is skipped, not
  * flagged: there is nothing to validate it against.
  *
  * A continuation is further split into two roles (see
@@ -936,12 +946,16 @@ function findByBasename(
 /**
  * Finds the nearest citation earlier in the same doc whose cited path
  * contains a `/` and ends with the same suffix as `citedPath`, the "full
- * path was mentioned earlier in this section/doc" convention.
+ * path was mentioned earlier in this section/doc" convention. `scopeStart`
+ * restricts the scan to candidates at or after that offset (see
+ * `findLogEntryScopeStart` for why log.md passes an entry start rather
+ * than 0).
  */
 function findPriorQualifiedCitation(
   content: string,
   beforeIndex: number,
   citedPath: string,
+  scopeStart = 0,
 ): string | null {
   const suffix = "/" + citedPath;
   let best: string | null = null;
@@ -950,6 +964,7 @@ function findPriorQualifiedCitation(
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
     if (m.index >= beforeIndex) break;
+    if (m.index < scopeStart) continue;
     const candidate = m[1];
     if (candidate === citedPath) continue; // not more qualified than itself
     if (
@@ -963,6 +978,30 @@ function findPriorQualifiedCitation(
     }
   }
   return best;
+}
+
+/**
+ * Start offset of the log.md entry containing `beforeIndex`. A log.md entry
+ * is a top-level list item (a line starting `- ` at column 0, the append-
+ * at-top convention); entries group under `#`/`##` heading lines. The entry
+ * scope therefore begins at the nearest preceding (or containing) line that
+ * starts with `- ` or `#` at column 0, or at 0 if there is none. `log.md`
+ * uses this scope for two things: step 5 of path resolution scans only the
+ * entry containing the citation, and a continuation chains off `governing`
+ * only within the entry that set it -- a full path in a NEWER entry (top of
+ * the file) must neither re-resolve a bare-basename citation in an OLDER
+ * entry below nor govern that entry's bare tails, where the two whole-doc
+ * scans would otherwise pair them. Fenced code blocks are not tracked here
+ * on purpose: a `- `- or `#`-led line at column 0 inside one merely narrows
+ * the scope a little further, never widens it.
+ */
+function findLogEntryScopeStart(content: string, beforeIndex: number): number {
+  let lineStart = content.lastIndexOf("\n", beforeIndex - 1) + 1;
+  for (;;) {
+    if (/^(?:- |#)/.test(content.slice(lineStart))) return lineStart;
+    if (lineStart === 0) return 0;
+    lineStart = content.lastIndexOf("\n", lineStart - 2) + 1;
+  }
 }
 
 /**
@@ -1004,6 +1043,9 @@ function resolveViaAncestorClimb(
  * for binding a bare prose line reference to the file mention nearest it,
  * rather than re-implementing (and risking drifting from) this rule's own
  * path-resolution rules.
+ *
+ * `priorScopeStart` bounds step 5's backward scan (see
+ * `findLogEntryScopeStart`); it defaults to 0, the whole-doc scan.
  */
 export function resolveCitation(
   cache: BasenameCache,
@@ -1013,6 +1055,7 @@ export function resolveCitation(
   docSources: string[],
   citedPath: string,
   matchIndex: number,
+  priorScopeStart = 0,
 ): Resolution | null {
   if (citedPath.startsWith("/")) {
     return { skip: true };
@@ -1042,7 +1085,12 @@ export function resolveCitation(
   const docRelative = path.resolve(path.dirname(docAbsPath), citedPath);
   if (isFile(docRelative)) return { path: docRelative };
 
-  const prior = findPriorQualifiedCitation(docContent, matchIndex, citedPath);
+  const prior = findPriorQualifiedCitation(
+    docContent,
+    matchIndex,
+    citedPath,
+    priorScopeStart,
+  );
   if (prior) {
     const candidate = path.resolve(root, prior);
     if (isFile(candidate)) return { path: candidate };
@@ -2341,6 +2389,15 @@ function scanDoc(
   // uses for the non-reserved case.
   const requireAnchorsForDoc = doc.isReserved ? undefined : requireAnchors;
 
+  // Step 5 scope. log.md is append-at-top, so a full path in a newer entry
+  // is "earlier in the doc" than every older entry and would re-resolve
+  // their bare-basename citations across entries; for log.md only, step 5
+  // therefore scans from the start of the entry containing the citation
+  // (see findLogEntryScopeStart). The continuation `governing` state below
+  // records the same scope start. Every other doc keeps the whole-doc scan.
+  const priorScopeStartFor = (index: number): number =>
+    doc.basename === "log.md" ? findLogEntryScopeStart(content, index) : 0;
+
   // Heading-section citations (well-formed and malformed) are collected up
   // front so their char spans can gate the `CITATION_RE` scan below: a
   // `CITATION_RE` match landing inside a heading-section citation's own
@@ -2409,7 +2466,10 @@ function scanDoc(
   // above) can name "the governing citation" the same way it was actually
   // written. `lastStartLine`: the start line a "cont-ext" atom extends into
   // a range; tracks the most recent full or cont-fresh atom's own
-  // startLine, scoped together with `governing`.
+  // startLine, scoped together with `governing`. `governingScopeStart`: the
+  // entry start `governing` was set in (see findLogEntryScopeStart), used
+  // for log.md only to drop a governing citation that lives in a different
+  // entry than the continuation being looked at.
   let governing: {
     citedPath: string;
     resolvedPath: string;
@@ -2417,8 +2477,24 @@ function scanDoc(
     endLine: number | null;
   } | null = null;
   let lastStartLine: number | null = null;
+  let governingScopeStart: number | null = null;
 
   for (const atom of atoms) {
+    // Continuation scope (log.md only, the same entry boundary as step 5
+    // above): a `governing` set in a different entry than this atom does not
+    // govern it; reset, and let the "no governing citation" checks below
+    // skip this atom exactly like a continuation at the very start of a doc.
+    // Every other doc keeps the document-wide chain.
+    if (
+      doc.basename === "log.md" &&
+      governing !== null &&
+      findLogEntryScopeStart(content, atom.index) !== governingScopeStart
+    ) {
+      governing = null;
+      lastStartLine = null;
+      governingScopeStart = null;
+    }
+
     if (atom.kind === "cont-ext") {
       if (!governing || lastStartLine === null) continue; // nothing to extend
       const citation = `${governing.citedPath}:${lastStartLine}-${atom.value} (continuation)`;
@@ -2517,6 +2593,7 @@ function scanDoc(
       );
       governing = null;
       lastStartLine = null;
+      governingScopeStart = null;
       continue;
     }
 
@@ -2528,6 +2605,7 @@ function scanDoc(
       sources,
       citedPath,
       atom.index,
+      priorScopeStartFor(atom.index),
     );
 
     if (!resolution) {
@@ -2540,17 +2618,20 @@ function scanDoc(
       );
       governing = null;
       lastStartLine = null;
+      governingScopeStart = null;
       continue;
     }
     if ("skip" in resolution) {
       governing = null;
       lastStartLine = null;
+      governingScopeStart = null;
       continue;
     }
     if ("ambiguous" in resolution) {
       pushAmbiguous(findings, doc.relPath, citation, resolution.candidates);
       governing = null;
       lastStartLine = null;
+      governingScopeStart = null;
       continue;
     }
 
@@ -2631,6 +2712,7 @@ function scanDoc(
       endLine,
     };
     lastStartLine = startLine;
+    governingScopeStart = priorScopeStartFor(atom.index);
   }
 
   // Heading-section citations -- see the "Heading-section citations" doc
@@ -2666,6 +2748,7 @@ function scanDoc(
       sources,
       citedPath,
       hs.index,
+      priorScopeStartFor(hs.index),
     );
 
     if (!resolution) {
@@ -2802,6 +2885,7 @@ function scanDoc(
         sources,
         targetPath,
         sf.index,
+        priorScopeStartFor(sf.index),
       );
 
       if (!resolution) {
