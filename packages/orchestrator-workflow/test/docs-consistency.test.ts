@@ -2088,7 +2088,7 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
  * install-fence-mechanics.md (whose own frontmatter `sources` does not
  * list SKILL.md) trips this local assertion while okf-kit's own filter
  * stays at 0, because repo-wide `SKILL.md` is ambiguous between
- * packages/github-api-tool/SKILL.md and this package's own (see
+ * packages/agent-primitives/assets/skill/SKILL.md and this package's own (see
  * docs/okf/log.md for the measured run).
  */
 describe("every docs/okf citation into a kit-source category this bundle anchors carries an anchor", () => {

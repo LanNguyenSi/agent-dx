@@ -11,7 +11,6 @@ body:
         - okf-kit
         - orchestrator-workflow
         - friction-log
-        - github-api-tool
         - git-batch-cli
         - agent-dev-kit
         - agent-primitives

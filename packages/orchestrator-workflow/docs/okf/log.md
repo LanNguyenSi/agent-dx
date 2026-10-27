@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-10-27T21:09:40Z, `github-api-tool` removed from agent-dx: one comment line in `test/docs-consistency.test.ts` now names
+  `packages/agent-primitives/assets/skill/SKILL.md` as the repo-wide `SKILL.md` basename twin instead of the
+  removed package's file (the basename stays ambiguous, so the comment's claim holds). The line count is unchanged,
+  so no citation into the file moves; the docs that list it as a source make no claim about that comment. Re-stamped:
+  `model-preselection.md`, `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`.
 - 2026-10-25T07:33:42Z, release 0.48.0: the `[Unreleased]` entries move under a new `## [0.48.0]` heading,
   which shifts every later `CHANGELOG.md` line by two; each anchored log citation into those
   lines was re-pointed (`CHANGELOG.md:1250#"The implementer"`,

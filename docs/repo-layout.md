@@ -27,7 +27,6 @@ root needs to be set up first.
   alongside the CLI.
 - `agent-dev-kit`, `git-batch-cli`, and `mcp-token-audit` are
   functional CLIs, not yet published to npm.
-- `github-api-tool` is marked private in its own `package.json`.
 - `agent-engineering-playbook` and `agentic-coding-playbook` are
   documentation packages, not code: they have no `package.json`.
 
