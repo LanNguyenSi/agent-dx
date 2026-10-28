@@ -157,7 +157,7 @@ export function lineShiftAbove(hunks: Hunk[], from: number): number {
   return shift;
 }
 
-interface FileInfo {
+export interface FileInfo {
   /** Set when the file cannot be judged; the reason. */
   skip?: string;
   oldLines: string[];
@@ -238,7 +238,7 @@ function loadFileInfo(
   };
 }
 
-function judge(
+export function judge(
   citation: ResolvedCitation,
   file: string,
   info: FileInfo,

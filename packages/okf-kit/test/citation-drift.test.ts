@@ -4,9 +4,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runCheck, UsageError } from "../src/cli.js";
 import {
   hunkTouchesRange,
+  judge,
   lineShiftAbove,
   parseHunks,
 } from "../src/citation-drift.js";
+import type { ResolvedCitation } from "../src/rules/citations-resolve.js";
 import { renderRepointText, runRepoint } from "../src/repoint.js";
 import { createTmpGitRepo, type TmpGitRepo } from "./git-helpers.js";
 import { runCli } from "./helpers.js";
@@ -132,6 +134,58 @@ describe("hunk mapping", () => {
     expect(lineShiftAbove(hunks, 3)).toBe(3);
     expect(lineShiftAbove(hunks, 10)).toBe(3);
     expect(lineShiftAbove(hunks, 14)).toBe(-1);
+  });
+});
+
+describe("verdict", () => {
+  const citation = (startLine: number, endLine: number): ResolvedCitation => ({
+    docRelPath: "doc.md",
+    kind: "full",
+    label: `a.ts:${startLine}-${endLine}`,
+    resolvedPath: "/repo/a.ts",
+    startLine,
+    endLine,
+    startSpan: { offset: 0, length: 1 },
+    endSpan: null,
+  });
+  const base = { ref: "base", sha: "0".repeat(40) };
+  const oldLines = sourceLines(10);
+
+  it("refuses a shift whose text does not match, even though no hunk touches the range", () => {
+    // the hunks claim three lines were inserted above line 6, but the file
+    // does not contain the cited text three lines further down
+    const info = {
+      oldLines,
+      newLines: sourceLines(10).map((line, i) =>
+        i === 5 || i === 6 ? "unrelated" : line,
+      ),
+      hunks: [{ oldStart: 2, oldCount: 0, newStart: 3, newCount: 3 }],
+    };
+    const verdict = judge(citation(6, 7), "a.ts", info, base);
+    expect(verdict.status).toBe("changed");
+    expect(verdict.reason).toContain("not found at the lines it should have");
+  });
+
+  it("accepts the shift once the text is there", () => {
+    const newLines = [...oldLines];
+    newLines.splice(2, 0, "x1", "x2", "x3");
+    const info = {
+      oldLines,
+      newLines,
+      hunks: [{ oldStart: 2, oldCount: 0, newStart: 3, newCount: 3 }],
+    };
+    const verdict = judge(citation(6, 7), "a.ts", info, base);
+    expect(verdict).toMatchObject({
+      status: "moved",
+      newStartLine: 9,
+      newEndLine: 10,
+    });
+  });
+
+  it("skips a range that was not valid at the ref", () => {
+    const info = { oldLines, newLines: oldLines, hunks: [] };
+    expect(judge(citation(9, 12), "a.ts", info, base).status).toBe("skipped");
+    expect(judge(citation(7, 6), "a.ts", info, base).status).toBe("skipped");
   });
 });
 
