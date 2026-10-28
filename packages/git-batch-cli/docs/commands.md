@@ -91,7 +91,7 @@ The plain-text `status` row keeps the existing columns in place and appends the 
 <repo>: branch=X target=Y upstream=U ahead=D behind=E clean=Z staged=… unstaged=… untracked=… [outcome=F] target_ref=R target_sha=S head_sha=H ahead_of_target=A behind_target=B worktree=W common_dir=C
 ```
 
-`target_sha` and `head_sha` are shortened to 7 characters in text; JSON carries the full SHAs. The `-` sentinel is reused for `upstream=-`, `ahead=-`, `behind=-` when the current branch has no upstream, and for the target columns that are `null` in JSON. A value containing whitespace or a double quote (in practice `common_dir`, when the path has a space) is double-quoted with JSON string escaping, for example `common_dir="/Users/me/my repos/app/.git"`; split on whitespace outside quotes, or use `--json`, which is the safe way to parse. Scripts using `key=value` parsing are unaffected; scripts that index columns positionally should switch to `--json`.
+`target_sha` and `head_sha` are shortened to 7 characters in text; JSON carries the full SHAs. The `-` sentinel is reused for `upstream=-`, `ahead=-`, `behind=-` when the current branch has no upstream, and for the target columns that are `null` in JSON. A value containing whitespace or a double quote (in practice `common_dir`, when the path has a space) is double-quoted with JSON string escaping, for example `common_dir="/srv/my repos/app/.git"`; split on whitespace outside quotes, or use `--json`, which is the safe way to parse. Scripts using `key=value` parsing are unaffected; scripts that index columns positionally should switch to `--json`.
 
 ## `dirty`
 
