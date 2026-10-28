@@ -90,6 +90,7 @@ function parseArgs(argv) {
     dryRun: false,
     json: false,
     fetch: false,
+    fetchConcurrency: undefined,
     help: false
   };
 
@@ -135,6 +136,19 @@ function parseArgs(argv) {
 
     if (token === "--fetch") {
       parsed.fetch = true;
+      continue;
+    }
+
+    if (token === "--concurrency") {
+      index += 1;
+      parsed.fetchConcurrency = parseConcurrency(
+        resolveRequiredValue(argv, index, "--concurrency")
+      );
+      continue;
+    }
+
+    if (token.startsWith("--concurrency=")) {
+      parsed.fetchConcurrency = parseConcurrency(token.slice("--concurrency=".length));
       continue;
     }
 
@@ -233,6 +247,17 @@ function parseArgs(argv) {
   return parsed;
 }
 
+function parseConcurrency(value) {
+  if (!/^\d+$/.test(String(value).trim())) {
+    throw new Error(`Invalid value for --concurrency: ${value}`);
+  }
+  const numeric = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) {
+    throw new Error(`Invalid value for --concurrency: ${value}`);
+  }
+  return numeric;
+}
+
 function resolveRequiredValue(argv, index, optionName) {
   const value = argv[index];
   if (!value) {
@@ -270,7 +295,7 @@ function helpText() {
     "  git-batch [command] [root] [options]",
     "",
     "Commands:",
-    "  sync       Check for local changes, switch to a protected branch, pull",
+    "  sync       Check for local changes, switch to a protected branch, fast-forward",
     "  status     Show branch and worktree status for each repository",
     "  fetch      Run git fetch --all --prune for each repository",
     "  branches   Show current branch and detected protected branch",
@@ -289,6 +314,8 @@ function helpText() {
     "  --dry-run                 Print planned git actions without executing them",
     "  --json                    Emit JSON instead of text",
     "  --fetch                   (status) Run git fetch --quiet per repo first",
+    "  --concurrency <n>         Repositories processed in parallel by sync, fetch and",
+    "                            status --fetch (default 8)",
     "  --help                    Show this help",
     "",
     "Examples:",
@@ -506,8 +533,8 @@ function runBranches(repos, options) {
   });
 }
 
-function runFetch(repos, options) {
-  return repos.map((repo) => {
+async function runFetch(repos, options) {
+  return runParallelLimit(repos, normalizeFetchConcurrency(options.fetchConcurrency), async (repo) => {
     const result = {
       repo: repo.name,
       path: repo.path,
@@ -516,7 +543,7 @@ function runFetch(repos, options) {
     };
 
     try {
-      executeGitCommand(repo.path, ["fetch", "--all", "--prune"], options, result);
+      await executeGitCommand(repo.path, ["fetch", "--all", "--prune"], options, result);
       return result;
     } catch (error) {
       return repoError(repo, error, result.actions);
@@ -552,17 +579,17 @@ function runDirty(repos, options) {
     .filter((entry) => entry.outcome === "error" || !entry.clean);
 }
 
-function runSync(repos, options) {
-  return repos.map((repo) => {
+async function runSync(repos, options) {
+  return runParallelLimit(repos, normalizeFetchConcurrency(options.fetchConcurrency), async (repo) => {
     try {
-      return syncRepository(repo, options);
+      return await syncRepository(repo, options);
     } catch (error) {
       return repoError(repo, error);
     }
   });
 }
 
-function syncRepository(repo, options) {
+async function syncRepository(repo, options) {
   const status = collectRepoStatus(repo.path);
   const result = {
     repo: repo.name,
@@ -582,7 +609,7 @@ function syncRepository(repo, options) {
     return result;
   }
 
-  executeGitCommand(repo.path, ["fetch", "--all", "--prune"], options, result);
+  await executeGitCommand(repo.path, ["fetch", "--all", "--prune"], options, result);
 
   const targetBranch = detectProtectedBranch(repo.path, options.protectedBranches, {
     preferConfigured: options.protectedBranchesExplicit,
@@ -596,10 +623,13 @@ function syncRepository(repo, options) {
     return result;
   }
 
-  ensureCheckedOut(repo.path, status.branch, targetBranch, options, result);
-  executeGitCommand(
+  await ensureCheckedOut(repo.path, status.branch, targetBranch, options, result);
+  // The fetch above already updated origin/<target>; merging the local
+  // remote-tracking ref avoids a second network roundtrip that
+  // `git pull` would make.
+  await executeGitCommand(
     repo.path,
-    ["pull", "--ff-only", "origin", targetBranch],
+    ["merge", "--ff-only", `origin/${targetBranch}`],
     options,
     result
   );
@@ -759,18 +789,18 @@ function hasRemoteBranch(repoPath, branch) {
   );
 }
 
-function ensureCheckedOut(repoPath, currentBranch, targetBranch, options, result) {
+async function ensureCheckedOut(repoPath, currentBranch, targetBranch, options, result) {
   if (currentBranch === targetBranch) {
     return;
   }
 
   if (hasLocalBranch(repoPath, targetBranch)) {
-    executeGitCommand(repoPath, ["checkout", targetBranch], options, result);
+    await executeGitCommand(repoPath, ["checkout", targetBranch], options, result);
     return;
   }
 
   if (hasRemoteBranch(repoPath, targetBranch)) {
-    executeGitCommand(
+    await executeGitCommand(
       repoPath,
       ["checkout", "-b", targetBranch, "--track", `origin/${targetBranch}`],
       options,
@@ -782,7 +812,7 @@ function ensureCheckedOut(repoPath, currentBranch, targetBranch, options, result
   throw new Error(`Branch ${targetBranch} does not exist in ${repoPath}`);
 }
 
-function executeGitCommand(repoPath, args, options, result) {
+async function executeGitCommand(repoPath, args, options, result) {
   result.actions.push({
     command: ["git", ...args].join(" "),
     dryRun: options.dryRun
@@ -792,7 +822,11 @@ function executeGitCommand(repoPath, args, options, result) {
     return;
   }
 
-  const execution = runGit(repoPath, args);
+  // Network-touching and mutating calls run through the async runner so
+  // the parallel pool can overlap them; options.gitRunner lets tests
+  // observe or delay them.
+  const runner = options.gitRunner || runGitAsync;
+  const execution = await runner(repoPath, args);
   if (execution.code !== 0) {
     const stderr = execution.stderr.trim() || execution.stdout.trim();
     throw new Error(`${path.basename(repoPath)}: ${stderr}`);
@@ -1071,6 +1105,7 @@ module.exports = {
   printResults,
   resolveCliPath,
   runDirty,
+  runFetch,
   runList,
   runStatus,
   runSync

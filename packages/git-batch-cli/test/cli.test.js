@@ -16,6 +16,7 @@ const {
   printResults,
   resolveCliPath,
   runDirty,
+  runFetch,
   runStatus,
   runSync
 } = require("../src/cli");
@@ -184,7 +185,7 @@ test("discoverRepositories applies include and exclude filters", () => {
   );
 });
 
-test("runSync skips dirty repos and pulls clean repos to the protected branch", () => {
+test("runSync skips dirty repos and fast-forwards clean repos to the protected branch", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-sync-"));
   const clean = setupClonedRepo(root, "clean-repo");
   const dirty = setupClonedRepo(root, "dirty-repo");
@@ -195,7 +196,7 @@ test("runSync skips dirty repos and pulls clean repos to the protected branch", 
   git(clean.seedPath, ["commit", "-am", "update remote"]);
   git(clean.seedPath, ["push", "origin", "main"]);
 
-  const results = runSync(
+  const results = await runSync(
     discoverRepositories(root, {
       includeCurrent: false,
       includeHidden: false
@@ -217,13 +218,13 @@ test("runSync skips dirty repos and pulls clean repos to the protected branch", 
   assert.match(fs.readFileSync(path.join(clean.repoPath, "README.md"), "utf8"), /updated/);
 });
 
-test("runSync skips repositories when explicit protected branches are local-only", () => {
+test("runSync skips repositories when explicit protected branches are local-only", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-sync-local-only-"));
   const repo = setupClonedRepo(root, "local-only-repo");
 
   git(repo.repoPath, ["checkout", "-b", "develop"]);
 
-  const [result] = runSync(
+  const [result] = await runSync(
     discoverRepositories(root, {
       includeCurrent: false,
       includeHidden: false
@@ -633,4 +634,181 @@ test("printResults includes skip reasons for sync output", () => {
   assert.deepEqual(lines, [
     "dirty-repo: outcome=skipped_dirty current=feature/test target=- clean=false staged=0 unstaged=1 untracked=0 reason=worktree_dirty"
   ]);
+});
+
+function slowFetchRunner(delays, tracker) {
+  const { runGitAsyncForTest } = tracker;
+  return async (repoPath, args, extra) => {
+    const isFetch = args[0] === "fetch";
+    if (isFetch) {
+      tracker.inFlight += 1;
+      tracker.maxInFlight = Math.max(tracker.maxInFlight, tracker.inFlight);
+      await sleep(delays[path.basename(repoPath)] || 20);
+      tracker.inFlight -= 1;
+      tracker.finished.push(path.basename(repoPath));
+    }
+    tracker.commands.push(`${path.basename(repoPath)}: ${args.join(" ")}`);
+    return runGitAsyncForTest(repoPath, args, extra);
+  };
+}
+
+function makeTracker() {
+  const { spawn } = require("node:child_process");
+  const runGitAsyncForTest = (repoPath, args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn("git", args, { cwd: repoPath, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c) => { stdout += c; });
+      child.stderr.on("data", (c) => { stderr += c; });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) resolve({ code, stdout, stderr });
+        else reject(new Error(stderr.trim() || stdout.trim() || "git failed"));
+      });
+    });
+  return { inFlight: 0, maxInFlight: 0, finished: [], commands: [], runGitAsyncForTest };
+}
+
+function setupFiveRepos(prefix) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  for (const name of ["repo-a", "repo-b", "repo-c", "repo-d", "repo-e"]) {
+    setupClonedRepo(root, name);
+  }
+  return {
+    root,
+    repos: discoverRepositories(root, {
+      includeCurrent: false,
+      includeHidden: false,
+      only: ["/^repo-[a-e]$/"]
+    })
+  };
+}
+
+test("runSync overlaps fetches up to the concurrency cap", async () => {
+  const { repos } = setupFiveRepos("git-batch-sync-overlap-");
+  const tracker = makeTracker();
+  const results = await runSync(repos, {
+    protectedBranches: ["main", "master"],
+    fetchConcurrency: 3,
+    gitRunner: slowFetchRunner({}, tracker)
+  });
+  assert.equal(tracker.maxInFlight, 3);
+  assert.ok(results.every((entry) => entry.outcome === "ok"));
+});
+
+test("runFetch overlaps fetches with the default concurrency", async () => {
+  const { repos } = setupFiveRepos("git-batch-fetch-overlap-");
+  const tracker = makeTracker();
+  const results = await runFetch(repos, {
+    gitRunner: slowFetchRunner({}, tracker)
+  });
+  assert.equal(tracker.maxInFlight, 5);
+  assert.ok(results.every((entry) => entry.outcome === "ok"));
+  assert.equal(results[0].actions[0].command, "git fetch --all --prune");
+});
+
+test("runFetch and runSync keep sorted repo order when later repos finish first", async () => {
+  const { repos } = setupFiveRepos("git-batch-order-");
+  const delays = { "repo-a": 150, "repo-b": 100, "repo-c": 50 };
+
+  const fetchTracker = makeTracker();
+  const fetched = await runFetch(repos, { gitRunner: slowFetchRunner(delays, fetchTracker) });
+  assert.notEqual(fetchTracker.finished[0], "repo-a");
+  assert.deepEqual(fetched.map((entry) => entry.repo), repos.map((repo) => repo.name));
+
+  const syncTracker = makeTracker();
+  const synced = await runSync(repos, {
+    protectedBranches: ["main", "master"],
+    gitRunner: slowFetchRunner(delays, syncTracker)
+  });
+  assert.notEqual(syncTracker.finished[0], "repo-a");
+  assert.deepEqual(synced.map((entry) => entry.repo), repos.map((repo) => repo.name));
+});
+
+test("runSync fast-forwards with git merge instead of git pull", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-sync-merge-"));
+  const repo = setupClonedRepo(root, "merge-repo");
+  fs.writeFileSync(path.join(repo.seedPath, "upstream.txt"), "upstream\n", "utf8");
+  git(repo.seedPath, ["add", "upstream.txt"]);
+  git(repo.seedPath, ["commit", "-m", "upstream"]);
+  git(repo.seedPath, ["push", "origin", "main"]);
+
+  const [result] = await runSync(
+    discoverRepositories(root, { includeCurrent: false, includeHidden: false }),
+    { protectedBranches: ["main"], dryRun: false }
+  );
+
+  assert.equal(result.outcome, "ok");
+  const commands = result.actions.map((action) => action.command);
+  assert.deepEqual(commands, ["git fetch --all --prune", "git merge --ff-only origin/main"]);
+  assert.ok(!commands.some((command) => command.includes("pull")));
+  assert.equal(fs.readFileSync(path.join(repo.repoPath, "upstream.txt"), "utf8"), "upstream\n");
+});
+
+test("runSync reports non-fast-forward merges as errors", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-sync-nonff-"));
+  const repo = setupClonedRepo(root, "diverged-repo");
+  fs.writeFileSync(path.join(repo.seedPath, "remote.txt"), "remote\n", "utf8");
+  git(repo.seedPath, ["add", "remote.txt"]);
+  git(repo.seedPath, ["commit", "-m", "remote"]);
+  git(repo.seedPath, ["push", "origin", "main"]);
+  fs.writeFileSync(path.join(repo.repoPath, "local.txt"), "local\n", "utf8");
+  git(repo.repoPath, ["add", "local.txt"]);
+  git(repo.repoPath, ["commit", "-m", "local"]);
+
+  const [result] = await runSync(
+    discoverRepositories(root, { includeCurrent: false, includeHidden: false }),
+    { protectedBranches: ["main"], dryRun: false }
+  );
+
+  assert.equal(result.outcome, "error");
+  assert.match(result.error, /not possible to fast-forward|diverging|fatal/i);
+});
+
+test("runSync dry-run records the merge command and executes nothing", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-sync-dry-"));
+  setupClonedRepo(root, "dry-repo");
+  const tracker = makeTracker();
+  const [result] = await runSync(
+    discoverRepositories(root, { includeCurrent: false, includeHidden: false }),
+    { protectedBranches: ["main"], dryRun: true, gitRunner: slowFetchRunner({}, tracker) }
+  );
+  assert.equal(result.outcome, "ok");
+  assert.equal(tracker.commands.length, 0);
+  assert.equal(result.actions.at(-1).command, "git merge --ff-only origin/main");
+});
+
+test("parseArgs --concurrency: absent, valid, equals form", () => {
+  assert.equal(parseArgs(["fetch", "/tmp/ws"]).fetchConcurrency, undefined);
+  assert.equal(parseArgs(["fetch", "/tmp/ws", "--concurrency", "3"]).fetchConcurrency, 3);
+  assert.equal(parseArgs(["fetch", "/tmp/ws", "--concurrency=5"]).fetchConcurrency, 5);
+});
+
+test("parseArgs --concurrency rejects 0, negatives and non-numeric values", () => {
+  for (const bad of ["0", "-2", "abc", "1.5", ""]) {
+    assert.throws(
+      () => parseArgs(["sync", "/tmp/ws", `--concurrency=${bad}`]),
+      /Invalid value for --concurrency/
+    );
+  }
+  assert.throws(
+    () => parseArgs(["sync", "/tmp/ws", "--concurrency", "0"]),
+    /Invalid value for --concurrency/
+  );
+  assert.throws(
+    () => parseArgs(["sync", "/tmp/ws", "--concurrency", "abc"]),
+    /Invalid value for --concurrency/
+  );
+});
+
+test("--concurrency reaches the pool through main", async () => {
+  const { root } = setupFiveRepos("git-batch-main-concurrency-");
+  const out = [];
+  const code = await main(["fetch", root, "--only", "/^repo-[a-e]$/", "--concurrency", "2", "--dry-run", "--json"], {
+    out: (line) => out.push(line),
+    err: () => {}
+  });
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(out[0]).results.length, 5);
 });
