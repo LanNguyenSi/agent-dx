@@ -11,6 +11,7 @@ import {
   ignoredSymlinks,
   isWithin,
   mergeVerdict,
+  parseWorktreeList,
   resolveDefaultBase,
   resolveRemoteBase,
   resolveRepo,
@@ -95,6 +96,128 @@ function sameDirectory(a: string, b: string): boolean {
   return isWithin(a, b) && isWithin(b, a);
 }
 
+/** What `deleteCheckedBranch` did. `warnings` names every way the result
+ * falls short of a deleted branch with its configuration gone. */
+interface BranchDeletion {
+  deleted: boolean;
+  reason: string;
+  warnings: string[];
+}
+
+/**
+ * Deletes the local `branch` once its worktree is gone, but only while it
+ * still points at `checkedHead`: the commit `git worktree list` showed the
+ * worktree at before the first check of the removal ran. `git update-ref
+ * --no-deref -d refs/heads/<branch> <checkedHead>` compares and deletes in
+ * one step, so a commit made on the branch after the checks (in the
+ * worktree before it was removed, or from anywhere else) makes git refuse,
+ * and the branch is kept with the commit on it. The rest is what `git
+ * branch -D` does besides deleting the ref: a branch that another worktree
+ * has checked out is kept, and the `branch.<name>` configuration (its
+ * upstream, say) is removed with the branch, so a branch made later under
+ * the same name does not inherit it.
+ */
+function deleteCheckedBranch(
+  mainCheckout: string,
+  branch: string,
+  checkedHead: string | undefined,
+): BranchDeletion {
+  const kept = (why: string): BranchDeletion => ({
+    deleted: false,
+    reason: `kept ${branch}: ${why}`,
+    warnings: [`the branch ${branch} was not deleted: ${why}`],
+  });
+  if (
+    checkedHead === undefined ||
+    !/^[0-9a-f]{40,64}$/.test(checkedHead) ||
+    /^0+$/.test(checkedHead)
+  ) {
+    return kept(
+      "the commit the checks were made at is not known, so it is not deleted unchecked",
+    );
+  }
+  const listing = git(
+    mainCheckout,
+    ["worktree", "list", "--porcelain"],
+    REPORT_TIMEOUT,
+  );
+  if (listing.error !== undefined || listing.status !== 0) {
+    return kept(
+      `cannot tell whether another worktree has it checked out: ${gitFailure(listing)}`,
+    );
+  }
+  const holder = parseWorktreeList(listing.stdout).find(
+    (w) => w.branch === branch,
+  );
+  if (holder !== undefined) {
+    return kept(`it is checked out in ${holder.path}`);
+  }
+  const ref = `refs/heads/${branch}`;
+  const deleted = git(
+    mainCheckout,
+    ["update-ref", "--no-deref", "-d", ref, checkedHead],
+    REPORT_TIMEOUT,
+  );
+  if (deleted.error !== undefined || deleted.status !== 0) {
+    // The deletion is conditional on the checked commit, so a branch that
+    // moved fails it; reading the branch again tells that from a git error.
+    const now = git(
+      mainCheckout,
+      ["rev-parse", "--verify", "--quiet", ref],
+      REPORT_TIMEOUT,
+    );
+    const nowSha =
+      now.error === undefined && now.status === 0
+        ? now.stdout.trim()
+        : undefined;
+    if (nowSha !== undefined && nowSha !== checkedHead) {
+      return kept(
+        `it points at ${nowSha} now, not at ${checkedHead} where the checks found it (a commit made while the removal ran, say), so it is kept with that commit`,
+      );
+    }
+    if (nowSha === undefined && now.error === undefined) {
+      const gone = `git update-ref -d ${ref} ${checkedHead} failed (${gitFailure(deleted)}), and ${branch} no longer exists`;
+      return { deleted: false, reason: gone, warnings: [gone] };
+    }
+    return kept(
+      `git update-ref -d ${ref} ${checkedHead} failed: ${gitFailure(deleted)}`,
+    );
+  }
+  const result: BranchDeletion = {
+    deleted: true,
+    reason: `deleted ${branch} (was ${checkedHead})`,
+    warnings: [],
+  };
+  const section = `branch.${branch}`;
+  const config = git(
+    mainCheckout,
+    ["config", "--local", "--list", "--name-only", "-z"],
+    REPORT_TIMEOUT,
+  );
+  if (config.error !== undefined || config.status !== 0) {
+    result.warnings.push(
+      `deleted ${branch}, but could not read the configuration to remove its \`${section}\` section: ${gitFailure(config)}`,
+    );
+    return result;
+  }
+  const hasSection = config.stdout
+    .split("\0")
+    .some((name) => name.startsWith(`${section}.`));
+  if (hasSection) {
+    const dropped = git(
+      mainCheckout,
+      ["config", "--local", "--remove-section", section],
+      REPORT_TIMEOUT,
+    );
+    if (dropped.error !== undefined || dropped.status !== 0) {
+      result.warnings.push(
+        `deleted ${branch}, but its \`${section}\` configuration is left: ${gitFailure(dropped)}`,
+      );
+    }
+  }
+  return result;
+}
+
 /**
  * Removes one linked worktree: the locked, nested-worktree, submodule,
  * status, merged and unpushed checks first, each of the last three failing
@@ -103,14 +226,15 @@ function sameDirectory(a: string, b: string): boolean {
  * that arrived during the checks has had its chance to stop the command
  * (`stopIfInterrupted`), the ignored dependency links (unlinked, never
  * followed), then `git worktree remove` and `git worktree prune`, and finally
- * the optional `git branch -D`.
+ * the optional deletion of the branch, at the commit the checks were made at
+ * (`deleteCheckedBranch`).
  *
  * The main checkout is not modified by the removal: its HEAD, index,
  * working tree and stash are untouched, and `git stash`, `checkout`,
  * `switch` and `reset` are never run anywhere. Every git call that writes
  * acts on the main checkout's administrative directories only (`worktree
- * remove`, `worktree prune`, `branch -D`); everything else reads the
- * worktree. The one exception is `syncMain`, which may fast-forward the main
+ * remove`, `worktree prune`, and for the branch `update-ref -d` and `config
+ * --remove-section`); everything else reads the worktree. The one exception is `syncMain`, which may fast-forward the main
  * checkout when it is clean and on the default branch (see `sync.ts`).
  */
 export async function removeWorktree(
@@ -252,14 +376,7 @@ export async function removeWorktree(
   // Asked only when a flag needs the answer: the `gh` lookup of a verdict is
   // a network call where `gh` happens to be installed. Computed before the
   // unpushed check, because a branch that is merged into the base has no
-  // work left to lose even when no remote branch holds its commits. The
-  // content rule is weighed only where the caller asked for the merge to be
-  // required and there is a branch the verdict is about: elsewhere
-  // (`--delete-branch` alone, a detached HEAD) the verdict is ancestry or a
-  // merged pull request, as it was before the rule existed, so a content
-  // verdict alone never excuses commits there.
-  const withContentRule =
-    o.requireMerged === true && entry.branch !== undefined;
+  // work left to lose even when no remote branch holds its commits.
   const merged: MergeVerdict | null =
     o.requireMerged !== true && o.deleteBranch !== true
       ? null
@@ -276,7 +393,6 @@ export async function removeWorktree(
             base.ref,
             base.ghBase,
             base.label,
-            { contentRule: withContentRule },
           );
   if (o.requireMerged === true && o.force !== true && merged !== null) {
     if (merged.merged === "no") {
@@ -455,29 +571,19 @@ export async function removeWorktree(
     if (entry.branch === undefined) {
       branch = { deleted: false, reason: "detached HEAD, no branch" };
     } else {
-      // `-D` cannot lose work here: an unpushed branch was already refused
-      // above, unless `--force` said otherwise or the verdict said the
-      // branch is merged into the base, which warned about those commits.
-      const deleted = git(
+      // The deletion cannot lose work here: an unpushed branch was already
+      // refused above, unless `--force` said otherwise or the verdict said
+      // the branch is merged into the base, which warned about those
+      // commits; and it only deletes the branch at the commit the worktree
+      // list showed before those checks ran.
+      const deletion = deleteCheckedBranch(
         repo.mainCheckout,
-        ["branch", "-D", entry.branch],
-        REPORT_TIMEOUT,
+        entry.branch,
+        entry.head,
       );
-      const ok = deleted.error === undefined && deleted.status === 0;
-      const text = [deleted.stdout.trim(), deleted.stderr.trim()]
-        .filter((part) => part.length > 0)
-        .join(" ");
-      branch = {
-        deleted: ok,
-        reason:
-          text.length > 0
-            ? text
-            : ok
-              ? `deleted ${entry.branch}`
-              : deleted.timedOut === true
-                ? `git branch -D ${entry.branch} failed: ${gitFailure(deleted)}`
-                : `git branch -D ${entry.branch} failed`,
-      };
+      const ok = deletion.deleted;
+      branch = { deleted: ok, reason: deletion.reason };
+      warnings.push(...deletion.warnings);
       if (ok && merged !== null) {
         const where = base?.label ?? "the default branch";
         const hint =

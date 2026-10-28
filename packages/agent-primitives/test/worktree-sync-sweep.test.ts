@@ -3,20 +3,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  CONTENT_RULE_MAX_COMMITS,
-  contentInBase,
-  contentRule,
-} from "../src/worktree/git.js";
 import { FIXED_BIN_DIR, spawnCli } from "./helpers/spawn-cli.js";
 
 /**
- * `worktree remove --sync-main`, `worktree sweep` and the content rule of the
- * merged verdict. Hermetic like the other worktree suites: no global or
+ * `worktree remove --sync-main`, `worktree sweep` and the merged verdict
+ * they rest on. Hermetic like the other worktree suites: no global or
  * system git config, an identity from the environment, and a local bare
  * repository as `origin`. A merge on the "server" is made by a second clone
  * pushing a squash commit, so the fixture's main checkout is behind origin
- * exactly as it is after a real pull request merge.
+ * exactly as it is after a real pull request merge. A squash merge leaves no
+ * ancestry, so only `gh` can vouch for it: the CLI's PATH has no `gh` unless
+ * a test puts the stand-in of `ghStub` there.
  */
 const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_CONFIG_GLOBAL: "/dev/null",
@@ -197,6 +194,71 @@ function entryFor(r: Cli, dir: string): Record<string, any> {
   );
   expect(found, `no entry for ${dir} in ${r.stdout}`).toBeDefined();
   return found as Record<string, any>;
+}
+
+/**
+ * A `gh` stand-in, returned as the PATH that puts it in front of the fixed
+ * binaries. `gh pr list ... --head <branch>` prints the merged pull requests
+ * `mergedPr` recorded for that branch and `[]` for any other, the way GitHub
+ * filters by the head branch; every call is appended to `<base>/gh.log`.
+ * With `<base>/commit-on-call` holding a number N, the N-th call first
+ * commits `late.txt` in its working directory, which is the worktree the
+ * verdict is about: a commit made after the removal's checks began.
+ */
+function ghStub(f: Fixture): string {
+  const bin = path.join(f.base, "ghbin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.mkdirSync(path.join(f.base, "prs"), { recursive: true });
+  fs.writeFileSync(
+    path.join(bin, "gh"),
+    [
+      // Shell built-ins and git only: the fixed PATH has no `cat`.
+      "#!/bin/sh",
+      "n=0",
+      `if [ -f '${f.base}/gh.count' ]; then read -r n < '${f.base}/gh.count'; fi`,
+      "n=$((n + 1))",
+      `echo "$n" > '${f.base}/gh.count'`,
+      `echo "$*" >> '${f.base}/gh.log'`,
+      "at=",
+      `if [ -f '${f.base}/commit-on-call' ]; then read -r at < '${f.base}/commit-on-call'; fi`,
+      'if [ "$at" = "$n" ]; then',
+      '  echo late > late.txt && git add late.txt && git commit -q -m "late commit" || exit 3',
+      "fi",
+      "head=",
+      "prev=",
+      'for a in "$@"; do',
+      '  if [ "$prev" = --head ]; then head=$a; fi',
+      "  prev=$a",
+      "done",
+      "json='[]'",
+      `if [ -n "$head" ] && [ -f '${f.base}/prs/'"$head"'.json' ]; then read -r json < '${f.base}/prs/'"$head"'.json'; fi`,
+      "printf '%s\\n' \"$json\"",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return `${bin}${path.delimiter}${FIXED_BIN_DIR}`;
+}
+
+/** Records a merged pull request of `branch` into `main` whose head was
+ * `headRefOid`, for `ghStub` to report. */
+function mergedPr(f: Fixture, branch: string, headRefOid: string): void {
+  fs.mkdirSync(path.join(f.base, "prs"), { recursive: true });
+  fs.writeFileSync(
+    path.join(f.base, "prs", `${branch}.json`),
+    `${JSON.stringify([{ number: 7, headRefOid, baseRefName: "main" }])}\n`,
+  );
+}
+
+/** A `gh` that the trampoline cannot run (exit 127), as on a machine
+ * without it; returned as a PATH like `ghStub`'s. */
+function noGh(f: Fixture): string {
+  const bin = path.join(f.base, "noghbin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, "gh"), "#!/bin/sh\nexit 127\n", {
+    mode: 0o755,
+  });
+  return `${bin}${path.delimiter}${FIXED_BIN_DIR}`;
 }
 
 describe("worktree remove --sync-main", () => {
@@ -414,25 +476,7 @@ describe("worktree remove --sync-main", () => {
   });
 });
 
-describe("the content rule of the merged verdict", () => {
-  it("calls a multi-commit squash merge merged when the base moved on elsewhere, without gh", async () => {
-    const f = makeFixture();
-    const wt = featureWorktree(f, "feat");
-    serverCommit(f, "elsewhere.txt", "before the squash\n");
-    squashMergeOnServer(f, "feat");
-    serverCommit(f, "later.txt", "after the squash\n");
-    fetchPrune(f);
-
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toContain(
-      "2 path(s)",
-    );
-    const listed = await cli(f.work, ["list", "--repo", f.repo]);
-    const entry = (listed.json.worktrees as Record<string, any>[]).find(
-      (w) => w.path === wt,
-    );
-    expect(entry?.merged).toMatchObject({ merged: "yes", via: "content" });
-  });
-
+describe("the merged verdict of a squash merge: ancestry, or gh at the tip", () => {
   it("does not call a branch merged that gained a commit after the squash", async () => {
     const f = makeFixture();
     const wt = featureWorktree(f, "feat");
@@ -440,117 +484,81 @@ describe("the content rule of the merged verdict", () => {
     fetchPrune(f);
     commitHere(wt, "after.txt", "work after the squash");
 
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toBe(
-      undefined,
-    );
     const listed = await cli(f.work, ["list", "--repo", f.repo]);
     const entry = (listed.json.worktrees as Record<string, any>[]).find(
       (w) => w.path === wt,
     );
-    // No gh in the CLI's PATH: not merged by content, so unknown.
+    // No gh in the CLI's PATH: not an ancestor, and nothing else can say.
     expect(entry?.merged.merged).toBe("unknown");
     const refused = await cli(f.work, ["remove", wt, "--require-merged"]);
     expect(refused.code).toBe(2);
     expect(refused.json.reason).toBe("merge_state_unknown");
+    expect(fs.existsSync(path.join(wt, "after.txt"))).toBe(true);
   });
 
-  it("does not call a branch merged when the base changed the same file again", async () => {
-    const f = makeFixture();
-    const wt = featureWorktree(f, "feat");
-    squashMergeOnServer(f, "feat");
-    serverCommit(f, "feat-1.txt", "rewritten on main\n");
-    fetchPrune(f);
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toBe(
-      undefined,
-    );
-  });
-
-  it("counts a rename as a change of both paths", () => {
-    const f = makeFixture();
-    const wt = addWorktree(f, "mv", path.join(f.root, "mv"));
-    git(wt, ["mv", "a.txt", "renamed.txt"]);
-    git(wt, ["commit", "-q", "-am", "rename a"]);
-    // The base got the new file but kept the old one: the branch deleted
-    // a.txt, so its work is not all in the base.
-    git(f.other, ["pull", "-q", "--ff-only", "origin", "main"]);
-    write(f.other, "renamed.txt", "one\n");
-    git(f.other, ["add", "-A"]);
-    git(f.other, ["commit", "-q", "-m", "copy a"]);
-    git(f.other, ["push", "-q", "origin", "main"]);
-    fetchPrune(f);
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toBe(
-      undefined,
-    );
-    // The base that also dropped the old path has all of it.
-    git(f.other, ["rm", "-q", "a.txt"]);
-    git(f.other, ["commit", "-q", "-m", "drop a"]);
-    git(f.other, ["push", "-q", "origin", "main"]);
-    fetchPrune(f);
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toContain(
-      "2 path(s)",
-    );
-  });
-
-  it("does not decide a branch that changed nothing since it forked", () => {
-    const f = makeFixture();
-    const wt = addWorktree(f, "empty", path.join(f.root, "empty"));
-    git(wt, ["commit", "-q", "--allow-empty", "-m", "nothing"]);
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toBe(
-      undefined,
-    );
-  });
-
-  it("does not call a branch with unmerged work merged", () => {
-    const f = makeFixture();
-    const wt = featureWorktree(f, "feat");
-    serverCommit(f, "elsewhere.txt", "unrelated\n");
-    fetchPrune(f);
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toBe(
-      undefined,
-    );
-  });
-
-  it("does not ask gh when the content rule decides", async () => {
+  it("lets remove --require-merged --delete-branch take a squash-merged branch whose pull request gh reports at its tip", async () => {
     const f = makeFixture();
     const wt = featureWorktree(f, "feat");
     squashMergeOnServer(f, "feat");
     fetchPrune(f);
-    const bin = path.join(f.base, "ghbin");
-    fs.mkdirSync(bin);
-    const log = path.join(f.base, "gh.log");
-    fs.writeFileSync(
-      path.join(bin, "gh"),
-      `#!/bin/sh\necho "$@" >> '${log}'\necho '[]'\n`,
-      { mode: 0o755 },
+    const PATH = ghStub(f);
+    mergedPr(f, "feat", head(wt));
+
+    const r = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--delete-branch"],
+      { PATH },
     );
-    const r = await cli(f.work, ["remove", wt, "--require-merged"], {
-      PATH: `${bin}${path.delimiter}${FIXED_BIN_DIR}`,
-    });
     expect(r.code, r.stdout + r.stderr).toBe(0);
-    expect(r.json.merged).toMatchObject({ merged: "yes", via: "content" });
-    expect(fs.existsSync(log)).toBe(false);
-  });
-
-  it("lets remove --require-merged --delete-branch take a squash-merged branch whose remote branch is gone", async () => {
-    const f = makeFixture();
-    const wt = featureWorktree(f, "feat");
-    squashMergeOnServer(f, "feat");
-    fetchPrune(f);
-
-    const r = await cli(f.work, [
-      "remove",
-      wt,
-      "--require-merged",
-      "--delete-branch",
-    ]);
-    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged).toMatchObject({ merged: "yes", via: "gh" });
     expect(r.json.branch.deleted).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
     expect(branchExists(f, "feat")).toBe(false);
     expect(
       (r.json.warnings as string[]).some((w) =>
         w.includes("not counted as unpushed"),
       ),
     ).toBe(true);
+  });
+
+  it("refuses a squash-merged branch with a commit after the pull request's head, which gh reports at the older tip", async () => {
+    const f = makeFixture();
+    const wt = featureWorktree(f, "feat");
+    const prHead = head(wt);
+    squashMergeOnServer(f, "feat");
+    fetchPrune(f);
+    commitHere(wt, "extra.txt", "never pushed, after the squash");
+    const PATH = ghStub(f);
+    mergedPr(f, "feat", prHead);
+
+    const r = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--delete-branch"],
+      { PATH },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("branch_not_merged");
+    expect(r.json.details.merged).toMatchObject({ merged: "no", via: "gh" });
+    expect(fs.existsSync(path.join(wt, "extra.txt"))).toBe(true);
+    expect(branchExists(f, "feat")).toBe(true);
+  });
+
+  it("without gh, leaves a squash-merged branch unknown, so remove --require-merged refuses it", async () => {
+    const f = makeFixture();
+    const wt = featureWorktree(f, "feat");
+    squashMergeOnServer(f, "feat");
+    fetchPrune(f);
+
+    const r = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--delete-branch"],
+      { PATH: noGh(f) },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("merge_state_unknown");
+    expect(r.json.details.merged.reason).toContain("gh is not available");
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(branchExists(f, "feat")).toBe(true);
   });
 });
 
@@ -577,8 +585,18 @@ describe("worktree sweep", () => {
     squashMergeOnServer(f, "locked");
     git(f.repo, ["worktree", "lock", locked]);
     fetchPrune(f);
+    // GitHub's view: the three squash-merged branches have a merged pull
+    // request at their tips; `open` and `unpushed` have none.
+    const PATH = ghStub(f);
+    for (const [name, dir] of [
+      ["squashed", squashed],
+      ["dirty", dirty],
+      ["locked", locked],
+    ] as const) {
+      mergedPr(f, name, head(dir));
+    }
 
-    const r = await cli(f.work, ["sweep", "--root", f.root]);
+    const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
     expect(r.code, r.stdout + r.stderr).toBe(1);
     expect(r.json.status).toBe("partial");
     expect(r.json.dryRun).toBe(false);
@@ -586,6 +604,10 @@ describe("worktree sweep", () => {
     expect(entryFor(r, squashed)).toMatchObject({
       action: "removed",
       branchDeleted: true,
+    });
+    expect(entryFor(r, squashed).merged).toMatchObject({
+      merged: "yes",
+      via: "gh",
     });
     expect(entryFor(r, ff)).toMatchObject({
       action: "skipped",
@@ -632,11 +654,60 @@ describe("worktree sweep", () => {
     const wt = featureWorktree(f, "feat");
     squashMergeOnServer(f, "feat");
     fetchPrune(f);
-    const r = await cli(f.work, ["sweep", "--root", f.root]);
+    const PATH = ghStub(f);
+    mergedPr(f, "feat", head(wt));
+    const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
     expect(r.code, r.stdout + r.stderr).toBe(0);
     expect(r.json.status).toBe("ok");
     expect(r.json.summary.removed).toBe(1);
     expect(fs.existsSync(wt)).toBe(false);
+  });
+
+  it("removes a squash-merged branch whose pull request gh reports at its tip, with the branch's configuration", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "feat", path.join(f.root, "feat"));
+    commitHere(wt, "feat.txt", "feat work");
+    // An upstream, as `git push -u` sets it.
+    git(wt, ["push", "-q", "-u", "origin", "feat"]);
+    expect(git(f.repo, ["config", "branch.feat.remote"]).trim()).toBe("origin");
+    squashMergeOnServer(f, "feat");
+    fetchPrune(f);
+    const PATH = ghStub(f);
+    mergedPr(f, "feat", head(wt));
+
+    const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(entryFor(r, wt)).toMatchObject({
+      action: "removed",
+      branchDeleted: true,
+    });
+    expect(entryFor(r, wt).merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(branchExists(f, "feat")).toBe(false);
+    expect(gitOk(f.repo, ["config", "--get-regexp", "^branch\\.feat\\."])).toBe(
+      false,
+    );
+  });
+
+  it("skips a squash-merged branch without gh, with the reason, and reports partial", async () => {
+    const f = makeFixture();
+    const wt = featureWorktree(f, "feat");
+    squashMergeOnServer(f, "feat");
+    fetchPrune(f);
+
+    const r = await cli(f.work, ["sweep", "--root", f.root], {
+      PATH: noGh(f),
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(1);
+    expect(r.json.status).toBe("partial");
+    expect(entryFor(r, wt).action).toBe("skipped");
+    expect(entryFor(r, wt).reason).toContain("gh is not available");
+    expect(entryFor(r, wt).merged).toMatchObject({
+      merged: "unknown",
+      via: "none",
+    });
+    expect(fs.existsSync(path.join(wt, "feat-1.txt"))).toBe(true);
+    expect(branchExists(f, "feat")).toBe(true);
   });
 
   it("executes nothing with --dry-run and lists what it would remove", async () => {
@@ -645,10 +716,14 @@ describe("worktree sweep", () => {
     const open = featureWorktree(f, "open");
     squashMergeOnServer(f, "merged");
     fetchPrune(f);
+    const PATH = ghStub(f);
+    mergedPr(f, "merged", head(merged));
     const refsBefore = git(f.repo, ["show-ref"]);
     const listBefore = git(f.repo, ["worktree", "list", "--porcelain"]);
 
-    const r = await cli(f.work, ["sweep", "--root", f.root, "--dry-run"]);
+    const r = await cli(f.work, ["sweep", "--root", f.root, "--dry-run"], {
+      PATH,
+    });
     expect(r.code, r.stdout + r.stderr).toBe(1);
     expect(r.json.dryRun).toBe(true);
     expect(entryFor(r, merged).action).toBe("would_remove");
@@ -662,10 +737,14 @@ describe("worktree sweep", () => {
 
   it("exits 0 for a dry run that skips nothing", async () => {
     const f = makeFixture();
-    featureWorktree(f, "merged");
+    const merged = featureWorktree(f, "merged");
     squashMergeOnServer(f, "merged");
     fetchPrune(f);
-    const r = await cli(f.work, ["sweep", "--root", f.root, "--dry-run"]);
+    const PATH = ghStub(f);
+    mergedPr(f, "merged", head(merged));
+    const r = await cli(f.work, ["sweep", "--root", f.root, "--dry-run"], {
+      PATH,
+    });
     expect(r.code, r.stdout + r.stderr).toBe(0);
     expect(r.json.status).toBe("ok");
     expect(r.json.summary.wouldRemove).toBe(1);
@@ -680,8 +759,11 @@ describe("worktree sweep", () => {
     squashMergeOnServer(f, "inside");
     squashMergeOnServer(f, "outside");
     fetchPrune(f);
+    const PATH = ghStub(f);
+    mergedPr(f, "inside", head(inside));
+    mergedPr(f, "outside", head(outside));
 
-    const r = await cli(f.work, ["sweep", "--root", f.root]);
+    const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
     expect(r.code, r.stdout + r.stderr).toBe(0);
     expect(fs.existsSync(inside)).toBe(false);
     expect(fs.existsSync(outside)).toBe(true);
@@ -721,16 +803,21 @@ describe("worktree sweep", () => {
     expect(branchExists(f, "main")).toBe(true);
   });
 
-  it("does not sweep a branch that gained unpushed commits after its squash merge", async () => {
+  it("does not sweep a branch that gained unpushed commits after its squash merge, though gh reports the pull request at the older tip", async () => {
     const f = makeFixture();
     const wt = featureWorktree(f, "feat");
+    const prHead = head(wt);
     squashMergeOnServer(f, "feat");
     fetchPrune(f);
     commitHere(wt, "extra.txt", "extra work after the squash");
+    const PATH = ghStub(f);
+    mergedPr(f, "feat", prHead);
 
-    const r = await cli(f.work, ["sweep", "--root", f.root]);
+    const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
     expect(r.code, r.stdout + r.stderr).toBe(1);
     expect(entryFor(r, wt).action).toBe("skipped");
+    expect(entryFor(r, wt).merged).toMatchObject({ merged: "no", via: "gh" });
+    expect(entryFor(r, wt).reason).toContain(`none into main at ${head(wt)}`);
     expect(fs.existsSync(path.join(wt, "extra.txt"))).toBe(true);
     expect(branchExists(f, "feat")).toBe(true);
   });
@@ -790,10 +877,13 @@ describe("worktree sweep: what it must never remove", () => {
     const moved = path.join(outsideDir, "outsider");
     squashMergeOnServer(f, "outsider");
     fetchPrune(f);
+    // Merged as far as gh can tell, so only the link check holds it back.
+    const PATH = ghStub(f);
+    mergedPr(f, "outsider", head(moved));
     const link = path.join(f.root, "link");
     fs.symlinkSync(moved, link);
 
-    const r = await cli(f.work, ["sweep", "--root", f.root]);
+    const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
     expect(r.code, r.stdout + r.stderr).toBe(1);
     expect(r.json.status).toBe("partial");
     expect(entryFor(r, link)).toMatchObject({ action: "skipped" });
@@ -880,41 +970,58 @@ describe("worktree sweep: what it must never remove", () => {
     expect(removed.code, removed.stdout + removed.stderr).toBe(0);
   });
 
-  it("does not sweep a squash-merged branch that gained unpushed commits adding and then deleting a file", async () => {
+  /** A branch `sq` whose one commit `s1` was pushed and squash-merged,
+   * with the remote branch deleted, and then two commits that were never
+   * pushed: one adds `notes.md`, the next deletes it again, so the
+   * branch's net change is still all in the base. */
+  function netZeroAfterSquash(): { f: Fixture; wt: string; s1: string } {
     const f = makeFixture();
     const wt = addWorktree(f, "sq", path.join(f.root, "sq"));
     commitHere(wt, "s.txt", "s1");
     git(wt, ["push", "-q", "origin", "sq"]);
+    const s1 = head(wt);
     squashMergeOnServer(f, "sq");
     fetchPrune(f);
-    // After the squash, never pushed: the second commit takes the file
-    // back, so the branch's net change is still all in the base.
     commitHere(wt, "notes.md", "important notes");
     git(wt, ["rm", "-q", "notes.md"]);
     git(wt, ["commit", "-q", "-m", "move the notes elsewhere"]);
+    return { f, wt, s1 };
+  }
 
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toBe(
-      undefined,
-    );
+  it("does not sweep a squash-merged branch that gained unpushed commits adding and then deleting a file", async () => {
+    const { f, wt, s1 } = netZeroAfterSquash();
+
+    // Without gh nothing can vouch for it.
     const listed = await cli(f.work, ["list", "--repo", f.repo]);
     const entry = (listed.json.worktrees as Record<string, any>[]).find(
       (w) => w.path === wt,
     );
-    expect(entry?.merged.merged).not.toBe("yes");
-    expect(entry?.merged.reason).toContain("2 commit(s) after it");
-
-    const refused = await cli(f.work, [
+    expect(entry?.merged.merged).toBe("unknown");
+    const unknown = await cli(f.work, [
       "remove",
       wt,
       "--require-merged",
       "--delete-branch",
     ]);
-    expect(refused.code, refused.stdout + refused.stderr).toBe(2);
-    expect(refused.json.reason).toBe("merge_state_unknown");
+    expect(unknown.code, unknown.stdout + unknown.stderr).toBe(2);
+    expect(unknown.json.reason).toBe("merge_state_unknown");
 
-    const r = await cli(f.work, ["sweep", "--root", f.root]);
-    expect(r.code, r.stdout + r.stderr).toBe(1);
-    expect(entryFor(r, wt).action).toBe("skipped");
+    // With gh, the pull request was merged at s1, not at the tip.
+    const PATH = ghStub(f);
+    mergedPr(f, "sq", s1);
+    const refused = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--delete-branch"],
+      { PATH },
+    );
+    expect(refused.code, refused.stdout + refused.stderr).toBe(2);
+    expect(refused.json.reason).toBe("branch_not_merged");
+
+    for (const env of [{}, { PATH }]) {
+      const r = await cli(f.work, ["sweep", "--root", f.root], env);
+      expect(r.code, r.stdout + r.stderr).toBe(1);
+      expect(entryFor(r, wt).action).toBe("skipped");
+    }
     expect(fs.existsSync(wt)).toBe(true);
     expect(branchExists(f, "sq")).toBe(true);
     expect(git(wt, ["log", "--format=%s", "-1", "HEAD~1"]).trim()).toBe(
@@ -922,18 +1029,138 @@ describe("worktree sweep: what it must never remove", () => {
     );
   });
 
+  it("does not sweep net-zero commits after a squash followed by a cherry-pick of a base commit", async () => {
+    const { f, wt, s1 } = netZeroAfterSquash();
+    // A later change on the base, taken onto the branch as well.
+    serverCommit(f, "a.txt", "moved\n");
+    fetchPrune(f);
+    const baseCommit = git(f.repo, ["rev-parse", "origin/main"]).trim();
+    git(wt, ["cherry-pick", baseCommit]);
+    const PATH = ghStub(f);
+    mergedPr(f, "sq", s1);
+
+    for (const dryRun of [true, false]) {
+      const r = await cli(
+        f.work,
+        ["sweep", "--root", f.root, ...(dryRun ? ["--dry-run"] : [])],
+        { PATH },
+      );
+      expect(r.code, r.stdout + r.stderr).toBe(1);
+      expect(entryFor(r, wt).action).toBe("skipped");
+      expect(entryFor(r, wt).merged).toMatchObject({
+        merged: "no",
+        via: "gh",
+      });
+    }
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(branchExists(f, "sq")).toBe(true);
+    expect(git(f.repo, ["log", "--format=%s", "sq"])).toContain(
+      "important notes",
+    );
+  });
+
+  it("refuses net-zero commits after a squash followed by taking a base file in a commit of its own", async () => {
+    const { f, wt, s1 } = netZeroAfterSquash();
+    serverCommit(f, "a.txt", "moved\n");
+    fetchPrune(f);
+    git(wt, ["checkout", "-q", "origin/main", "--", "a.txt"]);
+    git(wt, ["commit", "-q", "-m", "take a.txt from main"]);
+    const PATH = ghStub(f);
+    mergedPr(f, "sq", s1);
+
+    const r = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--delete-branch"],
+      { PATH },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("branch_not_merged");
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(branchExists(f, "sq")).toBe(true);
+    expect(git(f.repo, ["log", "--format=%s", "sq"])).toContain(
+      "important notes",
+    );
+  });
+
+  it("does not sweep a branch stacked on a squash-merged branch, which has no merged pull request of its own", async () => {
+    const f = makeFixture();
+    const featx = addWorktree(f, "featx", path.join(f.root, "featx"));
+    commitHere(featx, "fx1.txt", "fx one");
+    commitHere(featx, "fx2.txt", "fx two");
+    git(featx, ["push", "-q", "origin", "featx"]);
+    fetchPrune(f);
+    fs.appendFileSync(
+      path.join(f.repo, ".git", "info", "exclude"),
+      ".ai/run\n.env\n",
+    );
+    const runDir = path.join(f.base, "run");
+    fs.mkdirSync(runDir);
+    const featy = path.join(f.root, "featy");
+    const created = await spawnCli(
+      [
+        "-C",
+        f.work,
+        "worktree",
+        "create",
+        "--repo",
+        f.repo,
+        "--branch",
+        "featy",
+        "--base",
+        "origin/featx",
+        "--path",
+        featy,
+        "--run",
+        runDir,
+        "--no-fetch",
+      ],
+      { env: GIT_ENV },
+    );
+    expect(created.code, created.stdout + created.stderr).toBe(0);
+    // The stacked task is in flight: ignored local configuration.
+    write(featy, ".env", "SECRET=in-flight\n");
+    squashMergeOnServer(f, "featx");
+    fetchPrune(f);
+    // gh knows the parent's pull request only.
+    const PATH = ghStub(f);
+    mergedPr(f, "featx", head(featx));
+
+    for (const dryRun of [true, false]) {
+      const r = await cli(
+        f.work,
+        ["sweep", "--root", f.root, ...(dryRun ? ["--dry-run"] : [])],
+        { PATH },
+      );
+      expect(r.code, r.stdout + r.stderr).toBe(1);
+      expect(entryFor(r, featx).action).toBe(
+        dryRun ? "would_remove" : "removed",
+      );
+      expect(entryFor(r, featy).action).toBe("skipped");
+      expect(entryFor(r, featy).reason).toContain(
+        "gh lists no merged pull request for featy",
+      );
+    }
+    expect(fs.readFileSync(path.join(featy, ".env"), "utf8")).toBe(
+      "SECRET=in-flight\n",
+    );
+    expect(fs.existsSync(path.join(featy, ".ai", "run"))).toBe(true);
+    expect(branchExists(f, "featy")).toBe(true);
+    expect(branchExists(f, "featx")).toBe(false);
+  });
+
   it("carries the removal's warnings into the entry and the top-level warnings, in a dry run too", async () => {
     const f = makeFixture();
     const wt = featureWorktree(f, "feat");
     squashMergeOnServer(f, "feat");
     fetchPrune(f);
+    const PATH = ghStub(f);
+    mergedPr(f, "feat", head(wt));
     for (const dryRun of [true, false]) {
-      const r = await cli(f.work, [
-        "sweep",
-        "--root",
-        f.root,
-        ...(dryRun ? ["--dry-run"] : []),
-      ]);
+      const r = await cli(
+        f.work,
+        ["sweep", "--root", f.root, ...(dryRun ? ["--dry-run"] : [])],
+        { PATH },
+      );
       expect(r.code, r.stdout + r.stderr).toBe(0);
       const entry = entryFor(r, wt);
       expect(entry.action).toBe(dryRun ? "would_remove" : "removed");
@@ -953,67 +1180,99 @@ describe("worktree sweep: what it must never remove", () => {
   });
 });
 
-describe("the content rule: commits after the point where the base had it all", () => {
-  it("calls a squash of commits that rewrote the same file merged", () => {
+/**
+ * The branch is deleted only at the commit the checks were made at. The
+ * `gh` stand-in commits on the branch from inside the merge check, which
+ * is a commit made after the checks began and before the deletion.
+ */
+describe("worktree remove and sweep: a branch that moves after the checks", () => {
+  function raceFixture(commitOnCall: number): {
+    f: Fixture;
+    wt: string;
+    checked: string;
+    PATH: string;
+  } {
     const f = makeFixture();
-    const wt = addWorktree(f, "iter", path.join(f.root, "iter"));
-    write(wt, "f.txt", "draft\n");
-    git(wt, ["add", "-A"]);
-    git(wt, ["commit", "-q", "-m", "draft"]);
-    write(wt, "f.txt", "final\n");
-    git(wt, ["commit", "-q", "-am", "final"]);
-    git(wt, ["push", "-q", "origin", "iter"]);
-    squashMergeOnServer(f, "iter");
+    const wt = featureWorktree(f, "feat");
+    const checked = head(wt);
+    squashMergeOnServer(f, "feat");
     fetchPrune(f);
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toContain(
-      "1 path(s)",
+    const PATH = ghStub(f);
+    mergedPr(f, "feat", checked);
+    fs.writeFileSync(path.join(f.base, "commit-on-call"), String(commitOnCall));
+    return { f, wt, checked, PATH };
+  }
+
+  function expectLateCommitKept(f: Fixture, checked: string): void {
+    expect(branchExists(f, "feat")).toBe(true);
+    expect(git(f.repo, ["rev-parse", "feat~1"]).trim()).toBe(checked);
+    expect(git(f.repo, ["show", "feat:late.txt"])).toBe("late\n");
+  }
+
+  it("remove --delete-branch keeps the branch with the new commit and warns", async () => {
+    // The removal's one gh call is the merge check.
+    const { f, wt, checked, PATH } = raceFixture(1);
+
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"], { PATH });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(r.json.branch.deleted).toBe(false);
+    expect(r.json.branch.reason).toContain(`not at ${checked}`);
+    expect(
+      (r.json.warnings as string[]).some((w) =>
+        w.includes("the branch feat was not deleted"),
+      ),
+    ).toBe(true);
+    expectLateCommitKept(f, checked);
+  });
+
+  it("sweep keeps the branch with the new commit, warns on the entry and reports partial", async () => {
+    // The listing asks gh first, the removal second.
+    const { f, wt, checked, PATH } = raceFixture(2);
+
+    const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
+    expect(r.code, r.stdout + r.stderr).toBe(1);
+    expect(r.json.status).toBe("partial");
+    const entry = entryFor(r, wt);
+    expect(entry).toMatchObject({ action: "removed", branchDeleted: false });
+    expect(
+      (entry.warnings as string[]).some((w) =>
+        w.includes("the branch feat was not deleted"),
+      ),
+    ).toBe(true);
+    expect(
+      (r.json.warnings as string[]).some(
+        (w) =>
+          w.startsWith(`${wt}: `) &&
+          w.includes("the branch feat was not deleted"),
+      ),
+    ).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
+    expectLateCommitKept(f, checked);
+    expect(fs.readFileSync(path.join(f.base, "gh.count"), "utf8").trim()).toBe(
+      "2",
     );
   });
 
-  it("does not decide a branch whose commits cancel out", () => {
+  it("keeps a branch that another worktree has checked out", async () => {
     const f = makeFixture();
-    const wt = addWorktree(f, "undo", path.join(f.root, "undo"));
-    write(wt, "a.txt", "changed\n");
-    git(wt, ["commit", "-q", "-am", "change"]);
-    write(wt, "a.txt", "one\n");
-    git(wt, ["commit", "-q", "-am", "take it back"]);
-    serverCommit(f, "elsewhere.txt", "unrelated\n");
-    fetchPrune(f);
-    expect(contentRule(wt, "HEAD", "refs/remotes/origin/main")).toEqual({});
-  });
+    const wt = featureWorktree(f, "feat");
+    const twin = path.join(f.base, "twin");
+    git(f.repo, ["worktree", "add", "-q", "--force", twin, "feat"]);
 
-  it("decides a branch of up to the commit bound, and does not decide one past it", () => {
-    const f = makeFixture();
-    const wt = addWorktree(f, "long", path.join(f.root, "long"));
-    // Every commit rewrites the same file, so no commit before the last
-    // has what the base gets.
-    execFileSync(
-      "sh",
-      [
-        "-c",
-        `i=1; while [ $i -le ${String(CONTENT_RULE_MAX_COMMITS)} ]; do echo $i > f.txt; git add f.txt; git commit -q -m c$i; i=$((i+1)); done`,
-      ],
-      { cwd: wt, env: { PATH: process.env.PATH, ...GIT_ENV } },
-    );
-    serverCommit(f, "f.txt", `${String(CONTENT_RULE_MAX_COMMITS)}\n`);
-    fetchPrune(f);
-    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toContain(
-      "1 path(s)",
-    );
-
-    commitHere(wt, "f.txt", "one more");
-    serverCommit(f, "f.txt", "one more\n");
-    fetchPrune(f);
-    const answer = contentRule(wt, "HEAD", "refs/remotes/origin/main");
-    expect(answer.yes).toBe(undefined);
-    expect(answer.note).toContain(
-      `more than ${String(CONTENT_RULE_MAX_COMMITS)} commits`,
-    );
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(r.json.branch.deleted).toBe(false);
+    expect(r.json.branch.reason).toContain(`checked out in ${twin}`);
+    expect(branchExists(f, "feat")).toBe(true);
+    expect(git(twin, ["branch", "--show-current"]).trim()).toBe("feat");
   });
 });
 
-describe("worktree remove: what a content verdict excuses", () => {
-  it("keeps refusing never-pushed commits with --delete-branch alone, and takes them with --require-merged", async () => {
+describe("worktree remove: what a merged verdict excuses", () => {
+  it("refuses never-pushed commits whose change reached the base on its own, with --delete-branch alone and with --require-merged", async () => {
     for (const requireMerged of [false, true]) {
       const f = makeFixture();
       const wt = addWorktree(f, "np", path.join(f.root, "np"));
@@ -1022,6 +1281,7 @@ describe("worktree remove: what a content verdict excuses", () => {
       // The same change reached the base on its own.
       serverCommit(f, "a.txt", "changed\n");
       fetchPrune(f);
+      const sha = head(wt);
 
       const r = await cli(f.work, [
         "remove",
@@ -1029,41 +1289,30 @@ describe("worktree remove: what a content verdict excuses", () => {
         "--delete-branch",
         ...(requireMerged ? ["--require-merged"] : []),
       ]);
-      if (requireMerged) {
-        expect(r.code, r.stdout + r.stderr).toBe(0);
-        expect(r.json.merged).toMatchObject({ merged: "yes", via: "content" });
-        expect(fs.existsSync(wt)).toBe(false);
-        expect(branchExists(f, "np")).toBe(false);
-      } else {
-        expect(r.code, r.stdout + r.stderr).toBe(2);
-        expect(r.json.reason).toBe("unpushed_commits");
-        expect(fs.existsSync(wt)).toBe(true);
-        expect(branchExists(f, "np")).toBe(true);
-      }
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe(
+        requireMerged ? "merge_state_unknown" : "unpushed_commits",
+      );
+      expect(fs.existsSync(wt)).toBe(true);
+      expect(branchExists(f, "np")).toBe(true);
+      expect(head(wt)).toBe(sha);
     }
   });
 
-  it("lets a merged pull request excuse them for --delete-branch alone, as before the content rule", async () => {
+  it("lets a merged pull request excuse them for --delete-branch alone", async () => {
     const f = makeFixture();
     const wt = featureWorktree(f, "feat");
     squashMergeOnServer(f, "feat");
     fetchPrune(f);
-    const bin = path.join(f.base, "ghbin");
-    fs.mkdirSync(bin);
-    fs.writeFileSync(
-      path.join(bin, "gh"),
-      `#!/bin/sh\necho '[{"number":7,"headRefOid":"${head(wt)}","baseRefName":"main"}]'\n`,
-      { mode: 0o755 },
-    );
-    const r = await cli(f.work, ["remove", wt, "--delete-branch"], {
-      PATH: `${bin}${path.delimiter}${FIXED_BIN_DIR}`,
-    });
+    const PATH = ghStub(f);
+    mergedPr(f, "feat", head(wt));
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"], { PATH });
     expect(r.code, r.stdout + r.stderr).toBe(0);
     expect(r.json.merged).toMatchObject({ merged: "yes", via: "gh" });
     expect(branchExists(f, "feat")).toBe(false);
   });
 
-  it("never excuses the unpushed commits of a detached worktree by content", async () => {
+  it("never excuses the unpushed commits of a detached worktree whose change reached the base", async () => {
     const f = makeFixture();
     const wt = path.join(f.root, "det");
     git(f.repo, ["worktree", "add", "-q", "--detach", wt, "origin/main"]);
@@ -1073,14 +1322,14 @@ describe("worktree remove: what a content verdict excuses", () => {
     fetchPrune(f);
     const sha = head(wt);
 
-    // `list` reports what the content rule sees ...
+    // No ancestry and no branch to ask gh about: unknown, in `list` ...
     const listed = await cli(f.work, ["list", "--repo", f.repo]);
     expect(
       (listed.json.worktrees as Record<string, any>[]).find(
         (w) => w.path === wt,
       )?.merged,
-    ).toMatchObject({ merged: "yes", via: "content" });
-    // ... but a removal does not weigh it for a detached HEAD.
+    ).toMatchObject({ merged: "unknown", via: "none" });
+    // ... and in a removal, which refuses.
     const r = await cli(f.work, ["remove", wt, "--require-merged"]);
     expect(r.code, r.stdout + r.stderr).toBe(2);
     expect(r.json.reason).toBe("merge_state_unknown");

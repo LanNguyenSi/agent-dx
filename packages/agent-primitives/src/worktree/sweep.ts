@@ -8,15 +8,21 @@ import { removeWorktree } from "./remove.js";
  * direct children of one directory whose work is in origin's default
  * branch, together with its local branch.
  *
- * It adds no rule of its own. A worktree is looked at by `listWorktrees`
- * (the same dirty state and the same merge verdict `list` and `remove
- * --require-merged` report), and only one that is clean and merged is handed
- * to `removeWorktree` with `deleteBranch` and `requireMerged`, so every guard
- * of that command (locked, nested worktree, submodules, unpushed commits not
- * covered by the merge verdict, the default branch and the main checkout's
- * branch never deleted) holds here too. A refusal of `removeWorktree` is a
- * skipped entry with its reason, never a failed sweep. `--force` does not
- * exist for a sweep.
+ * It adds no merge rule of its own. A worktree is looked at by
+ * `listWorktrees` (the same dirty state and the same merge verdict `list`
+ * and `remove --require-merged` report: ancestry, or a merged pull request
+ * that `gh` reports at the branch's tip, so that without `gh` a
+ * squash-merged branch is not known to be merged and is skipped), and only
+ * one that is clean and merged is handed to `removeWorktree` with
+ * `deleteBranch` and `requireMerged`, so every guard of that command
+ * (locked, nested worktree, submodules, unpushed commits not covered by the
+ * merge verdict, the default branch and the main checkout's branch never
+ * deleted) holds here too, and so does its branch deletion,
+ * which deletes the branch only at the commit the checks were made at: a
+ * branch that gained a commit while its worktree was removed is kept (a
+ * `removed` entry with `branchDeleted: false` and a warning). A refusal of
+ * `removeWorktree` is a skipped entry with its reason, never a failed sweep.
+ * `--force` does not exist for a sweep.
  *
  * Three checks are the sweep's own, because a sweep acts on worktrees
  * nobody named one by one. A child of `root` that is a symbolic link is not
@@ -69,7 +75,9 @@ export interface SweepEntry {
 
 export interface SweepWorktreesResult {
   /** `ok`: nothing was skipped (an `ignored` main checkout does not count).
-   * `partial`: at least one worktree was skipped. */
+   * `partial`: at least one worktree was skipped, or one was removed but its
+   * branch was kept (`branchDeleted: false`, with the reason in its
+   * warnings). */
   status: "ok" | "partial";
   dryRun: boolean;
   root: string;
@@ -212,8 +220,11 @@ export async function sweepWorktrees(
     skipped: count("skipped"),
     ignored: count("ignored"),
   };
+  const branchKept = entries.some(
+    (e) => e.action === "removed" && e.branchDeleted === false,
+  );
   return {
-    status: summary.skipped > 0 ? "partial" : "ok",
+    status: summary.skipped > 0 || branchKept ? "partial" : "ok",
     dryRun,
     root,
     summary,

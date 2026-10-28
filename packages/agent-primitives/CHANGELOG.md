@@ -26,33 +26,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ignored files inside it, and lists every other entry with the reason. It
   reuses `remove --require-merged --delete-branch` for each entry, so all of
   that command's guards hold, and each removal's warnings are kept on its
-  entry and in the top-level warnings. On top of those: a branch whose tip is
-  its fork point with the base is skipped as `no_own_commits` (a worktree
-  just created looks like that, and so does a branch merged by a merge commit
-  or a fast forward, which a sweep therefore leaves to `remove`); a child of
-  `<dir>` that is a symbolic link is not followed, and an entry whose real
-  path is not below `<dir>` is skipped. Exit `0` and status `ok` when nothing
-  was skipped, `1` and the new status `partial` when something was (a child
-  that cannot be described counts), `2` for a refusal. A main checkout among
-  the children is listed as `ignored`, never removed.
-- The merged verdict has a third rule, `via: "content"`, between ancestry and
-  `gh`, which recognises a squash merge (the remote branch is gone, the
-  commits are no ancestors) with no network call: on every path the branch's
-  first-parent commits touched since the fork, its last commit has exactly
-  what the base has, the branch changed something, and no earlier commit of
-  the branch already had all of it. Work added after the squash, work added
-  and taken back after it, a path the base changed again, and a branch with
-  more than 50 commits since the fork are not decided by it and go on to
-  `gh`. `worktree list` reports it for every worktree. `remove` weighs it
-  only with `--require-merged` and for a worktree on a branch (the sweep
-  passes that flag), so a squash-merged branch that was `unknown` without
-  `gh` is now `yes` there and its commits on no remote branch are excused.
-  `remove --delete-branch` without `--require-merged`, and any detached
-  worktree, keep the verdict of ancestry and `gh` they had: a squash-merged
-  branch whose remote branch was deleted is still refused as
-  `unpushed_commits` there unless `gh` reports its pull request, and a
-  detached worktree's unpushed commits are never excused by content.
+  entry and in the top-level warnings. Merged is the verdict `list` and
+  `remove` already use: ancestry, or a merged pull request that `gh` reports
+  at exactly the branch's tip. A squash or rebase merge is recognised only
+  through `gh`; without it (or when it fails or times out) the verdict is
+  `unknown` and the entry is skipped with that reason. On top of those: a
+  branch whose tip is its fork point with the base is skipped as
+  `no_own_commits` (a worktree just created looks like that, and so does a
+  branch merged by a merge commit or a fast forward, which a sweep therefore
+  leaves to `remove`); a child of `<dir>` that is a symbolic link is not
+  followed, and an entry whose real path is not below `<dir>` is skipped.
+  Exit `0` and status `ok` when nothing was skipped, `1` and the new status
+  `partial` when something was (a child that cannot be described counts) or
+  a removed worktree's branch was kept, `2` for a refusal. A main checkout
+  among the children is listed as `ignored`, never removed.
 - Envelope status `partial` (finding class, exit `1`).
+
+### Changed
+
+- `worktree remove --delete-branch` (and so `worktree sweep`) deletes the
+  branch with `git update-ref --no-deref -d refs/heads/<branch> <commit>`,
+  where `<commit>` is what `git worktree list` showed before the first check,
+  instead of `git branch -D`. A commit made on the branch while the removal
+  ran makes the deletion fail, and the branch is kept with that commit
+  (`branch.deleted: false` and a warning; in a sweep a `removed` entry with
+  `branchDeleted: false`). As with `git branch -D`, a branch that another
+  worktree has checked out is kept, and the branch's `branch.<name>`
+  configuration is removed with it.
 
 ## [0.18.0] - 2026-10-25
 

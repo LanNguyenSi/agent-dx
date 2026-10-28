@@ -49,13 +49,25 @@ const GIT_ENV: Record<string, string> = {
 
 vi.setConfig({ testTimeout: 60_000 });
 
-// The sweep runs in this process: its git sees the fixed PATH (no gh) and
-// no global or system configuration, like a spawned CLI.
+// The sweep runs in this process: its git sees the fixed PATH and no
+// global or system configuration, like a spawned CLI. In front of the
+// fixed binaries sits a `gh` that reports a merged pull request into `main`
+// at whatever commit the worktree it is asked in is at, so every entry is
+// merged and only the sweep's own check can hold one back.
 const saved: Record<string, string | undefined> = {};
+let ghDir = "";
 beforeAll(() => {
+  ghDir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-wt-root-gh-")),
+  );
+  fs.writeFileSync(
+    path.join(ghDir, "gh"),
+    `#!/bin/sh\nprintf '[{"number":1,"headRefOid":"%s","baseRefName":"main"}]\\n' "$(git rev-parse HEAD)"\n`,
+    { mode: 0o755 },
+  );
   for (const [key, value] of Object.entries({
     ...GIT_ENV,
-    PATH: FIXED_BIN_DIR,
+    PATH: `${ghDir}${path.delimiter}${FIXED_BIN_DIR}`,
   })) {
     saved[key] = process.env[key];
     process.env[key] = value;
@@ -66,6 +78,7 @@ afterAll(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+  fs.rmSync(ghDir, { recursive: true, force: true });
 });
 
 const tmpDirs: string[] = [];
@@ -92,7 +105,8 @@ function write(root: string, rel: string, content: string): void {
 
 /** A repository with a local bare origin and one worktree at `wtDir` on
  * branch `feat`, squash-merged on the server with its remote branch
- * deleted: merged by the content rule, removable by `remove`. */
+ * deleted: merged by the pull request the `gh` stand-in reports, removable
+ * by `remove`. */
 function mergedWorktree(wtDir: (base: string) => string): {
   base: string;
   repo: string;
@@ -139,7 +153,7 @@ function mergedWorktree(wtDir: (base: string) => string): {
   return { base, repo, wt };
 }
 
-/** The entry `list` reports for `wt`, merged by the content rule. */
+/** The entry `list` reports for `wt`, merged by that pull request. */
 async function describedEntry(
   repo: string,
   wt: string,
@@ -147,7 +161,7 @@ async function describedEntry(
   const listed = await listWorktrees({ cwd: repo, repo });
   const entry = listed.worktrees.find((w) => w.path === wt);
   expect(entry).toBeDefined();
-  expect(entry?.merged).toMatchObject({ merged: "yes", via: "content" });
+  expect(entry?.merged).toMatchObject({ merged: "yes", via: "gh" });
   return entry as ListedWorktree;
 }
 

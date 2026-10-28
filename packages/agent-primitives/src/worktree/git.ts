@@ -1666,14 +1666,10 @@ export function addToExclude(commonDir: string, pattern: string): boolean {
 /** Whether `branch` is merged into `baseRef`, and how that was decided. */
 export interface MergeVerdict {
   merged: "yes" | "no" | "unknown";
-  /** `ancestry`: the branch tip is an ancestor of the base. `content`: the
-   * tip is no ancestor, but everything the branch changed since it forked
-   * is in the base exactly as the branch has it, and that is first true at
-   * the tip (a squash merge, a rebase merge or a cherry-pick leaves no
-   * ancestry; see `contentRule`). `gh`:
-   * GitHub lists a merged pull request for the branch. `none`: none of them
-   * could decide. */
-  via: "ancestry" | "content" | "gh" | "none";
+  /** `ancestry`: the branch tip is an ancestor of the base. `gh`: GitHub
+   * lists a merged pull request for the branch (a squash merge leaves no
+   * ancestry). `none`: neither could decide. */
+  via: "ancestry" | "gh" | "none";
   reason: string;
 }
 
@@ -1711,16 +1707,13 @@ export function runGh(cwd: string, args: readonly string[]): GhRun | undefined {
 
 /**
  * Merged into `baseRef`? Ancestry first (`git merge-base --is-ancestor`);
- * then the content rule (`contentRule`), which needs no network and
- * catches a squash merge whose pull request `gh` cannot be asked about;
- * when neither decides and the worktree has a branch, asks `gh` for a merged
+ * when that says no and the worktree has a branch, asks `gh` for a merged
  * pull request whose head is the branch and whose base is the branch the
  * verdict is about, which also catches a squash merge. `baseBranchName` is
  * that branch when it cannot be read off `baseRef` (a remote other than
  * `origin`, a full `refs/remotes/...` ref); by default `origin/` is stripped.
  * `baseLabel` is how the reasons name the base (default `baseRef`): the
- * measurement is always against `baseRef`. `options.contentRule: false`
- * leaves the content rule out (ancestry, then `gh`).
+ * measurement is always against `baseRef`.
  */
 export function mergeVerdict(
   cwd: string,
@@ -1729,18 +1722,9 @@ export function mergeVerdict(
   baseRef: string,
   baseBranchName?: string,
   baseLabel: string = baseRef,
-  options: { contentRule?: boolean } = {},
 ): MergeVerdict {
   try {
-    return decideMerge(
-      cwd,
-      head,
-      branch,
-      baseRef,
-      baseBranchName,
-      baseLabel,
-      options.contentRule !== false,
-    );
+    return decideMerge(cwd, head, branch, baseRef, baseBranchName, baseLabel);
   } catch (err) {
     // A git call that did not finish cannot say whether the branch is
     // merged: the verdict is unknown, which `remove --require-merged`
@@ -1750,195 +1734,6 @@ export function mergeVerdict(
   }
 }
 
-/** The most first-parent commits between the fork point and `HEAD` that
- * the content rule reads; a branch with more is not decided by it. */
-export const CONTENT_RULE_MAX_COMMITS = 50;
-
-/** What the content rule found: `yes` with the sentence for the reason
- * when it decides, otherwise nothing, with a `note` when the rule held at
- * `HEAD` but is not trusted (an earlier commit of the branch already held
- * it, or the branch has more commits than the rule reads). */
-export interface ContentRuleAnswer {
-  yes?: string;
-  note?: string;
-}
-
-/** The first-parent commits of `head ^fork`, newest first, each with the
- * paths it changed against its first parent (`--no-renames`, so a rename
- * lists both paths). At most `max` commits are read; `undefined` when git
- * fails or prints something this parser does not expect. */
-function branchCommits(
-  cwd: string,
-  head: string,
-  fork: string,
-  max: number,
-  opts: GitCallOptions,
-): { sha: string; paths: string[] }[] | undefined {
-  // `%x00%H` starts every commit with an empty field, which no path can
-  // be, so a path that looks like a commit name is never read as one. `-m`
-  // with `--first-parent` diffs a merge against its first parent only.
-  const r = git(
-    cwd,
-    [
-      "log",
-      "--first-parent",
-      "-m",
-      `--max-count=${String(max)}`,
-      "--no-show-signature",
-      "--format=%x00%H",
-      "--name-only",
-      "-z",
-      "--no-renames",
-      "--no-ext-diff",
-      "--ignore-submodules=none",
-      head,
-      `^${fork}`,
-      "--",
-    ],
-    opts,
-  );
-  if (r.error !== undefined || r.status !== 0) return undefined;
-  const commits: { sha: string; paths: string[] }[] = [];
-  let expectSha = false;
-  let firstPath = false;
-  for (const field of r.stdout.split("\0")) {
-    if (field.length === 0) {
-      expectSha = true;
-      continue;
-    }
-    if (expectSha) {
-      if (!/^[0-9a-f]{40,64}$/.test(field)) return undefined;
-      commits.push({ sha: field, paths: [] });
-      expectSha = false;
-      firstPath = true;
-      continue;
-    }
-    const current = commits[commits.length - 1];
-    if (current === undefined) return undefined;
-    // git separates the name list from the commit line with a newline.
-    current.paths.push(
-      firstPath && field.startsWith("\n") ? field.slice(1) : field,
-    );
-    firstPath = false;
-  }
-  return commits;
-}
-
-/**
- * The content rule for work whose commits never became ancestors of the
- * base. Where a repository squash-merges (or rebase-merges) and the host
- * deletes the remote branch on merge, the branch's commits are never
- * ancestors of the base and `gh` is the only other witness; this rule asks
- * the question a squash answers instead.
- *
- * With `fork` = `merge-base head baseRef`, it reads the first-parent
- * commits of `head ^fork` and the set of paths any of them changed
- * against its first parent (`--no-renames`, so a rename lists both of its
- * paths). A commit "holds" when, on every path of that set, it has exactly
- * what `baseRef` has: the same blob and mode, or absent on both sides. The
- * answer is yes only when `HEAD` holds, the branch changed something since
- * the fork (an empty or net-zero branch has nothing to compare), and no
- * earlier commit of the branch holds already. That last part is what keeps
- * commits made after a squash merge from being counted as merged: work
- * added after the squash and then taken back (add a file, delete it again)
- * leaves `HEAD` holding, but so does the commit the squash was made from,
- * and the commits that follow it are not in the base. A normal
- * multi-commit pull request first holds at its last commit, because an
- * earlier commit lacks what a later one added. Where an earlier commit
- * holds for another reason (a pull request that took back its own last
- * change), the rule does not decide either; the next rule is asked.
- *
- * Work added after the squash fails at `HEAD` already, because its paths
- * differ from the base; so does a path the base changed again since. A
- * branch with more than `CONTENT_RULE_MAX_COMMITS` first-parent commits
- * since the fork is not decided. Read only: `merge-base`, `log` and `diff`
- * write nothing, and they run without replace refs and without the commit
- * graph like the ancestry check. A git call that fails leaves the question
- * to the next rule; every "not decided" is a fall through, never a yes.
- */
-export function contentRule(
-  cwd: string,
-  head: string,
-  baseRef: string,
-): ContentRuleAnswer {
-  const opts = { boundMs: GIT_WALK_BOUND_MS, trustObjectsOnly: true } as const;
-  const fork = git(cwd, ["merge-base", head, baseRef], opts);
-  if (fork.error !== undefined || fork.status !== 0) return {};
-  const forkSha = fork.stdout.trim();
-  if (forkSha.length === 0) return {};
-  const commits = branchCommits(
-    cwd,
-    head,
-    forkSha,
-    CONTENT_RULE_MAX_COMMITS + 1,
-    opts,
-  );
-  if (commits === undefined || commits.length === 0) return {};
-  const touched = new Set(commits.flatMap((c) => c.paths));
-  const names = (a: string, b: string): Set<string> | undefined => {
-    const r = git(
-      cwd,
-      [
-        "diff",
-        "--name-only",
-        "-z",
-        "--no-renames",
-        "--no-ext-diff",
-        "--ignore-submodules=none",
-        a,
-        b,
-        "--",
-      ],
-      opts,
-    );
-    if (r.error !== undefined || r.status !== 0) return undefined;
-    return new Set(r.stdout.split("\0").filter((entry) => entry.length > 0));
-  };
-  /** `commit` has what the base has on every path the branch touched;
-   * `undefined` when git cannot tell. */
-  const holdsAt = (commit: string): boolean | undefined => {
-    const differing = names(commit, baseRef);
-    if (differing === undefined) return undefined;
-    for (const entry of touched) {
-      if (differing.has(entry)) return false;
-    }
-    return true;
-  };
-  if (holdsAt(head) !== true) return {};
-  if (commits.length > CONTENT_RULE_MAX_COMMITS) {
-    return {
-      note: `the branch has more than ${String(CONTENT_RULE_MAX_COMMITS)} commits since it forked, more than the rule reads`,
-    };
-  }
-  const changed = names(forkSha, head);
-  if (changed === undefined || changed.size === 0) return {};
-  // Oldest first: the first commit that holds is where the base already
-  // had everything the branch touched.
-  const earlier = commits.slice(1).reverse();
-  for (const [index, commit] of earlier.entries()) {
-    const held = holdsAt(commit.sha);
-    if (held === undefined) return {};
-    if (held) {
-      return {
-        note: `the base already had what the branch touched at its commit ${commit.sha}, and the ${String(earlier.length - index)} commit(s) after it are not counted as merged`,
-      };
-    }
-  }
-  return {
-    yes: `all ${String(changed.size)} path(s) the branch changed since it forked are in the base exactly as the branch has them, first at its last commit (a squash or rebase merge)`,
-  };
-}
-
-/** The content rule's sentence for the reason when it says yes, otherwise
- * `undefined`; see `contentRule`. */
-export function contentInBase(
-  cwd: string,
-  head: string,
-  baseRef: string,
-): string | undefined {
-  return contentRule(cwd, head, baseRef).yes;
-}
-
 function decideMerge(
   cwd: string,
   head: string,
@@ -1946,7 +1741,6 @@ function decideMerge(
   baseRef: string,
   baseBranchName: string | undefined,
   baseLabel: string,
-  withContentRule: boolean,
 ): MergeVerdict {
   // A grafted graph can make a branch look merged, and neither the
   // ancestry nor a pull request can be weighed against a graph that is not
@@ -1984,42 +1778,6 @@ function decideMerge(
       reason: `${head} is an ancestor of ${baseLabel}`,
     };
   }
-  const content: ContentRuleAnswer = withContentRule
-    ? contentRule(cwd, head, baseRef)
-    : {};
-  if (content.yes !== undefined) {
-    return {
-      merged: "yes",
-      via: "content",
-      reason: `${head} is no ancestor of ${baseLabel}, but ${content.yes}`,
-    };
-  }
-  const byPullRequest = decideByPullRequest(
-    cwd,
-    head,
-    branch,
-    baseRef,
-    baseBranchName,
-    baseLabel,
-  );
-  return content.note === undefined || byPullRequest.merged === "yes"
-    ? byPullRequest
-    : {
-        ...byPullRequest,
-        reason: `${byPullRequest.reason}; the content rule did not decide: ${content.note}`,
-      };
-}
-
-/** The last rule of `decideMerge`: a merged pull request that `gh` reports
- * for `branch` into the base at the worktree's HEAD commit. */
-function decideByPullRequest(
-  cwd: string,
-  head: string,
-  branch: string | undefined,
-  baseRef: string,
-  baseBranchName: string | undefined,
-  baseLabel: string,
-): MergeVerdict {
   if (branch === undefined) {
     return {
       merged: "unknown",

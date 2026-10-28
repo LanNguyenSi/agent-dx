@@ -432,11 +432,6 @@ interface RemoveRow {
 
 const REMOVE_FLAGS = ["--require-merged", "--delete-branch"];
 
-/** The content rule's walk of the branch's first-parent commits, as the
- * stand-in git sees it (the fork point follows it). */
-const CONTENT_LOG =
-  "log --first-parent -m --max-count=51 --no-show-signature --format=%x00%H --name-only -z --no-renames --no-ext-diff --ignore-submodules=none";
-
 const REMOVE_REFUSALS: RemoveRow[] = [
   {
     name: "resolveRepo: rev-parse --show-toplevel",
@@ -627,10 +622,8 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
       const FLAG =
         "--no-replace-objects -c core.useReplaceRefs=false -c core.commitGraph=false";
       const withFlag = calls.filter((c) => c.startsWith(`${FLAG} `));
-      // The ancestry, the sha a merged pull request must match and the
-      // unpushed walk: nothing else reads the graph for a verdict. The
-      // content rule is not weighed for `--delete-branch` alone (the walk
-      // of the next case is its own).
+      // The unpushed walk, the ancestry and the sha a merged pull request
+      // must match: nothing else reads the graph for a verdict.
       expect(withFlag).toEqual([
         `${FLAG} -c maintenance.auto=false -c gc.auto=0 merge-base --is-ancestor HEAD refs/remotes/origin/main`,
         `${FLAG} -c maintenance.auto=false -c gc.auto=0 rev-parse --verify --quiet HEAD^{commit}`,
@@ -644,49 +637,6 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
           call,
         ).toBe(true);
       }
-    },
-  );
-
-  it.concurrent(
-    "runs the content rule's walk of a squash-merged branch with the same settings, one diff per commit",
-    async () => {
-      const f = makeFixture();
-      const wt = addWorktree(f, "feat", true);
-      write(wt, "second.txt", "second\n");
-      git2(wt, ["add", "-A"]);
-      git2(wt, ["commit", "-q", "-m", "second"]);
-      // The squash merge, made in the main checkout and pushed.
-      git2(f.repo, ["merge", "-q", "--squash", "feat"]);
-      git2(f.repo, ["commit", "-q", "-m", "squash feat"]);
-      git2(f.repo, ["push", "-q", "origin", "main"]);
-      const first = git2(wt, ["rev-parse", "HEAD~1"]).trim();
-      const spy = hangingGit({ match: "no-such-subcommand" });
-      const r = await runCli(f.work, ["remove", wt, "--require-merged"], {
-        ...boundEnv(),
-        PATH: spy.PATH,
-      });
-      expect(r.code, r.stdout + r.stderr).toBe(0);
-      expect(r.json.merged).toMatchObject({ merged: "yes", via: "content" });
-      const FLAG =
-        "--no-replace-objects -c core.useReplaceRefs=false -c core.commitGraph=false";
-      const NOW = `${FLAG} -c maintenance.auto=false -c gc.auto=0`;
-      const withFlag = (spy.calls?.() ?? [])
-        .filter((c) => c.startsWith(`${FLAG} `))
-        .map((c) =>
-          c.replace(first, "<first>").replace(/\b[0-9a-f]{40}\b/g, "<fork>"),
-        );
-      const DIFF =
-        "diff --name-only -z --no-renames --no-ext-diff --ignore-submodules=none";
-      expect(withFlag).toEqual([
-        `${NOW} merge-base --is-ancestor HEAD refs/remotes/origin/main`,
-        `${NOW} merge-base HEAD refs/remotes/origin/main`,
-        `${NOW} ${CONTENT_LOG} HEAD ^<fork> --`,
-        `${NOW} ${DIFF} HEAD refs/remotes/origin/main --`,
-        `${NOW} ${DIFF} <fork> HEAD --`,
-        // The one commit before HEAD, which must not hold already.
-        `${NOW} ${DIFF} <first> refs/remotes/origin/main --`,
-        `${NOW} rev-list HEAD --not --exclude=origin/HEAD --remotes`,
-      ]);
     },
   );
 
@@ -784,7 +734,7 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
     async () => {
       const f = makeFixture();
       const wt = addWorktree(f, "feat");
-      const hung = hangingGit({ match: "gc.auto=0 branch -D" });
+      const hung = hangingGit({ match: "gc.auto=0 update-ref --no-deref -d" });
       const r = await runCli(f.work, ["remove", wt, ...REMOVE_FLAGS], {
         ...boundEnv(),
         PATH: hung.PATH,
@@ -1389,7 +1339,9 @@ describe("a SIGINT or SIGTERM before the first change", () => {
         expect(branchExists(f.repo, "feat")).toBe(true);
         expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
         const writes = slow.calls!().filter((c) =>
-          / (worktree remove|worktree prune|branch -D) /.test(` ${c} `),
+          / (worktree remove|worktree prune|branch -D|update-ref|config --local --remove-section) /.test(
+            ` ${c} `,
+          ),
         );
         expect(writes).toEqual([]);
         await expectGone(pids);

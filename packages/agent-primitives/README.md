@@ -75,13 +75,15 @@ for teams shipping with AI agents.
   fast-forwards a clean main checkout that is on the default branch (otherwise
   it reports why it did not).
 - `worktree sweep --root <dir> [--dry-run]`: removes every linked worktree
-  below `<dir>` that is clean, merged into origin's default branch (a squash
-  merge counts, decided from the content, without `gh`) and has commits of its
-  own, with its local branch and its ignored files; everything else is listed
-  with a reason (a branch without commits of its own, as just created or
-  merged by ancestry, is `no_own_commits`). Symlinked children are not
-  followed. Exit `0` nothing skipped, `1` something skipped (`partial`), `2`
-  refused.
+  among the direct children of `<dir>` that is clean, merged into origin's
+  default branch (a squash merge counts only when `gh` reports its merged pull
+  request at the branch's tip; without `gh` it is skipped) and has commits of
+  its own, with its local branch and its ignored files; everything else is
+  listed with a reason (a branch without commits of its own, as just created
+  or merged by ancestry, is `no_own_commits`). Symlinked children are not
+  followed, and a branch that gained a commit while its worktree was removed
+  is kept. Exit `0` nothing skipped, `1` something skipped or a branch kept
+  (`partial`), `2` refused.
 - `worktree list`: reports every worktree of a repository, or every work tree
   below `--root`, with its branch, `.ai/run` pointer, dirty state, commits
   ahead of and behind the default base (or a remote-tracking `--base <rev>`), merge verdict and
