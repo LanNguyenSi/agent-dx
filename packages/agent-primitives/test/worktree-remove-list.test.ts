@@ -2639,19 +2639,18 @@ describe("remove --delete-branch warns about a branch it deletes unmerged (#488)
     ).toBe(true);
   });
 
-  it("does not warn when the branch deletion itself fails", async () => {
+  it("does not claim a deletion when the branch deletion itself fails, and warns that the branch was kept", async () => {
     const f = makeFixture();
     const { wt } = makeHotfix(f);
+    // The branch is deleted with `update-ref -d <ref> <checked commit>`.
     const failingBranchDelete = gitWrapper(
       f,
       "git-no-branch-delete",
-      `prev=
-for a in "$@"; do
-  if [ "$prev" = branch ] && [ "$a" = -D ]; then
-    echo "error: injected branch -D failure" >&2
+      `for a in "$@"; do
+  if [ "$a" = update-ref ]; then
+    echo "error: injected branch delete failure" >&2
     exit 1
   fi
-  prev=$a
 done`,
     );
     const r = await cli(
@@ -2661,10 +2660,18 @@ done`,
     );
     expect(r.json.merged).toMatchObject({ merged: "no" });
     expect(r.json.branch.deleted).toBe(false);
-    expect(r.json.branch.reason).toContain("injected branch -D failure");
+    expect(r.json.branch.reason).toContain("injected branch delete failure");
     expect(
       r.json.warnings.some((w: string) => w.includes("deleted branch")),
     ).toBe(false);
+    expect(
+      r.json.warnings.some(
+        (w: string) =>
+          w.includes("was not deleted") &&
+          w.includes("injected branch delete failure"),
+      ),
+    ).toBe(true);
+    expect(git(f.repo, ["branch", "--list", "hotfix/one"]).trim()).not.toBe("");
   });
 
   it("does not warn when the branch is kept", async () => {

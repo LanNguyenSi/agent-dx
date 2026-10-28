@@ -355,10 +355,27 @@ or `git worktree remove`. It refuses a dirty or untracked worktree and
 commits that are on no remote branch (unless `--force`), unlinks the
 dependency links without following them, keeps the branch unless
 `--delete-branch`, and with `--require-merged` refuses a branch that is not
-merged into the default branch (ancestry, or a merged pull request via `gh`
-for a squash merge); `--base <remote>/<branch>` checks against another remote-tracking
+merged into the default branch (ancestry, or a merged pull request that
+`gh` reports at exactly the worktree's commit, which is how a squash merge
+counts; without `gh` a squash merge is not recognised and the state is
+unknown); `--base <remote>/<branch>` checks against another remote-tracking
 branch, such as `origin/master` for a hotfix (a local branch, `HEAD` or a sha
-is refused). `worktree list [--repo <path> | --root <dir>]
+is refused). `--delete-branch` deletes the branch only at the commit `git
+worktree list` showed: a worktree whose HEAD is no longer there when the checks end is
+refused (`head_moved`), and a branch that gains a commit after that is kept
+with a warning. A tracked file flagged assume-unchanged or skip-worktree
+that is present in the work tree, edited or not (`git status` does not show
+an edit to it), is refused as `worktree_dirty` too. `remove --sync-main` then runs `git fetch --prune --no-prune-tags origin` and
+fast-forwards the main checkout only when it is clean, on the default branch
+and in no merge, rebase, `am` or bisect (else `sync.reason` says why; never a
+checkout, reset or force, and an ignored file in the way makes it fail).
+`worktree sweep --root <dir> [--dry-run]` removes every clean, merged
+worktree among the direct children of `<dir>` that has commits of its own,
+with its branch and its ignored files, and lists the rest with reasons (a
+branch with none, as just created or merged by ancestry, is
+`no_own_commits`; a symlinked child is not followed; without `gh` a
+squash-merged branch is skipped); exit `0` nothing skipped, `1` some skipped
+or a branch kept. `worktree list [--repo <path> | --root <dir>]
 [--base <rev>]` reports
 each worktree's branch, dirty state, ahead/behind, merged state, run
 pointer and links. See the agent-primitives package's docs/worktree.md.

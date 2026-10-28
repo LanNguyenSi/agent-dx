@@ -1,14 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  GIT_WALK_BOUND_MS,
   REPORT_TIMEOUT,
   REPORT_TIMEOUT_WALK,
   WorktreeRefusal,
+  commitSha,
   git,
+  gitBytes,
   gitFailure,
   ignoredSymlinks,
   isWithin,
   mergeVerdict,
+  parseWorktreeList,
+  renderBytes,
   resolveDefaultBase,
   resolveRemoteBase,
   resolveRepo,
@@ -16,6 +21,7 @@ import {
   unpushedCommits,
   type MergeVerdict,
 } from "./git.js";
+import { syncMainCheckout, type SyncMainResult } from "./sync.js";
 
 /**
  * `worktree remove`: the safe half of the worktree lifecycle. Every check
@@ -38,6 +44,22 @@ export interface RemoveWorktreeOptions {
    * branch. Needs `requireMerged` or `deleteBranch`, the two options that
    * run the check; alone it is a usage error rather than a silent no-op. */
   base?: string;
+  /** After a successful removal: `git fetch --prune origin` in the main
+   * checkout, then a fast-forward to origin's default branch where that is
+   * safe (see `syncMainCheckout`). Never part of a refusal: the removal
+   * has happened by then, and the outcome is `sync` in the result. */
+  syncMain?: boolean;
+  /** Refuse (`no_own_commits`) a branch whose tip is its fork point with
+   * the base (`merge-base HEAD <base>` is `HEAD`): it has no commit of its
+   * own, which is what a worktree created a moment ago looks like, and an
+   * ancestry verdict cannot tell it from finished work. Set by `worktree
+   * sweep` only; a plain `remove` keeps taking such a branch. */
+  requireOwnCommits?: boolean;
+  /** Run every check that can refuse, then stop before the first change and
+   * report what would have been removed (`dryRun: true` in the result). The
+   * same code path as the real removal up to that point, so a dry run
+   * refuses exactly where the removal would. */
+  dryRun?: boolean;
   /** Aborted when the run is interrupted (SIGINT, SIGTERM): checked before
    * the first change, which then refuses with `interrupted`. */
   signal?: AbortSignal;
@@ -53,6 +75,10 @@ export interface RemoveWorktreeResult {
   branch: { deleted: boolean; reason: string };
   /** `git worktree prune` ran and succeeded afterwards. */
   pruned: boolean;
+  /** `--sync-main`'s outcome; `null` when it was not asked for. */
+  sync: SyncMainResult | null;
+  /** Present (`true`) for a dry run: nothing was changed. */
+  dryRun?: true;
   warnings: string[];
 }
 
@@ -72,21 +98,226 @@ function sameDirectory(a: string, b: string): boolean {
   return isWithin(a, b) && isWithin(b, a);
 }
 
+/** What `deleteCheckedBranch` did. `warnings` names every way the result
+ * falls short of a deleted branch with its configuration gone. */
+interface BranchDeletion {
+  deleted: boolean;
+  reason: string;
+  warnings: string[];
+}
+
+/**
+ * Deletes the local `branch` once its worktree is gone, but only while it
+ * still points at `checkedHead`: the commit `git worktree list` showed the
+ * worktree at before the first check of the removal ran. `git update-ref
+ * --no-deref -d refs/heads/<branch> <checkedHead>` compares and deletes in
+ * one step, so a commit made on the branch after the checks (in the
+ * worktree before it was removed, or from anywhere else) makes git refuse,
+ * and the branch is kept with the commit on it. The rest is what `git
+ * branch -D` does besides deleting the ref: a branch that another worktree
+ * has checked out is kept, and the `branch.<name>` configuration (its
+ * upstream, say) is removed with the branch, so a branch made later under
+ * the same name does not inherit it.
+ */
+function deleteCheckedBranch(
+  mainCheckout: string,
+  branch: string,
+  checkedHead: string | undefined,
+): BranchDeletion {
+  const kept = (why: string): BranchDeletion => ({
+    deleted: false,
+    reason: `kept ${branch}: ${why}`,
+    warnings: [`the branch ${branch} was not deleted: ${why}`],
+  });
+  if (
+    checkedHead === undefined ||
+    !/^[0-9a-f]{40,64}$/.test(checkedHead) ||
+    /^0+$/.test(checkedHead)
+  ) {
+    return kept(
+      "the commit the checks were made at is not known, so it is not deleted unchecked",
+    );
+  }
+  const listing = git(
+    mainCheckout,
+    ["worktree", "list", "--porcelain"],
+    REPORT_TIMEOUT,
+  );
+  if (listing.error !== undefined || listing.status !== 0) {
+    return kept(
+      `cannot tell whether another worktree has it checked out: ${gitFailure(listing)}`,
+    );
+  }
+  const holder = parseWorktreeList(listing.stdout).find(
+    (w) => w.branch === branch,
+  );
+  if (holder !== undefined) {
+    return kept(`it is checked out in ${holder.path}`);
+  }
+  const ref = `refs/heads/${branch}`;
+  const deleted = git(
+    mainCheckout,
+    ["update-ref", "--no-deref", "-d", ref, checkedHead],
+    REPORT_TIMEOUT,
+  );
+  if (deleted.error !== undefined || deleted.status !== 0) {
+    // The deletion is conditional on the checked commit, so a branch that
+    // moved fails it; reading the branch again tells that from a git error.
+    const now = git(
+      mainCheckout,
+      ["rev-parse", "--verify", "--quiet", ref],
+      REPORT_TIMEOUT,
+    );
+    const nowSha =
+      now.error === undefined && now.status === 0
+        ? now.stdout.trim()
+        : undefined;
+    if (nowSha !== undefined && nowSha !== checkedHead) {
+      return kept(
+        `it points at ${nowSha} now, not at ${checkedHead} where the checks found it (a commit made while the removal ran, say), so it is kept with that commit`,
+      );
+    }
+    if (nowSha === undefined && now.error === undefined) {
+      const gone = `git update-ref -d ${ref} ${checkedHead} failed (${gitFailure(deleted)}), and ${branch} no longer exists`;
+      return { deleted: false, reason: gone, warnings: [gone] };
+    }
+    return kept(
+      `git update-ref -d ${ref} ${checkedHead} failed: ${gitFailure(deleted)}`,
+    );
+  }
+  const result: BranchDeletion = {
+    deleted: true,
+    reason: `deleted ${branch} (was ${checkedHead})`,
+    warnings: [],
+  };
+  const section = `branch.${branch}`;
+  const config = git(
+    mainCheckout,
+    ["config", "--local", "--list", "--name-only", "-z"],
+    REPORT_TIMEOUT,
+  );
+  if (config.error !== undefined || config.status !== 0) {
+    result.warnings.push(
+      `deleted ${branch}, but could not read the configuration to remove its \`${section}\` section: ${gitFailure(config)}`,
+    );
+    return result;
+  }
+  // The section of a key is everything before its last dot, so the
+  // `branch.feat.x.remote` of a sibling branch `feat.x` is not `feat`'s.
+  const hasSection = config.stdout
+    .split("\0")
+    .some((name) => name.slice(0, name.lastIndexOf(".")) === section);
+  if (hasSection) {
+    const dropped = git(
+      mainCheckout,
+      ["config", "--local", "--remove-section", section],
+      REPORT_TIMEOUT,
+    );
+    if (dropped.error !== undefined || dropped.status !== 0) {
+      result.warnings.push(
+        `deleted ${branch}, but its \`${section}\` configuration is left: ${gitFailure(dropped)}`,
+      );
+    }
+  }
+  return result;
+}
+
+/** What `flaggedFiles` found: each tracked path flagged assume-unchanged or
+ * skip-worktree that is present in the work tree, as `<path> is flagged
+ * <flag>`, or why that could not be told. */
+type FlaggedFiles =
+  { ok: true; flagged: string[] } | { ok: false; why: string };
+
+/**
+ * Tracked paths whose edits `git status` does not show. A path flagged
+ * assume-unchanged (`git ls-files -v` prints its tag in lowercase) or
+ * skip-worktree (tag `S`, `s` with both flags) is not compared with the
+ * work tree by status, so an edit to it would go with the worktree unseen.
+ * Its content is not compared here either: every flagged path that is
+ * present in the work tree (a file, a link, a directory, anything `lstat`
+ * finds) is listed, edited or not. A flagged path that is absent (a sparse
+ * checkout leaves it out) has nothing in it to lose and is not listed, nor
+ * is a submodule entry (mode 160000): git's own `worktree remove` refuses
+ * a populated submodule without --force (worktree_remove_failed), and an
+ * unpopulated one has nothing tracked in it. The paths are read from `git ls-files -s -v -z`; a listing that
+ * cannot be read, or a path that cannot be inspected, is `ok: false`.
+ */
+function flaggedFiles(target: string): FlaggedFiles {
+  const listing = gitBytes(target, ["ls-files", "-s", "-v", "-z"], {
+    ...REPORT_TIMEOUT_WALK,
+  });
+  if (listing.error !== undefined || listing.status !== 0) {
+    return {
+      ok: false,
+      why: `git ls-files -s -v failed: ${gitFailure({ ...listing, stdout: "" })}`,
+    };
+  }
+  const flagged: string[] = [];
+  const records = listing.stdout.toString("latin1").split("\0");
+  let offset = 0;
+  for (const record of records) {
+    const bytes = listing.stdout.subarray(offset, offset + record.length);
+    offset += record.length + 1;
+    if (record.length === 0) continue;
+    const tab = record.indexOf("\t");
+    const fields = (tab < 0 ? "" : record.slice(0, tab)).split(" ");
+    const [tag = "", mode = "", oid = ""] = fields;
+    if (
+      fields.length !== 4 ||
+      !/^[A-Za-z?]$/.test(tag) ||
+      !/^[0-7]{6}$/.test(mode) ||
+      !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(oid)
+    ) {
+      return {
+        ok: false,
+        why: `git ls-files -s -v printed a line it cannot be read from: ${JSON.stringify(record.slice(0, 120))}`,
+      };
+    }
+    const assumeUnchanged = tag !== tag.toUpperCase();
+    const skipWorktree = tag.toUpperCase() === "S";
+    if (!assumeUnchanged && !skipWorktree) continue;
+    if (mode === "160000") continue;
+    const rel = bytes.subarray(tab + 1);
+    const label = `${renderBytes(rel)} is flagged ${[
+      ...(assumeUnchanged ? ["assume-unchanged"] : []),
+      ...(skipWorktree ? ["skip-worktree"] : []),
+    ].join(" and ")}`;
+    try {
+      fs.lstatSync(
+        Buffer.concat([Buffer.from(target), Buffer.from(path.sep), rel]),
+      );
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") continue;
+      return { ok: false, why: `cannot inspect ${label}: ${messageOf(err)}` };
+    }
+    flagged.push(label);
+  }
+  return { ok: true, flagged };
+}
+
 /**
  * Removes one linked worktree: the locked, nested-worktree, submodule,
- * status, merged and unpushed checks first, each of the last three failing
- * closed so that a git command which cannot answer is a refusal rather than
- * a clean, unpushed or unmerged reading. Then, once a SIGINT or SIGTERM
- * that arrived during the checks has had its chance to stop the command
- * (`stopIfInterrupted`), the ignored dependency links (unlinked, never
+ * status (with the flagged files whose edits status does not show,
+ * `flaggedFiles`), merged and unpushed checks first, each of the last three
+ * failing closed so that a git command which cannot answer is a refusal
+ * rather than a clean,
+ * unpushed or unmerged reading. Then, once a SIGINT or SIGTERM that arrived
+ * during the checks has had its chance to stop the command
+ * (`stopIfInterrupted`), HEAD is read again and the removal refuses
+ * (`head_moved`) unless it is still the commit `git worktree list` showed
+ * before the first check. Then the ignored dependency links (unlinked, never
  * followed), then `git worktree remove` and `git worktree prune`, and finally
- * the optional `git branch -D`.
+ * the optional deletion of the branch, only while it still points at that
+ * listed commit (`deleteCheckedBranch`).
  *
- * The main checkout is never modified: its HEAD, index, working tree and
- * stash are untouched, and `git stash`, `checkout`, `switch` and `reset`
- * are never run anywhere. Every git call that writes acts on the main
- * checkout's administrative directories only (`worktree remove`,
- * `worktree prune`, `branch -D`); everything else reads the worktree.
+ * The main checkout is not modified by the removal: its HEAD, index,
+ * working tree and stash are untouched, and `git stash`, `checkout`,
+ * `switch` and `reset` are never run anywhere. Every git call that writes
+ * acts on the main checkout's administrative directories only (`worktree
+ * remove`, `worktree prune`, and for the branch `update-ref -d` and `config
+ * --remove-section`); everything else reads the worktree. The one exception is `syncMain`, which may fast-forward the main
+ * checkout when it is clean and on the default branch (see `sync.ts`).
  */
 export async function removeWorktree(
   o: RemoveWorktreeOptions,
@@ -205,6 +436,24 @@ export async function removeWorktree(
       { entries: dirty.slice(0, DIRTY_DETAIL_LINES) },
     );
   }
+  if (o.force !== true) {
+    const flags = flaggedFiles(target);
+    if (!flags.ok) {
+      throw new WorktreeRefusal(
+        `cannot tell whether ${target} has tracked files flagged assume-unchanged or skip-worktree, whose edits git status does not show: ${flags.why}; pass --force to remove it anyway`,
+        "worktree_dirty",
+      );
+    }
+    if (flags.flagged.length > 0) {
+      const one = flags.flagged.length === 1;
+      const more = flags.flagged.length - 3;
+      throw new WorktreeRefusal(
+        `${target}: ${flags.flagged.slice(0, 3).join(", ")}${more > 0 ? `, and ${String(more)} more` : ""}, so git status does not show edits to ${one ? "it" : "them"}; clear the flag (\`git update-index --no-assume-unchanged\` or \`--no-skip-worktree\`) or pass --force to remove the worktree with ${one ? "it" : "them"}`,
+        "worktree_dirty",
+        { flagged: flags.flagged.slice(0, DIRTY_DETAIL_LINES) },
+      );
+    }
+  }
 
   const defaultBase = resolveDefaultBase(repo.mainCheckout);
   // resolveRemoteBase is the single guard for a base: it only ever yields
@@ -297,6 +546,35 @@ export async function removeWorktree(
     }
   }
 
+  if (o.requireOwnCommits === true) {
+    // Fails closed: a fork point or a tip that cannot be read is a refusal.
+    const tip = commitSha(target, "HEAD", { trustObjectsOnly: true });
+    const fork =
+      base === undefined
+        ? undefined
+        : git(target, ["merge-base", "HEAD", base.ref], {
+            boundMs: GIT_WALK_BOUND_MS,
+            trustObjectsOnly: true,
+          });
+    const forkSha =
+      fork !== undefined && fork.error === undefined && fork.status === 0
+        ? fork.stdout.trim()
+        : undefined;
+    if (tip === undefined || forkSha === undefined || forkSha.length === 0) {
+      throw new WorktreeRefusal(
+        `cannot tell whether ${entry.branch ?? "HEAD"} has commits of its own since it forked from ${base?.label ?? "the default branch"}, so it is left alone`,
+        "no_own_commits",
+      );
+    }
+    if (forkSha === tip) {
+      throw new WorktreeRefusal(
+        `${entry.branch ?? "HEAD"} has no commits of its own: its tip is its fork point with ${base?.label ?? "the default branch"}, as for a worktree that was just created, so it is left alone (remove it with \`worktree remove --require-merged --delete-branch\` when it is done)`,
+        "no_own_commits",
+        { head: tip },
+      );
+    }
+  }
+
   const warnings: string[] = [];
   if (unpushedLines.length > 0 && mergedIntoBase) {
     warnings.push(
@@ -312,6 +590,84 @@ export async function removeWorktree(
     o.signal,
     `worktree remove of ${target} was interrupted (SIGINT or SIGTERM) before its first change; nothing was removed`,
   );
+
+  // The last read before the first change: the worktree's HEAD must still
+  // be the commit `git worktree list` showed before the first check, which
+  // is also the one the branch deletion compares against. A HEAD that can
+  // be read and moved while the checks ran, and is still moved, refuses
+  // here, with or without --force; one moved away and back before this read
+  // is not seen. When the listing showed no commit (an unborn branch is the
+  // zero id) or HEAD names none now (unborn, or a commit object that is
+  // missing), whether it moved cannot be told: a refusal without --force,
+  // which fails closed, and nothing to refuse with it.
+  const listedHead =
+    entry.head !== undefined &&
+    /^[0-9a-f]{40,64}$/.test(entry.head) &&
+    !/^0+$/.test(entry.head)
+      ? entry.head
+      : undefined;
+  const headNow = commitSha(target, "HEAD", { trustObjectsOnly: true });
+  if (
+    headNow !== undefined &&
+    listedHead !== undefined &&
+    headNow !== listedHead
+  ) {
+    throw new WorktreeRefusal(
+      `the HEAD of ${target} is at ${headNow} now, not at ${listedHead} where \`git worktree list\` showed it before the checks (something committed, checked out or reset there while they ran), so nothing is removed, with or without --force; run the command again`,
+      "head_moved",
+      { head: headNow, listed: listedHead },
+    );
+  }
+  if ((headNow === undefined || listedHead === undefined) && o.force !== true) {
+    const unreadable = [
+      ...(listedHead === undefined
+        ? [
+            "`git worktree list` showed no commit for it before the checks (an unborn branch)",
+          ]
+        : []),
+      ...(headNow === undefined
+        ? [
+            "HEAD names no commit that can be read now (an unborn branch, or a commit object that is missing)",
+          ]
+        : []),
+    ];
+    throw new WorktreeRefusal(
+      `whether the HEAD of ${target} moved while the checks ran cannot be told: ${unreadable.join("; ")}; nothing is removed. Pass --force to remove the worktree anyway`,
+      "head_moved",
+      { head: headNow ?? null, listed: listedHead ?? null },
+    );
+  }
+
+  if (o.dryRun === true) {
+    return {
+      status: "ok",
+      worktree: {
+        path: target,
+        ...(entry.branch !== undefined ? { branch: entry.branch } : {}),
+        ...(entry.head !== undefined ? { head: entry.head } : {}),
+      },
+      linksRemoved: [],
+      merged,
+      branch: {
+        deleted: false,
+        reason:
+          o.deleteBranch === true
+            ? "dry run: nothing was changed, the branch would be deleted"
+            : "dry run: nothing was changed",
+      },
+      pruned: false,
+      sync:
+        o.syncMain === true
+          ? {
+              status: "skipped",
+              reason: "dry run: nothing was changed",
+              fetch: "skipped",
+            }
+          : null,
+      dryRun: true,
+      warnings,
+    };
+  }
 
   const linksRemoved: string[] = [];
   for (const rel of links) {
@@ -362,29 +718,19 @@ export async function removeWorktree(
     if (entry.branch === undefined) {
       branch = { deleted: false, reason: "detached HEAD, no branch" };
     } else {
-      // `-D` cannot lose work here: an unpushed branch was already refused
-      // above, unless `--force` said otherwise or the verdict said the
-      // branch is merged into the base, which warned about those commits.
-      const deleted = git(
+      // The deletion cannot lose work here: an unpushed branch was already
+      // refused above, unless `--force` said otherwise or the verdict said
+      // the branch is merged into the base, which warned about those
+      // commits; and it only deletes the branch at the commit the worktree
+      // list showed before those checks ran.
+      const deletion = deleteCheckedBranch(
         repo.mainCheckout,
-        ["branch", "-D", entry.branch],
-        REPORT_TIMEOUT,
+        entry.branch,
+        entry.head,
       );
-      const ok = deleted.error === undefined && deleted.status === 0;
-      const text = [deleted.stdout.trim(), deleted.stderr.trim()]
-        .filter((part) => part.length > 0)
-        .join(" ");
-      branch = {
-        deleted: ok,
-        reason:
-          text.length > 0
-            ? text
-            : ok
-              ? `deleted ${entry.branch}`
-              : deleted.timedOut === true
-                ? `git branch -D ${entry.branch} failed: ${gitFailure(deleted)}`
-                : `git branch -D ${entry.branch} failed`,
-      };
+      const ok = deletion.deleted;
+      branch = { deleted: ok, reason: deletion.reason };
+      warnings.push(...deletion.warnings);
       if (ok && merged !== null) {
         const where = base?.label ?? "the default branch";
         const hint =
@@ -404,6 +750,14 @@ export async function removeWorktree(
     }
   }
 
+  let sync: SyncMainResult | null = null;
+  if (o.syncMain === true) {
+    sync = syncMainCheckout(repo.mainCheckout);
+    if (sync.status === "failed") {
+      warnings.push(`--sync-main: ${sync.reason}`);
+    }
+  }
+
   return {
     status: "ok",
     worktree: {
@@ -415,6 +769,7 @@ export async function removeWorktree(
     merged,
     branch,
     pruned,
+    sync,
     warnings,
   };
 }

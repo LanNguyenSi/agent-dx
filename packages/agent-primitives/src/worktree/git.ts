@@ -63,6 +63,8 @@ export type WorktreeRefusalReason =
   | "branch_not_merged"
   | "merge_state_unknown"
   | "default_branch_delete"
+  | "no_own_commits"
+  | "head_moved"
   | "worktree_remove_failed";
 
 /** A precondition that was not met. Nothing has been changed when one is

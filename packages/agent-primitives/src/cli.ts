@@ -84,10 +84,12 @@ import {
   createWorktree,
   listWorktrees,
   removeWorktree,
+  sweepWorktrees,
   WorktreeRefusal,
   type CreateWorktreeResult,
   type ListWorktreesResult,
   type RemoveWorktreeResult,
+  type SweepWorktreesResult,
 } from "./worktree/index.js";
 
 function readVersion(): string {
@@ -726,7 +728,7 @@ export function signalExitCode(signal: "SIGINT" | "SIGTERM"): number {
  * process group, so a check's own worker dies with this CLI instead of
  * being orphaned by the exit: `detached: true` puts each command in a
  * group of its own, which means a terminal's Ctrl-C reaches this process
- * alone. `worktree create` and `worktree remove` also get it for the check
+ * alone. `worktree create`, `worktree remove` and `worktree sweep` also get it for the check
  * they make before their first change.
  *
  * `probe` is deliberately not wired to it: it installs its own handler
@@ -2878,7 +2880,7 @@ function renderWorktreeCreateText(result: CreateWorktreeResult): string {
 const worktreeCommand = program
   .command("worktree")
   .description(
-    "Manage linked git worktrees for task branches (subcommands: create, remove, list)",
+    "Manage linked git worktrees for task branches (subcommands: create, remove, sweep, list)",
   );
 
 worktreeCommand
@@ -3018,6 +3020,7 @@ interface WorktreeRemoveCliOptions {
   deleteBranch?: boolean;
   requireMerged?: boolean;
   base?: string;
+  syncMain?: boolean;
 }
 
 /** The worktree `remove` acts on: the positional argument or `--path`,
@@ -3055,6 +3058,9 @@ function renderWorktreeRemoveText(result: RemoveWorktreeResult): string {
     `branch: ${result.branch.deleted ? `deleted (${result.branch.reason})` : result.branch.reason}`,
     `pruned: ${result.pruned ? "yes" : "no"}`,
   ];
+  if (result.sync !== null) {
+    lines.push(`sync-main: ${result.sync.status} (${result.sync.reason})`);
+  }
   if (result.warnings.length > 0) {
     lines.push("", "warnings:");
     for (const warning of result.warnings) lines.push(`  - ${warning}`);
@@ -3078,19 +3084,23 @@ worktreeCommand
   )
   .option(
     "--force",
-    "remove it even when it is dirty, has commits no remote branch has, is locked, or is not merged",
+    "remove it even when it is dirty (a tracked file flagged assume-unchanged or skip-worktree that is present in the work tree included, edited or not, since git status does not show edits to it), has commits no remote branch has, is locked, holds a nested worktree or submodules, a check could not be made (the status, the flagged files, the unpushed or merge state, a HEAD that cannot be read), or is not merged; never overrides not_a_worktree, not_a_git_repo, remove_main_checkout, default_branch_delete, option_invalid, base_not_found, base_not_remote_branch, head_moved for a HEAD that can be read and is not at the commit `git worktree list` showed, git_timeout, interrupted or worktree_remove_failed (git itself failed, after the checks)",
   )
   .option(
     "--delete-branch",
-    "delete the worktree's branch after the worktree is gone (never the default branch or the main checkout's own branch)",
+    "delete the worktree's branch after the worktree is gone (never the default branch or the main checkout's own branch), only while it still points at the commit `git worktree list` showed before the checks: the removal refuses (head_moved) when the worktree's HEAD is no longer at that commit right before its first change, and a branch that gains a commit after that is kept, with a warning",
   )
   .option(
     "--require-merged",
-    "refuse unless the branch is merged into origin/<default branch> (or --base), by ancestry or by a merged pull request that gh reports for it",
+    "refuse unless the branch is merged into origin/<default branch> (or --base): by ancestry, or by a merged pull request that gh reports for it at exactly the worktree's commit; without gh a squash merge is not recognised and the state is unknown (merge_state_unknown); a merged verdict excuses commits no remote branch has",
   )
   .option(
     "--base <rev>",
     "run the merge check against the remote-tracking branch <rev> (<remote>/<branch> or refs/remotes/<remote>/<branch>, e.g. origin/master) instead of origin's default branch, for a branch whose pull request targets another one; anything else (HEAD, a local branch, a sha, a tag) is refused as base_not_remote_branch; needs --require-merged or --delete-branch; the gh lookup uses the branch part after <remote>/ as the pull request base and runs against gh's default repository (no --repo is passed)",
+  )
+  .option(
+    "--sync-main",
+    "after the removal: `git fetch --prune --no-prune-tags origin` in the main checkout (a fetch.pruneTags setting cannot delete a local tag), then fast-forward it to origin's default branch, only when no merge, cherry-pick, revert, rebase, am or bisect is in progress there and it is on the default branch with no staged, unstaged or untracked change and is neither ahead of nor diverged from origin; otherwise skipped with the reason in the result's `sync` field. An ignored file or link in the fast-forward's way makes git refuse it, a failed sync that changes nothing. Never a checkout, reset, stash or force; a failed fetch or fast-forward is a warning, the removal stands",
   )
   .action(
     async (
@@ -3110,6 +3120,7 @@ worktreeCommand
           deleteBranch: opts.deleteBranch,
           requireMerged: opts.requireMerged,
           base: opts.base,
+          syncMain: opts.syncMain,
           signal: shutdownController.signal,
         });
       } catch (err) {
@@ -3152,8 +3163,9 @@ worktreeCommand
           merged: result.merged,
           branch: result.branch,
           pruned: result.pruned,
+          ...(result.sync !== null ? { sync: result.sync } : {}),
         },
-        keepWhole: ["worktree", "branch"],
+        keepWhole: ["worktree", "branch", "sync"],
         maxChars: global.maxChars,
         logDir: global.logDir,
       });
@@ -3165,6 +3177,112 @@ worktreeCommand
       );
     },
   );
+
+interface WorktreeSweepCliOptions {
+  root?: string;
+  dryRun?: boolean;
+}
+
+function renderWorktreeSweepText(result: SweepWorktreesResult): string {
+  const lines = [
+    `status: ${result.status}${result.dryRun ? " (dry run)" : ""}`,
+    `root: ${result.root}`,
+    `removed: ${String(result.summary.removed)}  would remove: ${String(result.summary.wouldRemove)}  skipped: ${String(result.summary.skipped)}  ignored: ${String(result.summary.ignored)}`,
+  ];
+  for (const e of result.entries) {
+    lines.push(
+      `${e.action}  ${e.path}  ${e.branch ?? (e.repo === undefined ? "-" : "detached")}  ${e.reason}`,
+    );
+  }
+  if (result.warnings.length > 0) {
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+worktreeCommand
+  .command("sweep")
+  .description(
+    "Remove every linked worktree among the direct children of --root that is clean and merged into origin's default branch, together with its local branch; --dry-run only reports. Merged means ancestry, or a merged pull request that gh reports at exactly the branch's tip; without gh a squash-merged branch is skipped. A branch with no commits of its own (its tip is its fork point, as for a worktree just created; a branch merged by ancestry looks the same) is skipped as no_own_commits, a child that is a symbolic link is not followed, a branch that gained a commit while its worktree was removed is kept, and ignored files inside a removed worktree go with it. Everything else is listed with its reason. Exit 0: nothing skipped; 1: at least one entry was skipped or a branch was kept (status partial); 2: refused",
+  )
+  .option(
+    "--root <dir>",
+    "the directory whose direct children are looked at; a worktree anywhere else is never touched, and a main checkout among the children is listed as ignored, never removed",
+  )
+  .option(
+    "--dry-run",
+    "run every check and list what would be removed, change nothing",
+  )
+  .action(async (opts: WorktreeSweepCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    let result: SweepWorktreesResult;
+    try {
+      if (opts.root === undefined) {
+        throw new WorktreeRefusal(
+          "worktree sweep needs --root <dir>: the directory whose direct children are swept",
+          "option_invalid",
+        );
+      }
+      result = await sweepWorktrees({
+        cwd: global.cwd,
+        root: opts.root,
+        dryRun: opts.dryRun,
+        signal: shutdownController.signal,
+      });
+    } catch (err) {
+      if (!(err instanceof WorktreeRefusal)) throw err;
+      const { envelope, exitCode } = buildEnvelope({
+        version: VERSION,
+        command: "worktree sweep",
+        status: "usage_error",
+        durationMs: Date.now() - start,
+        cwd: global.cwd,
+        warnings: [],
+        logs: [],
+        extra: {
+          reason: err.reason,
+          message: err.message,
+          ...(err.details !== undefined ? { details: err.details } : {}),
+        },
+        maxChars: global.maxChars,
+        logDir: global.logDir,
+      });
+      emit(
+        envelope,
+        exitCode,
+        { format: global.format, maxChars: global.maxChars },
+        () => `worktree sweep refused (${err.reason}): ${err.message}\n`,
+      );
+      return;
+    }
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "worktree sweep",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs: [],
+      extra: {
+        dryRun: result.dryRun,
+        root: result.root,
+        summary: result.summary,
+        entries: result.entries,
+      },
+      keepWhole: ["summary"],
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(
+      envelope,
+      exitCode,
+      { format: global.format, maxChars: global.maxChars },
+      () => renderWorktreeSweepText(result),
+    );
+  });
 
 interface WorktreeListCliOptions {
   repo?: string;

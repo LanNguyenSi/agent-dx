@@ -42,6 +42,8 @@ const STATUS_CLASS: Record<string, StatusClass> = {
   // text, or a target is hard-linked or read-only; nothing is written.
   fuzzy_side_effect: "finding",
   not_editable: "finding",
+  // `worktree sweep`: the sweep ran, but at least one worktree was skipped.
+  partial: "finding",
   // `init`'s additive target status: bytes match a released, older copy
   // of the packaged asset (per the digest ledger) rather than an unknown
   // edit. Same class and exit code as `conflicted` (still nothing

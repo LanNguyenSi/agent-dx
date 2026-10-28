@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `worktree remove --sync-main`: after a successful removal, runs `git fetch
+  --prune --no-prune-tags origin` in the main checkout and fast-forwards it to
+  origin's default branch, but only when no merge, cherry-pick, revert,
+  rebase, `git am`, sequencer or bisect is in progress there, it is on that
+  branch with no staged, unstaged or untracked change, and it is neither
+  ahead of nor diverged from origin. Otherwise the result's `sync` field says
+  `skipped` with the reason. The fast-forward runs with
+  `--no-overwrite-ignore`, so an ignored file or link in its way (at a path
+  it adds or at a parent of one) makes git refuse, which is a `failed` sync
+  with git's message. `checkout`, `reset`, `stash` and `--force` are never
+  run, and a failed fetch or fast-forward is a warning, not a failed removal.
+- `worktree sweep --root <dir> [--dry-run]`: removes every linked worktree
+  among the direct children of `<dir>` that is clean, merged into origin's
+  default branch and has commits of its own, with its local branch and the
+  ignored files inside it, and lists every other entry with the reason. It
+  reuses `remove --require-merged --delete-branch` for each entry, so all of
+  that command's guards hold, and each removal's warnings are kept on its
+  entry and in the top-level warnings. Merged is the verdict `list` and
+  `remove` already use: ancestry, or a merged pull request that `gh` reports
+  at exactly the branch's tip. A squash or rebase merge is recognised only
+  through `gh`; without it (or when it fails or times out) the verdict is
+  `unknown` and the entry is skipped with that reason. On top of those: a
+  branch whose tip is its fork point with the base is skipped as
+  `no_own_commits` (a worktree just created looks like that, and so does a
+  branch merged by a merge commit or a fast forward, which a sweep therefore
+  leaves to `remove`); a child of `<dir>` that is a symbolic link is not
+  followed, and an entry whose real path is not below `<dir>` is skipped.
+  Exit `0` and status `ok` when nothing was skipped, `1` and the new status
+  `partial` when something was (a child that cannot be described counts) or
+  a removed worktree's branch was kept, `2` for a refusal. A main checkout
+  among the children is listed as `ignored`, never removed.
+- Envelope status `partial` (finding class, exit `1`).
+
+### Changed
+
+- `worktree remove --delete-branch` (and so `worktree sweep`) deletes the
+  branch with `git update-ref --no-deref -d refs/heads/<branch> <commit>`,
+  where `<commit>` is what `git worktree list` showed before the first check,
+  instead of `git branch -D`. A commit made on the branch while the removal
+  ran makes the deletion fail, and the branch is kept with that commit
+  (`branch.deleted: false` and a warning; in a sweep a `removed` entry with
+  `branchDeleted: false`). As with `git branch -D`, a branch that another
+  worktree has checked out is kept, and the branch's `branch.<name>`
+  configuration is removed with it (that section only: the configuration of
+  a dotted sibling such as `feat.x` is neither removed nor reported as left).
+- `worktree remove` (and so `worktree sweep`) reads the worktree's HEAD
+  again right before its first change and refuses with the new reason
+  `head_moved` when it is no longer the commit `git worktree list` showed
+  before the checks, so a commit, checkout or reset made in the worktree
+  while the checks ran stops the removal instead of the checks' verdict
+  being applied to another commit. A HEAD moved away and back before that
+  read is not seen. In a sweep the entry is skipped with that refusal.
+  `--force` does not override it for a HEAD that can be read and moved.
+  When the listing showed no commit (an unborn branch) or HEAD names no
+  commit that can be read (an unborn branch, or a commit object that is
+  missing), the refusal says that whether it moved cannot be told, and
+  `--force` removes the worktree anyway, as it did before this check.
+- `worktree remove` (and so `worktree sweep`) refuses a worktree in which a
+  tracked file flagged assume-unchanged or skip-worktree is present in the
+  work tree, as `worktree_dirty`, edited or not: `git status` does not show
+  an edit to such a file, and its content is not compared (neither with the
+  index nor otherwise). The refusal names the path and the flag in
+  `details.flagged`. A flagged path that is absent from the work tree, as in
+  a sparse checkout, and a submodule entry do not count. A listing that
+  cannot be read is the same refusal. Clear the flag or pass `--force`; in a
+  sweep the entry is skipped.
+
 ## [0.18.0] - 2026-10-25
 
 ### Added

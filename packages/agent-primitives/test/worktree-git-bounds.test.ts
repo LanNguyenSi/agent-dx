@@ -551,8 +551,14 @@ const REMOVE_REFUSALS: RemoveRow[] = [
     message: TIMEOUT_TEXT,
   },
   {
+    name: "hidden edits: ls-files of the flagged files",
+    hang: { match: "gc.auto=0 ls-files -s -v -z" },
+    reason: "worktree_dirty",
+    message: TIMEOUT_TEXT,
+  },
+  {
     name: "ignored links: ls-files",
-    hang: { match: "gc.auto=0 ls-files" },
+    hang: { match: "gc.auto=0 ls-files -z --others" },
     reason: "git_timeout",
   },
   {
@@ -734,7 +740,7 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
     async () => {
       const f = makeFixture();
       const wt = addWorktree(f, "feat");
-      const hung = hangingGit({ match: "gc.auto=0 branch -D" });
+      const hung = hangingGit({ match: "gc.auto=0 update-ref --no-deref -d" });
       const r = await runCli(f.work, ["remove", wt, ...REMOVE_FLAGS], {
         ...boundEnv(),
         PATH: hung.PATH,
@@ -1339,7 +1345,9 @@ describe("a SIGINT or SIGTERM before the first change", () => {
         expect(branchExists(f.repo, "feat")).toBe(true);
         expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
         const writes = slow.calls!().filter((c) =>
-          / (worktree remove|worktree prune|branch -D) /.test(` ${c} `),
+          / (worktree remove|worktree prune|branch -D|update-ref|config --local --remove-section) /.test(
+            ` ${c} `,
+          ),
         );
         expect(writes).toEqual([]);
         await expectGone(pids);

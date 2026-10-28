@@ -32,3 +32,11 @@ export {
   type ListWorktreesResult,
   type ListedWorktree,
 } from "./list.js";
+export { syncMainCheckout, type SyncMainResult } from "./sync.js";
+export {
+  sweepWorktrees,
+  type SweepAction,
+  type SweepEntry,
+  type SweepWorktreesOptions,
+  type SweepWorktreesResult,
+} from "./sweep.js";
