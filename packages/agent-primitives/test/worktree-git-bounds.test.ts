@@ -551,8 +551,14 @@ const REMOVE_REFUSALS: RemoveRow[] = [
     message: TIMEOUT_TEXT,
   },
   {
+    name: "hidden edits: ls-files of the flagged files",
+    hang: { match: "gc.auto=0 ls-files -s -v -z" },
+    reason: "worktree_dirty",
+    message: TIMEOUT_TEXT,
+  },
+  {
     name: "ignored links: ls-files",
-    hang: { match: "gc.auto=0 ls-files" },
+    hang: { match: "gc.auto=0 ls-files -z --others" },
     reason: "git_timeout",
   },
   {
