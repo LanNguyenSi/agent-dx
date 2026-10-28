@@ -1096,6 +1096,8 @@ test("status target fields are null without a target or a remote-tracking ref", 
   git(repoPath, ["config", "user.name", "Test User"]);
   git(repoPath, ["config", "user.email", "test@example.com"]);
   commitFile(repoPath, "a.txt", "a");
+  // A remote-tracking ref literally named "null" must not be mistaken for a target.
+  git(repoPath, ["update-ref", "refs/remotes/origin/null", "HEAD"]);
 
   let [entry] = await statusOf(root);
   assert.equal(entry.targetBranch, null);
