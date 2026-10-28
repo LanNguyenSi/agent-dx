@@ -520,7 +520,7 @@ export function analyzeCitationDrift(
           ? {
               ...verdict,
               status: "changed",
-              reason: `matched to the citation at ${base.ref} by file and numbers only (the sentence changed since), so it may already have been fixed by hand; check it, it is not re-pointed`,
+              reason: `matched to the citation at ${base.ref} by file and numbers only (the sentence changed since), so it may already have been fixed by hand and is not re-pointed`,
               newStartLine: undefined,
               newEndLine: undefined,
             }
