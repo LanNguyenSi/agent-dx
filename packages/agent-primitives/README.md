@@ -73,9 +73,11 @@ for teams shipping with AI agents.
   unless `--delete-branch` says otherwise, and never removing or switching the
   main checkout. `--sync-main` then runs `git fetch --prune --no-prune-tags
   origin` and fast-forwards a clean main checkout that is on the default
-  branch with no merge, rebase, `am` or bisect in progress (otherwise it
-  reports why it did not); an ignored file in the fast-forward's way makes
-  the sync fail without touching anything.
+  branch with no merge, cherry-pick, revert, rebase, `am` or bisect in
+  progress (otherwise it reports why it did not); an ignored file at a path
+  the fast-forward would add makes it skip before anything is touched, and
+  one at a parent path of such a file makes the merge itself fail, the main
+  checkout untouched either way.
 - `worktree sweep --root <dir> [--dry-run]`: removes every linked worktree
   among the direct children of `<dir>` that is clean, merged into origin's
   default branch (a squash merge counts only when `gh` reports its merged pull

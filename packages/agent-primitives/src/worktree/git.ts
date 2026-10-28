@@ -147,6 +147,11 @@ export interface GitCallOptions {
    * a call whose answer decides whether commits are on a remote or in a
    * base. It does not switch off `info/grafts` (see `alteredCommitGraph`). */
   trustObjectsOnly?: true;
+  /** Variables set in the child's environment after the ambient
+   * repository-selection variables are removed, for a call that must read
+   * another index than the worktree's own (`GIT_INDEX_FILE` naming a copy
+   * of it). */
+  env?: Readonly<Record<string, string>>;
 }
 
 /** git's top-level option that ignores every replace ref. */
@@ -271,7 +276,7 @@ export function git(
   const result = runGit(
     cwd,
     callArgv(args, options),
-    withoutRepoSelectionEnv(),
+    { ...withoutRepoSelectionEnv(), ...options.env },
     boundMs,
   );
   return settleTimeout(
@@ -972,7 +977,7 @@ export function gitBytes(
   const result = runGitBytes(
     cwd,
     callArgv(args, options),
-    withoutRepoSelectionEnv(),
+    { ...withoutRepoSelectionEnv(), ...options.env },
     options.input,
     boundMs,
   );

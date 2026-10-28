@@ -428,6 +428,8 @@ interface RemoveRow {
   ahead?: boolean;
   /** Extra text the message holds. */
   message?: string;
+  /** Prepares the worktree before the command runs (flags a file, say). */
+  setup?: (wt: string) => void;
 }
 
 const REMOVE_FLAGS = ["--require-merged", "--delete-branch"];
@@ -557,6 +559,41 @@ const REMOVE_REFUSALS: RemoveRow[] = [
     message: TIMEOUT_TEXT,
   },
   {
+    name: "hidden edits: rev-parse --git-path index",
+    hang: { match: "gc.auto=0 rev-parse --git-path index" },
+    reason: "worktree_dirty",
+    message: TIMEOUT_TEXT,
+    setup: (wt) => git2(wt, ["update-index", "--assume-unchanged", "a.txt"]),
+  },
+  {
+    name: "hidden edits: update-index --no-assume-unchanged on the copy",
+    hang: { match: "gc.auto=0 update-index --no-assume-unchanged -z --stdin" },
+    reason: "worktree_dirty",
+    message: TIMEOUT_TEXT,
+    setup: (wt) => git2(wt, ["update-index", "--assume-unchanged", "a.txt"]),
+  },
+  {
+    name: "hidden edits: update-index --no-skip-worktree on the copy",
+    hang: { match: "gc.auto=0 update-index --no-skip-worktree -z --stdin" },
+    reason: "worktree_dirty",
+    message: TIMEOUT_TEXT,
+    setup: (wt) => git2(wt, ["update-index", "--skip-worktree", "a.txt"]),
+  },
+  {
+    name: "hidden edits: update-index --refresh of the copy",
+    hang: { match: "gc.auto=0 update-index -q --refresh" },
+    reason: "worktree_dirty",
+    message: TIMEOUT_TEXT,
+    setup: (wt) => git2(wt, ["update-index", "--assume-unchanged", "a.txt"]),
+  },
+  {
+    name: "hidden edits: diff-files of the copy",
+    hang: { match: "gc.auto=0 diff-files --name-only -z" },
+    reason: "worktree_dirty",
+    message: TIMEOUT_TEXT,
+    setup: (wt) => git2(wt, ["update-index", "--assume-unchanged", "a.txt"]),
+  },
+  {
     name: "ignored links: ls-files",
     hang: { match: "gc.auto=0 ls-files -z --others" },
     reason: "git_timeout",
@@ -578,9 +615,10 @@ const REMOVE_REFUSALS: RemoveRow[] = [
 describe("worktree remove: a git call that does not finish ends in a refusal", () => {
   it.concurrent.each(REMOVE_REFUSALS.map((row) => [row.name, row] as const))(
     "%s",
-    async (_name, { hang, reason, flags, ahead, message }) => {
+    async (_name, { hang, reason, flags, ahead, message, setup }) => {
       const f = makeFixture();
       const wt = addWorktree(f, "feat", ahead === true);
+      setup?.(wt);
       const sha = git2(wt, ["rev-parse", "HEAD"]).trim();
       const hung = hangingGit(hang);
       const r = await runCli(

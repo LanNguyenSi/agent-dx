@@ -1363,6 +1363,42 @@ describe("worktree remove and sweep: a branch that moves after the checks", () =
     expect(branchExists(f, "feat")).toBe(true);
     expect(git(twin, ["branch", "--show-current"]).trim()).toBe("feat");
   });
+
+  it("remove --force takes a worktree on an unborn branch, which the listing shows at no commit", async () => {
+    const f = makeFixture();
+    const wt = path.join(f.root, "orphan");
+    git(f.repo, ["worktree", "add", "--orphan", "-b", "orphan", wt]);
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).toContain(
+      `worktree ${wt}\nHEAD 0000000000000000000000000000000000000000\n`,
+    );
+
+    const r = await cli(f.work, ["remove", wt, "--force"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).not.toContain(
+      `worktree ${wt}\n`,
+    );
+  });
+
+  it("remove --force takes a worktree whose branch points at a commit object that is missing", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "gone", path.join(f.root, "gone"));
+    const missing = "1111111111111111111111111111111111111111";
+    fs.writeFileSync(
+      path.join(f.repo, ".git", "refs", "heads", "gone"),
+      `${missing}\n`,
+    );
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).toContain(
+      `worktree ${wt}\nHEAD ${missing}\n`,
+    );
+
+    const r = await cli(f.work, ["remove", wt, "--force"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).not.toContain(
+      `worktree ${wt}\n`,
+    );
+  });
 });
 
 describe("worktree remove and sweep: edits git status does not show", () => {
@@ -1499,6 +1535,112 @@ describe("worktree remove and sweep: edits git status does not show", () => {
     const removed = await cli(f.work, ["remove", kept]);
     expect(removed.code, removed.stdout + removed.stderr).toBe(0);
     expect(fs.existsSync(kept)).toBe(false);
+  });
+
+  /** A pushed `feat` worktree below `f.root` whose files `setup` adds and
+   * commits, so that a plain `remove` has nothing unpushed to refuse. */
+  function pushedWorktree(setup: (wt: string) => void): {
+    f: Fixture;
+    wt: string;
+  } {
+    const f = makeFixture();
+    const wt = addWorktree(f, "feat", path.join(f.root, "feat"));
+    setup(wt);
+    git(wt, ["push", "-q", "origin", "feat"]);
+    return { f, wt };
+  }
+
+  it("names each edited flagged file whose name holds a newline, a carriage return, a leading double quote or a backslash, and removes them unedited", async () => {
+    const names = [
+      "nl\nname.txt",
+      "cr\rname.txt",
+      '"lead.txt',
+      "back\\slash.txt",
+    ];
+    const { f, wt } = pushedWorktree((dir) => {
+      for (const name of names) write(dir, name, "v\n");
+      git(dir, ["add", "-A"]);
+      git(dir, ["commit", "-q", "-m", "names"]);
+    });
+    git(wt, ["update-index", "--assume-unchanged", "--", ...names]);
+    for (const name of names) write(wt, name, "EDIT\n");
+    expect(git(wt, ["status", "--porcelain"])).toBe("");
+
+    const refused = await cli(f.work, ["remove", wt]);
+    expect(refused.code, refused.stdout + refused.stderr).toBe(2);
+    expect(refused.json.reason).toBe("worktree_dirty");
+    expect([...(refused.json.details.hidden as string[])].sort()).toEqual(
+      names.map((name) => `assume-unchanged ${name}`).sort(),
+    );
+    for (const name of names) {
+      expect(fs.readFileSync(path.join(wt, name), "utf8")).toBe("EDIT\n");
+    }
+
+    for (const name of names) write(wt, name, "v\n");
+    const removed = await cli(f.work, ["remove", wt]);
+    expect(removed.code, removed.stdout + removed.stderr).toBe(0);
+    expect(fs.existsSync(wt)).toBe(false);
+  });
+
+  it("removes a worktree whose flagged file holds CRLF in the index under `* text=auto` and is not edited, as git itself reads it", async () => {
+    const { f, wt } = pushedWorktree((dir) => {
+      write(dir, "crlf.txt", "c1\r\nc2\r\n");
+      git(dir, ["add", "crlf.txt"]);
+      git(dir, ["commit", "-q", "-m", "crlf"]);
+      write(dir, ".gitattributes", "* text=auto\n");
+      git(dir, ["add", ".gitattributes"]);
+      git(dir, ["commit", "-q", "-m", "attr"]);
+    });
+    git(wt, ["update-index", "--assume-unchanged", "crlf.txt"]);
+    // Stat data that differs from the index, so git has to hash the file
+    // to tell: `git add` would keep the CRLF the index already holds.
+    const later = new Date(Date.now() + 10_000);
+    fs.utimesSync(path.join(wt, "crlf.txt"), later, later);
+    git(wt, ["update-index", "--no-assume-unchanged", "crlf.txt"]);
+    expect(git(wt, ["status", "--porcelain"])).toBe("");
+    git(wt, ["update-index", "--assume-unchanged", "crlf.txt"]);
+
+    const r = await cli(f.work, ["remove", wt]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(fs.existsSync(wt)).toBe(false);
+  });
+
+  it("refuses a flagged file whose executable bit alone changed, under core.fileMode", async () => {
+    const f = makeFixture();
+    const wt = featureWorktree(f, "feat");
+    git(f.repo, ["config", "core.fileMode", "true"]);
+    git(wt, ["update-index", "--assume-unchanged", "shared.txt"]);
+    fs.chmodSync(path.join(wt, "shared.txt"), 0o755);
+    expect(git(wt, ["status", "--porcelain"])).toBe("");
+
+    const r = await cli(f.work, ["remove", wt]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("worktree_dirty");
+    expect(r.json.details.hidden).toEqual(["assume-unchanged shared.txt"]);
+    expect(fs.statSync(path.join(wt, "shared.txt")).mode & 0o100).toBe(0o100);
+    expect(fs.existsSync(wt)).toBe(true);
+  });
+
+  it("does not compare a flagged submodule entry, and removes the worktree with an empty directory in its place", async () => {
+    const { f, wt } = pushedWorktree((dir) => {
+      git(dir, [
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        `160000,${head(dir)},sub`,
+      ]);
+      git(dir, ["commit", "-q", "-m", "gitlink"]);
+    });
+    fs.mkdirSync(path.join(wt, "sub"));
+    git(wt, ["update-index", "--assume-unchanged", "sub"]);
+    expect(git(wt, ["ls-files", "-s", "-v", "sub"])).toMatch(/^h 160000 /);
+    expect(git(wt, ["status", "--porcelain", "--untracked-files=all"])).toBe(
+      "",
+    );
+
+    const r = await cli(f.work, ["remove", wt]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(fs.existsSync(wt)).toBe(false);
   });
 });
 

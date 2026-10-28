@@ -3084,7 +3084,7 @@ worktreeCommand
   )
   .option(
     "--force",
-    "remove it even when it is dirty, has commits no remote branch has, is locked, or is not merged",
+    "remove it even when it is dirty (edits git status does not show included), has commits no remote branch has, is locked, holds a nested worktree or submodules, a check could not be made (the status, the unpushed or merge state, a HEAD that cannot be read), or is not merged; never overrides not_a_worktree, not_a_git_repo, remove_main_checkout, default_branch_delete, option_invalid, base_not_found, base_not_remote_branch, head_moved for a HEAD that can be read and is not at the commit `git worktree list` showed, git_timeout or interrupted",
   )
   .option(
     "--delete-branch",

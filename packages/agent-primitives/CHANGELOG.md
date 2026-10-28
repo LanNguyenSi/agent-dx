@@ -61,15 +61,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the checks ran stops the removal instead of the checks' verdict
   being applied to another commit. A HEAD moved away and back before that
   read is not seen. In a sweep the entry is skipped with that refusal.
+  `--force` does not override it for a HEAD that can be read and moved.
+  When the listing showed no commit (an unborn branch) or HEAD names no
+  commit that can be read (an unborn branch, or a commit object that is
+  missing), the refusal says that whether it moved cannot be told, and
+  `--force` removes the worktree anyway, as it did before this check.
 - `worktree remove` (and so `worktree sweep`) counts as dirty an edit that
   `git status` does not show: a tracked file flagged assume-unchanged or
-  skip-worktree whose content in the work tree differs from the index
-  (hashed with `git hash-object --stdin-paths`, with the path's filters; a
-  symbolic link by its target) is the `worktree_dirty` refusal, naming the
-  flag and the path in `details.hidden`, and so is a flag listing or a hash
-  that cannot be read. A flagged path that is absent from the work tree, as
-  in a sparse checkout, does not count. `--force` overrides it as for any
-  other dirty state.
+  skip-worktree that differs from the index by git's own rule, read with
+  `git diff-files --name-only -z` on a copy of the worktree's index (in a
+  temporary directory, named by `GIT_INDEX_FILE`) where the flags are
+  cleared for the flagged paths that exist as a file or a link (`git
+  update-index --no-assume-unchanged` and `--no-skip-worktree`, the paths
+  NUL-separated on stdin) and the copy is refreshed (`git update-index -q
+  --refresh`, which hashes a file whose stat data differs, with the path's
+  filters, as `git add` would store it): a changed content, link target or
+  mode (the executable bit under `core.fileMode`) is the `worktree_dirty`
+  refusal, naming the flag and the path in `details.hidden`, and so is a
+  listing, the copy or a call that cannot be made, or a listed path that is
+  not flagged. The worktree's own index is never written. A flagged path
+  that is absent from the work tree, as in a sparse checkout, keeps its
+  flags on the copy and does not count; a submodule entry is not compared.
+  `--force` overrides it as for any other dirty state.
 
 ## [0.18.0] - 2026-10-25
 

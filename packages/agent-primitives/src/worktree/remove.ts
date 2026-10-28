@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   GIT_WALK_BOUND_MS,
@@ -223,36 +223,32 @@ function deleteCheckedBranch(
   return result;
 }
 
-/** What `hiddenEdits` found: the flagged files whose content differs from
- * the index, each as `<flag> <path>`, or why that could not be told. */
+/** What `hiddenEdits` found: the flagged files that differ from the index,
+ * each as `<flag> <path>`, or why that could not be told. */
 type HiddenEdits = { ok: true; edited: string[] } | { ok: false; why: string };
 
-/** One line of `git hash-object --stdin-paths` input for `rel`: the path
- * as it is, or C-quoted (every byte outside printable ASCII, a quote and a
- * backslash as `\ooo`) when it holds anything git would read differently,
- * which git unquotes for a line that starts with a quote. */
-function stdinPathLine(rel: Buffer): Buffer {
-  const plain = rel.every(
-    (b) => b >= 0x20 && b < 0x7f && b !== 0x22 && b !== 0x5c,
-  );
-  if (plain) return Buffer.concat([rel, Buffer.from("\n")]);
-  let quoted = '"';
-  for (const b of rel) {
-    quoted +=
-      b >= 0x20 && b < 0x7f && b !== 0x22 && b !== 0x5c
-        ? String.fromCharCode(b)
-        : `\\${b.toString(8).padStart(3, "0")}`;
-  }
-  return Buffer.from(`${quoted}"\n`, "latin1");
+/** A flagged index entry that exists in the work tree as a regular file or
+ * a symbolic link, which git is asked about: its path as `git ls-files -z`
+ * printed it, the `<flag> <path>` label of a refusal, and which flags it
+ * carries. */
+interface FlaggedFile {
+  rel: Buffer;
+  label: string;
+  assumeUnchanged: boolean;
+  skipWorktree: boolean;
 }
 
-/** The id git gives a blob holding `content`, in the object format the id
- * `like` is written in (64 hex digits for SHA-256, 40 for SHA-1). */
-function blobId(content: Buffer, like: string): string {
-  return createHash(like.length === 64 ? "sha256" : "sha1")
-    .update(`blob ${String(content.length)}\0`)
-    .update(content)
-    .digest("hex");
+/** The pieces of `bytes` before each NUL; a trailing NUL ends the last
+ * piece, and nothing follows it. */
+function nulSeparated(bytes: Buffer): Buffer[] {
+  const pieces: Buffer[] = [];
+  let start = 0;
+  for (let i = bytes.indexOf(0, start); i >= 0; i = bytes.indexOf(0, start)) {
+    pieces.push(bytes.subarray(start, i));
+    start = i + 1;
+  }
+  if (start < bytes.length) pieces.push(bytes.subarray(start));
+  return pieces;
 }
 
 /**
@@ -260,14 +256,13 @@ function blobId(content: Buffer, like: string): string {
  * assume-unchanged (`git ls-files -v` prints its tag in lowercase) or
  * skip-worktree (tag `S`, `s` with both flags) is not compared with the
  * work tree by status, so an edit to it would go with the worktree unseen.
- * Each flagged path that exists in the work tree as a regular file is
- * hashed as `git add` would store it (`git hash-object --stdin-paths`,
- * which applies the path's filters), a symbolic link by its target as git
- * stores a link, and the result is compared with the blob the index holds;
- * a file where the index has a link, or anything else where it has a file,
- * counts as edited. A flagged path that is absent (a sparse checkout leaves
- * it out) has nothing in it to lose and does not count, nor does a
- * submodule entry. Reads only; a listing or a hash that cannot be read is
+ * The flagged paths are read from `git ls-files -s -v -z`; each one that
+ * exists in the work tree as a regular file or a symbolic link is handed to
+ * `compareWithIndex`, which asks git itself whether it differs from the
+ * index. A flagged path that is absent (a sparse checkout leaves it out)
+ * has nothing in it to lose and does not count, nor does a submodule entry,
+ * which git never compares with the index; anything else in a file's place
+ * (a directory, a fifo) counts as edited. A listing that cannot be read is
  * `ok: false`.
  */
 function hiddenEdits(target: string): HiddenEdits {
@@ -281,7 +276,7 @@ function hiddenEdits(target: string): HiddenEdits {
     };
   }
   const edited: string[] = [];
-  const files: { rel: Buffer; label: string; oid: string }[] = [];
+  const files = new Map<string, FlaggedFile>();
   const records = listing.stdout.toString("latin1").split("\0");
   let offset = 0;
   for (const record of records) {
@@ -324,43 +319,155 @@ function hiddenEdits(target: string): HiddenEdits {
       if (code === "ENOENT" || code === "ENOTDIR") continue;
       return { ok: false, why: `cannot read ${label}: ${messageOf(err)}` };
     }
-    const indexLink = mode === "120000";
-    if (stat.isSymbolicLink() && indexLink) {
-      let link: Buffer;
-      try {
-        link = fs.readlinkSync(full, { encoding: "buffer" });
-      } catch (err) {
-        return { ok: false, why: `cannot read ${label}: ${messageOf(err)}` };
-      }
-      if (blobId(link, oid) !== oid) edited.push(label);
-    } else if (stat.isFile() && !indexLink) {
-      files.push({ rel, label, oid });
+    if (stat.isFile() || stat.isSymbolicLink()) {
+      files.set(rel.toString("latin1"), {
+        rel,
+        label,
+        assumeUnchanged,
+        skipWorktree,
+      });
     } else {
       edited.push(label);
     }
   }
-  if (files.length > 0) {
-    const hashed = gitBytes(target, ["hash-object", "--stdin-paths"], {
-      ...REPORT_TIMEOUT_WALK,
-      input: Buffer.concat(files.map((f) => stdinPathLine(f.rel))),
-    });
-    const ids = hashed.stdout.toString("latin1").split("\n");
-    if (
-      hashed.error !== undefined ||
-      hashed.status !== 0 ||
-      ids.length !== files.length + 1 ||
-      ids[files.length] !== ""
-    ) {
+  if (files.size === 0) return { ok: true, edited };
+  const compared = compareWithIndex(target, files);
+  if (!compared.ok) return compared;
+  return { ok: true, edited: [...edited, ...compared.edited] };
+}
+
+/**
+ * Git's own comparison of the flagged `files` with the index, made on a
+ * copy of the worktree's index in a temporary directory so that the
+ * worktree's index is never written. On that copy (`GIT_INDEX_FILE`) the
+ * flags are cleared for exactly these paths (`git update-index
+ * --no-assume-unchanged -z --stdin` and `--no-skip-worktree -z --stdin`,
+ * one call per flag since git applies one per call, the paths NUL-separated
+ * on stdin, so no name needs quoting), the copy is refreshed (`git
+ * update-index -q --refresh`: a file whose stat data differs from the
+ * index is hashed with the path's filters, as `git add` would store it, and
+ * stays marked only when the content differs), and `git diff-files
+ * --name-only -z` lists what differs from the index: content, link target,
+ * or mode (the executable bit under `core.fileMode`; a file in a link's
+ * place or the other way round). Each listed path is a hidden edit.
+ * `diff-files` takes no NUL-separated pathspec list, so it runs over the
+ * whole copy; a path it lists that is not among `files` changed after the
+ * status check, and the result is `ok: false` rather than a guess at its
+ * flag. A flagged path that is absent keeps its flags on the copy, so git
+ * does not read it as deleted. A copy or a git call that fails or does
+ * not finish is `ok: false`. The temporary directory, the exact path
+ * `mkdtemp` made, is removed before the result is returned.
+ */
+function compareWithIndex(
+  target: string,
+  files: Map<string, FlaggedFile>,
+): HiddenEdits {
+  const located = gitBytes(
+    target,
+    ["rev-parse", "--git-path", "index"],
+    REPORT_TIMEOUT,
+  );
+  const printed =
+    located.stdout[located.stdout.length - 1] === 0x0a
+      ? located.stdout.subarray(0, located.stdout.length - 1)
+      : located.stdout;
+  if (
+    located.error !== undefined ||
+    located.status !== 0 ||
+    printed.length === 0
+  ) {
+    return {
+      ok: false,
+      why: `git rev-parse --git-path index failed: ${gitFailure({ ...located, stdout: "" })}`,
+    };
+  }
+  const index = path.isAbsolute(printed.toString("latin1"))
+    ? printed
+    : Buffer.concat([Buffer.from(target), Buffer.from(path.sep), printed]);
+  let dir: string;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-index-"));
+  } catch (err) {
+    return {
+      ok: false,
+      why: `cannot make a temporary directory for a copy of the index: ${messageOf(err)}`,
+    };
+  }
+  try {
+    const copy = path.join(dir, "index");
+    try {
+      fs.copyFileSync(index, copy);
+    } catch (err) {
       return {
         ok: false,
-        why: `git hash-object --stdin-paths failed: ${gitFailure({ ...hashed, stdout: "" })}`,
+        why: `cannot copy the index ${renderBytes(index)}: ${messageOf(err)}`,
       };
     }
-    files.forEach((f, i) => {
-      if (ids[i] !== f.oid) edited.push(f.label);
+    const env = { GIT_INDEX_FILE: copy };
+    const nul = Buffer.from([0]);
+    const clears: [string, (f: FlaggedFile) => boolean][] = [
+      ["--no-assume-unchanged", (f) => f.assumeUnchanged],
+      ["--no-skip-worktree", (f) => f.skipWorktree],
+    ];
+    for (const [option, carries] of clears) {
+      const paths = [...files.values()].filter(carries);
+      if (paths.length === 0) continue;
+      const cleared = gitBytes(
+        target,
+        ["update-index", option, "-z", "--stdin"],
+        {
+          ...REPORT_TIMEOUT_WALK,
+          env,
+          input: Buffer.concat(paths.flatMap((f) => [f.rel, nul])),
+        },
+      );
+      if (cleared.error !== undefined || cleared.status !== 0) {
+        return {
+          ok: false,
+          why: `git update-index ${option} on a copy of the index failed: ${gitFailure({ ...cleared, stdout: "" })}`,
+        };
+      }
+    }
+    const refreshed = git(target, ["update-index", "-q", "--refresh"], {
+      ...REPORT_TIMEOUT_WALK,
+      env,
     });
+    if (refreshed.error !== undefined || refreshed.status !== 0) {
+      return {
+        ok: false,
+        why: `git update-index --refresh on a copy of the index failed: ${gitFailure(refreshed)}`,
+      };
+    }
+    const differing = gitBytes(target, ["diff-files", "--name-only", "-z"], {
+      ...REPORT_TIMEOUT_WALK,
+      env,
+    });
+    if (differing.error !== undefined || differing.status !== 0) {
+      return {
+        ok: false,
+        why: `git diff-files on a copy of the index failed: ${gitFailure({ ...differing, stdout: "" })}`,
+      };
+    }
+    const edited: string[] = [];
+    for (const rel of nulSeparated(differing.stdout)) {
+      const file = files.get(rel.toString("latin1"));
+      if (file === undefined) {
+        return {
+          ok: false,
+          why: `git diff-files lists ${renderBytes(rel)}, which is not flagged, so the work tree changed after the status check`,
+        };
+      }
+      edited.push(file.label);
+    }
+    return { ok: true, edited };
+  } finally {
+    // Only the directory `mkdtemp` made above, and whatever git wrote in it.
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // A temporary directory that could not be removed changes no verdict.
+    }
   }
-  return { ok: true, edited };
 }
 
 /**
@@ -657,9 +764,13 @@ export async function removeWorktree(
 
   // The last read before the first change: the worktree's HEAD must still
   // be the commit `git worktree list` showed before the first check, which
-  // is also the one the branch deletion compares against. A HEAD that moved
-  // while the checks ran and is still moved refuses here; one moved away and
-  // back before this read is not seen.
+  // is also the one the branch deletion compares against. A HEAD that can
+  // be read and moved while the checks ran, and is still moved, refuses
+  // here, with or without --force; one moved away and back before this read
+  // is not seen. When the listing showed no commit (an unborn branch is the
+  // zero id) or HEAD names none now (unborn, or a commit object that is
+  // missing), whether it moved cannot be told: a refusal without --force,
+  // which fails closed, and nothing to refuse with it.
   const listedHead =
     entry.head !== undefined &&
     /^[0-9a-f]{40,64}$/.test(entry.head) &&
@@ -667,9 +778,32 @@ export async function removeWorktree(
       ? entry.head
       : undefined;
   const headNow = commitSha(target, "HEAD", { trustObjectsOnly: true });
-  if (headNow !== listedHead) {
+  if (
+    headNow !== undefined &&
+    listedHead !== undefined &&
+    headNow !== listedHead
+  ) {
     throw new WorktreeRefusal(
-      `the HEAD of ${target} is at ${headNow ?? "no commit that can be read"} now, not at ${listedHead ?? "no commit"} where \`git worktree list\` showed it before the checks (something committed, checked out or reset there while they ran), so nothing is removed; run the command again`,
+      `the HEAD of ${target} is at ${headNow} now, not at ${listedHead} where \`git worktree list\` showed it before the checks (something committed, checked out or reset there while they ran), so nothing is removed, with or without --force; run the command again`,
+      "head_moved",
+      { head: headNow, listed: listedHead },
+    );
+  }
+  if ((headNow === undefined || listedHead === undefined) && o.force !== true) {
+    const unreadable = [
+      ...(listedHead === undefined
+        ? [
+            "`git worktree list` showed no commit for it before the checks (an unborn branch)",
+          ]
+        : []),
+      ...(headNow === undefined
+        ? [
+            "HEAD names no commit that can be read now (an unborn branch, or a commit object that is missing)",
+          ]
+        : []),
+    ];
+    throw new WorktreeRefusal(
+      `whether the HEAD of ${target} moved while the checks ran cannot be told: ${unreadable.join("; ")}; nothing is removed. Pass --force to remove the worktree anyway`,
       "head_moved",
       { head: headNow ?? null, listed: listedHead ?? null },
     );
