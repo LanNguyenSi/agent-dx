@@ -175,6 +175,11 @@ describe("statusClass / exitCodeForStatus", () => {
     expect(exitCodeForStatus("survived")).toBe(1);
   });
 
+  it("maps the worktree sweep's partial status to exit 1", () => {
+    expect(statusClass("partial")).toBe("finding");
+    expect(exitCodeForStatus("partial")).toBe(1);
+  });
+
   it("maps cannot-conclude class statuses (including usage_error) to exit 2", () => {
     expect(statusClass("usage_error")).toBe("cannot-conclude");
     expect(exitCodeForStatus("usage_error")).toBe(2);

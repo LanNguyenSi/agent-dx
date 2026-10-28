@@ -358,7 +358,14 @@ dependency links without following them, keeps the branch unless
 merged into the default branch (ancestry, or a merged pull request via `gh`
 for a squash merge); `--base <remote>/<branch>` checks against another remote-tracking
 branch, such as `origin/master` for a hotfix (a local branch, `HEAD` or a sha
-is refused). `worktree list [--repo <path> | --root <dir>]
+is refused). A squash merge counts as merged without `gh` when every path the
+branch changed is in the base as the branch has it (`via: content`); extra
+commits after the squash make it unmerged. `remove --sync-main` then runs
+`git fetch --prune origin` and fast-forwards the main checkout only when it
+is clean and on the default branch (else `sync.reason` says why; never a
+checkout, reset or force). `worktree sweep --root <dir> [--dry-run]` removes
+every clean, merged worktree below `<dir>` with its branch and lists the rest
+with reasons; exit `0` nothing skipped, `1` some skipped. `worktree list [--repo <path> | --root <dir>]
 [--base <rev>]` reports
 each worktree's branch, dirty state, ahead/behind, merged state, run
 pointer and links. See the agent-primitives package's docs/worktree.md.

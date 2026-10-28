@@ -71,7 +71,14 @@ for teams shipping with AI agents.
   unless `--force`, unlinking the
   dependency links it finds without ever following them, keeping the branch
   unless `--delete-branch` says otherwise, and never removing or switching the
-  main checkout.
+  main checkout. `--sync-main` then runs `git fetch --prune origin` and
+  fast-forwards a clean main checkout that is on the default branch (otherwise
+  it reports why it did not).
+- `worktree sweep --root <dir> [--dry-run]`: removes every linked worktree
+  below `<dir>` that is clean and merged into origin's default branch (a
+  squash merge counts, decided from the content, without `gh`), with its local
+  branch; everything else is listed with a reason. Exit `0` nothing skipped,
+  `1` something skipped (`partial`), `2` refused.
 - `worktree list`: reports every worktree of a repository, or every work tree
   below `--root`, with its branch, `.ai/run` pointer, dirty state, commits
   ahead of and behind the default base (or a remote-tracking `--base <rev>`), merge verdict and
@@ -134,7 +141,7 @@ file, and reports whether the test caught it (`killed`) or missed it
   timeout, memory cap, leftovers and the exit codes.
 - [`snapshot`](docs/snapshot.md): read-only checkout fingerprints.
 - [`delta`](docs/delta.md): compare the same checkout with a saved snapshot.
-- [`worktree`](docs/worktree.md): create, list and remove linked worktrees
+- [`worktree`](docs/worktree.md): create, list, remove and sweep linked worktrees
   for a task branch, with their flags and refusals.
 - [Non-JS test runners](docs/non-js-test-runners.md): PHP and other
   non-Node test runner support, including the "Python bytecode cache"
@@ -159,7 +166,7 @@ maps the status to the exit code. Each command lives in its own module:
 | `patch` | `src/patch/` (`index.ts` plan and write phase, `engine.ts` matching, `hint.ts`, `diff.ts`) |
 | `guard` | `src/guard/` (`index.ts` run, limits and sweeps; `ps.ts` the process table), spawning through `src/bounded-spawn.ts` |
 | `snapshot`, `delta` | `src/snapshot/` |
-| `worktree` | `src/worktree/` (`create.ts`, `remove.ts`, `list.ts`; shared git helpers in `git.ts`, the smoke verdict in `readiness.ts`) |
+| `worktree` | `src/worktree/` (`create.ts`, `remove.ts`, `sweep.ts`, `sync.ts`, `list.ts`; shared git helpers in `git.ts`, the smoke verdict in `readiness.ts`) |
 
 `verify` spawns its checks through `execCommand` in `src/exec.ts`.
 `probe` is split into a setup phase (`src/probe/setup.ts`: containment,

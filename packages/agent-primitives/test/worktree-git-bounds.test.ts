@@ -621,11 +621,19 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
       // file.
       const FLAG =
         "--no-replace-objects -c core.useReplaceRefs=false -c core.commitGraph=false";
-      const withFlag = calls.filter((c) => c.startsWith(`${FLAG} `));
-      // The unpushed walk, the ancestry and the sha a merged pull request
-      // must match: nothing else reads the graph for a verdict.
+      const withFlag = calls
+        .filter((c) => c.startsWith(`${FLAG} `))
+        // The fork point is a fixture-specific sha.
+        .map((c) => c.replace(/\b[0-9a-f]{40}\b/g, "<fork>"));
+      // The ancestry, the content rule's fork point and its two path lists,
+      // the sha a merged pull request must match and the unpushed walk:
+      // nothing else reads the graph for a verdict.
+      const NOW = `${FLAG} -c maintenance.auto=false -c gc.auto=0`;
       expect(withFlag).toEqual([
         `${FLAG} -c maintenance.auto=false -c gc.auto=0 merge-base --is-ancestor HEAD refs/remotes/origin/main`,
+        `${NOW} merge-base HEAD refs/remotes/origin/main`,
+        `${NOW} diff --name-only -z --no-renames --no-ext-diff --ignore-submodules=none <fork> HEAD --`,
+        `${NOW} diff --name-only -z --no-renames --no-ext-diff --ignore-submodules=none HEAD refs/remotes/origin/main --`,
         `${FLAG} -c maintenance.auto=false -c gc.auto=0 rev-parse --verify --quiet HEAD^{commit}`,
         `${FLAG} -c maintenance.auto=false -c gc.auto=0 rev-list HEAD --not --exclude=origin/HEAD --remotes`,
       ]);

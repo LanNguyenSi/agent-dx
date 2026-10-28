@@ -1665,10 +1665,13 @@ export function addToExclude(commonDir: string, pattern: string): boolean {
 /** Whether `branch` is merged into `baseRef`, and how that was decided. */
 export interface MergeVerdict {
   merged: "yes" | "no" | "unknown";
-  /** `ancestry`: the branch tip is an ancestor of the base. `gh`: GitHub
-   * lists a merged pull request for the branch (a squash merge leaves no
-   * ancestry). `none`: neither could decide. */
-  via: "ancestry" | "gh" | "none";
+  /** `ancestry`: the branch tip is an ancestor of the base. `content`: the
+   * tip is no ancestor, but everything the branch changed since it forked
+   * is in the base exactly as the branch has it (a squash merge, a rebase
+   * merge or a cherry-pick leaves no ancestry; see `contentInBase`). `gh`:
+   * GitHub lists a merged pull request for the branch. `none`: none of them
+   * could decide. */
+  via: "ancestry" | "content" | "gh" | "none";
   reason: string;
 }
 
@@ -1706,7 +1709,9 @@ export function runGh(cwd: string, args: readonly string[]): GhRun | undefined {
 
 /**
  * Merged into `baseRef`? Ancestry first (`git merge-base --is-ancestor`);
- * when that says no and the worktree has a branch, asks `gh` for a merged
+ * then the content rule (`contentInBase`), which needs no network and
+ * catches a squash merge whose pull request `gh` cannot be asked about;
+ * when both say no and the worktree has a branch, asks `gh` for a merged
  * pull request whose head is the branch and whose base is the branch the
  * verdict is about, which also catches a squash merge. `baseBranchName` is
  * that branch when it cannot be read off `baseRef` (a remote other than
@@ -1731,6 +1736,67 @@ export function mergeVerdict(
     if (!isGitTimeout(err)) throw err;
     return { merged: "unknown", via: "none", reason: err.message };
   }
+}
+
+/**
+ * The content rule for work whose commits never became ancestors of the
+ * base (the repositories here squash-merge, and the remote branch is
+ * deleted on merge): `head` counts as merged when every path the branch
+ * changed since it forked from `baseRef` (`merge-base`, then `diff
+ * --no-renames`, so a rename lists both of its paths) is, at `baseRef`,
+ * exactly what `head` has: the same blob and mode, or absent on both
+ * sides. Everything the branch contributed is then in the base, whichever
+ * commits carried it there.
+ *
+ * It is the answer `git cherry` cannot give for a multi-commit squash (the
+ * squash commit has one patch id, the branch commits have several) and a
+ * tree comparison cannot give once the base has moved on elsewhere. Work
+ * added after the squash fails it, because the paths of those commits differ
+ * from the base; so does a path the base changed again since (the verdict
+ * is then "not decided here", never a false yes). A branch that changed
+ * nothing since the fork has nothing to compare and is not decided either.
+ * Read only: `diff` and `merge-base` write nothing. A git call that fails
+ * leaves the question to the next rule.
+ *
+ * Returns the sentence to show as the reason when the rule says yes,
+ * otherwise `undefined`.
+ */
+export function contentInBase(
+  cwd: string,
+  head: string,
+  baseRef: string,
+): string | undefined {
+  const opts = { boundMs: GIT_WALK_BOUND_MS, trustObjectsOnly: true } as const;
+  const fork = git(cwd, ["merge-base", head, baseRef], opts);
+  if (fork.error !== undefined || fork.status !== 0) return undefined;
+  const forkSha = fork.stdout.trim();
+  if (forkSha.length === 0) return undefined;
+  const names = (a: string, b: string): string[] | undefined => {
+    const r = git(
+      cwd,
+      [
+        "diff",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        "--no-ext-diff",
+        "--ignore-submodules=none",
+        a,
+        b,
+        "--",
+      ],
+      opts,
+    );
+    if (r.error !== undefined || r.status !== 0) return undefined;
+    return r.stdout.split("\0").filter((entry) => entry.length > 0);
+  };
+  const changed = names(forkSha, head);
+  if (changed === undefined || changed.length === 0) return undefined;
+  const differing = names(head, baseRef);
+  if (differing === undefined) return undefined;
+  const stillDiffering = new Set(differing);
+  if (changed.some((entry) => stillDiffering.has(entry))) return undefined;
+  return `all ${String(changed.length)} path(s) the branch changed since it forked are in the base exactly as the branch has them (a squash or rebase merge)`;
 }
 
 function decideMerge(
@@ -1775,6 +1841,14 @@ function decideMerge(
       merged: "yes",
       via: "ancestry",
       reason: `${head} is an ancestor of ${baseLabel}`,
+    };
+  }
+  const inBase = contentInBase(cwd, head, baseRef);
+  if (inBase !== undefined) {
+    return {
+      merged: "yes",
+      via: "content",
+      reason: `${head} is no ancestor of ${baseLabel}, but ${inBase}`,
     };
   }
   if (branch === undefined) {

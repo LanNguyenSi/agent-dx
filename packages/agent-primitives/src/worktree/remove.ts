@@ -16,6 +16,7 @@ import {
   unpushedCommits,
   type MergeVerdict,
 } from "./git.js";
+import { syncMainCheckout, type SyncMainResult } from "./sync.js";
 
 /**
  * `worktree remove`: the safe half of the worktree lifecycle. Every check
@@ -38,6 +39,16 @@ export interface RemoveWorktreeOptions {
    * branch. Needs `requireMerged` or `deleteBranch`, the two options that
    * run the check; alone it is a usage error rather than a silent no-op. */
   base?: string;
+  /** After a successful removal: `git fetch --prune origin` in the main
+   * checkout, then a fast-forward to origin's default branch where that is
+   * safe (see `syncMainCheckout`). Never part of a refusal: the removal
+   * has happened by then, and the outcome is `sync` in the result. */
+  syncMain?: boolean;
+  /** Run every check that can refuse, then stop before the first change and
+   * report what would have been removed (`dryRun: true` in the result). The
+   * same code path as the real removal up to that point, so a dry run
+   * refuses exactly where the removal would. */
+  dryRun?: boolean;
   /** Aborted when the run is interrupted (SIGINT, SIGTERM): checked before
    * the first change, which then refuses with `interrupted`. */
   signal?: AbortSignal;
@@ -53,6 +64,10 @@ export interface RemoveWorktreeResult {
   branch: { deleted: boolean; reason: string };
   /** `git worktree prune` ran and succeeded afterwards. */
   pruned: boolean;
+  /** `--sync-main`'s outcome; `null` when it was not asked for. */
+  sync: SyncMainResult | null;
+  /** Present (`true`) for a dry run: nothing was changed. */
+  dryRun?: true;
   warnings: string[];
 }
 
@@ -82,11 +97,13 @@ function sameDirectory(a: string, b: string): boolean {
  * followed), then `git worktree remove` and `git worktree prune`, and finally
  * the optional `git branch -D`.
  *
- * The main checkout is never modified: its HEAD, index, working tree and
- * stash are untouched, and `git stash`, `checkout`, `switch` and `reset`
- * are never run anywhere. Every git call that writes acts on the main
- * checkout's administrative directories only (`worktree remove`,
- * `worktree prune`, `branch -D`); everything else reads the worktree.
+ * The main checkout is not modified by the removal: its HEAD, index,
+ * working tree and stash are untouched, and `git stash`, `checkout`,
+ * `switch` and `reset` are never run anywhere. Every git call that writes
+ * acts on the main checkout's administrative directories only (`worktree
+ * remove`, `worktree prune`, `branch -D`); everything else reads the
+ * worktree. The one exception is `syncMain`, which may fast-forward the main
+ * checkout when it is clean and on the default branch (see `sync.ts`).
  */
 export async function removeWorktree(
   o: RemoveWorktreeOptions,
@@ -313,6 +330,37 @@ export async function removeWorktree(
     `worktree remove of ${target} was interrupted (SIGINT or SIGTERM) before its first change; nothing was removed`,
   );
 
+  if (o.dryRun === true) {
+    return {
+      status: "ok",
+      worktree: {
+        path: target,
+        ...(entry.branch !== undefined ? { branch: entry.branch } : {}),
+        ...(entry.head !== undefined ? { head: entry.head } : {}),
+      },
+      linksRemoved: [],
+      merged,
+      branch: {
+        deleted: false,
+        reason:
+          o.deleteBranch === true
+            ? "dry run: nothing was changed, the branch would be deleted"
+            : "dry run: nothing was changed",
+      },
+      pruned: false,
+      sync:
+        o.syncMain === true
+          ? {
+              status: "skipped",
+              reason: "dry run: nothing was changed",
+              fetch: "skipped",
+            }
+          : null,
+      dryRun: true,
+      warnings,
+    };
+  }
+
   const linksRemoved: string[] = [];
   for (const rel of links) {
     // `unlink` removes the link itself and never follows it, so the shared
@@ -404,6 +452,14 @@ export async function removeWorktree(
     }
   }
 
+  let sync: SyncMainResult | null = null;
+  if (o.syncMain === true) {
+    sync = syncMainCheckout(repo.mainCheckout);
+    if (sync.status === "failed") {
+      warnings.push(`--sync-main: ${sync.reason}`);
+    }
+  }
+
   return {
     status: "ok",
     worktree: {
@@ -415,6 +471,7 @@ export async function removeWorktree(
     merged,
     branch,
     pruned,
+    sync,
     warnings,
   };
 }

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `worktree remove --sync-main`: after a successful removal, runs `git fetch
+  --prune origin` in the main checkout and fast-forwards it to origin's
+  default branch, but only when it is on that branch with no staged, unstaged
+  or untracked change, is neither ahead of nor diverged from origin, and no
+  ignored file is in the way of the fast-forward. Otherwise the result's
+  `sync` field says `skipped` with the reason; `checkout`, `reset`, `stash`
+  and `--force` are never run, and a failed fetch or fast-forward is a
+  warning, not a failed removal.
+- `worktree sweep --root <dir> [--dry-run]`: removes every linked worktree
+  among the direct children of `<dir>` that is clean and merged into
+  origin's default branch, with its local branch, and lists every other one
+  with the reason. It reuses `remove --require-merged --delete-branch` for
+  each entry, so all of that command's guards hold. Exit `0` and status `ok`
+  when nothing was skipped, `1` and the new status `partial` when something
+  was, `2` for a refusal. A main checkout among the children is listed as
+  `ignored`, never removed.
+- The merged verdict has a third rule, `via: "content"`, between ancestry and
+  `gh`: a branch counts as merged when every path it changed since it forked
+  is in the base exactly as the branch has it, which recognises a squash merge
+  (the remote branch is gone, the commits are no ancestors) with no network
+  call. Work added after the squash, or a path the base changed again, keeps
+  the branch unmerged. `worktree list`, `remove --require-merged` and
+  `--delete-branch` use it too: a squash-merged branch that was `unknown`
+  without `gh` is now `yes`, and `remove` no longer needs `--force` for it.
+- Envelope status `partial` (finding class, exit `1`).
+
 ## [0.18.0] - 2026-10-25
 
 ### Added
