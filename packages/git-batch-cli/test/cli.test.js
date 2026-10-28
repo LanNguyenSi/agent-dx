@@ -952,6 +952,48 @@ test("runSync fast-forwards when the fetch refspec does not cover the target bra
   assert.ok(result.actions.some((action) => action.command.startsWith("git fetch origin ")));
 });
 
+const TARGETED_FETCH = "git fetch origin +refs/heads/main:refs/remotes/origin/main";
+
+test("runSync runs the targeted fetch when a negative refspec excludes the target branch", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-negspec-");
+  git(repo.repoPath, ["config", "--add", "remote.origin.fetch", "^refs/heads/main"]);
+  const head = advanceRemote(repo, "main");
+  const result = await syncOne(root, "main");
+  assert.equal(result.outcome, "ok", result.error);
+  assert.equal(git(repo.repoPath, ["rev-parse", "HEAD"]).trim(), head);
+  assert.ok(result.actions.some((action) => action.command === TARGETED_FETCH), JSON.stringify(result.actions));
+});
+
+test("runSync runs the targeted fetch when the refspec maps to a different remote-tracking namespace", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-otherns-");
+  git(repo.repoPath, ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/upstream/*"]);
+  const head = advanceRemote(repo, "main");
+  const result = await syncOne(root, "main");
+  assert.equal(result.outcome, "ok", result.error);
+  assert.equal(git(repo.repoPath, ["rev-parse", "HEAD"]).trim(), head);
+  assert.ok(result.actions.some((action) => action.command === TARGETED_FETCH), JSON.stringify(result.actions));
+});
+
+test("printResults marks a shared fetch action in text output", () => {
+  const lines = [];
+  printResults(
+    "fetch",
+    [
+      {
+        repo: "wt-a",
+        outcome: "ok",
+        actions: [{ command: "git fetch --all --prune", skipped: true, sharedWith: "main-wt" }]
+      },
+      { repo: "main-wt", outcome: "ok", actions: [{ command: "git fetch --all --prune" }] }
+    ],
+    { out: (line) => lines.push(line) }
+  );
+  assert.deepEqual(lines, [
+    "wt-a: git fetch --all --prune (shared with main-wt)",
+    "main-wt: git fetch --all --prune"
+  ]);
+});
+
 test("runSync does not run the extra fetch for a default refspec", async () => {
   const { root, repo } = setupEdgeRemote("git-batch-default-spec-");
   advanceRemote(repo, "main");

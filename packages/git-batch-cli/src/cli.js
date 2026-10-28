@@ -1220,7 +1220,9 @@ function determineExitCode(command, results, strict) {
 }
 
 function renderActions(actions) {
-  return actions.map((action) => action.command).join(" -> ");
+  return actions
+    .map((action) => (action.skipped ? `${action.command} (shared with ${action.sharedWith})` : action.command))
+    .join(" -> ");
 }
 
 function formatCount(value) {
