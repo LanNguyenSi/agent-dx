@@ -461,6 +461,32 @@ describe("the content rule of the merged verdict", () => {
     );
   });
 
+  it("counts a rename as a change of both paths", () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "mv", path.join(f.root, "mv"));
+    git(wt, ["mv", "a.txt", "renamed.txt"]);
+    git(wt, ["commit", "-q", "-am", "rename a"]);
+    // The base got the new file but kept the old one: the branch deleted
+    // a.txt, so its work is not all in the base.
+    git(f.other, ["pull", "-q", "--ff-only", "origin", "main"]);
+    write(f.other, "renamed.txt", "one\n");
+    git(f.other, ["add", "-A"]);
+    git(f.other, ["commit", "-q", "-m", "copy a"]);
+    git(f.other, ["push", "-q", "origin", "main"]);
+    fetchPrune(f);
+    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toBe(
+      undefined,
+    );
+    // The base that also dropped the old path has all of it.
+    git(f.other, ["rm", "-q", "a.txt"]);
+    git(f.other, ["commit", "-q", "-m", "drop a"]);
+    git(f.other, ["push", "-q", "origin", "main"]);
+    fetchPrune(f);
+    expect(contentInBase(wt, "HEAD", "refs/remotes/origin/main")).toContain(
+      "2 path(s)",
+    );
+  });
+
   it("does not decide a branch that changed nothing since it forked", () => {
     const f = makeFixture();
     const wt = addWorktree(f, "empty", path.join(f.root, "empty"));
@@ -563,12 +589,17 @@ describe("worktree sweep", () => {
 
     expect(entryFor(r, dirty)).toMatchObject({ action: "skipped" });
     expect(entryFor(r, dirty).reason).toContain("uncommitted");
+    // Held back by the sweep's own check, before any removal was tried.
+    expect(entryFor(r, dirty).refusal).toBeUndefined();
     expect(entryFor(r, open).action).toBe("skipped");
     expect(entryFor(r, open).reason).toContain("not merged");
+    expect(entryFor(r, open).refusal).toBeUndefined();
     expect(entryFor(r, unpushed).action).toBe("skipped");
     expect(entryFor(r, unpushed).reason).toContain("not merged");
+    expect(entryFor(r, unpushed).refusal).toBeUndefined();
     expect(entryFor(r, locked).action).toBe("skipped");
     expect(entryFor(r, locked).reason).toContain("locked");
+    expect(entryFor(r, locked).refusal).toBeUndefined();
     for (const kept of [dirty, open, unpushed, locked]) {
       expect(fs.existsSync(kept)).toBe(true);
     }
