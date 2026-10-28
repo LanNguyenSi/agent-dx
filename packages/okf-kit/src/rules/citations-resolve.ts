@@ -840,6 +840,45 @@ type Problem = {
  */
 export type BasenameCache = Map<string, Map<string, string[]>>;
 
+/** A run of digits in the doc text: `[offset, offset + length)` of `doc.raw`. */
+export interface LineSpan {
+  offset: number;
+  length: number;
+}
+
+/**
+ * One citation that `citations-resolve` resolved to a real file, with the
+ * line numbers it cites and where those numbers sit in the doc text. The
+ * citation-drift check (`--base`, see `src/citation-drift.ts`) and
+ * `repoint` read these instead of re-parsing the grammar: they see exactly
+ * the citations (full, continuation, extension, short-form) this rule
+ * evaluates, resolved by the same path resolution.
+ */
+export interface ResolvedCitation {
+  docRelPath: string;
+  kind: "full" | "continuation" | "extension" | "short-form";
+  /** The citation as the findings label it, e.g. `src/a.ts:10-12`. */
+  label: string;
+  /** Absolute path of the cited file. */
+  resolvedPath: string;
+  /** First cited line (for an extension: the start line of the range it extends). */
+  startLine: number;
+  /** Last cited line; equals `startLine` for a single-line citation. */
+  endLine: number;
+  /** The start line's digits in the doc; null for an extension, which only writes the end line. */
+  startSpan: LineSpan | null;
+  /** The end line's digits in the doc; null for a single-line citation. */
+  endSpan: LineSpan | null;
+}
+
+/** Every digit run in `raw` (a continuation as written), located in the doc. */
+function digitSpans(index: number, raw: string): LineSpan[] {
+  return [...raw.matchAll(/\d+/g)].map((d) => ({
+    offset: index + (d.index ?? 0),
+    length: d[0].length,
+  }));
+}
+
 type Atom =
   | {
       kind: "full";
@@ -848,6 +887,9 @@ type Atom =
       startLine: number;
       endLine: number | null;
       anchor: Anchor | null;
+      // Where the start (and end) line digits sit in the doc, for the
+      // resolved-citation sink (see `ResolvedCitation`).
+      lineSpans: { start: LineSpan; end: LineSpan | null };
       // Non-null when a `#` immediately followed this citation's range but
       // did not parse as either anchor form -- see `anchor-malformed` in
       // the atom-processing loop below. Carried on the atom (computed at
@@ -1118,7 +1160,7 @@ export function resolveCitation(
   return null;
 }
 
-function splitLines(content: string): string[] {
+export function splitLines(content: string): string[] {
   const lines = content.split("\n");
   if (
     lines.length > 0 &&
@@ -1928,6 +1970,10 @@ type ShortFormMatch = {
   index: number;
   startLine: number;
   endLine: number;
+  // Digit counts as written, so the resolved-citation sink can locate the
+  // two numbers after the `:` even with leading zeros.
+  startLength: number;
+  endLength: number;
 };
 
 /**
@@ -1970,7 +2016,13 @@ function collectShortFormMatches(
     if (!isSerialConnectivePreceded(content, m.index)) continue;
     const startLine = Number(m[1]);
     const endLine = Number(m[2]);
-    out.push({ index: m.index, startLine, endLine });
+    out.push({
+      index: m.index,
+      startLine,
+      endLine,
+      startLength: m[1].length,
+      endLength: m[2].length,
+    });
   }
 
   return out.sort((a, b) => a.index - b.index);
@@ -2371,6 +2423,7 @@ function scanDoc(
   doc: BundleDoc,
   requireAnchors?: RequireAnchorsOptions,
   specVersion?: SpecVersion,
+  sink?: ResolvedCitation[],
 ): Finding[] {
   const findings: Finding[] = [];
   const content = doc.raw;
@@ -2449,6 +2502,15 @@ function scanDoc(
       startLine: Number(m[2]),
       endLine: m[3] ? Number(m[3]) : null,
       anchor: parseAnchor(m[4]),
+      lineSpans: {
+        start: { offset: m.index + m[1].length + 1, length: m[2].length },
+        end: m[3]
+          ? {
+              offset: m.index + m[1].length + 1 + m[2].length + 1,
+              length: m[3].length,
+            }
+          : null,
+      },
       malformedAnchorRaw,
     });
     fullSpans.push([m.index, matchEnd]);
@@ -2498,6 +2560,17 @@ function scanDoc(
     if (atom.kind === "cont-ext") {
       if (!governing || lastStartLine === null) continue; // nothing to extend
       const citation = `${governing.citedPath}:${lastStartLine}-${atom.value} (continuation)`;
+      const valueSpan = digitSpans(atom.index, atom.raw).at(-1) ?? null;
+      sink?.push({
+        docRelPath: doc.relPath,
+        kind: "extension",
+        label: citation,
+        resolvedPath: governing.resolvedPath,
+        startLine: lastStartLine,
+        endLine: atom.value,
+        startSpan: null,
+        endSpan: valueSpan,
+      });
       pushAnchorRequiredContinuation(
         findings,
         doc.relPath,
@@ -2537,6 +2610,17 @@ function scanDoc(
       if (!governing) continue; // nothing to validate a bare continuation against
       const { startLine, endLine } = atom;
       const citation = `${governing.citedPath}:${startLine}${endLine ? "-" + endLine : ""} (continuation)`;
+      const spans = digitSpans(atom.index, atom.raw);
+      sink?.push({
+        docRelPath: doc.relPath,
+        kind: "continuation",
+        label: citation,
+        resolvedPath: governing.resolvedPath,
+        startLine,
+        endLine: endLine ?? startLine,
+        startSpan: spans[0] ?? null,
+        endSpan: endLine ? (spans[1] ?? null) : null,
+      });
       pushAnchorRequiredContinuation(
         findings,
         doc.relPath,
@@ -2644,6 +2728,17 @@ function scanDoc(
     // see parseAnchor); this only ADDS a heads-up that the `#` sitting
     // right there was silently not read as the anchor it looks like it was
     // meant to be.
+    sink?.push({
+      docRelPath: doc.relPath,
+      kind: "full",
+      label: citation,
+      resolvedPath: resolution.path,
+      startLine,
+      endLine: endLine ?? startLine,
+      startSpan: atom.lineSpans.start,
+      endSpan: endLine ? atom.lineSpans.end : null,
+    });
+
     if (atom.malformedAnchorRaw !== null) {
       pushDrift(
         findings,
@@ -2904,6 +2999,20 @@ function scanDoc(
         continue;
       }
 
+      sink?.push({
+        docRelPath: doc.relPath,
+        kind: "short-form",
+        label: citation,
+        resolvedPath: resolution.path,
+        startLine: sf.startLine,
+        endLine: sf.endLine,
+        startSpan: { offset: sf.index + 1, length: sf.startLength },
+        endSpan: {
+          offset: sf.index + 1 + sf.startLength + 1,
+          length: sf.endLength,
+        },
+      });
+
       // anchor-required-continuation (opt-in, warning) also applies to a
       // bound short-form citation: it is just as anchor-less as a
       // backtick continuation (see the "Short-form citations" doc block
@@ -3037,6 +3146,23 @@ function scanFootnoteLineCitations(
       }
     }
   }
+}
+
+/**
+ * Every citation `citations-resolve` evaluates in `doc` that resolved to a
+ * real file, in the order the rule meets them (findings are discarded).
+ * Footnote-form line numbers (spec v0.2) are not included: their digits sit
+ * in a footnote definition, which has no stable offset in `doc.raw`.
+ */
+export function collectResolvedCitations(
+  root: string,
+  bundleDir: string,
+  doc: BundleDoc,
+  cache: BasenameCache = new Map(),
+): ResolvedCitation[] {
+  const sink: ResolvedCitation[] = [];
+  scanDoc(cache, root, bundleDir, doc, undefined, undefined, sink);
+  return sink;
 }
 
 export const citationsResolveRule: Rule = {

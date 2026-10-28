@@ -11,6 +11,7 @@ import {
   hasParentSegment,
   paragraphStartFor,
   resolveCitation,
+  splitLines,
   type BasenameCache,
 } from "./citations-resolve.js";
 import type {
@@ -232,23 +233,6 @@ function lineNumberAt(content: string, index: number): number {
     if (content[i] === "\n") line++;
   }
   return line;
-}
-
-// Duplicated from citations-resolve's own splitLines (not exported: this
-// rule needs the identical "trailing newline does not count as an extra
-// blank final line" semantics so a file's line count agrees with what
-// citations-resolve would report for the same file, but the function
-// itself is a two-line utility not worth threading a new export for).
-function splitLines(content: string): string[] {
-  const lines = content.split("\n");
-  if (
-    lines.length > 0 &&
-    lines[lines.length - 1] === "" &&
-    content.endsWith("\n")
-  ) {
-    lines.pop();
-  }
-  return lines;
 }
 
 /**

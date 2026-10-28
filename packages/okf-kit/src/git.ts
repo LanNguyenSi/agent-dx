@@ -47,14 +47,14 @@ function gitChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
 }
 
 /**
- * Default RunGit implementation: shells out to the real `git` binary.
+ * Runs `git <args>` and returns stdout exactly as git wrote it, or null on
+ * any failure (non-zero exit, git missing, output past MAX_GIT_OUTPUT_BYTES).
  * stderr is discarded (git's own "fatal: not a git repository" etc. text is
- * an expected, silent signal here, not something to surface), and any
- * failure (non-zero exit, git missing, output past MAX_GIT_OUTPUT_BYTES)
- * resolves to null instead of throwing. The child runs with gitChildEnv(),
- * so pathspec parsing ignores the caller's pathspec-mode variables.
+ * an expected, silent signal here, not something to surface). The child runs
+ * with gitChildEnv(), so pathspec parsing ignores the caller's pathspec-mode
+ * variables.
  */
-export const runGit: RunGit = (args, cwd) => {
+function execGit(args: string[], cwd: string): string | null {
   try {
     return execFileSync("git", args, {
       cwd,
@@ -62,11 +62,27 @@ export const runGit: RunGit = (args, cwd) => {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: MAX_GIT_OUTPUT_BYTES,
-    }).trim();
+    });
   } catch {
     return null;
   }
-};
+}
+
+/**
+ * Default RunGit implementation: shells out to the real `git` binary and
+ * returns trimmed stdout (see `execGit` for the failure contract). Any
+ * failure resolves to null instead of throwing.
+ */
+export const runGit: RunGit = (args, cwd) => execGit(args, cwd)?.trim() ?? null;
+
+/**
+ * Like `runGit`, but returns stdout UNTRIMMED. File content read through
+ * `git show <rev>:<path>` needs it: trimming would drop the first line's
+ * indentation and any trailing blank lines, and line numbers (which the
+ * citation-drift check maps through `git diff -U0` hunks) must count every
+ * line of the real file.
+ */
+export const runGitRaw: RunGit = (args, cwd) => execGit(args, cwd);
 
 /**
  * Resolves the git work tree root containing `startDir`, or undefined when

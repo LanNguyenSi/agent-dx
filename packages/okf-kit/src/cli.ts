@@ -12,11 +12,19 @@ import {
 } from "./docs-for.js";
 import { parseCompanions } from "./companions.js";
 import { UsageError } from "./errors.js";
+import { resolveBaseCommit } from "./citation-drift.js";
 import { detectRepoRoot } from "./git.js";
 import { formatInitSummary, runInit } from "./init.js";
+import { renderRepointJson, renderRepointText, runRepoint } from "./repoint.js";
 import { allRules } from "./rules/index.js";
 import { renderJson, renderText, summarize } from "./report.js";
-import type { Finding, RunGit, Severity, SpecVersion } from "./types.js";
+import type {
+  CitationDriftOptions,
+  Finding,
+  RunGit,
+  Severity,
+  SpecVersion,
+} from "./types.js";
 
 export { UsageError };
 
@@ -51,6 +59,14 @@ export interface CheckOptions {
    * set.
    */
   proseLineReferencesStrict?: boolean;
+  /**
+   * Opt-in for `citation-drift`: a git ref (branch, tag, commit) the docs'
+   * line numbers were written against. Every line citation whose cited text
+   * is no longer at its cited lines in the working tree is flagged. A ref
+   * that names no commit, or a bundle outside a git work tree, is a
+   * UsageError. Stored on `ctx.citationDrift`; see `src/citation-drift.ts`.
+   */
+  base?: string;
   /**
    * `sources-fresh-future`'s clock-skew allowance, in minutes (default 10
    * when omitted; see `DEFAULT_FUTURE_SKEW_SECONDS` in
@@ -173,7 +189,19 @@ export function runCheck(
     ? path.resolve(options.repoRoot)
     : detectRepoRoot(resolvedBundleDir, options.runGit);
   const companions = parseCompanions(options.companions ?? []);
+  let citationDrift: CitationDriftOptions | undefined;
+  if (options.base !== undefined) {
+    if (!repoRoot) {
+      throw new UsageError(
+        "--base needs a git work tree: the bundle is not inside one (pass --repo-root)",
+      );
+    }
+    citationDrift = resolveBaseCommit(repoRoot, options.base);
+  }
   const ctx = loadBundle(resolvedBundleDir, repoRoot, options.runGit);
+  if (citationDrift) {
+    ctx.citationDrift = citationDrift;
+  }
   // `--spec` replaces the version loadBundle detected from the bundle-root
   // index.md frontmatter; the same override flows to every rule through
   // ctx.specVersion. An invalid value is the same usage error (exit 2) an
@@ -272,6 +300,12 @@ program
       "the remedy to lift it into a backtick citation or a symbol name (ignored unless --prose-line-references is also passed)",
   )
   .option(
+    "--base <ref>",
+    "citation-drift: git ref (branch, tag or commit) the docs' line numbers were written against; flags every " +
+      "line citation whose cited text is no longer at its cited lines in the working tree (opt-in, see docs/citations.md). " +
+      "An unknown ref is a usage error (exit 2)",
+  )
+  .option(
     "--future-skew-minutes <n>",
     "sources-fresh-future: clock-skew allowance in minutes before a doc `timestamp` later than " +
       "the doc's own last commit is flagged as future-dated (default 10)",
@@ -327,6 +361,7 @@ program
         requireAnchorsAllow?: string[];
         proseLineReferences?: boolean;
         proseLineReferencesStrict?: boolean;
+        base?: string;
         futureSkewMinutes?: string;
         dirtyAsNow?: boolean;
         companion?: string[];
@@ -367,6 +402,7 @@ program
           requireAnchorsAllow: opts.requireAnchorsAllow,
           proseLineReferences: opts.proseLineReferences,
           proseLineReferencesStrict: opts.proseLineReferencesStrict,
+          base: opts.base,
           futureSkewMinutes,
           dirtyAsNow: opts.dirtyAsNow,
           companions: opts.companion,
@@ -382,6 +418,59 @@ program
         // Set the code and return instead of process.exit(): a pipe write is
         // asynchronous, and exiting here cut a report larger than the pipe
         // buffer (platform dependent) short.
+        process.exitCode = result.exitCode;
+        return;
+      } catch (err) {
+        if (err instanceof UsageError) {
+          process.stderr.write(`okf-kit: ${err.message}\n`);
+          process.exit(2);
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`okf-kit: ${msg}\n`);
+        process.exit(2);
+      }
+    },
+  );
+
+program
+  .command("repoint <bundleDir>")
+  .description(
+    "Re-point line citations whose cited text moved since a git ref (dry run unless --write); a citation an edit touched is listed for manual handling, never rewritten",
+  )
+  .requiredOption(
+    "--base <ref>",
+    "Git ref (branch, tag or commit) the docs' line numbers were written against; an unknown ref is a usage error (exit 2)",
+  )
+  .option(
+    "-r, --repo-root <path>",
+    "Repo root the citations resolve against (auto-detected via `git rev-parse --show-toplevel` from the bundle dir when omitted)",
+  )
+  .option(
+    "-w, --write",
+    "Rewrite the line numbers in the docs (default: print the planned rewrites and change nothing)",
+  )
+  .option("-j, --json", "Output the result as JSON")
+  .exitOverride()
+  .action(
+    (
+      bundleDir: string,
+      opts: {
+        base: string;
+        repoRoot?: string;
+        write?: boolean;
+        json?: boolean;
+      },
+    ) => {
+      try {
+        const result = runRepoint(bundleDir, {
+          base: opts.base,
+          repoRoot: opts.repoRoot,
+          write: opts.write,
+        });
+        const output = opts.json
+          ? renderRepointJson(result)
+          : renderRepointText(result);
+        process.stdout.write(output);
         process.exitCode = result.exitCode;
         return;
       } catch (err) {

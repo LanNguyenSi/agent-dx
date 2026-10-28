@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `check --base <ref>` and `okf-kit repoint <bundleDir> --base <ref>`: line
+  citations that a source edit moved onto other, non-empty lines are now
+  detected and can be re-pointed mechanically. `citations-resolve` only flags
+  a drifted citation through structural symptoms (blank line, lone closing
+  brace, range past the end of the file); with a base ref the check compares
+  the text a citation named at the ref with the text at its current lines.
+  The new opt-in `citation-drift` rule (off without `--base`, so existing
+  output is unchanged) reports `citation-moved` (the cited text moved; the
+  message names the new lines) and `citation-content-changed` (an edit touched
+  the cited lines themselves) for primary, continuation, extension and
+  short-form citations. `repoint` maps each citation through the hunks of
+  `git diff -U0 <ref>`, verifies the text at the shifted lines, and rewrites
+  only the digits; it prints the plan as a dry run by default, rewrites with
+  `--write`, refuses (lists, exit 1) a citation inside a changed hunk, and
+  never re-stamps a doc or writes a `log.md` entry. A citation the doc did not
+  already carry at the ref (written or re-pointed since) is not judged, so a
+  second run is a no-op; a citation paired with the ref only by file and
+  numbers (its sentence was reworded) is reported, never rewritten, since it
+  may have been fixed by hand. `--repo-root` may be a subdirectory of the git
+  top level. Anchor citations (`path:#heading`), footnote line
+  numbers and reserved docs are out of scope; a renamed cited file is followed
+  only for a citation that still resolves. See
+  [Drift since a git ref](docs/citations.md#drift-since-a-git-ref---base) and
+  [Re-pointing citations](docs/repoint.md) (task 51b19593).
+
 ## [0.19.2] - 2026-10-25
 
 ### Fixed

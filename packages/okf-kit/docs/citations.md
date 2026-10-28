@@ -104,6 +104,31 @@ Under spec v0.2, `citations-resolve` takes every backticked line number or range
 - it is checked only when the footnote's `sources` entry has an `id`, a path (not URL) `resource` that stays in the repo root and is an existing file; a missing or escaping resource is `sources-shape`'s finding, and a URL has no lines to check;
 - write the range as its own backticked token. Backticked numbers in a definition are read as line numbers, so keep other numbers out of backticks there; and avoid the shapes the continuation grammar above claims for itself (`` (`N`) ``, `` -`M` ``, `` `:N-M` ``), which are read as continuations of the nearest earlier inline citation instead.
 
+## Drift since a git ref (`--base`)
+
+`citations-resolve` sees a drifted line citation only through its structural symptoms (a blank line, a lone closing brace, a range past the end of the file). An edit that inserts or removes lines above a cited range usually leaves the citation on some other ordinary line, which no structural check can tell from a correct one. With a base ref the question has an answer: the doc was written against the file as it was at the ref, so the text a citation named THERE is the text it must still name.
+
+```bash
+okf-kit check path/to/bundle --base origin/main
+```
+
+`--base <ref>` (a branch, tag or commit; an unknown ref is a usage error, exit 2) turns on the opt-in `citation-drift` rule. For every line citation the doc already carried at the ref, it compares the lines the citation names now against the lines it named at the ref, and maps the position through the hunks of `git diff -U0 <ref>` (working tree against the ref, so uncommitted edits count). Two findings, both warnings:
+
+- `citation-moved`: no hunk touches the cited range, so the whole range shifted by the net line change of the hunks above it, and the text at the shifted lines was verified equal to the text cited at the ref. The message names the new lines; [`okf-kit repoint`](repoint.md) rewrites the citation.
+- `citation-content-changed`: a hunk touches the cited range (a line inside it was edited or removed, or lines were inserted between its first and last line), or the shifted lines do not hold the cited text. The new position cannot be derived, so the citation is reported for manual handling and never rewritten.
+- the same finding, with the reason "matched to the citation at the ref by file and numbers only", for a citation whose sentence changed since the ref and whose cited text would otherwise count as moved. The fallback pairing (same file and same numbers, no prose line in common) cannot tell a stale citation from one a person already fixed by hand against the current file, so such a citation is reported and never rewritten; fix it by hand or reword it back. If the text did not move it stays unreported.
+
+What is covered: full citations (`path:N`, `path:N-M`, with or without an `#anchor`, which stays as written), continuations (`` `:N` ``, `` `:N-M` ``, `` (`N`) ``), extensions (`` `path:N`-`M` ``) and bound short forms (`:N-M`). These are exactly the citations `citations-resolve` evaluates, resolved by the same path resolution. What is not judged, and produces no finding:
+
+- a citation into a file that did not exist at the ref, or whose cited range was not valid there;
+- a citation the doc did not carry at the ref: it is matched by the prose line it sits on (digits ignored, told apart from identical lines by its ordinal among them); a citation whose line carried other numbers at the ref was re-pointed or edited since, and one with no counterpart was written since, so both are taken to name the current file. This is what keeps a second `repoint` run a no-op. Known false negative: doc lines that read the same once digits are blanked (rows of one table, items of one list) are paired by ordinal, so removing or inserting one of them shifts the pairing of every later one and their stale citations are skipped as "re-pointed or edited since"; re-point such a table by hand or against a ref taken after that doc edit;
+- a doc that did not exist at the ref, and the reserved docs `index.md` and `log.md` (their line numbers narrate past states);
+- a footnote-form line number (spec v0.2), and anchor-only citations (`path:#heading`), which locate themselves.
+
+A cited file renamed since the ref is followed in one direction: a citation that still resolves to the new path (for example a bare filename that the repo-wide search finds) is compared against the old path's content at the ref. A citation that still spells the old path no longer resolves, so `citations-resolve` reports it as `missing-file` and it never reaches this check; rewriting paths is out of scope.
+
+Without `--base` the rule returns nothing, and `check` output is byte-identical to a version without it. `--base` needs a git work tree and shells out to the real `git` (it ignores the test-only `runGit` override).
+
 ## Anchor strictness (opt-in, `--require-anchors`)
 
 Everything above is on by default. `--require-anchors` opts into five additional, stricter checks against `citations-resolve`, all `warning`-severity, off unless the flag is passed -- an existing bundle's findings under a plain `check` are byte-for-byte unaffected by this section existing. `--require-anchors` (and its sibling `--require-anchors-allow`) is a CLI flag only; okf-kit has no bundle-level config file today (no `.okf.yml`, no `okf-kit.config`, no frontmatter field), so there is no other way to turn this on. All five checks are also exempt for a citing doc that is a reserved file (`index.md`, `log.md`), the same carve-out `citations-resolve` already gives reserved docs for short-form matching elsewhere: a reserved doc's citations still get the unconditional base checks (`missing-file`, `inverted-range`, `anchor-not-found-in-range`, and so on), just none of the five opt-in ones:
