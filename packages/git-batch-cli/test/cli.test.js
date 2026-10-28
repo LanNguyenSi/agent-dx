@@ -887,7 +887,8 @@ test("fetch and sync of linked worktrees succeed with real git at default concur
     JSON.stringify(synced.map((e) => e.error))
   );
   assert.equal(synced.find((entry) => entry.repo === "main-wt").outcome, "ok");
-});
+  // Real git with 8 worktrees and 30 branches exceeds the 5 s default under load.
+}, 30000);
 
 test("status --fetch shares one fetch across linked worktrees", async () => {
   const { repos } = setupWorktreeGroup("git-batch-worktrees-status-", 3);
