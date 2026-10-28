@@ -89,6 +89,19 @@ export interface ProseLineReferencesOptions {
   strict?: boolean;
 }
 
+/**
+ * Opt-in for `citation-drift` (see `check --base <ref>` in `src/cli.ts` and
+ * `src/citation-drift.ts`). Absent entirely when `--base` was not passed, so
+ * the rule returns no findings and `check` output is byte-identical to a
+ * version without it.
+ */
+export interface CitationDriftOptions {
+  /** The ref as the caller spelled it. */
+  ref: string;
+  /** The commit it resolved to. */
+  sha: string;
+}
+
 export interface BundleContext {
   bundleDir: string;
   repoRoot?: string;
@@ -108,6 +121,8 @@ export interface BundleContext {
   requireAnchors?: RequireAnchorsOptions;
   /** See `ProseLineReferencesOptions`. Undefined when `--prose-line-references` was not passed. */
   proseLineReferences?: ProseLineReferencesOptions;
+  /** See `CitationDriftOptions`. Undefined when `--base` was not passed. */
+  citationDrift?: CitationDriftOptions;
   /**
    * Clock-skew allowance (seconds) for `sources-fresh-future` (see
    * `--future-skew-minutes` in `src/cli.ts` and `DEFAULT_FUTURE_SKEW_SECONDS`

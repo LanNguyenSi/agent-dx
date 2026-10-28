@@ -9,6 +9,7 @@ import { sourcesFreshRule, sourcesFreshFutureRule } from "./sources-fresh.js";
 import { generatedShapeRule } from "./generated-shape.js";
 import { footnotesResolveRule } from "./footnotes-resolve.js";
 import { citationsResolveRule } from "./citations-resolve.js";
+import { citationDriftRule } from "./citation-drift.js";
 import { proseLineReferencesRule } from "./prose-line-references.js";
 import { frontmatterRefsResolveRule } from "./frontmatter-refs-resolve.js";
 
@@ -17,6 +18,9 @@ import { frontmatterRefsResolveRule } from "./frontmatter-refs-resolve.js";
 // ctx.proseLineReferences is set (see src/rules/prose-line-references.ts),
 // so a consumer that never passes --prose-line-references sees
 // byte-identical `check` output to before this rule existed.
+//
+// citationDriftRule is registered the same way: its run(ctx) returns []
+// unless ctx.citationDrift is set (`check --base <ref>`).
 //
 // sourcesFreshFutureRule, unlike those two, is always active (no opt-in
 // flag gates it, only `--future-skew-minutes` tunes its threshold): it
@@ -34,6 +38,7 @@ export const allRules: Rule[] = [
   generatedShapeRule,
   footnotesResolveRule,
   citationsResolveRule,
+  citationDriftRule,
   proseLineReferencesRule,
   frontmatterRefsResolveRule,
 ];
@@ -50,6 +55,7 @@ export {
   generatedShapeRule,
   footnotesResolveRule,
   citationsResolveRule,
+  citationDriftRule,
   proseLineReferencesRule,
   frontmatterRefsResolveRule,
 };

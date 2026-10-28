@@ -14,7 +14,7 @@ It validates frontmatter shape, link resolution, staleness against git history, 
 
 ## Key features
 
-- 10 rules covering frontmatter shape, reserved files, link resolution, and staleness/citation drift assessed against git history; see the [check catalog](docs/check-catalog.md).
+- 14 rules covering frontmatter shape, reserved files, link resolution, and staleness/citation drift assessed against git history; see the [check catalog](docs/check-catalog.md).
 - `init` scaffolds a starter bundle: `index.md`, `log.md`, and one template doc per concept type.
 - `docs-for` reverse lookup: given one or more changed paths, which bundle docs claim them as `sources` or `applies_to` (a lookup-only field that `sources-fresh` ignores).
 - A citation can carry an anchor (`#heading` or `#"text"`) so a `path:N-M` citation survives content moving above it; see [Citation resolution](docs/citations.md).
@@ -62,6 +62,10 @@ okf-kit check path/to/bundle --rule citations-resolve,links-resolve --min-severi
 # `okf_version` frontmatter; v0.1 when that key is absent; see docs/check-catalog.md's
 # "Spec version (--spec)")
 okf-kit check path/to/bundle --spec v0.2
+
+# flag every line citation whose cited text moved or changed since a git ref (opt-in `citation-drift`
+# rule; see docs/citations.md's "Drift since a git ref")
+okf-kit check path/to/bundle --base origin/main
 ```
 
 `check` exits `0` with no errors (and, under `--strict`, no warnings), `1` when it finds one, and `2` on an invocation or tool error; see [check catalog](docs/check-catalog.md#exit-codes) for the full table and [Output](docs/check-catalog.md#output) for the text and JSON formats.
@@ -74,9 +78,15 @@ okf-kit init
 
 # which docs claim src/foo.ts (or a directory it lives under) as a source?
 okf-kit docs-for path/to/bundle src/foo.ts
+
+# a source edit inserted or removed lines: re-point the line citations that moved since
+# origin/main. Dry run by default (prints the plan); --write rewrites the docs. A citation whose
+# cited lines were themselves edited is listed for manual handling and never rewritten.
+okf-kit repoint path/to/bundle --base origin/main
+okf-kit repoint path/to/bundle --base origin/main --write
 ```
 
-See [Scaffold a bundle](docs/init.md) and [Reverse lookup](docs/docs-for.md) for the full command reference, including flags and output formats.
+See [Scaffold a bundle](docs/init.md), [Reverse lookup](docs/docs-for.md) and [Re-pointing citations](docs/repoint.md) for the full command reference, including flags and output formats.
 
 ### Use in CI
 
@@ -92,11 +102,12 @@ Pin the exact version and use a full (non-shallow) checkout; [CI usage](docs/ci.
 
 ## Documentation
 
-- [Check catalog](docs/check-catalog.md): all 10 rules, repo-root auto-detection, exit codes, output format.
+- [Check catalog](docs/check-catalog.md): all 14 rules, repo-root auto-detection, exit codes, output format.
 - [Scaffold a bundle (`init`)](docs/init.md): generated files, placeholder sources, authoring guidance.
 - [Reverse lookup (`docs-for`)](docs/docs-for.md): matching rules, path resolution, output formats.
 - [Staleness (`sources-fresh`)](docs/staleness.md): the re-stamp rule, comment-only source edits, designator-less timestamps, squash-merge interaction, `--dirty-as-now`, `sources-fresh-future`.
-- [Citation resolution (`citations-resolve`)](docs/citations.md): every finding id, anchor forms, continuation and short-form citations, `--require-anchors`.
+- [Citation resolution (`citations-resolve`)](docs/citations.md): every finding id, anchor forms, continuation and short-form citations, `--require-anchors`, and the opt-in `--base` drift check (`citation-drift`).
+- [Re-pointing citations (`repoint`)](docs/repoint.md): rewrite the line numbers of citations that moved since a git ref, with a dry run, and what is refused.
 - [Prose line references](docs/prose-line-references.md): the opt-in `--prose-line-references` check for line numbers written outside `citations-resolve`'s own grammar.
 - [CI usage](docs/ci.md): shallow-clone caveats, the pinned-version rationale, the template's pin, and the `templates/okf-staleness.yml` warn-only workflow template.
 
@@ -114,7 +125,7 @@ See [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) for issue and PR convention
 
 Modules under `src/`:
 
-- `cli.ts`: the `check`, `docs-for` and `init` commands, `runCheck`, and the mapping of results and errors to exit codes.
+- `cli.ts`: the `check`, `docs-for`, `repoint` and `init` commands, `runCheck`, and the mapping of results and errors to exit codes.
 - `bundle.ts`: `loadBundle` walks the bundle's `*.md` files and parses their frontmatter (`parseFrontmatter`).
 - `rules/`: one file per rule (`sources-fresh.ts` holds both `sources-fresh` and `sources-fresh-future`); `rules/index.ts` registers them in `allRules`.
 - `report.ts`: `summarize`, and the text (`renderText`) and JSON (`renderJson`) output of `check`.
@@ -124,6 +135,7 @@ Modules under `src/`:
 - `links.ts`: `extractMarkdownLinks`, shared by `links-resolve` and `no-absolute-links`.
 - `companions.ts`: `--companion` parsing (`parseCompanions`).
 - `docs-for.ts`: `runDocsFor` and its text and JSON output.
+- `citation-drift.ts`: the diff-hunk line mapping and the per-citation verdicts behind `check --base` (rule `rules/citation-drift.ts`) and `repoint`; `repoint.ts`: `runRepoint` and its text and JSON output.
 - `init.ts` and `templates.ts`: `runInit` and the scaffolded file bodies.
 - `types.ts`: the shared types (`Finding`, `Rule`, `BundleContext`, `RunGit`); `errors.ts`: `UsageError`.
 
