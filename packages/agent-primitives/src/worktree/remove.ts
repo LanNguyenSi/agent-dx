@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -7,11 +8,13 @@ import {
   WorktreeRefusal,
   commitSha,
   git,
+  gitBytes,
   gitFailure,
   ignoredSymlinks,
   isWithin,
   mergeVerdict,
   parseWorktreeList,
+  renderBytes,
   resolveDefaultBase,
   resolveRemoteBase,
   resolveRepo,
@@ -200,9 +203,11 @@ function deleteCheckedBranch(
     );
     return result;
   }
+  // The section of a key is everything before its last dot, so the
+  // `branch.feat.x.remote` of a sibling branch `feat.x` is not `feat`'s.
   const hasSection = config.stdout
     .split("\0")
-    .some((name) => name.startsWith(`${section}.`));
+    .some((name) => name.slice(0, name.lastIndexOf(".")) === section);
   if (hasSection) {
     const dropped = git(
       mainCheckout,
@@ -218,16 +223,159 @@ function deleteCheckedBranch(
   return result;
 }
 
+/** What `hiddenEdits` found: the flagged files whose content differs from
+ * the index, each as `<flag> <path>`, or why that could not be told. */
+type HiddenEdits = { ok: true; edited: string[] } | { ok: false; why: string };
+
+/** One line of `git hash-object --stdin-paths` input for `rel`: the path
+ * as it is, or C-quoted (every byte outside printable ASCII, a quote and a
+ * backslash as `\ooo`) when it holds anything git would read differently,
+ * which git unquotes for a line that starts with a quote. */
+function stdinPathLine(rel: Buffer): Buffer {
+  const plain = rel.every(
+    (b) => b >= 0x20 && b < 0x7f && b !== 0x22 && b !== 0x5c,
+  );
+  if (plain) return Buffer.concat([rel, Buffer.from("\n")]);
+  let quoted = '"';
+  for (const b of rel) {
+    quoted +=
+      b >= 0x20 && b < 0x7f && b !== 0x22 && b !== 0x5c
+        ? String.fromCharCode(b)
+        : `\\${b.toString(8).padStart(3, "0")}`;
+  }
+  return Buffer.from(`${quoted}"\n`, "latin1");
+}
+
+/** The id git gives a blob holding `content`, in the object format the id
+ * `like` is written in (64 hex digits for SHA-256, 40 for SHA-1). */
+function blobId(content: Buffer, like: string): string {
+  return createHash(like.length === 64 ? "sha256" : "sha1")
+    .update(`blob ${String(content.length)}\0`)
+    .update(content)
+    .digest("hex");
+}
+
+/**
+ * Edits that `git status` does not show. A tracked path flagged
+ * assume-unchanged (`git ls-files -v` prints its tag in lowercase) or
+ * skip-worktree (tag `S`, `s` with both flags) is not compared with the
+ * work tree by status, so an edit to it would go with the worktree unseen.
+ * Each flagged path that exists in the work tree as a regular file is
+ * hashed as `git add` would store it (`git hash-object --stdin-paths`,
+ * which applies the path's filters), a symbolic link by its target as git
+ * stores a link, and the result is compared with the blob the index holds;
+ * a file where the index has a link, or anything else where it has a file,
+ * counts as edited. A flagged path that is absent (a sparse checkout leaves
+ * it out) has nothing in it to lose and does not count, nor does a
+ * submodule entry. Reads only; a listing or a hash that cannot be read is
+ * `ok: false`.
+ */
+function hiddenEdits(target: string): HiddenEdits {
+  const listing = gitBytes(target, ["ls-files", "-s", "-v", "-z"], {
+    ...REPORT_TIMEOUT_WALK,
+  });
+  if (listing.error !== undefined || listing.status !== 0) {
+    return {
+      ok: false,
+      why: `git ls-files -s -v failed: ${gitFailure({ ...listing, stdout: "" })}`,
+    };
+  }
+  const edited: string[] = [];
+  const files: { rel: Buffer; label: string; oid: string }[] = [];
+  const records = listing.stdout.toString("latin1").split("\0");
+  let offset = 0;
+  for (const record of records) {
+    const bytes = listing.stdout.subarray(offset, offset + record.length);
+    offset += record.length + 1;
+    if (record.length === 0) continue;
+    const tab = record.indexOf("\t");
+    const fields = (tab < 0 ? "" : record.slice(0, tab)).split(" ");
+    const [tag = "", mode = "", oid = ""] = fields;
+    if (
+      fields.length !== 4 ||
+      !/^[A-Za-z?]$/.test(tag) ||
+      !/^[0-7]{6}$/.test(mode) ||
+      !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(oid)
+    ) {
+      return {
+        ok: false,
+        why: `git ls-files -s -v printed a line it cannot be read from: ${JSON.stringify(record.slice(0, 120))}`,
+      };
+    }
+    const assumeUnchanged = tag !== tag.toUpperCase();
+    const skipWorktree = tag.toUpperCase() === "S";
+    if (!assumeUnchanged && !skipWorktree) continue;
+    if (mode === "160000") continue;
+    const rel = bytes.subarray(tab + 1);
+    const label = `${[
+      ...(assumeUnchanged ? ["assume-unchanged"] : []),
+      ...(skipWorktree ? ["skip-worktree"] : []),
+    ].join(" and ")} ${renderBytes(rel)}`;
+    const full = Buffer.concat([
+      Buffer.from(target),
+      Buffer.from(path.sep),
+      rel,
+    ]);
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(full);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") continue;
+      return { ok: false, why: `cannot read ${label}: ${messageOf(err)}` };
+    }
+    const indexLink = mode === "120000";
+    if (stat.isSymbolicLink() && indexLink) {
+      let link: Buffer;
+      try {
+        link = fs.readlinkSync(full, { encoding: "buffer" });
+      } catch (err) {
+        return { ok: false, why: `cannot read ${label}: ${messageOf(err)}` };
+      }
+      if (blobId(link, oid) !== oid) edited.push(label);
+    } else if (stat.isFile() && !indexLink) {
+      files.push({ rel, label, oid });
+    } else {
+      edited.push(label);
+    }
+  }
+  if (files.length > 0) {
+    const hashed = gitBytes(target, ["hash-object", "--stdin-paths"], {
+      ...REPORT_TIMEOUT_WALK,
+      input: Buffer.concat(files.map((f) => stdinPathLine(f.rel))),
+    });
+    const ids = hashed.stdout.toString("latin1").split("\n");
+    if (
+      hashed.error !== undefined ||
+      hashed.status !== 0 ||
+      ids.length !== files.length + 1 ||
+      ids[files.length] !== ""
+    ) {
+      return {
+        ok: false,
+        why: `git hash-object --stdin-paths failed: ${gitFailure({ ...hashed, stdout: "" })}`,
+      };
+    }
+    files.forEach((f, i) => {
+      if (ids[i] !== f.oid) edited.push(f.label);
+    });
+  }
+  return { ok: true, edited };
+}
+
 /**
  * Removes one linked worktree: the locked, nested-worktree, submodule,
- * status, merged and unpushed checks first, each of the last three failing
- * closed so that a git command which cannot answer is a refusal rather than
- * a clean, unpushed or unmerged reading. Then, once a SIGINT or SIGTERM
- * that arrived during the checks has had its chance to stop the command
- * (`stopIfInterrupted`), the ignored dependency links (unlinked, never
+ * status (with the edits status does not show, `hiddenEdits`), merged and
+ * unpushed checks first, each of the last three failing closed so that a
+ * git command which cannot answer is a refusal rather than a clean,
+ * unpushed or unmerged reading. Then, once a SIGINT or SIGTERM that arrived
+ * during the checks has had its chance to stop the command
+ * (`stopIfInterrupted`), HEAD is read again and the removal refuses
+ * (`head_moved`) unless it is still the commit `git worktree list` showed
+ * before the first check. Then the ignored dependency links (unlinked, never
  * followed), then `git worktree remove` and `git worktree prune`, and finally
- * the optional deletion of the branch, at the commit the checks were made at
- * (`deleteCheckedBranch`).
+ * the optional deletion of the branch, only while it still points at that
+ * listed commit (`deleteCheckedBranch`).
  *
  * The main checkout is not modified by the removal: its HEAD, index,
  * working tree and stash are untouched, and `git stash`, `checkout`,
@@ -353,6 +501,22 @@ export async function removeWorktree(
       "worktree_dirty",
       { entries: dirty.slice(0, DIRTY_DETAIL_LINES) },
     );
+  }
+  if (o.force !== true) {
+    const hidden = hiddenEdits(target);
+    if (!hidden.ok) {
+      throw new WorktreeRefusal(
+        `cannot tell whether ${target} has edits that git status does not show, to tracked files flagged assume-unchanged or skip-worktree: ${hidden.why}; pass --force to remove it anyway`,
+        "worktree_dirty",
+      );
+    }
+    if (hidden.edited.length > 0) {
+      throw new WorktreeRefusal(
+        `${target} has ${String(hidden.edited.length)} uncommitted change(s) that git status does not show, to tracked files flagged assume-unchanged or skip-worktree (${hidden.edited.slice(0, 3).join(", ")}${hidden.edited.length > 3 ? ", ..." : ""}); clear the flag (\`git update-index --no-assume-unchanged\` or \`--no-skip-worktree\`) and commit, stash or discard them first, or pass --force to remove the worktree with them`,
+        "worktree_dirty",
+        { hidden: hidden.edited.slice(0, DIRTY_DETAIL_LINES) },
+      );
+    }
   }
 
   const defaultBase = resolveDefaultBase(repo.mainCheckout);
@@ -490,6 +654,26 @@ export async function removeWorktree(
     o.signal,
     `worktree remove of ${target} was interrupted (SIGINT or SIGTERM) before its first change; nothing was removed`,
   );
+
+  // The last read before the first change: the worktree's HEAD must still
+  // be the commit `git worktree list` showed before the first check, which
+  // is also the one the branch deletion compares against. A HEAD that moved
+  // while the checks ran and is still moved refuses here; one moved away and
+  // back before this read is not seen.
+  const listedHead =
+    entry.head !== undefined &&
+    /^[0-9a-f]{40,64}$/.test(entry.head) &&
+    !/^0+$/.test(entry.head)
+      ? entry.head
+      : undefined;
+  const headNow = commitSha(target, "HEAD", { trustObjectsOnly: true });
+  if (headNow !== listedHead) {
+    throw new WorktreeRefusal(
+      `the HEAD of ${target} is at ${headNow ?? "no commit that can be read"} now, not at ${listedHead ?? "no commit"} where \`git worktree list\` showed it before the checks (something committed, checked out or reset there while they ran), so nothing is removed; run the command again`,
+      "head_moved",
+      { head: headNow ?? null, listed: listedHead ?? null },
+    );
+  }
 
   if (o.dryRun === true) {
     return {

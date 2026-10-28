@@ -17,9 +17,11 @@ import { removeWorktree } from "./remove.js";
  * `deleteBranch` and `requireMerged`, so every guard of that command
  * (locked, nested worktree, submodules, unpushed commits not covered by the
  * merge verdict, the default branch and the main checkout's branch never
- * deleted) holds here too, and so does its branch deletion,
- * which deletes the branch only at the commit the checks were made at: a
- * branch that gained a commit while its worktree was removed is kept (a
+ * deleted) holds here too, and so do its last read and its branch
+ * deletion: the removal refuses (`head_moved`, a skipped entry) when the
+ * worktree's HEAD is no longer the commit `git worktree list` showed before
+ * the first check, and the branch is deleted only while it still points at
+ * that commit, so a branch that gained a commit after that read is kept (a
  * `removed` entry with `branchDeleted: false` and a warning). A refusal of
  * `removeWorktree` is a skipped entry with its reason, never a failed sweep.
  * `--force` does not exist for a sweep.

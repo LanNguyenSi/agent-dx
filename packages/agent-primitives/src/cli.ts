@@ -3088,7 +3088,7 @@ worktreeCommand
   )
   .option(
     "--delete-branch",
-    "delete the worktree's branch after the worktree is gone (never the default branch or the main checkout's own branch), only while it still points at the commit the checks were made at: a branch that gained a commit in the meantime is kept, with a warning",
+    "delete the worktree's branch after the worktree is gone (never the default branch or the main checkout's own branch), only while it still points at the commit `git worktree list` showed before the checks: the removal refuses (head_moved) when the worktree's HEAD is no longer at that commit right before its first change, and a branch that gains a commit after that is kept, with a warning",
   )
   .option(
     "--require-merged",
@@ -3100,7 +3100,7 @@ worktreeCommand
   )
   .option(
     "--sync-main",
-    "after the removal: `git fetch --prune origin` in the main checkout, then fast-forward it to origin's default branch, only when it is on the default branch with no staged, unstaged or untracked change and is neither ahead of nor diverged from origin; otherwise skipped with the reason in the result's `sync` field (never a checkout, reset, stash or force; a failed fetch or fast-forward is a warning, the removal stands)",
+    "after the removal: `git fetch --prune --no-prune-tags origin` in the main checkout (a fetch.pruneTags setting cannot delete a local tag), then fast-forward it to origin's default branch, only when no merge, cherry-pick, revert, rebase, am or bisect is in progress there and it is on the default branch with no staged, unstaged or untracked change and is neither ahead of nor diverged from origin; otherwise skipped with the reason in the result's `sync` field. An ignored file or link in the fast-forward's way makes git refuse it, a failed sync that changes nothing. Never a checkout, reset, stash or force; a failed fetch or fast-forward is a warning, the removal stands",
   )
   .action(
     async (

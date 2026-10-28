@@ -52,7 +52,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`branch.deleted: false` and a warning; in a sweep a `removed` entry with
   `branchDeleted: false`). As with `git branch -D`, a branch that another
   worktree has checked out is kept, and the branch's `branch.<name>`
-  configuration is removed with it.
+  configuration is removed with it (that section only: the configuration of
+  a dotted sibling such as `feat.x` is neither removed nor reported as left).
+- `worktree remove` (and so `worktree sweep`) reads the worktree's HEAD
+  again right before its first change and refuses with the new reason
+  `head_moved` when it is no longer the commit `git worktree list` showed
+  before the checks, so a commit, checkout or reset made in the worktree
+  while the checks ran stops the removal instead of the checks' verdict
+  being applied to another commit. A HEAD moved away and back before that
+  read is not seen. In a sweep the entry is skipped with that refusal.
+- `worktree remove` (and so `worktree sweep`) counts as dirty an edit that
+  `git status` does not show: a tracked file flagged assume-unchanged or
+  skip-worktree whose content in the work tree differs from the index
+  (hashed with `git hash-object --stdin-paths`, with the path's filters; a
+  symbolic link by its target) is the `worktree_dirty` refusal, naming the
+  flag and the path in `details.hidden`, and so is a flag listing or a hash
+  that cannot be read. A flagged path that is absent from the work tree, as
+  in a sparse checkout, does not count. `--force` overrides it as for any
+  other dirty state.
 
 ## [0.18.0] - 2026-10-25
 

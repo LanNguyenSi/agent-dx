@@ -1082,6 +1082,35 @@ describe("worktree sweep: what it must never remove", () => {
     );
   });
 
+  it("skips an orphan branch, which has no fork point with the base to tell its own commits by, though gh reports its merged pull request at its tip", async () => {
+    const f = makeFixture();
+    const wt = path.join(f.root, "orph");
+    git(f.repo, ["worktree", "add", "-q", "--detach", wt, "origin/main"]);
+    git(wt, ["switch", "-q", "--orphan", "orph"]);
+    commitHere(wt, "o.txt", "orphan work");
+    git(wt, ["push", "-q", "origin", "orph"]);
+    const tip = head(wt);
+    mergedPr(f, "orph", tip);
+    git(f.repo, ["push", "-q", "origin", "--delete", "orph"]);
+    fetchPrune(f);
+    expect(gitOk(wt, ["merge-base", "HEAD", "origin/main"])).toBe(false);
+    const PATH = ghStub(f);
+
+    const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
+    expect(r.code, r.stdout + r.stderr).toBe(1);
+    const entry = entryFor(r, wt);
+    expect(entry).toMatchObject({
+      action: "skipped",
+      refusal: "no_own_commits",
+    });
+    expect(entry.merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(entry.reason).toContain("cannot tell whether");
+    expect(fs.readFileSync(path.join(wt, "o.txt"), "utf8")).toBe(
+      "orphan work\n",
+    );
+    expect(git(f.repo, ["rev-parse", "refs/heads/orph"]).trim()).toBe(tip);
+  });
+
   it("does not sweep a branch stacked on a squash-merged branch, which has no merged pull request of its own", async () => {
     const f = makeFixture();
     const featx = addWorktree(f, "featx", path.join(f.root, "featx"));
@@ -1186,7 +1215,12 @@ describe("worktree sweep: what it must never remove", () => {
  * is a commit made after the checks began and before the deletion.
  */
 describe("worktree remove and sweep: a branch that moves after the checks", () => {
-  function raceFixture(commitOnCall: number): {
+  /** A squash-merged `feat` whose pull request gh reports at its tip. With
+   * `commitOnCall`, the gh stand-in commits in the worktree on that call
+   * (during the checks); otherwise a `git` stand-in in front of it commits
+   * there right before running `git worktree remove`, after the removal's
+   * last read of HEAD. */
+  function raceFixture(commitOnCall?: number): {
     f: Fixture;
     wt: string;
     checked: string;
@@ -1197,10 +1231,36 @@ describe("worktree remove and sweep: a branch that moves after the checks", () =
     const checked = head(wt);
     squashMergeOnServer(f, "feat");
     fetchPrune(f);
-    const PATH = ghStub(f);
+    const ghPath = ghStub(f);
     mergedPr(f, "feat", checked);
-    fs.writeFileSync(path.join(f.base, "commit-on-call"), String(commitOnCall));
-    return { f, wt, checked, PATH };
+    if (commitOnCall !== undefined) {
+      fs.writeFileSync(
+        path.join(f.base, "commit-on-call"),
+        String(commitOnCall),
+      );
+      return { f, wt, checked, PATH: ghPath };
+    }
+    const bin = path.join(f.base, "gitbin");
+    fs.mkdirSync(bin);
+    const realGit = path.join(FIXED_BIN_DIR, "git");
+    fs.writeFileSync(
+      path.join(bin, "git"),
+      [
+        "#!/bin/sh",
+        'case " $* " in',
+        '  *" worktree remove "*)',
+        `    if [ ! -f '${f.base}/committed' ]; then`,
+        `      : > '${f.base}/committed'`,
+        `      (cd '${wt}' && echo late > late.txt && '${realGit}' add late.txt && '${realGit}' commit -q -m "late commit") || exit 3`,
+        "    fi",
+        "    ;;",
+        "esac",
+        `exec '${realGit}' "$@"`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    return { f, wt, checked, PATH: `${bin}${path.delimiter}${ghPath}` };
   }
 
   function expectLateCommitKept(f: Fixture, checked: string): void {
@@ -1209,9 +1269,42 @@ describe("worktree remove and sweep: a branch that moves after the checks", () =
     expect(git(f.repo, ["show", "feat:late.txt"])).toBe("late\n");
   }
 
-  it("remove --delete-branch keeps the branch with the new commit and warns", async () => {
+  it("remove --delete-branch refuses (head_moved) when the worktree's HEAD moved during the checks, and keeps the worktree and the new commit", async () => {
     // The removal's one gh call is the merge check.
     const { f, wt, checked, PATH } = raceFixture(1);
+
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"], { PATH });
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("head_moved");
+    expect(r.json.message).toContain(`not at ${checked}`);
+    expect(r.json.details.listed).toBe(checked);
+    expect(r.json.details.head).toBe(head(wt));
+    expect(fs.existsSync(path.join(wt, "late.txt"))).toBe(true);
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).toContain(
+      `worktree ${wt}\n`,
+    );
+    expectLateCommitKept(f, checked);
+  });
+
+  it("sweep skips (head_moved) a worktree whose HEAD moved during the removal's checks", async () => {
+    // The listing asks gh first, the removal second.
+    const { f, wt, checked, PATH } = raceFixture(2);
+
+    const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
+    expect(r.code, r.stdout + r.stderr).toBe(1);
+    expect(r.json.status).toBe("partial");
+    expect(entryFor(r, wt)).toMatchObject({
+      action: "skipped",
+      refusal: "head_moved",
+    });
+    expect(fs.existsSync(path.join(wt, "late.txt"))).toBe(true);
+    expectLateCommitKept(f, checked);
+  });
+
+  it("remove --delete-branch keeps the branch with the new commit and warns", async () => {
+    // The commit lands after the last read of HEAD, while the worktree is
+    // removed.
+    const { f, wt, checked, PATH } = raceFixture();
 
     const r = await cli(f.work, ["remove", wt, "--delete-branch"], { PATH });
     expect(r.code, r.stdout + r.stderr).toBe(0);
@@ -1225,11 +1318,11 @@ describe("worktree remove and sweep: a branch that moves after the checks", () =
       ),
     ).toBe(true);
     expectLateCommitKept(f, checked);
+    expect(fs.existsSync(path.join(f.base, "committed"))).toBe(true);
   });
 
   it("sweep keeps the branch with the new commit, warns on the entry and reports partial", async () => {
-    // The listing asks gh first, the removal second.
-    const { f, wt, checked, PATH } = raceFixture(2);
+    const { f, wt, checked, PATH } = raceFixture();
 
     const r = await cli(f.work, ["sweep", "--root", f.root], { PATH });
     expect(r.code, r.stdout + r.stderr).toBe(1);
@@ -1253,6 +1346,7 @@ describe("worktree remove and sweep: a branch that moves after the checks", () =
     expect(fs.readFileSync(path.join(f.base, "gh.count"), "utf8").trim()).toBe(
       "2",
     );
+    expect(fs.existsSync(path.join(f.base, "committed"))).toBe(true);
   });
 
   it("keeps a branch that another worktree has checked out", async () => {
@@ -1268,6 +1362,170 @@ describe("worktree remove and sweep: a branch that moves after the checks", () =
     expect(r.json.branch.reason).toContain(`checked out in ${twin}`);
     expect(branchExists(f, "feat")).toBe(true);
     expect(git(twin, ["branch", "--show-current"]).trim()).toBe("feat");
+  });
+});
+
+describe("worktree remove and sweep: edits git status does not show", () => {
+  const flags = ["assume-unchanged", "skip-worktree"] as const;
+
+  /** A squash-merged `feat`, pushed, whose pull request gh reports at its
+   * tip, with the tracked `shared.txt` flagged `flag` in its worktree. */
+  function flaggedFixture(flag: (typeof flags)[number]): {
+    f: Fixture;
+    wt: string;
+    PATH: string;
+  } {
+    const f = makeFixture();
+    const wt = featureWorktree(f, "feat");
+    mergedPr(f, "feat", head(wt));
+    squashMergeOnServer(f, "feat");
+    fetchPrune(f);
+    const PATH = ghStub(f);
+    git(wt, ["update-index", `--${flag}`, "shared.txt"]);
+    return { f, wt, PATH };
+  }
+
+  function hide(wt: string): void {
+    write(wt, "shared.txt", "uncommitted local work\n");
+    expect(git(wt, ["status", "--porcelain", "--untracked-files=all"])).toBe(
+      "",
+    );
+  }
+
+  it.each(flags)(
+    "remove refuses an edit to a file flagged %s, with and without --require-merged, and keeps it",
+    async (flag) => {
+      const { f, wt, PATH } = flaggedFixture(flag);
+      hide(wt);
+      for (const args of [[], ["--require-merged", "--delete-branch"]]) {
+        const r = await cli(f.work, ["remove", wt, ...args], { PATH });
+        expect(r.code, r.stdout + r.stderr).toBe(2);
+        expect(r.json.reason).toBe("worktree_dirty");
+        expect(r.json.message).toContain(`${flag} shared.txt`);
+        expect(r.json.details.hidden).toEqual([`${flag} shared.txt`]);
+      }
+      expect(fs.readFileSync(path.join(wt, "shared.txt"), "utf8")).toBe(
+        "uncommitted local work\n",
+      );
+      expect(branchExists(f, "feat")).toBe(true);
+    },
+  );
+
+  it.each(flags)(
+    "sweep skips a worktree with an edit to a file flagged %s, and keeps it",
+    async (flag) => {
+      const { f, wt, PATH } = flaggedFixture(flag);
+      hide(wt);
+      for (const dryRun of [true, false]) {
+        const r = await cli(
+          f.work,
+          ["sweep", "--root", f.root, ...(dryRun ? ["--dry-run"] : [])],
+          { PATH },
+        );
+        expect(r.code, r.stdout + r.stderr).toBe(1);
+        const entry = entryFor(r, wt);
+        expect(entry).toMatchObject({
+          action: "skipped",
+          refusal: "worktree_dirty",
+        });
+        expect(entry.reason).toContain(`${flag} shared.txt`);
+      }
+      expect(fs.readFileSync(path.join(wt, "shared.txt"), "utf8")).toBe(
+        "uncommitted local work\n",
+      );
+      expect(branchExists(f, "feat")).toBe(true);
+    },
+  );
+
+  it.each(flags)(
+    "still removes a worktree with a file flagged %s that is not edited, by remove and by sweep",
+    async (flag) => {
+      const one = flaggedFixture(flag);
+      const removed = await cli(
+        one.f.work,
+        ["remove", one.wt, "--require-merged", "--delete-branch"],
+        { PATH: one.PATH },
+      );
+      expect(removed.code, removed.stdout + removed.stderr).toBe(0);
+      expect(fs.existsSync(one.wt)).toBe(false);
+
+      const two = flaggedFixture(flag);
+      const swept = await cli(two.f.work, ["sweep", "--root", two.f.root], {
+        PATH: two.PATH,
+      });
+      expect(swept.code, swept.stdout + swept.stderr).toBe(0);
+      expect(entryFor(swept, two.wt)).toMatchObject({
+        action: "removed",
+        branchDeleted: true,
+      });
+    },
+  );
+
+  it("does not count a skip-worktree file that is absent from the work tree, as in a sparse checkout", async () => {
+    const { f, wt, PATH } = flaggedFixture("skip-worktree");
+    fs.unlinkSync(path.join(wt, "shared.txt"));
+    const r = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--delete-branch"],
+      { PATH },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(fs.existsSync(wt)).toBe(false);
+  });
+
+  it("compares a flagged symbolic link by its target: refuses a retargeted one, removes an unchanged one", async () => {
+    const f = makeFixture();
+    const dirs: string[] = [];
+    for (const name of ["kept", "moved"]) {
+      const wt = addWorktree(f, name, path.join(f.root, name));
+      fs.symlinkSync("a.txt", path.join(wt, "ln"));
+      git(wt, ["add", "ln"]);
+      git(wt, ["commit", "-q", "-m", `link ${name}`]);
+      git(wt, ["push", "-q", "origin", name]);
+      git(wt, ["update-index", "--assume-unchanged", "ln"]);
+      dirs.push(wt);
+    }
+    const [kept, moved] = dirs as [string, string];
+    fs.unlinkSync(path.join(moved, "ln"));
+    fs.symlinkSync("shared.txt", path.join(moved, "ln"));
+    expect(git(moved, ["status", "--porcelain"])).toBe("");
+
+    const refused = await cli(f.work, ["remove", moved]);
+    expect(refused.code, refused.stdout + refused.stderr).toBe(2);
+    expect(refused.json.reason).toBe("worktree_dirty");
+    expect(refused.json.details.hidden).toEqual(["assume-unchanged ln"]);
+    expect(fs.readlinkSync(path.join(moved, "ln"))).toBe("shared.txt");
+
+    const removed = await cli(f.work, ["remove", kept]);
+    expect(removed.code, removed.stdout + removed.stderr).toBe(0);
+    expect(fs.existsSync(kept)).toBe(false);
+  });
+});
+
+describe("worktree remove --delete-branch: the branch's configuration", () => {
+  it("does not take the section of a dotted sibling branch for the deleted branch's own", async () => {
+    const f = makeFixture();
+    const wt = featureWorktree(f, "feat");
+    const PATH = ghStub(f);
+    mergedPr(f, "feat", head(wt));
+    // `feat` has no configuration of its own; its sibling `feat.x` does.
+    expect(gitOk(f.repo, ["config", "--get-regexp", "^branch\\.feat\\."])).toBe(
+      false,
+    );
+    git(f.repo, ["config", "branch.feat.x.remote", "origin"]);
+    git(f.repo, ["config", "branch.feat.x.merge", "refs/heads/feat.x"]);
+
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"], { PATH });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.branch.deleted).toBe(true);
+    expect(r.json.warnings).toEqual([]);
+    expect(branchExists(f, "feat")).toBe(false);
+    expect(git(f.repo, ["config", "branch.feat.x.remote"]).trim()).toBe(
+      "origin",
+    );
+    expect(git(f.repo, ["config", "branch.feat.x.merge"]).trim()).toBe(
+      "refs/heads/feat.x",
+    );
   });
 });
 

@@ -71,9 +71,11 @@ for teams shipping with AI agents.
   unless `--force`, unlinking the
   dependency links it finds without ever following them, keeping the branch
   unless `--delete-branch` says otherwise, and never removing or switching the
-  main checkout. `--sync-main` then runs `git fetch --prune origin` and
-  fast-forwards a clean main checkout that is on the default branch (otherwise
-  it reports why it did not).
+  main checkout. `--sync-main` then runs `git fetch --prune --no-prune-tags
+  origin` and fast-forwards a clean main checkout that is on the default
+  branch with no merge, rebase, `am` or bisect in progress (otherwise it
+  reports why it did not); an ignored file in the fast-forward's way makes
+  the sync fail without touching anything.
 - `worktree sweep --root <dir> [--dry-run]`: removes every linked worktree
   among the direct children of `<dir>` that is clean, merged into origin's
   default branch (a squash merge counts only when `gh` reports its merged pull
