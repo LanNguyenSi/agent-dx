@@ -25,8 +25,7 @@ root needs to be set up first.
   on npm belongs to an unrelated third-party package. It runs from a local
   build (see the root README's Quick start and Usage) and ships an MCP server
   alongside the CLI.
-- `agent-dev-kit` and `git-batch-cli` are
-  functional CLIs, not yet published to npm.
+- `git-batch-cli` is a functional CLI, not yet published to npm.
 - `agent-engineering-playbook` and `agentic-coding-playbook` are
   documentation packages, not code: they have no `package.json`.
 
