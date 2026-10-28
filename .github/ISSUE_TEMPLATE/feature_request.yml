@@ -12,7 +12,6 @@ body:
         - orchestrator-workflow
         - friction-log
         - git-batch-cli
-        - agent-dev-kit
         - agent-primitives
         - agentic-coding-playbook
         - agent-engineering-playbook
