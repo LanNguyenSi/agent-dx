@@ -3092,7 +3092,7 @@ worktreeCommand
   )
   .option(
     "--require-merged",
-    "refuse unless the branch is merged into origin/<default branch> (or --base), by ancestry or by a merged pull request that gh reports for it",
+    "refuse unless the branch is merged into origin/<default branch> (or --base): by ancestry, by the content rule (every path the branch touched is in the base as its last commit has it, and no earlier commit of it was already so: a squash or rebase merge, no network; weighed only with this flag and for a worktree on a branch) or by a merged pull request that gh reports for it at the worktree's commit; a merged verdict excuses commits no remote branch has",
   )
   .option(
     "--base <rev>",
@@ -3191,7 +3191,7 @@ function renderWorktreeSweepText(result: SweepWorktreesResult): string {
   ];
   for (const e of result.entries) {
     lines.push(
-      `${e.action}  ${e.path}  ${e.branch ?? "detached"}  ${e.reason}`,
+      `${e.action}  ${e.path}  ${e.branch ?? (e.repo === undefined ? "-" : "detached")}  ${e.reason}`,
     );
   }
   if (result.warnings.length > 0) {
@@ -3205,7 +3205,7 @@ function renderWorktreeSweepText(result: SweepWorktreesResult): string {
 worktreeCommand
   .command("sweep")
   .description(
-    "Remove every linked worktree among the direct children of --root that is clean and merged into origin's default branch (ancestry, the content rule for squash and rebase merges, or a merged pull request that gh reports), together with its local branch; --dry-run only reports. Everything else is listed with its reason. Exit 0: nothing skipped; 1: at least one worktree was skipped (status partial); 2: refused",
+    "Remove every linked worktree among the direct children of --root that is clean and merged into origin's default branch (the content rule for squash and rebase merges, or a merged pull request that gh reports), together with its local branch; --dry-run only reports. A branch with no commits of its own (its tip is its fork point, as for a worktree just created; a branch merged by ancestry looks the same) is skipped as no_own_commits, a child that is a symbolic link is not followed, and ignored files inside a removed worktree go with it. Everything else is listed with its reason. Exit 0: nothing skipped; 1: at least one entry was skipped (status partial); 2: refused",
   )
   .option(
     "--root <dir>",

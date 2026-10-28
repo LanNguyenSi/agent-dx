@@ -41,6 +41,19 @@ export interface ListWorktreesOptions {
    * origin's default branch; must be a remote-tracking branch. Applies to
    * every repository of a `root`. */
   base?: string;
+  /** With `root`: `skip` does not follow a child that is a symbolic link
+   * (it is reported in `skippedChildren` instead of being described), so
+   * nothing outside `root` is reached through one. `follow`, the default,
+   * describes the work tree the link points at, as `list` always has. */
+  symlinkChildren?: "follow" | "skip";
+}
+
+/** A direct child of `root` that holds a directory but was not described:
+ * a symbolic link that was not followed, or a work tree that could not be
+ * resolved (its warning says the same). */
+export interface SkippedChild {
+  path: string;
+  reason: string;
 }
 
 export interface ListedWorktree {
@@ -70,6 +83,9 @@ export interface ListedWorktree {
 export interface ListWorktreesResult {
   status: "ok";
   worktrees: ListedWorktree[];
+  /** With `root` only (and not part of `list`'s output): the children that
+   * were not described. */
+  skippedChildren: SkippedChild[];
   warnings: string[];
 }
 
@@ -277,6 +293,7 @@ export async function listWorktrees(
           defaultBases,
         ),
       ),
+      skippedChildren: [],
       warnings,
     };
   }
@@ -302,15 +319,26 @@ export async function listWorktrees(
     );
   }
   const worktrees: ListedWorktree[] = [];
+  const skippedChildren: SkippedChild[] = [];
   for (const name of names) {
     const child = path.join(root, name);
     let isDirectory = false;
+    let isLink = false;
     try {
+      isLink = fs.lstatSync(child).isSymbolicLink();
       isDirectory = fs.statSync(child).isDirectory();
     } catch {
       isDirectory = false;
     }
     if (!isDirectory) continue;
+    if (isLink && o.symlinkChildren === "skip") {
+      skippedChildren.push({
+        path: child,
+        reason:
+          "a symbolic link to a directory; it is not followed, so nothing outside --root is reached through it",
+      });
+      continue;
+    }
     // Only a work tree top: a subdirectory of some checkout resolves to
     // that checkout's top, which is another directory, and a plain
     // directory resolves to nothing. Both are skipped silently.
@@ -344,7 +372,8 @@ export async function listWorktrees(
       // with a warning would read as a listing that is complete.
       if (isGitTimeout(err)) throw err;
       warnings.push(`skipped ${child}: ${err.message}`);
+      skippedChildren.push({ path: child, reason: err.message });
     }
   }
-  return { status: "ok", worktrees, warnings };
+  return { status: "ok", worktrees, skippedChildren, warnings };
 }

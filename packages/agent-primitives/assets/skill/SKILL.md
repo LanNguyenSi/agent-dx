@@ -355,17 +355,23 @@ or `git worktree remove`. It refuses a dirty or untracked worktree and
 commits that are on no remote branch (unless `--force`), unlinks the
 dependency links without following them, keeps the branch unless
 `--delete-branch`, and with `--require-merged` refuses a branch that is not
-merged into the default branch (ancestry, or a merged pull request via `gh`
-for a squash merge); `--base <remote>/<branch>` checks against another remote-tracking
+merged into the default branch (ancestry, the content rule, or a merged pull
+request via `gh` for a squash merge); `--base <remote>/<branch>` checks against another remote-tracking
 branch, such as `origin/master` for a hotfix (a local branch, `HEAD` or a sha
-is refused). A squash merge counts as merged without `gh` when every path the
-branch changed is in the base as the branch has it (`via: content`); extra
-commits after the squash make it unmerged. `remove --sync-main` then runs
-`git fetch --prune origin` and fast-forwards the main checkout only when it
-is clean and on the default branch (else `sync.reason` says why; never a
-checkout, reset or force). `worktree sweep --root <dir> [--dry-run]` removes
-every clean, merged worktree below `<dir>` with its branch and lists the rest
-with reasons; exit `0` nothing skipped, `1` some skipped. `worktree list [--repo <path> | --root <dir>]
+is refused). A squash merge counts as merged without `gh` when, on every path
+the branch touched, its last commit has what the base has and no earlier
+commit did already (`via: content`); commits after the squash, even ones that
+cancel out, leave it undecided. Only `--require-merged` lets a content
+verdict excuse commits no remote branch has, and never for a detached HEAD.
+`remove --sync-main` then runs `git fetch --prune --no-prune-tags origin` and
+fast-forwards the main checkout only when it is clean, on the default branch
+and in no merge, rebase, `am` or bisect (else `sync.reason` says why; never a
+checkout, reset or force, and an ignored file in the way makes it fail).
+`worktree sweep --root <dir> [--dry-run]` removes every clean, merged
+worktree below `<dir>` that has commits of its own, with its branch and its
+ignored files, and lists the rest with reasons (a branch with none, as just
+created or merged by ancestry, is `no_own_commits`; a symlinked child is not
+followed); exit `0` nothing skipped, `1` some skipped. `worktree list [--repo <path> | --root <dir>]
 [--base <rev>]` reports
 each worktree's branch, dirty state, ahead/behind, merged state, run
 pointer and links. See the agent-primitives package's docs/worktree.md.

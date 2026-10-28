@@ -10,29 +10,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `worktree remove --sync-main`: after a successful removal, runs `git fetch
-  --prune origin` in the main checkout and fast-forwards it to origin's
-  default branch, but only when it is on that branch with no staged, unstaged
-  or untracked change, is neither ahead of nor diverged from origin, and no
-  ignored file is in the way of the fast-forward. Otherwise the result's
-  `sync` field says `skipped` with the reason; `checkout`, `reset`, `stash`
-  and `--force` are never run, and a failed fetch or fast-forward is a
-  warning, not a failed removal.
+  --prune --no-prune-tags origin` in the main checkout and fast-forwards it to
+  origin's default branch, but only when no merge, cherry-pick, revert,
+  rebase, `git am`, sequencer or bisect is in progress there, it is on that
+  branch with no staged, unstaged or untracked change, and it is neither
+  ahead of nor diverged from origin. Otherwise the result's `sync` field says
+  `skipped` with the reason. The fast-forward runs with
+  `--no-overwrite-ignore`, so an ignored file or link in its way (at a path
+  it adds or at a parent of one) makes git refuse, which is a `failed` sync
+  with git's message. `checkout`, `reset`, `stash` and `--force` are never
+  run, and a failed fetch or fast-forward is a warning, not a failed removal.
 - `worktree sweep --root <dir> [--dry-run]`: removes every linked worktree
-  among the direct children of `<dir>` that is clean and merged into
-  origin's default branch, with its local branch, and lists every other one
-  with the reason. It reuses `remove --require-merged --delete-branch` for
-  each entry, so all of that command's guards hold. Exit `0` and status `ok`
-  when nothing was skipped, `1` and the new status `partial` when something
-  was, `2` for a refusal. A main checkout among the children is listed as
-  `ignored`, never removed.
+  among the direct children of `<dir>` that is clean, merged into origin's
+  default branch and has commits of its own, with its local branch and the
+  ignored files inside it, and lists every other entry with the reason. It
+  reuses `remove --require-merged --delete-branch` for each entry, so all of
+  that command's guards hold, and each removal's warnings are kept on its
+  entry and in the top-level warnings. On top of those: a branch whose tip is
+  its fork point with the base is skipped as `no_own_commits` (a worktree
+  just created looks like that, and so does a branch merged by a merge commit
+  or a fast forward, which a sweep therefore leaves to `remove`); a child of
+  `<dir>` that is a symbolic link is not followed, and an entry whose real
+  path is not below `<dir>` is skipped. Exit `0` and status `ok` when nothing
+  was skipped, `1` and the new status `partial` when something was (a child
+  that cannot be described counts), `2` for a refusal. A main checkout among
+  the children is listed as `ignored`, never removed.
 - The merged verdict has a third rule, `via: "content"`, between ancestry and
-  `gh`: a branch counts as merged when every path it changed since it forked
-  is in the base exactly as the branch has it, which recognises a squash merge
-  (the remote branch is gone, the commits are no ancestors) with no network
-  call. Work added after the squash, or a path the base changed again, keeps
-  the branch unmerged. `worktree list`, `remove --require-merged` and
-  `--delete-branch` use it too: a squash-merged branch that was `unknown`
-  without `gh` is now `yes`, and `remove` no longer needs `--force` for it.
+  `gh`, which recognises a squash merge (the remote branch is gone, the
+  commits are no ancestors) with no network call: on every path the branch's
+  first-parent commits touched since the fork, its last commit has exactly
+  what the base has, the branch changed something, and no earlier commit of
+  the branch already had all of it. Work added after the squash, work added
+  and taken back after it, a path the base changed again, and a branch with
+  more than 50 commits since the fork are not decided by it and go on to
+  `gh`. `worktree list` reports it for every worktree. `remove` weighs it
+  only with `--require-merged` and for a worktree on a branch (the sweep
+  passes that flag), so a squash-merged branch that was `unknown` without
+  `gh` is now `yes` there and its commits on no remote branch are excused.
+  `remove --delete-branch` without `--require-merged`, and any detached
+  worktree, keep the verdict of ancestry and `gh` they had: a squash-merged
+  branch whose remote branch was deleted is still refused as
+  `unpushed_commits` there unless `gh` reports its pull request, and a
+  detached worktree's unpushed commits are never excused by content.
 - Envelope status `partial` (finding class, exit `1`).
 
 ## [0.18.0] - 2026-10-25

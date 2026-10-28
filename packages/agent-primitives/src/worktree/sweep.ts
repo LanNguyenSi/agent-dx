@@ -1,5 +1,5 @@
 import path from "node:path";
-import { WorktreeRefusal, type MergeVerdict } from "./git.js";
+import { WorktreeRefusal, isWithin, type MergeVerdict } from "./git.js";
 import { listWorktrees, type ListedWorktree } from "./list.js";
 import { removeWorktree } from "./remove.js";
 
@@ -17,6 +17,15 @@ import { removeWorktree } from "./remove.js";
  * branch never deleted) holds here too. A refusal of `removeWorktree` is a
  * skipped entry with its reason, never a failed sweep. `--force` does not
  * exist for a sweep.
+ *
+ * Three checks are the sweep's own, because a sweep acts on worktrees
+ * nobody named one by one. A child of `root` that is a symbolic link is not
+ * followed, and an entry whose real path is not below the real `root` is
+ * skipped, so nothing outside `root` is removed. And a branch whose tip is
+ * its fork point with the base (`no_own_commits`, checked by
+ * `removeWorktree` on the sweep's request) is skipped: it is merged by
+ * ancestry, but so is a worktree created a moment ago that still holds
+ * ignored files of a task in flight.
  */
 
 export interface SweepWorktreesOptions {
@@ -36,8 +45,10 @@ export type SweepAction = "removed" | "would_remove" | "skipped" | "ignored";
 
 export interface SweepEntry {
   path: string;
-  /** The basename of the main checkout the entry belongs to. */
-  repo: string;
+  /** The basename of the main checkout the entry belongs to; absent for a
+   * child that was not described (a symbolic link, a work tree that could
+   * not be resolved). */
+  repo?: string;
   branch?: string;
   action: SweepAction;
   /** Why, in a sentence: the removal done, or the guard that held it back. */
@@ -45,10 +56,15 @@ export interface SweepEntry {
   /** The machine-readable cause of a skip made by `removeWorktree`
    * (`worktree_dirty`, `unpushed_commits`, ...); absent otherwise. */
   refusal?: string;
-  /** The merge verdict the decision rests on. */
-  merged: MergeVerdict;
+  /** The merge verdict the decision rests on; absent for a child that was
+   * not described. */
+  merged?: MergeVerdict;
   /** The local branch was deleted along with the worktree. */
   branchDeleted?: boolean;
+  /** For an entry the removal ran for (`removed`, `would_remove`): what it
+   * warned about, such as commits on no remote branch that the merged
+   * verdict excused, or a link it could not unlink. */
+  warnings?: string[];
 }
 
 export interface SweepWorktreesResult {
@@ -112,14 +128,35 @@ function notEligible(w: ListedWorktree): string | undefined {
 export async function sweepWorktrees(
   o: SweepWorktreesOptions,
 ): Promise<SweepWorktreesResult> {
-  const listed = await listWorktrees({ cwd: o.cwd, root: o.root });
+  const root = path.resolve(o.cwd, o.root);
+  const listed = await listWorktrees({
+    cwd: o.cwd,
+    root: o.root,
+    symlinkChildren: "skip",
+  });
   const dryRun = o.dryRun === true;
   const entries: SweepEntry[] = [];
+  const warnings = [...listed.warnings];
 
+  for (const child of listed.skippedChildren) {
+    entries.push({ path: child.path, action: "skipped", reason: child.reason });
+  }
   for (const w of listed.worktrees) {
     if (w.main) {
       entries.push(
         entryOf(w, "ignored", "main checkout; a sweep never removes it"),
+      );
+      continue;
+    }
+    // Independent of how the entry was found: its real path must lie
+    // below the real root, and not be the root itself.
+    if (!isWithin(root, w.path) || isWithin(w.path, root)) {
+      entries.push(
+        entryOf(
+          w,
+          "skipped",
+          `its real path is not below --root ${root}; a sweep never removes a worktree outside it`,
+        ),
       );
       continue;
     }
@@ -134,15 +171,20 @@ export async function sweepWorktrees(
         path: w.path,
         deleteBranch: true,
         requireMerged: true,
+        requireOwnCommits: true,
         dryRun,
         signal: o.signal,
       });
+      for (const warning of r.warnings) {
+        warnings.push(`${w.path}: ${warning}`);
+      }
       if (dryRun) {
         entries.push(
           entryOf(
             w,
             "would_remove",
             `clean and merged (${r.merged?.via ?? "none"}); the worktree and its branch would be removed`,
+            { warnings: r.warnings },
           ),
         );
         continue;
@@ -151,6 +193,7 @@ export async function sweepWorktrees(
         entryOf(w, "removed", r.branch.reason, {
           merged: r.merged ?? w.merged,
           branchDeleted: r.branch.deleted,
+          warnings: r.warnings,
         }),
       );
     } catch (err) {
@@ -172,9 +215,9 @@ export async function sweepWorktrees(
   return {
     status: summary.skipped > 0 ? "partial" : "ok",
     dryRun,
-    root: path.resolve(o.cwd, o.root),
+    root,
     summary,
     entries,
-    warnings: listed.warnings,
+    warnings,
   };
 }

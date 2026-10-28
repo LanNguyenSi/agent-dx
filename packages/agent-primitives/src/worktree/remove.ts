@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  GIT_WALK_BOUND_MS,
   REPORT_TIMEOUT,
   REPORT_TIMEOUT_WALK,
   WorktreeRefusal,
+  commitSha,
   git,
   gitFailure,
   ignoredSymlinks,
@@ -44,6 +46,12 @@ export interface RemoveWorktreeOptions {
    * safe (see `syncMainCheckout`). Never part of a refusal: the removal
    * has happened by then, and the outcome is `sync` in the result. */
   syncMain?: boolean;
+  /** Refuse (`no_own_commits`) a branch whose tip is its fork point with
+   * the base (`merge-base HEAD <base>` is `HEAD`): it has no commit of its
+   * own, which is what a worktree created a moment ago looks like, and an
+   * ancestry verdict cannot tell it from finished work. Set by `worktree
+   * sweep` only; a plain `remove` keeps taking such a branch. */
+  requireOwnCommits?: boolean;
   /** Run every check that can refuse, then stop before the first change and
    * report what would have been removed (`dryRun: true` in the result). The
    * same code path as the real removal up to that point, so a dry run
@@ -244,7 +252,14 @@ export async function removeWorktree(
   // Asked only when a flag needs the answer: the `gh` lookup of a verdict is
   // a network call where `gh` happens to be installed. Computed before the
   // unpushed check, because a branch that is merged into the base has no
-  // work left to lose even when no remote branch holds its commits.
+  // work left to lose even when no remote branch holds its commits. The
+  // content rule is weighed only where the caller asked for the merge to be
+  // required and there is a branch the verdict is about: elsewhere
+  // (`--delete-branch` alone, a detached HEAD) the verdict is ancestry or a
+  // merged pull request, as it was before the rule existed, so a content
+  // verdict alone never excuses commits there.
+  const withContentRule =
+    o.requireMerged === true && entry.branch !== undefined;
   const merged: MergeVerdict | null =
     o.requireMerged !== true && o.deleteBranch !== true
       ? null
@@ -261,6 +276,7 @@ export async function removeWorktree(
             base.ref,
             base.ghBase,
             base.label,
+            { contentRule: withContentRule },
           );
   if (o.requireMerged === true && o.force !== true && merged !== null) {
     if (merged.merged === "no") {
@@ -310,6 +326,35 @@ export async function removeWorktree(
         `${target} is checked out on ${entry.branch}, the branch the default base names or the one the main checkout is on; that branch is never deleted`,
         "default_branch_delete",
         { branch: entry.branch, defaultBranch: defaultBranch ?? null },
+      );
+    }
+  }
+
+  if (o.requireOwnCommits === true) {
+    // Fails closed: a fork point or a tip that cannot be read is a refusal.
+    const tip = commitSha(target, "HEAD", { trustObjectsOnly: true });
+    const fork =
+      base === undefined
+        ? undefined
+        : git(target, ["merge-base", "HEAD", base.ref], {
+            boundMs: GIT_WALK_BOUND_MS,
+            trustObjectsOnly: true,
+          });
+    const forkSha =
+      fork !== undefined && fork.error === undefined && fork.status === 0
+        ? fork.stdout.trim()
+        : undefined;
+    if (tip === undefined || forkSha === undefined || forkSha.length === 0) {
+      throw new WorktreeRefusal(
+        `cannot tell whether ${entry.branch ?? "HEAD"} has commits of its own since it forked from ${base?.label ?? "the default branch"}, so it is left alone`,
+        "no_own_commits",
+      );
+    }
+    if (forkSha === tip) {
+      throw new WorktreeRefusal(
+        `${entry.branch ?? "HEAD"} has no commits of its own: its tip is its fork point with ${base?.label ?? "the default branch"}, as for a worktree that was just created, so it is left alone (remove it with \`worktree remove --require-merged --delete-branch\` when it is done)`,
+        "no_own_commits",
+        { head: tip },
       );
     }
   }
