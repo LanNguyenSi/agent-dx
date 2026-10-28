@@ -278,7 +278,7 @@ function judge(
     );
   }
   const shift = lineShiftAbove(hunks, from);
-  if (shift === 0 || !sameAt(shift)) {
+  if (!sameAt(shift)) {
     return verdict(
       "changed",
       `the text cited at ${base.ref} was not found at the lines it should have moved to`,
