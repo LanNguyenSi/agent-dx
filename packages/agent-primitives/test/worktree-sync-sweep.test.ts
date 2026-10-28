@@ -1548,6 +1548,34 @@ describe("worktree remove and sweep: files whose edits git status does not show"
     expect(fs.existsSync(wt)).toBe(false);
   });
 
+  it.skipIf(process.getuid?.() === 0)(
+    "refuses a flagged file it cannot inspect, under a directory it may not read",
+    async () => {
+      const f = makeFixture();
+      const wt = addWorktree(f, "locked", path.join(f.root, "locked"));
+      write(wt, "d/b.txt", "tracked\n");
+      git(wt, ["add", "d/b.txt"]);
+      git(wt, ["commit", "-q", "-m", "add d/b.txt"]);
+      git(wt, ["push", "-q", "origin", "locked"]);
+      git(wt, ["update-index", "--skip-worktree", "d/b.txt"]);
+      fs.chmodSync(path.join(wt, "d"), 0o000);
+      try {
+        const r = await cli(f.work, ["remove", wt]);
+        expect(r.code, r.stdout + r.stderr).toBe(2);
+        expect(r.json.reason).toBe("worktree_dirty");
+        expect(r.json.message).toContain(
+          "cannot inspect d/b.txt is flagged skip-worktree",
+        );
+        expect(fs.existsSync(wt)).toBe(true);
+      } finally {
+        fs.chmodSync(path.join(wt, "d"), 0o755);
+      }
+      expect(fs.readFileSync(path.join(wt, "d/b.txt"), "utf8")).toBe(
+        "tracked\n",
+      );
+    },
+  );
+
   it("refuses a flagged symbolic link, retargeted or not, and a flagged path with a directory in its place", async () => {
     const f = makeFixture();
     const dirs: string[] = [];

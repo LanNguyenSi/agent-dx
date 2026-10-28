@@ -237,8 +237,9 @@ type FlaggedFiles =
  * present in the work tree (a file, a link, a directory, anything `lstat`
  * finds) is listed, edited or not. A flagged path that is absent (a sparse
  * checkout leaves it out) has nothing in it to lose and is not listed, nor
- * is a submodule entry (mode 160000), which git never compares with the
- * index. The paths are read from `git ls-files -s -v -z`; a listing that
+ * is a submodule entry (mode 160000): git's own `worktree remove` refuses
+ * a populated submodule without --force (worktree_remove_failed), and an
+ * unpopulated one has nothing tracked in it. The paths are read from `git ls-files -s -v -z`; a listing that
  * cannot be read, or a path that cannot be inspected, is `ok: false`.
  */
 function flaggedFiles(target: string): FlaggedFiles {
