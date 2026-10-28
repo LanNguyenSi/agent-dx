@@ -59,6 +59,18 @@ Per-repo JSON fields added beyond the base shape:
 - `ahead`: commits on the current branch not yet on the upstream. `null` when there is no upstream.
 - `behind`: commits on the upstream not yet on the current branch. `null` when there is no upstream.
 
+Fleet-snapshot fields, one call to see where each repository stands relative to `origin/<default branch>`. They compare `HEAD` with the detected target branch (see Protected branches), never with the upstream, so a feature branch tracking another branch still reports its distance to the default branch:
+
+- `targetRef`: `refs/remotes/origin/<targetBranch>`, or `null` when no target branch is detected or that remote-tracking ref does not exist (for example a local-only `main`).
+- `targetSha`: full SHA of `targetRef`. `null` when `targetRef` is `null`.
+- `headSha`: full SHA of `HEAD`. Set on a detached HEAD too; `null` only for a repository without commits.
+- `aheadOfTarget`: commits on `HEAD` not on `targetRef`. `null` when `targetRef` is `null` or `HEAD` has no commit.
+- `behindTarget`: commits on `targetRef` not on `HEAD`. `null` under the same conditions.
+- `commonDir`: realpath of the git common directory. Linked worktrees of one repository share the same value, so group by it to find siblings.
+- `worktree`: `true` for a linked worktree, `false` for the main checkout.
+
+All of these, like `ahead`/`behind`, read local refs and reflect the last fetch unless `--fetch` is passed. The existing `upstream`, `ahead` and `behind` keep their meaning (against the branch upstream).
+
 `ahead`/`behind` are computed against the **local** copy of the upstream ref. Without `--fetch` they can be stale, the check is only as fresh as the last `git fetch`. Pass `--fetch` (or run `git-batch fetch ~/git` beforehand) to force a refresh.
 
 ### `--fetch` error handling
@@ -73,13 +85,13 @@ A repo with no remote configured at all is not a fetch failure: `git fetch --qui
 
 ### Text output shape
 
-The plain-text `status` row inserts the new columns between `target=…` and `clean=…`, it is not a pure append:
+The plain-text `status` row keeps the existing columns in place and appends the fleet-snapshot columns after them (after `outcome=` when present):
 
 ```
-<repo>: branch=X target=Y upstream=U ahead=D behind=E clean=Z staged=… unstaged=… untracked=… [outcome=F]
+<repo>: branch=X target=Y upstream=U ahead=D behind=E clean=Z staged=… unstaged=… untracked=… [outcome=F] target_ref=R target_sha=S head_sha=H ahead_of_target=A behind_target=B worktree=W common_dir=C
 ```
 
-The `-` sentinel is reused for `upstream=-`, `ahead=-`, `behind=-` when the current branch has no upstream. Scripts using `key=value` parsing are unaffected; scripts that index columns positionally should switch to `--json`.
+`target_sha` and `head_sha` are shortened to 7 characters in text; JSON carries the full SHAs. The `-` sentinel is reused for `upstream=-`, `ahead=-`, `behind=-` when the current branch has no upstream, and for the target columns that are `null` in JSON. Scripts using `key=value` parsing are unaffected; scripts that index columns positionally should switch to `--json`.
 
 ## `dirty`
 

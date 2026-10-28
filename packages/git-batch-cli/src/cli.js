@@ -441,23 +441,35 @@ async function runStatus(repos, options) {
     ? await fetchReposQuiet(repos, options)
     : new Map();
 
+  const context = createRunContext();
+
   return repos.map((repo) => {
     try {
       const status = collectRepoStatus(repo.path);
       const upstream = collectUpstreamState(repo.path);
+      const targetBranch = detectProtectedBranch(repo.path, options.protectedBranches, {
+        preferConfigured: options.protectedBranchesExplicit
+      });
+      const target = collectTargetState(repo.path, targetBranch);
+      const location = collectWorktreeLocation(repo.path, context);
       return {
         repo: repo.name,
         path: repo.path,
         currentBranch: status.branch,
-        targetBranch: detectProtectedBranch(repo.path, options.protectedBranches, {
-          preferConfigured: options.protectedBranchesExplicit
-        }),
+        targetBranch,
         upstream: upstream.upstream,
         ahead: upstream.ahead,
         behind: upstream.behind,
         clean: status.clean,
         counts: status.counts,
-        outcome: fetchFailures.get(repo.path) ? "fetch_failed" : "ok"
+        outcome: fetchFailures.get(repo.path) ? "fetch_failed" : "ok",
+        targetRef: target.targetRef,
+        targetSha: target.targetSha,
+        headSha: target.headSha,
+        aheadOfTarget: target.aheadOfTarget,
+        behindTarget: target.behindTarget,
+        commonDir: location.commonDir,
+        worktree: location.worktree
       };
     } catch (error) {
       return repoError(repo, error);
@@ -485,6 +497,70 @@ async function fetchReposQuiet(repos, options) {
   });
 
   return fetchFailures;
+}
+
+// HEAD against refs/remotes/origin/<target branch>, independent of the
+// branch upstream. Everything stays null when there is no target or its
+// remote-tracking ref is missing; headSha is null only for an unborn HEAD.
+function collectTargetState(repoPath, targetBranch) {
+  const empty = {
+    targetRef: null,
+    targetSha: null,
+    headSha: null,
+    aheadOfTarget: null,
+    behindTarget: null
+  };
+  const head = runGit(repoPath, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], {
+    allowFailure: true
+  });
+  const headSha = head.code === 0 && head.stdout.trim() ? head.stdout.trim() : null;
+  if (!targetBranch) {
+    return { ...empty, headSha };
+  }
+
+  const targetRef = `refs/remotes/origin/${targetBranch}`;
+  const resolved = runGit(
+    repoPath,
+    ["rev-parse", "--verify", "--quiet", `${targetRef}^{commit}`],
+    { allowFailure: true }
+  );
+  const targetSha = resolved.code === 0 && resolved.stdout.trim() ? resolved.stdout.trim() : null;
+  if (!targetSha) {
+    return { ...empty, headSha };
+  }
+  if (!headSha) {
+    return { ...empty, targetRef, targetSha };
+  }
+
+  const counts = runGit(
+    repoPath,
+    ["rev-list", "--left-right", "--count", `HEAD...${targetRef}`],
+    { allowFailure: true }
+  );
+  const match = counts.code === 0 ? counts.stdout.trim().match(/^(\d+)\s+(\d+)$/) : null;
+  return {
+    targetRef,
+    targetSha,
+    headSha,
+    aheadOfTarget: match ? Number(match[1]) : null,
+    behindTarget: match ? Number(match[2]) : null
+  };
+}
+
+// commonDir is shared by a repository and its linked worktrees; worktree is
+// true for a linked worktree and false for the main checkout.
+function collectWorktreeLocation(repoPath, context) {
+  const commonDir = resolveCommonDir(repoPath, context);
+  let worktree = false;
+  try {
+    const out = runGit(repoPath, ["rev-parse", "--absolute-git-dir"], { allowFailure: true });
+    if (out.code === 0 && out.stdout.trim()) {
+      worktree = fs.realpathSync(out.stdout.trim()) !== commonDir;
+    }
+  } catch (error) {
+    worktree = false;
+  }
+  return { commonDir, worktree };
 }
 
 function collectUpstreamState(repoPath) {
@@ -1101,7 +1177,7 @@ function printResults(command, results, io) {
         ? ` outcome=${entry.outcome}`
         : "";
       io.out(
-        `${entry.repo}: branch=${entry.currentBranch} target=${entry.targetBranch || "-"} upstream=${entry.upstream || "-"} ahead=${formatCount(entry.ahead)} behind=${formatCount(entry.behind)} clean=${entry.clean} staged=${counts.staged} unstaged=${counts.unstaged} untracked=${counts.untracked}${outcomeSuffix}`
+        `${entry.repo}: branch=${entry.currentBranch} target=${entry.targetBranch || "-"} upstream=${entry.upstream || "-"} ahead=${formatCount(entry.ahead)} behind=${formatCount(entry.behind)} clean=${entry.clean} staged=${counts.staged} unstaged=${counts.unstaged} untracked=${counts.untracked}${outcomeSuffix} target_ref=${entry.targetRef || "-"} target_sha=${shortSha(entry.targetSha)} head_sha=${shortSha(entry.headSha)} ahead_of_target=${formatCount(entry.aheadOfTarget)} behind_target=${formatCount(entry.behindTarget)} worktree=${entry.worktree === true} common_dir=${entry.commonDir || "-"}`
       );
     }
     return;
@@ -1223,6 +1299,10 @@ function renderActions(actions) {
   return actions
     .map((action) => (action.skipped ? `${action.command} (shared with ${action.sharedWith})` : action.command))
     .join(" -> ");
+}
+
+function shortSha(value) {
+  return value ? value.slice(0, 7) : "-";
 }
 
 function formatCount(value) {
