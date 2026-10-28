@@ -576,8 +576,8 @@ test("printResults renders upstream and distance columns for status", () => {
   );
 
   assert.deepEqual(lines, [
-    "behind-repo: branch=main target=main upstream=origin/main ahead=0 behind=16 clean=true staged=0 unstaged=0 untracked=0",
-    "no-upstream-repo: branch=feature/x target=main upstream=- ahead=- behind=- clean=true staged=0 unstaged=0 untracked=0"
+    "behind-repo: branch=main target=main upstream=origin/main ahead=0 behind=16 clean=true staged=0 unstaged=0 untracked=0 target_ref=- target_sha=- head_sha=- ahead_of_target=- behind_target=- worktree=false common_dir=-",
+    "no-upstream-repo: branch=feature/x target=main upstream=- ahead=- behind=- clean=true staged=0 unstaged=0 untracked=0 target_ref=- target_sha=- head_sha=- ahead_of_target=- behind_target=- worktree=false common_dir=-"
   ]);
 });
 
@@ -605,7 +605,7 @@ test("printResults tags status rows with non-ok outcome", () => {
   );
 
   assert.deepEqual(lines, [
-    "offline-repo: branch=main target=main upstream=origin/main ahead=0 behind=0 clean=true staged=0 unstaged=0 untracked=0 outcome=fetch_failed"
+    "offline-repo: branch=main target=main upstream=origin/main ahead=0 behind=0 clean=true staged=0 unstaged=0 untracked=0 outcome=fetch_failed target_ref=- target_sha=- head_sha=- ahead_of_target=- behind_target=- worktree=false common_dir=-"
   ]);
 });
 
@@ -1013,4 +1013,254 @@ test("runSync merges the remote-tracking ref even when a local branch is named o
   const result = await syncOne(root, "main");
   assert.equal(result.outcome, "ok", result.error);
   assert.equal(git(repo.repoPath, ["rev-parse", "HEAD"]).trim(), head);
+});
+
+// Fleet snapshot fields: HEAD against origin/<target>, never the upstream.
+function commitFile(repoPath, name, message) {
+  fs.writeFileSync(path.join(repoPath, name), `${name}\n`, "utf8");
+  git(repoPath, ["add", name]);
+  git(repoPath, ["commit", "-q", "-m", message]);
+}
+
+async function statusOf(root, extra = {}) {
+  const results = await runStatus(
+    discoverRepositories(root, { includeCurrent: false, includeHidden: false }),
+    { protectedBranches: ["main", "master"], ...extra }
+  );
+  return results;
+}
+
+test("status target fields: on target", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-on-"));
+  const repo = setupClonedRepo(root, "r");
+  const [entry] = await statusOf(root);
+  const sha = git(repo.repoPath, ["rev-parse", "HEAD"]).trim();
+  assert.equal(entry.targetRef, "refs/remotes/origin/main");
+  assert.equal(entry.targetSha, sha);
+  assert.equal(entry.headSha, sha);
+  assert.equal(entry.aheadOfTarget, 0);
+  assert.equal(entry.behindTarget, 0);
+  assert.equal(entry.worktree, false);
+  assert.equal(entry.commonDir, fs.realpathSync(path.join(repo.repoPath, ".git")));
+});
+
+test("status target fields: ahead, behind and diverged", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-drift-"));
+  const repo = setupClonedRepo(root, "r");
+
+  commitFile(repo.repoPath, "local1.txt", "local1");
+  commitFile(repo.repoPath, "local2.txt", "local2");
+  let [entry] = await statusOf(root);
+  assert.equal(entry.aheadOfTarget, 2);
+  assert.equal(entry.behindTarget, 0);
+
+  git(repo.repoPath, ["reset", "-q", "--hard", "origin/main"]);
+  advanceRemote(repo, "main");
+  [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.aheadOfTarget, 0);
+  assert.equal(entry.behindTarget, 1);
+  assert.equal(entry.targetSha, git(repo.seedPath, ["rev-parse", "HEAD"]).trim());
+
+  commitFile(repo.repoPath, "local3.txt", "local3");
+  [entry] = await statusOf(root);
+  assert.equal(entry.aheadOfTarget, 1);
+  assert.equal(entry.behindTarget, 1);
+});
+
+test("status target fields are computed against the target, not the upstream", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-upstream-"));
+  const repo = setupClonedRepo(root, "r");
+  // Branch tracks origin/develop, which is 2 commits ahead of origin/main.
+  git(repo.seedPath, ["checkout", "-q", "-b", "develop"]);
+  commitFile(repo.seedPath, "d1.txt", "d1");
+  commitFile(repo.seedPath, "d2.txt", "d2");
+  git(repo.seedPath, ["push", "-q", "origin", "develop"]);
+  git(repo.repoPath, ["fetch", "-q", "--all"]);
+  git(repo.repoPath, ["checkout", "-q", "-b", "work", "--track", "origin/develop"]);
+  commitFile(repo.repoPath, "w1.txt", "w1");
+
+  const [entry] = await statusOf(root);
+  assert.equal(entry.upstream, "origin/develop");
+  assert.equal(entry.ahead, 1);
+  assert.equal(entry.behind, 0);
+  assert.equal(entry.targetRef, "refs/remotes/origin/main");
+  assert.equal(entry.aheadOfTarget, 3);
+  assert.equal(entry.behindTarget, 0);
+});
+
+test("status target fields are null without a target or a remote-tracking ref", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-null-"));
+  const repoPath = path.join(root, "bare-local");
+  fs.mkdirSync(repoPath);
+  git(repoPath, ["init", "-q", "-b", "feature"]);
+  git(repoPath, ["config", "user.name", "Test User"]);
+  git(repoPath, ["config", "user.email", "test@example.com"]);
+  commitFile(repoPath, "a.txt", "a");
+  // A remote-tracking ref literally named "null" must not be mistaken for a target.
+  git(repoPath, ["update-ref", "refs/remotes/origin/null", "HEAD"]);
+
+  let [entry] = await statusOf(root);
+  assert.equal(entry.targetBranch, null);
+  assert.equal(entry.targetRef, null);
+  assert.equal(entry.targetSha, null);
+  assert.equal(entry.aheadOfTarget, null);
+  assert.equal(entry.behindTarget, null);
+  assert.equal(entry.headSha, git(repoPath, ["rev-parse", "HEAD"]).trim());
+
+  // A local-only main is a target branch for status, but has no origin ref.
+  git(repoPath, ["branch", "main"]);
+  [entry] = await statusOf(root);
+  assert.equal(entry.targetBranch, "main");
+  assert.equal(entry.targetRef, null);
+  assert.equal(entry.targetSha, null);
+  assert.equal(entry.aheadOfTarget, null);
+  assert.equal(entry.behindTarget, null);
+});
+
+test("status target fields on a detached HEAD", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-detached-"));
+  const repo = setupClonedRepo(root, "r");
+  commitFile(repo.repoPath, "local.txt", "local");
+  git(repo.repoPath, ["checkout", "-q", "--detach"]);
+
+  const [entry] = await statusOf(root);
+  assert.equal(entry.currentBranch, "detached");
+  assert.equal(entry.upstream, null);
+  assert.equal(entry.headSha, git(repo.repoPath, ["rev-parse", "HEAD"]).trim());
+  assert.equal(entry.aheadOfTarget, 1);
+  assert.equal(entry.behindTarget, 0);
+});
+
+test("status marks linked worktree siblings with the same commonDir", async () => {
+  const { repos } = setupWorktreeGroup("git-batch-target-wt-", 2);
+  const results = await runStatus(repos, { protectedBranches: ["main"] });
+  assert.equal(results.length, 3);
+  assert.equal(new Set(results.map((entry) => entry.commonDir)).size, 1);
+  assert.equal(results.find((entry) => entry.repo === "main-wt").worktree, false);
+  assert.ok(results.filter((entry) => entry.repo !== "main-wt").every((entry) => entry.worktree === true));
+  assert.ok(results.every((entry) => entry.targetRef === "refs/remotes/origin/main"));
+});
+
+test("status text output appends the target columns with short SHAs", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-text-"));
+  const repo = setupClonedRepo(root, "r");
+  const results = await statusOf(root);
+  const lines = [];
+  printResults("status", results, { out: (line) => lines.push(line) });
+  const sha = git(repo.repoPath, ["rev-parse", "HEAD"]).trim();
+  assert.match(lines[0], /^r: branch=main target=main upstream=origin\/main ahead=0 behind=0 clean=true /);
+  assert.ok(lines[0].includes(` target_ref=refs/remotes/origin/main target_sha=${sha.slice(0, 7)} head_sha=${sha.slice(0, 7)} ahead_of_target=0 behind_target=0 worktree=false common_dir=`));
+  assert.ok(!lines[0].includes(sha));
+});
+
+test("status --fetch refreshes the target when the branch tracks a non-origin remote", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-fork-");
+  git(repo.repoPath, ["remote", "add", "up", repo.originPath]);
+  git(repo.repoPath, ["fetch", "-q", "up"]);
+  git(repo.repoPath, ["checkout", "-q", "-b", "work", "--track", "up/develop"]);
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.upstream, "up/develop");
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+  assert.equal(entry.behindTarget, 1);
+});
+
+test("status --fetch refreshes the target when the branch tracks a local branch", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-dot-");
+  git(repo.repoPath, ["checkout", "-q", "-b", "feat", "--track", "main"]);
+  assert.equal(git(repo.repoPath, ["config", "--get", "branch.feat.remote"]).trim(), ".");
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+  assert.equal(entry.behindTarget, 1);
+});
+
+test("status --fetch refreshes a target that a negative refspec excludes", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-negative-");
+  git(repo.repoPath, ["config", "--add", "remote.origin.fetch", "^refs/heads/main"]);
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+  assert.equal(entry.behindTarget, 1);
+});
+
+test("status --fetch refreshes a target that origin's refspec does not map", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-refspec-");
+  git(repo.repoPath, [
+    "config",
+    "--replace-all",
+    "remote.origin.fetch",
+    "+refs/heads/develop:refs/remotes/origin/develop"
+  ]);
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+  assert.equal(entry.behindTarget, 1);
+});
+
+test("status --fetch refreshes the target when remote.origin.skipFetchAll is set", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-skipall-");
+  git(repo.repoPath, ["config", "remote.origin.skipFetchAll", "true"]);
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+});
+
+test("status --fetch does not fail when the detected target is missing on the remote", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-gone-");
+  git(repo.repoPath, [
+    "config",
+    "--replace-all",
+    "remote.origin.fetch",
+    "+refs/heads/develop:refs/remotes/origin/develop"
+  ]);
+  git(repo.repoPath, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone"]);
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.targetBranch, "gone");
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetRef, null);
+});
+
+test("status target fields on an unborn HEAD with origin/<target> present", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-unborn-"));
+  const seeded = setupClonedRepo(root, "seeded");
+  const repoPath = path.join(root, "unborn");
+  fs.mkdirSync(repoPath);
+  git(repoPath, ["init", "-q", "-b", "main"]);
+  git(repoPath, ["remote", "add", "origin", seeded.originPath]);
+  git(repoPath, ["fetch", "-q", "origin"]);
+
+  const entry = (await statusOf(root)).find((e) => e.repo === "unborn");
+  assert.equal(entry.targetRef, "refs/remotes/origin/main");
+  assert.equal(entry.targetSha, git(seeded.seedPath, ["rev-parse", "HEAD"]).trim());
+  assert.equal(entry.headSha, null);
+  assert.equal(entry.aheadOfTarget, null);
+  assert.equal(entry.behindTarget, null);
+});
+
+test("status text output quotes a common_dir that contains whitespace", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-space-"));
+  const root = path.join(base, "with space");
+  fs.mkdirSync(root);
+  const repo = setupClonedRepo(root, "r");
+  const results = await statusOf(root);
+  const lines = [];
+  printResults("status", results, { out: (line) => lines.push(line) });
+  const expected = fs.realpathSync(path.join(repo.repoPath, ".git"));
+  assert.ok(expected.includes(" "));
+  assert.ok(lines[0].endsWith(` common_dir=${JSON.stringify(expected)}`), lines[0]);
+  // Splitting on whitespace outside quotes yields exactly one common_dir pair.
+  const pairs = lines[0].match(/[a-z_]+=(?:"(?:[^"\\]|\\.)*"|\S*)/g);
+  assert.equal(pairs[pairs.length - 1], `common_dir=${JSON.stringify(expected)}`);
 });

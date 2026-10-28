@@ -437,27 +437,38 @@ function validateFilterPatterns(values, optionName) {
 }
 
 async function runStatus(repos, options) {
+  const context = createRunContext();
   const fetchFailures = options.fetch
-    ? await fetchReposQuiet(repos, options)
+    ? await fetchReposQuiet(repos, options, context)
     : new Map();
 
   return repos.map((repo) => {
     try {
       const status = collectRepoStatus(repo.path);
       const upstream = collectUpstreamState(repo.path);
+      const targetBranch = detectProtectedBranch(repo.path, options.protectedBranches, {
+        preferConfigured: options.protectedBranchesExplicit
+      });
+      const target = collectTargetState(repo.path, targetBranch);
+      const location = collectWorktreeLocation(repo.path, context);
       return {
         repo: repo.name,
         path: repo.path,
         currentBranch: status.branch,
-        targetBranch: detectProtectedBranch(repo.path, options.protectedBranches, {
-          preferConfigured: options.protectedBranchesExplicit
-        }),
+        targetBranch,
         upstream: upstream.upstream,
         ahead: upstream.ahead,
         behind: upstream.behind,
         clean: status.clean,
         counts: status.counts,
-        outcome: fetchFailures.get(repo.path) ? "fetch_failed" : "ok"
+        outcome: fetchFailures.get(repo.path) ? "fetch_failed" : "ok",
+        targetRef: target.targetRef,
+        targetSha: target.targetSha,
+        headSha: target.headSha,
+        aheadOfTarget: target.aheadOfTarget,
+        behindTarget: target.behindTarget,
+        commonDir: location.commonDir,
+        worktree: location.worktree
       };
     } catch (error) {
       return repoError(repo, error);
@@ -465,11 +476,10 @@ async function runStatus(repos, options) {
   });
 }
 
-async function fetchReposQuiet(repos, options) {
+async function fetchReposQuiet(repos, options, context = createRunContext()) {
   const fetchRepo = options.fetchRepo || fetchRepoQuiet;
   const fetchConcurrency = normalizeFetchConcurrency(options.fetchConcurrency);
   const fetchFailures = new Map();
-  const context = createRunContext();
 
   await runParallelLimit(repos, fetchConcurrency, async (repo) => {
     // Linked worktrees of one repository share a ref store; fetch it once
@@ -477,7 +487,7 @@ async function fetchReposQuiet(repos, options) {
     const key = resolveCommonDir(repo.path, context);
     let entry = context.shared.get(key);
     if (!entry) {
-      entry = { owner: repo.name, promise: Promise.resolve(fetchRepo(repo.path)) };
+      entry = { owner: repo.name, promise: Promise.resolve(fetchRepo(repo.path, options)) };
       context.shared.set(key, entry);
     }
     const fetched = await entry.promise;
@@ -485,6 +495,89 @@ async function fetchReposQuiet(repos, options) {
   });
 
   return fetchFailures;
+}
+
+// HEAD against refs/remotes/origin/<target branch>, independent of the
+// branch upstream. Everything stays null when there is no target or its
+// remote-tracking ref is missing; headSha is null only for an unborn HEAD.
+function collectTargetState(repoPath, targetBranch) {
+  const empty = {
+    targetRef: null,
+    targetSha: null,
+    headSha: null,
+    aheadOfTarget: null,
+    behindTarget: null
+  };
+  const SHA = /^[0-9a-f]{40,64}$/;
+  const targetRef = targetBranch ? `refs/remotes/origin/${targetBranch}` : null;
+
+  // Common case, one call: HEAD and the target ref both resolve.
+  if (targetRef) {
+    const both = runGit(repoPath, ["rev-parse", "HEAD^{commit}", `${targetRef}^{commit}`], {
+      allowFailure: true
+    });
+    const lines = both.stdout.split("\n").map((l) => l.trim());
+    if (both.code === 0 && SHA.test(lines[0]) && SHA.test(lines[1])) {
+      const [headSha, targetSha] = lines;
+      if (headSha === targetSha) {
+        return { targetRef, targetSha, headSha, aheadOfTarget: 0, behindTarget: 0 };
+      }
+      const counts = runGit(
+        repoPath,
+        ["rev-list", "--left-right", "--count", `HEAD...${targetRef}`],
+        { allowFailure: true }
+      );
+      const match = counts.code === 0 ? counts.stdout.trim().match(/^(\d+)\s+(\d+)$/) : null;
+      return {
+        targetRef,
+        targetSha,
+        headSha,
+        aheadOfTarget: match ? Number(match[1]) : null,
+        behindTarget: match ? Number(match[2]) : null
+      };
+    }
+  }
+
+  const head = runGit(repoPath, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], {
+    allowFailure: true
+  });
+  const headSha = head.code === 0 && head.stdout.trim() ? head.stdout.trim() : null;
+  if (!targetRef) {
+    return { ...empty, headSha };
+  }
+  const resolved = runGit(
+    repoPath,
+    ["rev-parse", "--verify", "--quiet", `${targetRef}^{commit}`],
+    { allowFailure: true }
+  );
+  const targetSha = resolved.code === 0 && resolved.stdout.trim() ? resolved.stdout.trim() : null;
+  if (!targetSha) {
+    return { ...empty, headSha };
+  }
+  if (headSha) {
+    const counts = runGit(
+      repoPath,
+      ["rev-list", "--left-right", "--count", `HEAD...${targetRef}`],
+      { allowFailure: true }
+    );
+    const match = counts.code === 0 ? counts.stdout.trim().match(/^(\d+)\s+(\d+)$/) : null;
+    return {
+      targetRef,
+      targetSha,
+      headSha,
+      aheadOfTarget: match ? Number(match[1]) : null,
+      behindTarget: match ? Number(match[2]) : null
+    };
+  }
+  // Unborn HEAD: the target is known, there is no distance to measure.
+  return { ...empty, targetRef, targetSha };
+}
+
+// commonDir is shared by a repository and its linked worktrees; worktree is
+// true for a linked worktree and false for the main checkout.
+function collectWorktreeLocation(repoPath, context) {
+  const { gitDir, commonDir } = resolveGitLocation(repoPath, context);
+  return { commonDir, worktree: gitDir !== null && gitDir !== commonDir };
 }
 
 function collectUpstreamState(repoPath) {
@@ -528,9 +621,64 @@ function collectUpstreamState(repoPath) {
   };
 }
 
-async function fetchRepoQuiet(repoPath) {
-  const result = await runGitAsync(repoPath, ["fetch", "--quiet"], { allowFailure: true });
-  return result.code === 0;
+// Status fetch, in this order, so the target distance reflects the remote:
+// 1. plain `git fetch` (the branch's own remote through its configured refspec);
+// 2. `git fetch origin` when the branch tracks another remote (a fork), since
+//    plain fetch never touches origin then;
+// 3. an explicit refspec for refs/remotes/origin/<target> when origin's
+//    configured refspec does not map the detected target branch. The target
+//    is detected after steps 1 and 2 so it sees the refreshed refs.
+// A target missing on the remote is not a fetch failure.
+async function fetchRepoQuiet(repoPath, options = {}) {
+  const plain = await runGitAsync(repoPath, ["fetch", "--quiet"], { allowFailure: true });
+  if (plain.code !== 0) {
+    return false;
+  }
+  const hasOrigin =
+    runGit(repoPath, ["config", "--get", "remote.origin.url"], { allowFailure: true }).code === 0;
+  if (!hasOrigin) {
+    return true;
+  }
+
+  const head = runGit(repoPath, ["symbolic-ref", "--quiet", "--short", "HEAD"], {
+    allowFailure: true
+  });
+  const current = head.code === 0 ? head.stdout.trim() : "";
+  const remote = current
+    ? runGit(repoPath, ["config", "--get", `branch.${current}.remote`], { allowFailure: true })
+    : { code: 1, stdout: "" };
+  const trackedRemote = remote.code === 0 ? remote.stdout.trim() : "";
+  // Any tracked remote other than origin, including "." (a local branch),
+  // means the plain fetch never touched origin.
+  if (trackedRemote && trackedRemote !== "origin") {
+    const viaOrigin = await runGitAsync(repoPath, ["fetch", "--quiet", "origin"], {
+      allowFailure: true
+    });
+    if (viaOrigin.code !== 0) {
+      return false;
+    }
+  }
+
+  const targetBranch = detectProtectedBranch(repoPath, options.protectedBranches || [], {
+    preferConfigured: options.protectedBranchesExplicit
+  });
+  if (targetBranch && targetRefspecMissing(repoPath, targetBranch)) {
+    const targeted = await runGitAsync(
+      repoPath,
+      [
+        "fetch",
+        "--quiet",
+        "origin",
+        `+refs/heads/${targetBranch}:refs/remotes/origin/${targetBranch}`
+      ],
+      // LC_ALL=C keeps the stderr text below untranslated.
+      { allowFailure: true, env: { LC_ALL: "C" } }
+    );
+    if (targeted.code !== 0 && !/couldn't find remote ref/i.test(targeted.stderr || "")) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function runBranches(repos, options) {
@@ -868,26 +1016,38 @@ async function executeGitCommand(repoPath, args, options, result) {
 }
 
 function createRunContext() {
-  return { shared: new Map(), commonDirs: new Map() };
+  return { shared: new Map(), locations: new Map() };
 }
 
 // Realpath of the git common dir: linked worktrees of one repository share
 // it (and so the ref store). Falls back to the repo path when git cannot say.
 function resolveCommonDir(repoPath, context) {
-  if (context.commonDirs.has(repoPath)) {
-    return context.commonDirs.get(repoPath);
+  return resolveGitLocation(repoPath, context).commonDir;
+}
+
+// One rev-parse call for the git dir and the common dir, cached per repo path
+// in the run context. gitDir is null when git cannot say.
+function resolveGitLocation(repoPath, context) {
+  if (context.locations.has(repoPath)) {
+    return context.locations.get(repoPath);
   }
-  let key = repoPath;
+  let location = { gitDir: null, commonDir: repoPath };
   try {
-    const out = runGit(repoPath, ["rev-parse", "--git-common-dir"], { allowFailure: true });
-    if (out.code === 0 && out.stdout.trim()) {
-      key = fs.realpathSync(path.resolve(repoPath, out.stdout.trim()));
+    const out = runGit(repoPath, ["rev-parse", "--absolute-git-dir", "--git-common-dir"], {
+      allowFailure: true
+    });
+    const lines = out.code === 0 ? out.stdout.split("\n").map((l) => l.trim()) : [];
+    if (lines.length >= 2 && lines[0] && lines[1]) {
+      location = {
+        gitDir: fs.realpathSync(lines[0]),
+        commonDir: fs.realpathSync(path.resolve(repoPath, lines[1]))
+      };
     }
   } catch (error) {
-    key = repoPath;
+    location = { gitDir: null, commonDir: repoPath };
   }
-  context.commonDirs.set(repoPath, key);
-  return key;
+  context.locations.set(repoPath, location);
+  return location;
 }
 
 // Runs a network git command once per git common dir and run. The first repo
@@ -922,6 +1082,12 @@ function needsTargetFetch(repoPath, branch) {
   if (skipAll.code === 0 && skipAll.stdout.trim() === "true") {
     return true;
   }
+  return targetRefspecMissing(repoPath, branch);
+}
+
+// True when origin's configured fetch refspecs do not map the branch onto
+// refs/remotes/origin/<branch> (no mapping, or an exclusion matches).
+function targetRefspecMissing(repoPath, branch) {
   const refspecs = runGit(repoPath, ["config", "--get-all", "remote.origin.fetch"], {
     allowFailure: true
   });
@@ -1008,6 +1174,7 @@ function runGitAsync(repoPath, args, extraOptions = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd: repoPath,
+      env: extraOptions.env ? { ...process.env, ...extraOptions.env } : process.env,
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -1101,7 +1268,7 @@ function printResults(command, results, io) {
         ? ` outcome=${entry.outcome}`
         : "";
       io.out(
-        `${entry.repo}: branch=${entry.currentBranch} target=${entry.targetBranch || "-"} upstream=${entry.upstream || "-"} ahead=${formatCount(entry.ahead)} behind=${formatCount(entry.behind)} clean=${entry.clean} staged=${counts.staged} unstaged=${counts.unstaged} untracked=${counts.untracked}${outcomeSuffix}`
+        `${entry.repo}: branch=${entry.currentBranch} target=${entry.targetBranch || "-"} upstream=${entry.upstream || "-"} ahead=${formatCount(entry.ahead)} behind=${formatCount(entry.behind)} clean=${entry.clean} staged=${counts.staged} unstaged=${counts.unstaged} untracked=${counts.untracked}${outcomeSuffix} target_ref=${entry.targetRef || "-"} target_sha=${shortSha(entry.targetSha)} head_sha=${shortSha(entry.headSha)} ahead_of_target=${formatCount(entry.aheadOfTarget)} behind_target=${formatCount(entry.behindTarget)} worktree=${entry.worktree === true} common_dir=${formatTextValue(entry.commonDir)}`
       );
     }
     return;
@@ -1223,6 +1390,19 @@ function renderActions(actions) {
   return actions
     .map((action) => (action.skipped ? `${action.command} (shared with ${action.sharedWith})` : action.command))
     .join(" -> ");
+}
+
+// A value containing whitespace is double-quoted (JSON string escaping) so
+// the row still splits into key=value pairs on whitespace outside quotes.
+function formatTextValue(value) {
+  if (!value) {
+    return "-";
+  }
+  return /\s|"/.test(value) ? JSON.stringify(value) : value;
+}
+
+function shortSha(value) {
+  return value ? value.slice(0, 7) : "-";
 }
 
 function formatCount(value) {

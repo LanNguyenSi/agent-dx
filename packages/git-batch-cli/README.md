@@ -11,7 +11,7 @@ Part of [`agent-dx`](https://github.com/LanNguyenSi/agent-dx). Source: `packages
 ## Key features
 
 - `sync`: fetch, detect the protected branch, and fast-forward (`git merge --ff-only`) across every repository in parallel, skipping dirty ones
-- `status`: branch, upstream, ahead/behind distance, and change counters, with `--fetch` for a live refresh
+- `status`: branch, upstream, ahead/behind distance, and change counters, with `--fetch` for a live refresh; also a fleet snapshot (`--fetch --json`: HEAD and `origin/<default>` SHAs, ahead/behind of the default branch, dirty state, linked-worktree grouping) in one call
 - `--json` and `--strict` on every command, for safe use from agents and CI (deterministic ordering, no prompts)
 - `--only` / `--exclude` repository filters (substring or regex)
 
