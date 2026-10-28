@@ -17,7 +17,6 @@ A monorepo workshop for agent-development tooling, built while shipping AI-agent
 | [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. | not published |
 | [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. | published |
 | [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder: sync, status, dirty checks, fetch, with `--strict` for automation. | not published |
-| [mcp-token-audit](packages/mcp-token-audit) | Ranks tool calls in Claude Code transcripts by approximate token cost per tool name, with an `mcp__*` share of the total. | not published |
 | [agent-engineering-playbook](packages/agent-engineering-playbook) | Guide for building production-ready AI agent systems. | doc package |
 | [agentic-coding-playbook](packages/agentic-coding-playbook) | Practical playbook for teams using AI agents in coding. | doc package |
 
