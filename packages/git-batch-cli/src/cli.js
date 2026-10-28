@@ -648,7 +648,9 @@ async function fetchRepoQuiet(repoPath, options = {}) {
     ? runGit(repoPath, ["config", "--get", `branch.${current}.remote`], { allowFailure: true })
     : { code: 1, stdout: "" };
   const trackedRemote = remote.code === 0 ? remote.stdout.trim() : "";
-  if (trackedRemote && trackedRemote !== "origin" && trackedRemote !== ".") {
+  // Any tracked remote other than origin, including "." (a local branch),
+  // means the plain fetch never touched origin.
+  if (trackedRemote && trackedRemote !== "origin") {
     const viaOrigin = await runGitAsync(repoPath, ["fetch", "--quiet", "origin"], {
       allowFailure: true
     });
@@ -669,7 +671,8 @@ async function fetchRepoQuiet(repoPath, options = {}) {
         "origin",
         `+refs/heads/${targetBranch}:refs/remotes/origin/${targetBranch}`
       ],
-      { allowFailure: true }
+      // LC_ALL=C keeps the stderr text below untranslated.
+      { allowFailure: true, env: { LC_ALL: "C" } }
     );
     if (targeted.code !== 0 && !/couldn't find remote ref/i.test(targeted.stderr || "")) {
       return false;
@@ -1171,6 +1174,7 @@ function runGitAsync(repoPath, args, extraOptions = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd: repoPath,
+      env: extraOptions.env ? { ...process.env, ...extraOptions.env } : process.env,
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";

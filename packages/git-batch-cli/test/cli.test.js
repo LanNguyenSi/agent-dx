@@ -1167,6 +1167,29 @@ test("status --fetch refreshes the target when the branch tracks a non-origin re
   assert.equal(entry.behindTarget, 1);
 });
 
+test("status --fetch refreshes the target when the branch tracks a local branch", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-dot-");
+  git(repo.repoPath, ["checkout", "-q", "-b", "feat", "--track", "main"]);
+  assert.equal(git(repo.repoPath, ["config", "--get", "branch.feat.remote"]).trim(), ".");
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+  assert.equal(entry.behindTarget, 1);
+});
+
+test("status --fetch refreshes a target that a negative refspec excludes", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-negative-");
+  git(repo.repoPath, ["config", "--add", "remote.origin.fetch", "^refs/heads/main"]);
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+  assert.equal(entry.behindTarget, 1);
+});
+
 test("status --fetch refreshes a target that origin's refspec does not map", async () => {
   const { root, repo } = setupEdgeRemote("git-batch-target-refspec-");
   git(repo.repoPath, [
