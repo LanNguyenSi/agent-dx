@@ -69,13 +69,13 @@ Fleet-snapshot fields, one call to see where each repository stands relative to 
 - `commonDir`: realpath of the git common directory. Linked worktrees of one repository share the same value, so group by it to find siblings.
 - `worktree`: `true` for a linked worktree, `false` for the main checkout.
 
-All of these, like `ahead`/`behind`, read local refs and reflect the last fetch unless `--fetch` is passed. The existing `upstream`, `ahead` and `behind` keep their meaning (against the branch upstream).
+`targetSha`, `aheadOfTarget` and `behindTarget` (like `ahead`/`behind`) read local remote-tracking refs and reflect the last fetch unless `--fetch` is passed. `headSha`, `commonDir` and `worktree` describe the local checkout and do not depend on a fetch. The existing `upstream`, `ahead` and `behind` keep their meaning (against the branch upstream).
 
 `ahead`/`behind` are computed against the **local** copy of the upstream ref. Without `--fetch` they can be stale, the check is only as fresh as the last `git fetch`. Pass `--fetch` (or run `git-batch fetch ~/git` beforehand) to force a refresh.
 
 ### `--fetch` error handling
 
-`--fetch` runs `git fetch --quiet` per repository. If a single repo's fetch fails (network error, unreachable remote, bad credentials), its entry is tagged `outcome: "fetch_failed"` but the batch continues. The remaining status fields still come from whatever refs happen to exist locally, so you get partial information instead of a hard stop.
+`--fetch` runs `git fetch --quiet` per repository, then makes sure `refs/remotes/origin/<target branch>` is refreshed so `targetSha`, `aheadOfTarget` and `behindTarget` are not stale. In order: (1) the plain fetch of the branch's own remote; (2) `git fetch --quiet origin` when the current branch tracks a different remote (a fork setup), because the plain fetch never touches origin then; (3) the target branch is detected only now, from the refreshed refs, and when origin's configured `remote.origin.fetch` refspec does not map it, `git fetch --quiet origin +refs/heads/<target>:refs/remotes/origin/<target>` runs. A target that does not exist on the remote is not a fetch failure. Linked worktrees of one repository share this whole sequence once per git common directory. If a single repo's fetch fails (network error, unreachable remote, bad credentials), its entry is tagged `outcome: "fetch_failed"` but the batch continues. The remaining status fields still come from whatever refs happen to exist locally, so you get partial information instead of a hard stop.
 
 A repo with no remote configured at all is not a fetch failure: `git fetch --quiet` exits 0 silently, and `outcome` stays `ok`.
 
@@ -91,7 +91,7 @@ The plain-text `status` row keeps the existing columns in place and appends the 
 <repo>: branch=X target=Y upstream=U ahead=D behind=E clean=Z staged=… unstaged=… untracked=… [outcome=F] target_ref=R target_sha=S head_sha=H ahead_of_target=A behind_target=B worktree=W common_dir=C
 ```
 
-`target_sha` and `head_sha` are shortened to 7 characters in text; JSON carries the full SHAs. The `-` sentinel is reused for `upstream=-`, `ahead=-`, `behind=-` when the current branch has no upstream, and for the target columns that are `null` in JSON. Scripts using `key=value` parsing are unaffected; scripts that index columns positionally should switch to `--json`.
+`target_sha` and `head_sha` are shortened to 7 characters in text; JSON carries the full SHAs. The `-` sentinel is reused for `upstream=-`, `ahead=-`, `behind=-` when the current branch has no upstream, and for the target columns that are `null` in JSON. A value containing whitespace or a double quote (in practice `common_dir`, when the path has a space) is double-quoted with JSON string escaping, for example `common_dir="/Users/me/my repos/app/.git"`; split on whitespace outside quotes, or use `--json`, which is the safe way to parse. Scripts using `key=value` parsing are unaffected; scripts that index columns positionally should switch to `--json`.
 
 ## `dirty`
 

@@ -1152,3 +1152,92 @@ test("status text output appends the target columns with short SHAs", async () =
   assert.ok(lines[0].includes(` target_ref=refs/remotes/origin/main target_sha=${sha.slice(0, 7)} head_sha=${sha.slice(0, 7)} ahead_of_target=0 behind_target=0 worktree=false common_dir=`));
   assert.ok(!lines[0].includes(sha));
 });
+
+test("status --fetch refreshes the target when the branch tracks a non-origin remote", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-fork-");
+  git(repo.repoPath, ["remote", "add", "up", repo.originPath]);
+  git(repo.repoPath, ["fetch", "-q", "up"]);
+  git(repo.repoPath, ["checkout", "-q", "-b", "work", "--track", "up/develop"]);
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.upstream, "up/develop");
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+  assert.equal(entry.behindTarget, 1);
+});
+
+test("status --fetch refreshes a target that origin's refspec does not map", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-refspec-");
+  git(repo.repoPath, [
+    "config",
+    "--replace-all",
+    "remote.origin.fetch",
+    "+refs/heads/develop:refs/remotes/origin/develop"
+  ]);
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+  assert.equal(entry.behindTarget, 1);
+});
+
+test("status --fetch refreshes the target when remote.origin.skipFetchAll is set", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-skipall-");
+  git(repo.repoPath, ["config", "remote.origin.skipFetchAll", "true"]);
+  const remoteMain = advanceRemote(repo, "main");
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetSha, remoteMain);
+});
+
+test("status --fetch does not fail when the detected target is missing on the remote", async () => {
+  const { root, repo } = setupEdgeRemote("git-batch-target-gone-");
+  git(repo.repoPath, [
+    "config",
+    "--replace-all",
+    "remote.origin.fetch",
+    "+refs/heads/develop:refs/remotes/origin/develop"
+  ]);
+  git(repo.repoPath, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone"]);
+
+  const [entry] = await statusOf(root, { fetch: true });
+  assert.equal(entry.targetBranch, "gone");
+  assert.equal(entry.outcome, "ok");
+  assert.equal(entry.targetRef, null);
+});
+
+test("status target fields on an unborn HEAD with origin/<target> present", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-unborn-"));
+  const seeded = setupClonedRepo(root, "seeded");
+  const repoPath = path.join(root, "unborn");
+  fs.mkdirSync(repoPath);
+  git(repoPath, ["init", "-q", "-b", "main"]);
+  git(repoPath, ["remote", "add", "origin", seeded.originPath]);
+  git(repoPath, ["fetch", "-q", "origin"]);
+
+  const entry = (await statusOf(root)).find((e) => e.repo === "unborn");
+  assert.equal(entry.targetRef, "refs/remotes/origin/main");
+  assert.equal(entry.targetSha, git(seeded.seedPath, ["rev-parse", "HEAD"]).trim());
+  assert.equal(entry.headSha, null);
+  assert.equal(entry.aheadOfTarget, null);
+  assert.equal(entry.behindTarget, null);
+});
+
+test("status text output quotes a common_dir that contains whitespace", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-target-space-"));
+  const root = path.join(base, "with space");
+  fs.mkdirSync(root);
+  const repo = setupClonedRepo(root, "r");
+  const results = await statusOf(root);
+  const lines = [];
+  printResults("status", results, { out: (line) => lines.push(line) });
+  const expected = fs.realpathSync(path.join(repo.repoPath, ".git"));
+  assert.ok(expected.includes(" "));
+  assert.ok(lines[0].endsWith(` common_dir=${JSON.stringify(expected)}`), lines[0]);
+  // Splitting on whitespace outside quotes yields exactly one common_dir pair.
+  const pairs = lines[0].match(/[a-z_]+=(?:"(?:[^"\\]|\\.)*"|\S*)/g);
+  assert.equal(pairs[pairs.length - 1], `common_dir=${JSON.stringify(expected)}`);
+});
