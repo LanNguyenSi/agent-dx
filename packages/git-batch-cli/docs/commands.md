@@ -4,7 +4,7 @@
 
 `sync` is the default command: `git-batch` runs `sync` in the current directory, and `git-batch <root>` runs it in `<root>`. Run `git-batch status <root>` or add `--dry-run` to preview first.
 
-Checks all repositories on one level, skips dirty repositories by default, switches to the protected branch, and pulls with fast-forward only.
+Checks all repositories on one level, skips dirty repositories by default, switches to the protected branch, and fast-forwards it with `git merge --ff-only`. Repositories are processed in parallel (default 8 at a time, see `--concurrency`).
 
 ```bash
 git-batch sync ~/git
@@ -13,7 +13,7 @@ git-batch sync ~/git --only api,worker
 git-batch sync --protected main,develop --dry-run
 ```
 
-Default `sync` flow: read `git status`; a dirty repository is skipped without fetching unless `--include-dirty` is passed; otherwise `git fetch --all --prune`, detect the protected target branch, switch to it, then `git pull --ff-only`. If `--protected` is given, that explicit branch order replaces `origin/HEAD` and the default branch list; explicitly configured protected branches must exist on `origin` (local-only branches are not selected as pull targets).
+Default `sync` flow: read `git status`; a dirty repository is skipped without fetching unless `--include-dirty` is passed; otherwise `git fetch --all --prune`, detect the protected target branch, switch to it, then `git merge --ff-only refs/remotes/origin/<target>` (fully qualified, so a local branch or tag named `origin/<target>` cannot shadow it). The merge uses the refs the fetch just updated, so each repository makes one network roundtrip instead of two (`git pull` would fetch again). Steps within one repository stay sequential; repositories run in a bounded parallel pool and the results keep the sorted repository order, not completion order. If `remote.origin.skipFetchAll` is set, or no `remote.origin.fetch` refspec maps `refs/heads/<target>` to `refs/remotes/origin/<target>`, `git fetch --all` would leave that ref stale; for such repositories `sync` first runs `git fetch origin +refs/heads/<target>:refs/remotes/origin/<target>` (one extra roundtrip, only for these configurations) and records it in `actions`. Linked worktrees of one repository share a ref store, so the network fetch runs once per git common directory: the first worktree in sorted order that is not skipped runs it, the others list the same command in `actions` with `skipped: true` and `sharedWith: <repo>`, wait for it, and then do their own checkout and merge. If the shared fetch fails, its siblings fail with the same message. In text output a shared action is printed with a suffix, for example `git fetch --all --prune (shared with main-wt)`. A sibling cannot check out a branch that another worktree already holds; that git error is reported for it as before. If `--protected` is given, that explicit branch order replaces `origin/HEAD` and the default branch list; explicitly configured protected branches must exist on `origin` (local-only branches are not selected as fast-forward targets).
 
 The per-repository path of `sync` (see [Branch detection](#branch-detection) and [Outcomes and exit codes](#outcomes-and-exit-codes)):
 
@@ -28,7 +28,7 @@ flowchart TD
   T -->|"none found"| SN["skipped_no_protected_branch"]
   TP --> C{"Checkout"}
   TO --> C
-  C -->|"already on target"| P["git pull --ff-only<br/>origin target"]
+  C -->|"already on target"| P["git merge --ff-only<br/>refs/remotes/origin/target"]
   C -->|"local branch exists"| CL["git checkout target"]
   C -->|"remote only"| CR["git checkout -b target<br/>--track origin/target"]
   CL --> P
@@ -41,7 +41,7 @@ flowchart TD
   P -.->|"git fails"| E
 ```
 
-With `--dry-run`, fetch, checkout and pull are recorded in `actions` but not run, so detection uses the refs from the last real fetch.
+With `--dry-run`, fetch, checkout and merge are recorded in `actions` but not run, so detection uses the refs from the last real fetch.
 
 ## `status`
 
@@ -69,7 +69,7 @@ A repo with no remote configured at all is not a fetch failure: `git fetch --qui
 
 ### `--fetch` performance
 
-`--fetch` runs repository fetches with a bounded parallel pool of 8 concurrent fetches (fixed; no CLI option changes it). On large trees this keeps status fresh enough for hook-driven workflows without changing the per-repo result shape.
+`--fetch` runs repository fetches with a bounded parallel pool of 8 concurrent fetches by default; `--concurrency <n>` changes the pool size. On large trees this keeps status fresh enough for hook-driven workflows without changing the per-repo result shape.
 
 ### Text output shape
 
@@ -91,7 +91,7 @@ git-batch dirty ~/git
 
 ## `fetch`
 
-Runs `git fetch --all --prune` for each repository.
+Runs `git fetch --all --prune` for each repository, in a bounded parallel pool (default 8, see `--concurrency`). Results keep the sorted repository order. Linked worktrees of one repository share their refs, so the fetch runs once per git common directory; the other worktrees show the command in `actions` with `skipped: true` and `sharedWith: <repo>`. `status --fetch` shares fetches the same way.
 
 ```bash
 git-batch fetch ~/git
@@ -126,6 +126,7 @@ git-batch list ~/git
 - `--dry-run`: for `sync` and `fetch`, list the Git commands that would change repositories without running them (read-only checks still run). `status --fetch` still fetches.
 - `--json`: emit JSON instead of plain text
 - `--fetch`: for `status`, run `git fetch --quiet` per repo before computing ahead/behind
+- `--concurrency <n>` (also `--concurrency=<n>`): number of repositories processed in parallel by `sync`, `fetch` and `status --fetch`; a positive integer, default 8. A bare `--concurrency` without a value fails with `Missing value for --concurrency`; any other non-positive-integer value fails with `Invalid value for --concurrency`. Very large values are not capped and can hit the open-file limit (each in-flight fetch holds several descriptors), so keep it modest.
 
 ## Repository filters
 
@@ -202,5 +203,4 @@ This repository includes the usual project governance files: `LICENSE`, `CONTRIB
 Not yet implemented; no scheduled milestone:
 
 - support for a workspace config file such as `.git-batch.json`
-- optional parallel fetch/pull execution with a configurable concurrency limit
 - an optional confirmation prompt before batch `sync` without `--dry-run`

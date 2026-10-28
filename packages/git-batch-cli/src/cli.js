@@ -43,7 +43,16 @@ async function main(argv = process.argv.slice(2), io = defaultIo()) {
     throw new Error(`Unknown command: ${parsed.command}`);
   }
 
-  const results = await action(repos, parsed);
+  // io.gitRunner / io.fetchRepo are test hooks: they let a caller observe or
+  // delay the git calls the pool makes without global mocking.
+  const actionOptions = { ...parsed };
+  if (io.gitRunner) {
+    actionOptions.gitRunner = io.gitRunner;
+  }
+  if (io.fetchRepo) {
+    actionOptions.fetchRepo = io.fetchRepo;
+  }
+  const results = await action(repos, actionOptions);
   const exitCode = determineExitCode(parsed.command, results, parsed.strict);
 
   if (parsed.json) {
@@ -90,6 +99,7 @@ function parseArgs(argv) {
     dryRun: false,
     json: false,
     fetch: false,
+    fetchConcurrency: undefined,
     help: false
   };
 
@@ -135,6 +145,19 @@ function parseArgs(argv) {
 
     if (token === "--fetch") {
       parsed.fetch = true;
+      continue;
+    }
+
+    if (token === "--concurrency") {
+      index += 1;
+      parsed.fetchConcurrency = parseConcurrency(
+        resolveRequiredValue(argv, index, "--concurrency")
+      );
+      continue;
+    }
+
+    if (token.startsWith("--concurrency=")) {
+      parsed.fetchConcurrency = parseConcurrency(token.slice("--concurrency=".length));
       continue;
     }
 
@@ -233,6 +256,17 @@ function parseArgs(argv) {
   return parsed;
 }
 
+function parseConcurrency(value) {
+  if (!/^\d+$/.test(String(value).trim())) {
+    throw new Error(`Invalid value for --concurrency: ${value}`);
+  }
+  const numeric = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) {
+    throw new Error(`Invalid value for --concurrency: ${value}`);
+  }
+  return numeric;
+}
+
 function resolveRequiredValue(argv, index, optionName) {
   const value = argv[index];
   if (!value) {
@@ -270,7 +304,7 @@ function helpText() {
     "  git-batch [command] [root] [options]",
     "",
     "Commands:",
-    "  sync       Check for local changes, switch to a protected branch, pull",
+    "  sync       Check for local changes, switch to a protected branch, fast-forward",
     "  status     Show branch and worktree status for each repository",
     "  fetch      Run git fetch --all --prune for each repository",
     "  branches   Show current branch and detected protected branch",
@@ -289,6 +323,8 @@ function helpText() {
     "  --dry-run                 Print planned git actions without executing them",
     "  --json                    Emit JSON instead of text",
     "  --fetch                   (status) Run git fetch --quiet per repo first",
+    "  --concurrency <n>         Repositories processed in parallel by sync, fetch and",
+    "                            status --fetch (default 8)",
     "  --help                    Show this help",
     "",
     "Examples:",
@@ -433,9 +469,18 @@ async function fetchReposQuiet(repos, options) {
   const fetchRepo = options.fetchRepo || fetchRepoQuiet;
   const fetchConcurrency = normalizeFetchConcurrency(options.fetchConcurrency);
   const fetchFailures = new Map();
+  const context = createRunContext();
 
   await runParallelLimit(repos, fetchConcurrency, async (repo) => {
-    const fetched = await fetchRepo(repo.path);
+    // Linked worktrees of one repository share a ref store; fetch it once
+    // and let the siblings reuse that outcome instead of racing on ref locks.
+    const key = resolveCommonDir(repo.path, context);
+    let entry = context.shared.get(key);
+    if (!entry) {
+      entry = { owner: repo.name, promise: Promise.resolve(fetchRepo(repo.path)) };
+      context.shared.set(key, entry);
+    }
+    const fetched = await entry.promise;
     fetchFailures.set(repo.path, !fetched);
   });
 
@@ -506,8 +551,9 @@ function runBranches(repos, options) {
   });
 }
 
-function runFetch(repos, options) {
-  return repos.map((repo) => {
+async function runFetch(repos, options) {
+  const context = createRunContext();
+  return runParallelLimit(repos, normalizeFetchConcurrency(options.fetchConcurrency), async (repo) => {
     const result = {
       repo: repo.name,
       path: repo.path,
@@ -516,7 +562,7 @@ function runFetch(repos, options) {
     };
 
     try {
-      executeGitCommand(repo.path, ["fetch", "--all", "--prune"], options, result);
+      await executeSharedGitCommand(repo, ["fetch", "--all", "--prune"], options, result, context);
       return result;
     } catch (error) {
       return repoError(repo, error, result.actions);
@@ -552,17 +598,18 @@ function runDirty(repos, options) {
     .filter((entry) => entry.outcome === "error" || !entry.clean);
 }
 
-function runSync(repos, options) {
-  return repos.map((repo) => {
+async function runSync(repos, options) {
+  const context = createRunContext();
+  return runParallelLimit(repos, normalizeFetchConcurrency(options.fetchConcurrency), async (repo) => {
     try {
-      return syncRepository(repo, options);
+      return await syncRepository(repo, options, context);
     } catch (error) {
       return repoError(repo, error);
     }
   });
 }
 
-function syncRepository(repo, options) {
+async function syncRepository(repo, options, context = createRunContext()) {
   const status = collectRepoStatus(repo.path);
   const result = {
     repo: repo.name,
@@ -582,7 +629,7 @@ function syncRepository(repo, options) {
     return result;
   }
 
-  executeGitCommand(repo.path, ["fetch", "--all", "--prune"], options, result);
+  await executeSharedGitCommand(repo, ["fetch", "--all", "--prune"], options, result, context);
 
   const targetBranch = detectProtectedBranch(repo.path, options.protectedBranches, {
     preferConfigured: options.protectedBranchesExplicit,
@@ -596,10 +643,27 @@ function syncRepository(repo, options) {
     return result;
   }
 
-  ensureCheckedOut(repo.path, status.branch, targetBranch, options, result);
-  executeGitCommand(
+  // `fetch --all` only refreshes origin/<target> when origin is not skipped
+  // and its fetch refspec maps the branch. Otherwise fetch just that branch,
+  // as the old `git pull` implicitly did.
+  if (needsTargetFetch(repo.path, targetBranch)) {
+    await executeSharedGitCommand(
+      repo,
+      ["fetch", "origin", `+refs/heads/${targetBranch}:refs/remotes/origin/${targetBranch}`],
+      options,
+      result,
+      context
+    );
+  }
+
+  await ensureCheckedOut(repo.path, status.branch, targetBranch, options, result);
+  // The fetch above already updated origin/<target>; merging the local
+  // remote-tracking ref avoids a second network roundtrip that
+  // `git pull` would make. The fully qualified ref cannot be shadowed by a
+  // local branch or tag named origin/<target>.
+  await executeGitCommand(
     repo.path,
-    ["pull", "--ff-only", "origin", targetBranch],
+    ["merge", "--ff-only", `refs/remotes/origin/${targetBranch}`],
     options,
     result
   );
@@ -759,18 +823,18 @@ function hasRemoteBranch(repoPath, branch) {
   );
 }
 
-function ensureCheckedOut(repoPath, currentBranch, targetBranch, options, result) {
+async function ensureCheckedOut(repoPath, currentBranch, targetBranch, options, result) {
   if (currentBranch === targetBranch) {
     return;
   }
 
   if (hasLocalBranch(repoPath, targetBranch)) {
-    executeGitCommand(repoPath, ["checkout", targetBranch], options, result);
+    await executeGitCommand(repoPath, ["checkout", targetBranch], options, result);
     return;
   }
 
   if (hasRemoteBranch(repoPath, targetBranch)) {
-    executeGitCommand(
+    await executeGitCommand(
       repoPath,
       ["checkout", "-b", targetBranch, "--track", `origin/${targetBranch}`],
       options,
@@ -782,7 +846,7 @@ function ensureCheckedOut(repoPath, currentBranch, targetBranch, options, result
   throw new Error(`Branch ${targetBranch} does not exist in ${repoPath}`);
 }
 
-function executeGitCommand(repoPath, args, options, result) {
+async function executeGitCommand(repoPath, args, options, result) {
   result.actions.push({
     command: ["git", ...args].join(" "),
     dryRun: options.dryRun
@@ -792,11 +856,116 @@ function executeGitCommand(repoPath, args, options, result) {
     return;
   }
 
-  const execution = runGit(repoPath, args);
+  // Network-touching and mutating calls run through the async runner so
+  // the parallel pool can overlap them; options.gitRunner lets tests
+  // observe or delay them.
+  const runner = options.gitRunner || runGitAsync;
+  const execution = await runner(repoPath, args);
   if (execution.code !== 0) {
     const stderr = execution.stderr.trim() || execution.stdout.trim();
     throw new Error(`${path.basename(repoPath)}: ${stderr}`);
   }
+}
+
+function createRunContext() {
+  return { shared: new Map(), commonDirs: new Map() };
+}
+
+// Realpath of the git common dir: linked worktrees of one repository share
+// it (and so the ref store). Falls back to the repo path when git cannot say.
+function resolveCommonDir(repoPath, context) {
+  if (context.commonDirs.has(repoPath)) {
+    return context.commonDirs.get(repoPath);
+  }
+  let key = repoPath;
+  try {
+    const out = runGit(repoPath, ["rev-parse", "--git-common-dir"], { allowFailure: true });
+    if (out.code === 0 && out.stdout.trim()) {
+      key = fs.realpathSync(path.resolve(repoPath, out.stdout.trim()));
+    }
+  } catch (error) {
+    key = repoPath;
+  }
+  context.commonDirs.set(repoPath, key);
+  return key;
+}
+
+// Runs a network git command once per git common dir and run. The first repo
+// to ask executes it; siblings record a skipped action naming that repo and
+// wait for its outcome, so their checkout/merge happens after the fetch and
+// a failed fetch fails them too.
+async function executeSharedGitCommand(repo, args, options, result, context) {
+  const key = `${resolveCommonDir(repo.path, context)}\0${args.join(" ")}`;
+  const existing = context.shared.get(key);
+  if (!existing) {
+    const entry = { owner: repo.name, promise: null };
+    context.shared.set(key, entry);
+    entry.promise = executeGitCommand(repo.path, args, options, result);
+    await entry.promise;
+    return;
+  }
+
+  result.actions.push({
+    command: ["git", ...args].join(" "),
+    dryRun: options.dryRun,
+    skipped: true,
+    sharedWith: existing.owner
+  });
+  await existing.promise;
+}
+
+// True when `git fetch --all` will not refresh refs/remotes/origin/<branch>.
+function needsTargetFetch(repoPath, branch) {
+  const skipAll = runGit(repoPath, ["config", "--type=bool", "--get", "remote.origin.skipFetchAll"], {
+    allowFailure: true
+  });
+  if (skipAll.code === 0 && skipAll.stdout.trim() === "true") {
+    return true;
+  }
+  const refspecs = runGit(repoPath, ["config", "--get-all", "remote.origin.fetch"], {
+    allowFailure: true
+  });
+  const specs = refspecs.code === 0 ? refspecs.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : [];
+  const ref = `refs/heads/${branch}`;
+  const excluded = specs.some(
+    (spec) => spec.startsWith("^") && matchRefPattern(spec.slice(1), ref) !== null
+  );
+  if (excluded) {
+    return true;
+  }
+  return !specs.some((spec) => refspecMapsBranch(spec, branch));
+}
+
+function matchRefPattern(pattern, ref) {
+  const star = pattern.indexOf("*");
+  if (star === -1) {
+    return pattern === ref ? "" : null;
+  }
+  const prefix = pattern.slice(0, star);
+  const suffix = pattern.slice(star + 1);
+  if (ref.length < prefix.length + suffix.length || !ref.startsWith(prefix) || !ref.endsWith(suffix)) {
+    return null;
+  }
+  return ref.slice(prefix.length, ref.length - suffix.length);
+}
+
+function refspecMapsBranch(refspec, branch) {
+  let spec = refspec.trim();
+  if (!spec || spec.startsWith("^")) {
+    return false;
+  }
+  if (spec.startsWith("+")) {
+    spec = spec.slice(1);
+  }
+  const colon = spec.indexOf(":");
+  if (colon === -1) {
+    return false;
+  }
+  const captured = matchRefPattern(spec.slice(0, colon), `refs/heads/${branch}`);
+  if (captured === null) {
+    return false;
+  }
+  return spec.slice(colon + 1).replace("*", captured) === `refs/remotes/origin/${branch}`;
 }
 
 function safeBranch(repoPath) {
@@ -1051,7 +1220,9 @@ function determineExitCode(command, results, strict) {
 }
 
 function renderActions(actions) {
-  return actions.map((action) => action.command).join(" -> ");
+  return actions
+    .map((action) => (action.skipped ? `${action.command} (shared with ${action.sharedWith})` : action.command))
+    .join(" -> ");
 }
 
 function formatCount(value) {
@@ -1071,6 +1242,7 @@ module.exports = {
   printResults,
   resolveCliPath,
   runDirty,
+  runFetch,
   runList,
   runStatus,
   runSync

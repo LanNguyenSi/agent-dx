@@ -10,7 +10,7 @@ Part of [`agent-dx`](https://github.com/LanNguyenSi/agent-dx). Source: `packages
 
 ## Key features
 
-- `sync`: fetch, detect the protected branch, and `git pull --ff-only` across every repository, skipping dirty ones
+- `sync`: fetch, detect the protected branch, and fast-forward (`git merge --ff-only`) across every repository in parallel, skipping dirty ones
 - `status`: branch, upstream, ahead/behind distance, and change counters, with `--fetch` for a live refresh
 - `--json` and `--strict` on every command, for safe use from agents and CI (deterministic ordering, no prompts)
 - `--only` / `--exclude` repository filters (substring or regex)
