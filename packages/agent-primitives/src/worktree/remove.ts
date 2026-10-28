@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
   GIT_WALK_BOUND_MS,
@@ -223,49 +222,26 @@ function deleteCheckedBranch(
   return result;
 }
 
-/** What `hiddenEdits` found: the flagged files that differ from the index,
- * each as `<flag> <path>`, or why that could not be told. */
-type HiddenEdits = { ok: true; edited: string[] } | { ok: false; why: string };
-
-/** A flagged index entry that exists in the work tree as a regular file or
- * a symbolic link, which git is asked about: its path as `git ls-files -z`
- * printed it, the `<flag> <path>` label of a refusal, and which flags it
- * carries. */
-interface FlaggedFile {
-  rel: Buffer;
-  label: string;
-  assumeUnchanged: boolean;
-  skipWorktree: boolean;
-}
-
-/** The pieces of `bytes` before each NUL; a trailing NUL ends the last
- * piece, and nothing follows it. */
-function nulSeparated(bytes: Buffer): Buffer[] {
-  const pieces: Buffer[] = [];
-  let start = 0;
-  for (let i = bytes.indexOf(0, start); i >= 0; i = bytes.indexOf(0, start)) {
-    pieces.push(bytes.subarray(start, i));
-    start = i + 1;
-  }
-  if (start < bytes.length) pieces.push(bytes.subarray(start));
-  return pieces;
-}
+/** What `flaggedFiles` found: each tracked path flagged assume-unchanged or
+ * skip-worktree that is present in the work tree, as `<path> is flagged
+ * <flag>`, or why that could not be told. */
+type FlaggedFiles =
+  { ok: true; flagged: string[] } | { ok: false; why: string };
 
 /**
- * Edits that `git status` does not show. A tracked path flagged
+ * Tracked paths whose edits `git status` does not show. A path flagged
  * assume-unchanged (`git ls-files -v` prints its tag in lowercase) or
  * skip-worktree (tag `S`, `s` with both flags) is not compared with the
  * work tree by status, so an edit to it would go with the worktree unseen.
- * The flagged paths are read from `git ls-files -s -v -z`; each one that
- * exists in the work tree as a regular file or a symbolic link is handed to
- * `compareWithIndex`, which asks git itself whether it differs from the
- * index. A flagged path that is absent (a sparse checkout leaves it out)
- * has nothing in it to lose and does not count, nor does a submodule entry,
- * which git never compares with the index; anything else in a file's place
- * (a directory, a fifo) counts as edited. A listing that cannot be read is
- * `ok: false`.
+ * Its content is not compared here either: every flagged path that is
+ * present in the work tree (a file, a link, a directory, anything `lstat`
+ * finds) is listed, edited or not. A flagged path that is absent (a sparse
+ * checkout leaves it out) has nothing in it to lose and is not listed, nor
+ * is a submodule entry (mode 160000), which git never compares with the
+ * index. The paths are read from `git ls-files -s -v -z`; a listing that
+ * cannot be read, or a path that cannot be inspected, is `ok: false`.
  */
-function hiddenEdits(target: string): HiddenEdits {
+function flaggedFiles(target: string): FlaggedFiles {
   const listing = gitBytes(target, ["ls-files", "-s", "-v", "-z"], {
     ...REPORT_TIMEOUT_WALK,
   });
@@ -275,8 +251,7 @@ function hiddenEdits(target: string): HiddenEdits {
       why: `git ls-files -s -v failed: ${gitFailure({ ...listing, stdout: "" })}`,
     };
   }
-  const edited: string[] = [];
-  const files = new Map<string, FlaggedFile>();
+  const flagged: string[] = [];
   const records = listing.stdout.toString("latin1").split("\0");
   let offset = 0;
   for (const record of records) {
@@ -302,179 +277,30 @@ function hiddenEdits(target: string): HiddenEdits {
     if (!assumeUnchanged && !skipWorktree) continue;
     if (mode === "160000") continue;
     const rel = bytes.subarray(tab + 1);
-    const label = `${[
+    const label = `${renderBytes(rel)} is flagged ${[
       ...(assumeUnchanged ? ["assume-unchanged"] : []),
       ...(skipWorktree ? ["skip-worktree"] : []),
-    ].join(" and ")} ${renderBytes(rel)}`;
-    const full = Buffer.concat([
-      Buffer.from(target),
-      Buffer.from(path.sep),
-      rel,
-    ]);
-    let stat: fs.Stats;
+    ].join(" and ")}`;
     try {
-      stat = fs.lstatSync(full);
+      fs.lstatSync(
+        Buffer.concat([Buffer.from(target), Buffer.from(path.sep), rel]),
+      );
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "ENOENT" || code === "ENOTDIR") continue;
-      return { ok: false, why: `cannot read ${label}: ${messageOf(err)}` };
+      return { ok: false, why: `cannot inspect ${label}: ${messageOf(err)}` };
     }
-    if (stat.isFile() || stat.isSymbolicLink()) {
-      files.set(rel.toString("latin1"), {
-        rel,
-        label,
-        assumeUnchanged,
-        skipWorktree,
-      });
-    } else {
-      edited.push(label);
-    }
+    flagged.push(label);
   }
-  if (files.size === 0) return { ok: true, edited };
-  const compared = compareWithIndex(target, files);
-  if (!compared.ok) return compared;
-  return { ok: true, edited: [...edited, ...compared.edited] };
-}
-
-/**
- * Git's own comparison of the flagged `files` with the index, made on a
- * copy of the worktree's index in a temporary directory so that the
- * worktree's index is never written. On that copy (`GIT_INDEX_FILE`) the
- * flags are cleared for exactly these paths (`git update-index
- * --no-assume-unchanged -z --stdin` and `--no-skip-worktree -z --stdin`,
- * one call per flag since git applies one per call, the paths NUL-separated
- * on stdin, so no name needs quoting), the copy is refreshed (`git
- * update-index -q --refresh`: a file whose stat data differs from the
- * index is hashed with the path's filters, as `git add` would store it, and
- * stays marked only when the content differs), and `git diff-files
- * --name-only -z` lists what differs from the index: content, link target,
- * or mode (the executable bit under `core.fileMode`; a file in a link's
- * place or the other way round). Each listed path is a hidden edit.
- * `diff-files` takes no NUL-separated pathspec list, so it runs over the
- * whole copy; a path it lists that is not among `files` changed after the
- * status check, and the result is `ok: false` rather than a guess at its
- * flag. A flagged path that is absent keeps its flags on the copy, so git
- * does not read it as deleted. A copy or a git call that fails or does
- * not finish is `ok: false`. The temporary directory, the exact path
- * `mkdtemp` made, is removed before the result is returned.
- */
-function compareWithIndex(
-  target: string,
-  files: Map<string, FlaggedFile>,
-): HiddenEdits {
-  const located = gitBytes(
-    target,
-    ["rev-parse", "--git-path", "index"],
-    REPORT_TIMEOUT,
-  );
-  const printed =
-    located.stdout[located.stdout.length - 1] === 0x0a
-      ? located.stdout.subarray(0, located.stdout.length - 1)
-      : located.stdout;
-  if (
-    located.error !== undefined ||
-    located.status !== 0 ||
-    printed.length === 0
-  ) {
-    return {
-      ok: false,
-      why: `git rev-parse --git-path index failed: ${gitFailure({ ...located, stdout: "" })}`,
-    };
-  }
-  const index = path.isAbsolute(printed.toString("latin1"))
-    ? printed
-    : Buffer.concat([Buffer.from(target), Buffer.from(path.sep), printed]);
-  let dir: string;
-  try {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-index-"));
-  } catch (err) {
-    return {
-      ok: false,
-      why: `cannot make a temporary directory for a copy of the index: ${messageOf(err)}`,
-    };
-  }
-  try {
-    const copy = path.join(dir, "index");
-    try {
-      fs.copyFileSync(index, copy);
-    } catch (err) {
-      return {
-        ok: false,
-        why: `cannot copy the index ${renderBytes(index)}: ${messageOf(err)}`,
-      };
-    }
-    const env = { GIT_INDEX_FILE: copy };
-    const nul = Buffer.from([0]);
-    const clears: [string, (f: FlaggedFile) => boolean][] = [
-      ["--no-assume-unchanged", (f) => f.assumeUnchanged],
-      ["--no-skip-worktree", (f) => f.skipWorktree],
-    ];
-    for (const [option, carries] of clears) {
-      const paths = [...files.values()].filter(carries);
-      if (paths.length === 0) continue;
-      const cleared = gitBytes(
-        target,
-        ["update-index", option, "-z", "--stdin"],
-        {
-          ...REPORT_TIMEOUT_WALK,
-          env,
-          input: Buffer.concat(paths.flatMap((f) => [f.rel, nul])),
-        },
-      );
-      if (cleared.error !== undefined || cleared.status !== 0) {
-        return {
-          ok: false,
-          why: `git update-index ${option} on a copy of the index failed: ${gitFailure({ ...cleared, stdout: "" })}`,
-        };
-      }
-    }
-    const refreshed = git(target, ["update-index", "-q", "--refresh"], {
-      ...REPORT_TIMEOUT_WALK,
-      env,
-    });
-    if (refreshed.error !== undefined || refreshed.status !== 0) {
-      return {
-        ok: false,
-        why: `git update-index --refresh on a copy of the index failed: ${gitFailure(refreshed)}`,
-      };
-    }
-    const differing = gitBytes(target, ["diff-files", "--name-only", "-z"], {
-      ...REPORT_TIMEOUT_WALK,
-      env,
-    });
-    if (differing.error !== undefined || differing.status !== 0) {
-      return {
-        ok: false,
-        why: `git diff-files on a copy of the index failed: ${gitFailure({ ...differing, stdout: "" })}`,
-      };
-    }
-    const edited: string[] = [];
-    for (const rel of nulSeparated(differing.stdout)) {
-      const file = files.get(rel.toString("latin1"));
-      if (file === undefined) {
-        return {
-          ok: false,
-          why: `git diff-files lists ${renderBytes(rel)}, which is not flagged, so the work tree changed after the status check`,
-        };
-      }
-      edited.push(file.label);
-    }
-    return { ok: true, edited };
-  } finally {
-    // Only the directory `mkdtemp` made above, and whatever git wrote in it.
-    try {
-      fs.rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // A temporary directory that could not be removed changes no verdict.
-    }
-  }
+  return { ok: true, flagged };
 }
 
 /**
  * Removes one linked worktree: the locked, nested-worktree, submodule,
- * status (with the edits status does not show, `hiddenEdits`), merged and
- * unpushed checks first, each of the last three failing closed so that a
- * git command which cannot answer is a refusal rather than a clean,
+ * status (with the flagged files whose edits status does not show,
+ * `flaggedFiles`), merged and unpushed checks first, each of the last three
+ * failing closed so that a git command which cannot answer is a refusal
+ * rather than a clean,
  * unpushed or unmerged reading. Then, once a SIGINT or SIGTERM that arrived
  * during the checks has had its chance to stop the command
  * (`stopIfInterrupted`), HEAD is read again and the removal refuses
@@ -610,18 +436,20 @@ export async function removeWorktree(
     );
   }
   if (o.force !== true) {
-    const hidden = hiddenEdits(target);
-    if (!hidden.ok) {
+    const flags = flaggedFiles(target);
+    if (!flags.ok) {
       throw new WorktreeRefusal(
-        `cannot tell whether ${target} has edits that git status does not show, to tracked files flagged assume-unchanged or skip-worktree: ${hidden.why}; pass --force to remove it anyway`,
+        `cannot tell whether ${target} has tracked files flagged assume-unchanged or skip-worktree, whose edits git status does not show: ${flags.why}; pass --force to remove it anyway`,
         "worktree_dirty",
       );
     }
-    if (hidden.edited.length > 0) {
+    if (flags.flagged.length > 0) {
+      const one = flags.flagged.length === 1;
+      const more = flags.flagged.length - 3;
       throw new WorktreeRefusal(
-        `${target} has ${String(hidden.edited.length)} uncommitted change(s) that git status does not show, to tracked files flagged assume-unchanged or skip-worktree (${hidden.edited.slice(0, 3).join(", ")}${hidden.edited.length > 3 ? ", ..." : ""}); clear the flag (\`git update-index --no-assume-unchanged\` or \`--no-skip-worktree\`) and commit, stash or discard them first, or pass --force to remove the worktree with them`,
+        `${target}: ${flags.flagged.slice(0, 3).join(", ")}${more > 0 ? `, and ${String(more)} more` : ""}, so git status does not show edits to ${one ? "it" : "them"}; clear the flag (\`git update-index --no-assume-unchanged\` or \`--no-skip-worktree\`) or pass --force to remove the worktree with ${one ? "it" : "them"}`,
         "worktree_dirty",
-        { hidden: hidden.edited.slice(0, DIRTY_DETAIL_LINES) },
+        { flagged: flags.flagged.slice(0, DIRTY_DETAIL_LINES) },
       );
     }
   }

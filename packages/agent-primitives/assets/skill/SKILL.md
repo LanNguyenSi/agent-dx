@@ -363,9 +363,9 @@ branch, such as `origin/master` for a hotfix (a local branch, `HEAD` or a sha
 is refused). `--delete-branch` deletes the branch only at the commit `git
 worktree list` showed: a worktree whose HEAD is no longer there when the checks end is
 refused (`head_moved`), and a branch that gains a commit after that is kept
-with a warning. An edit to a tracked file flagged assume-unchanged or
-skip-worktree, which `git status` does not show, is refused as
-`worktree_dirty` too. `remove --sync-main` then runs `git fetch --prune --no-prune-tags origin` and
+with a warning. A tracked file flagged assume-unchanged or skip-worktree
+that is present in the work tree, edited or not (`git status` does not show
+an edit to it), is refused as `worktree_dirty` too. `remove --sync-main` then runs `git fetch --prune --no-prune-tags origin` and
 fast-forwards the main checkout only when it is clean, on the default branch
 and in no merge, rebase, `am` or bisect (else `sync.reason` says why; never a
 checkout, reset or force, and an ignored file in the way makes it fail).
