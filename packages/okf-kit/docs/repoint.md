@@ -45,4 +45,6 @@ A citation is rewritten only when no hunk of `git diff -U0 <ref>` touches the ci
 | 1 | At least one citation needs manual handling. Under `--write` the re-pointable citations are still written. |
 | 2 | Usage or tool error: unknown bundle directory, missing `--base`, a `--base` ref that names no commit, no git work tree. |
 
+`repoint` counts only the citations that reach the drift analysis. A citation that no longer resolves to a file (the cited file was deleted, or the doc still spells the old path of a renamed file) is not counted in the summary and does not make the exit code 1; `okf-kit check` reports it as `missing-file`. A citation whose sentence changed since the ref and which is paired with the ref's citation only by file and numbers is listed as `MANUAL` and never rewritten, because it may already have been fixed by hand.
+
 Run `okf-kit check <bundleDir> --base <ref>` afterwards: a clean re-point leaves only `citation-content-changed` findings, and a second `repoint` run changes nothing.

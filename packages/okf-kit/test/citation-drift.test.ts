@@ -302,19 +302,39 @@ describe("check --base", () => {
     expect(labels).not.toContain("src/a.ts:6-8");
   });
 
-  it("still judges a citation whose sentence was reworded since the ref but kept its numbers", () => {
+  it("reports, but never rewrites, a citation whose sentence was reworded since the ref but kept its numbers", () => {
     const r = baseRepo();
     insertAboveAndEditLast(r);
+    const reworded = DOC.replace(
+      "Beta is `src/a.ts:9`-`11`.",
+      "Beta, reworded, is `src/a.ts:9`-`11`.",
+    );
+    fs.writeFileSync(docPath(r), reworded);
+    const byLabel = new Map(
+      drift(r).map((f) => [labelOf(f.message), f.message]),
+    );
+    for (const label of ["src/a.ts:9", "src/a.ts:9-11 (continuation)"]) {
+      expect(byLabel.get(label)).toContain("[citation-content-changed]");
+      expect(byLabel.get(label)).toContain("by file and numbers only");
+    }
+    const plan = runRepoint(bundle(r), { base: "HEAD", repoRoot: r.dir });
+    expect(plan.rewrites.map((w) => w.citation)).not.toContain("src/a.ts:9");
+    expect(plan.refused.map((w) => w.citation)).toContain("src/a.ts:9");
+    expect(plan.exitCode).toBe(1);
+  });
+
+  it("a reworded citation whose cited text did not move stays ok", () => {
+    const r = baseRepo();
+    // only src/b.ts changes, below the cited line 3, so no citation moved
+    fs.writeFileSync(
+      path.join(r.dir, "src/b.ts"),
+      sourceLines(5).join("\n") + "\nextra\n",
+    );
     fs.writeFileSync(
       docPath(r),
-      DOC.replace(
-        "Beta is `src/a.ts:9`-`11`.",
-        "Beta, reworded, is `src/a.ts:9`-`11`.",
-      ),
+      DOC.replace("Epsilon is", "Epsilon, reworded, is"),
     );
-    const labels = drift(r).map((f) => labelOf(f.message));
-    expect(labels).toContain("src/a.ts:9");
-    expect(labels).toContain("src/a.ts:9-11 (continuation)");
+    expect(drift(r)).toEqual([]);
   });
 
   it("does not judge reserved docs (log.md narrates past line numbers)", () => {
@@ -584,5 +604,218 @@ describe("repoint", () => {
     const out = runCli(["repoint", bundle(r), "--repo-root", r.dir]);
     expect(out.status).toBe(2);
     expect(out.stderr).toContain("--base");
+  });
+});
+
+/** A repo with a 30-line src/a.ts and a doc made of `docBody`. */
+function repoWithDoc(docBody: string, dir = ""): TmpGitRepo {
+  repo = createTmpGitRepo();
+  repo.commitFiles(
+    [
+      {
+        relPath: path.join(dir, "docs/okf/doc.md"),
+        content: FRONTMATTER + docBody,
+      },
+      {
+        relPath: path.join(dir, "src/a.ts"),
+        content: sourceLines(30).join("\n") + "\n",
+      },
+    ],
+    T0,
+  );
+  return repo;
+}
+
+/** Inserts five lines after line 9 of src/a.ts: line N (N >= 10) moves to N + 5. */
+function insertFiveAfterNine(r: TmpGitRepo, dir = ""): void {
+  const lines = sourceLines(30);
+  lines.splice(9, 0, "n1", "n2", "n3", "n4", "n5");
+  fs.writeFileSync(path.join(r.dir, dir, "src/a.ts"), lines.join("\n") + "\n");
+}
+
+describe("a citation matched to the ref by file and numbers only", () => {
+  const BEFORE = "See `src/a.ts:10` for v10.\n\nAlso `src/a.ts:15` for v15.\n";
+
+  it("is not re-pointed when it was hand-fixed and the other sentence was removed", () => {
+    const r = repoWithDoc(BEFORE);
+    insertFiveAfterNine(r);
+    // the author fixed the first citation by hand (v10 now sits on line 15)
+    // and rewrote the sentence; the old line-15 sentence is gone
+    const after =
+      FRONTMATTER + "The v10 constant lives at `src/a.ts:15` now.\n";
+    fs.writeFileSync(docPath(r), after);
+    const plan = runRepoint(bundle(r), { base: "HEAD", repoRoot: r.dir });
+    expect(plan.rewrites).toEqual([]);
+    expect(plan.refused).toEqual([
+      expect.objectContaining({ citation: "src/a.ts:15" }),
+    ]);
+    expect(plan.refused[0].reason).toContain("by file and numbers only");
+    expect(plan.exitCode).toBe(1);
+    runRepoint(bundle(r), { base: "HEAD", repoRoot: r.dir, write: true });
+    expect(fs.readFileSync(docPath(r), "utf8")).toBe(after);
+    expect(drift(r).map((f) => f.message)).toEqual([
+      expect.stringContaining("[citation-content-changed]"),
+    ]);
+  });
+
+  it("is not re-pointed when both sentences were reworded and one stale citation is left, and a second run changes nothing", () => {
+    const r = repoWithDoc(BEFORE);
+    insertFiveAfterNine(r);
+    const after =
+      FRONTMATTER +
+      "The v10 constant is `src/a.ts:15`.\n\nThe v15 constant is `src/a.ts:15`.\n";
+    fs.writeFileSync(docPath(r), after);
+    const first = runRepoint(bundle(r), {
+      base: "HEAD",
+      repoRoot: r.dir,
+      write: true,
+    });
+    expect(first.rewrites).toEqual([]);
+    expect(first.exitCode).toBe(1);
+    expect(fs.readFileSync(docPath(r), "utf8")).toBe(after);
+    const second = runRepoint(bundle(r), {
+      base: "HEAD",
+      repoRoot: r.dir,
+      write: true,
+    });
+    expect(second.rewrites).toEqual([]);
+    expect(fs.readFileSync(docPath(r), "utf8")).toBe(after);
+  });
+
+  it("is still re-pointed when it sits on the same prose line as at the ref", () => {
+    const r = repoWithDoc(BEFORE);
+    insertFiveAfterNine(r);
+    const result = runRepoint(bundle(r), {
+      base: "HEAD",
+      repoRoot: r.dir,
+      write: true,
+    });
+    expect(
+      result.rewrites.map((w) => [w.fromStartLine, w.toStartLine]),
+    ).toEqual([
+      [10, 15],
+      [15, 20],
+    ]);
+    expect(result.exitCode).toBe(0);
+  });
+});
+
+describe("an insertion directly after a single-line citation", () => {
+  it("does not shift the citation: lineShiftAbove counts only hunks ending above the line", () => {
+    const hunks = [
+      { oldStart: 2, oldCount: 0, newStart: 3, newCount: 3 },
+      { oldStart: 10, oldCount: 0, newStart: 11, newCount: 2 },
+    ];
+    expect(lineShiftAbove(hunks, 10)).toBe(3);
+    expect(lineShiftAbove(hunks, 11)).toBe(5);
+  });
+
+  it("moves `src/a.ts:10` by the shift above only (3 lines after line 2, 2 lines after line 10)", () => {
+    const r = repoWithDoc("Ten is `src/a.ts:10`.\n");
+    const lines = sourceLines(30);
+    lines.splice(10, 0, "after1", "after2");
+    lines.splice(2, 0, "top1", "top2", "top3");
+    fs.writeFileSync(path.join(r.dir, "src/a.ts"), lines.join("\n") + "\n");
+    const plan = runRepoint(bundle(r), { base: "HEAD", repoRoot: r.dir });
+    expect(plan.refused).toEqual([]);
+    expect(plan.rewrites).toEqual([
+      expect.objectContaining({ fromStartLine: 10, toStartLine: 13 }),
+    ]);
+    expect(drift(r)[0].message).toContain("now at line 13");
+  });
+});
+
+describe("citations that share a template", () => {
+  it("documents the false negative: removing a row of a same-template table skips the stale rows below it", () => {
+    const rows = (...n: number[]) =>
+      n.map((x) => `| \`src/a.ts:${x}\` |`).join("\n") + "\n";
+    const r = repoWithDoc("| c |\n|---|\n" + rows(5, 10, 30));
+    insertFiveAfterNine(r);
+    // the first row is deleted from the doc; the rows below it pair with the
+    // ref rows by ordinal, so each reads as re-pointed or edited since
+    fs.writeFileSync(docPath(r), FRONTMATTER + "| c |\n|---|\n" + rows(10, 30));
+    const plan = runRepoint(bundle(r), { base: "HEAD", repoRoot: r.dir });
+    expect(plan.rewrites).toEqual([]);
+    expect(plan.refused).toEqual([]);
+    expect(plan.skipped).toEqual([
+      {
+        reason:
+          "the doc did not carry this citation at HEAD (re-pointed or edited since)",
+        count: 2,
+      },
+    ]);
+    expect(plan.exitCode).toBe(0);
+  });
+
+  it("a re-pointed same-template table is a no-op on the second run", () => {
+    const rows = (...n: number[]) =>
+      n.map((x) => `| \`src/a.ts:${x}\` |`).join("\n") + "\n";
+    const r = repoWithDoc("| c |\n|---|\n" + rows(10, 15));
+    insertFiveAfterNine(r);
+    const first = runRepoint(bundle(r), {
+      base: "HEAD",
+      repoRoot: r.dir,
+      write: true,
+    });
+    expect(first.rewrites).toHaveLength(2);
+    expect(fs.readFileSync(docPath(r), "utf8")).toContain(
+      "| `src/a.ts:15` |\n| `src/a.ts:20` |",
+    );
+    const second = runRepoint(bundle(r), {
+      base: "HEAD",
+      repoRoot: r.dir,
+      write: true,
+    });
+    expect(second.rewrites).toEqual([]);
+    expect(fs.readFileSync(docPath(r), "utf8")).toContain(
+      "| `src/a.ts:15` |\n| `src/a.ts:20` |",
+    );
+  });
+});
+
+describe("--repo-root below the git top level", () => {
+  it("check --base and repoint read the blobs relative to the repo root", () => {
+    const r = repoWithDoc(
+      "Ten is `src/a.ts:10` and `src/a.ts:12-13`.\n",
+      "pkg",
+    );
+    insertFiveAfterNine(r, "pkg");
+    const root = path.join(r.dir, "pkg");
+    const found = runCheck(path.join(root, "docs/okf"), {
+      repoRoot: root,
+      base: "HEAD",
+      rules: ["citation-drift"],
+    }).findings;
+    expect(found.map((f) => f.message)).toEqual([
+      expect.stringContaining("now at line 15"),
+      expect.stringContaining("now at lines 17-18"),
+    ]);
+    const result = runRepoint(path.join(root, "docs/okf"), {
+      base: "HEAD",
+      repoRoot: root,
+      write: true,
+    });
+    expect(result.rewrites).toHaveLength(2);
+    expect(result.skipped).toEqual([]);
+    expect(
+      fs.readFileSync(path.join(root, "docs/okf/doc.md"), "utf8"),
+    ).toContain("Ten is `src/a.ts:15` and `src/a.ts:17-18`.");
+  });
+
+  it("follows a rename inside the repo root", () => {
+    const r = repoWithDoc("Ten is `a.ts:10`.\n", "pkg");
+    const root = path.join(r.dir, "pkg");
+    fs.mkdirSync(path.join(root, "lib"), { recursive: true });
+    r.gitAt(["mv", "pkg/src/a.ts", "pkg/lib/a.ts"], T1);
+    const lines = sourceLines(30);
+    lines.splice(2, 0, "top1", "top2");
+    fs.writeFileSync(path.join(root, "lib/a.ts"), lines.join("\n") + "\n");
+    const found = runCheck(path.join(root, "docs/okf"), {
+      repoRoot: root,
+      base: "HEAD",
+      rules: ["citation-drift"],
+    }).findings;
+    expect(found).toHaveLength(1);
+    expect(found[0].message).toContain("now at line 12");
   });
 });

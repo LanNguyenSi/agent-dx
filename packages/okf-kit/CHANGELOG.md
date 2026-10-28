@@ -25,7 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--write`, refuses (lists, exit 1) a citation inside a changed hunk, and
   never re-stamps a doc or writes a `log.md` entry. A citation the doc did not
   already carry at the ref (written or re-pointed since) is not judged, so a
-  second run is a no-op. Anchor citations (`path:#heading`), footnote line
+  second run is a no-op; a citation paired with the ref only by file and
+  numbers (its sentence was reworded) is reported, never rewritten, since it
+  may have been fixed by hand. `--repo-root` may be a subdirectory of the git
+  top level. Anchor citations (`path:#heading`), footnote line
   numbers and reserved docs are out of scope; a renamed cited file is followed
   only for a citation that still resolves. See
   [Drift since a git ref](docs/citations.md#drift-since-a-git-ref---base) and

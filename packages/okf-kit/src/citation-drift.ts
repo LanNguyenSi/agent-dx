@@ -168,11 +168,19 @@ export interface FileInfo {
 const comparable = (line: string | undefined): string | undefined =>
   line === undefined ? undefined : line.trimEnd();
 
+/**
+ * `<sha>:./<path>`: the blob of a path relative to the git working directory,
+ * which is the repo root the caller passed (`--repo-root` may be a
+ * subdirectory of the git top level, where `<sha>:<path>` would read the path
+ * from the top level instead).
+ */
+const blobSpec = (sha: string, rel: string): string => `${sha}:./${rel}`;
+
 /** `git diff -z --name-status -M <sha>`: new path -> old path, renames only. */
 function loadRenames(root: string, sha: string): Map<string, string> {
   const renames = new Map<string, string>();
   const out = runGitRaw(
-    ["diff", "-z", "--name-status", "-M", "--no-ext-diff", sha],
+    ["diff", "-z", "--name-status", "-M", "--no-ext-diff", "--relative", sha],
     root,
   );
   if (!out) return renames;
@@ -201,7 +209,7 @@ function loadFileInfo(
   const empty = { oldLines: [], newLines: [], hunks: [] };
   const oldPath = renames.get(rel) ?? rel;
   const oldRaw = runGitRaw(
-    ["cat-file", "blob", `${base.sha}:${oldPath}`],
+    ["cat-file", "blob", blobSpec(base.sha, oldPath)],
     root,
   );
   if (oldRaw === null) {
@@ -222,6 +230,7 @@ function loadFileInfo(
       "--no-ext-diff",
       "--no-textconv",
       "-M",
+      "--relative",
       base.sha,
       "--",
       ...paths,
@@ -347,19 +356,38 @@ const sameNumbers = (a: ResolvedCitation, b: ResolvedCitation): boolean =>
   a.startLine === b.startLine && a.endLine === b.endLine;
 
 /**
- * Which of `now`'s citations the doc already carried at the ref, with the
- * numbers it has now: the citation on the same prose line (same ordinal) with
- * the same numbers; failing that, one with the same file and numbers among the
- * ref citations no other citation claimed (a sentence reworded since). A
- * citation whose line carried other numbers at the ref was re-pointed or
- * edited since, and one with no counterpart was written since; both name the
- * current file by construction and are not judged.
+ * How a citation of the current doc relates to the doc at the ref:
+ *   - `carried`: the citation sits on the same prose line (same ordinal) with
+ *     the same numbers, so the doc named this very text at the ref
+ *   - `by-numbers`: only a citation with the same file and numbers exists
+ *     among the ref citations no other citation claimed (the sentence was
+ *     reworded since). The numbers may be stale, or they may be right because
+ *     someone fixed them by hand against the current file; a coincidence of
+ *     file and numbers cannot tell the two apart, so such a citation is never
+ *     rewritten (see `analyzeCitationDrift`)
+ *   - `skip`: a citation whose line carried other numbers at the ref was
+ *     re-pointed or edited since, and one with no counterpart was written
+ *     since; both name the current file by construction and are not judged
+ */
+type Carry =
+  | { kind: "carried" }
+  | { kind: "by-numbers" }
+  | { kind: "skip"; reason: string };
+
+/**
+ * Pairs `now`'s citations with the ones the doc carried at the ref. Doc lines
+ * that read the same once digits are blanked (rows of one table, items of one
+ * list) are told apart only by their ordinal, so removing or inserting one of
+ * them shifts every later pairing and the stale citations below it are
+ * skipped as re-pointed; pairing by numbers first would instead let a second
+ * `repoint` run pair a re-pointed row with another row's old numbers and
+ * rewrite it again.
  */
 function carriedAtRef(
   now: DocCitation[],
   atRef: DocCitation[],
-): Map<DocCitation, string | null> {
-  const verdict = new Map<DocCitation, string | null>();
+): Map<DocCitation, Carry> {
+  const verdict = new Map<DocCitation, Carry>();
   const unmatched: DocCitation[] = [];
   for (const entry of now) {
     const counterpart = atRef.find(
@@ -369,10 +397,13 @@ function carriedAtRef(
       unmatched.push(entry);
     } else if (sameNumbers(entry.citation, counterpart.citation)) {
       counterpart.used = true;
-      verdict.set(entry, null);
+      verdict.set(entry, { kind: "carried" });
     } else {
       counterpart.used = true;
-      verdict.set(entry, "re-pointed or edited since");
+      verdict.set(entry, {
+        kind: "skip",
+        reason: "re-pointed or edited since",
+      });
     }
   }
   for (const entry of unmatched) {
@@ -384,9 +415,9 @@ function carriedAtRef(
     );
     if (counterpart) {
       counterpart.used = true;
-      verdict.set(entry, null);
+      verdict.set(entry, { kind: "by-numbers" });
     } else {
-      verdict.set(entry, "written since");
+      verdict.set(entry, { kind: "skip", reason: "written since" });
     }
   }
   return verdict;
@@ -434,11 +465,11 @@ export function analyzeCitationDrift(
       .split(path.sep)
       .join("/");
     const refRaw = runGitRaw(
-      ["cat-file", "blob", `${base.sha}:${docRel}`],
+      ["cat-file", "blob", blobSpec(base.sha, docRel)],
       root,
     );
     const now = docCitations(root, doc.raw, citations);
-    let carried: Map<DocCitation, string | null> | null = null;
+    let carried: Map<DocCitation, Carry> | null = null;
     if (refRaw !== null) {
       const { frontmatter, body } = parseFrontmatter(refRaw);
       const refDoc: BundleDoc = { ...doc, raw: refRaw, frontmatter, body };
@@ -462,11 +493,11 @@ export function analyzeCitationDrift(
         verdicts.push(skipped(`the doc did not exist at ${base.ref}`));
         continue;
       }
-      const notCarried = carried.get(entry);
-      if (notCarried) {
+      const carry = carried.get(entry);
+      if (carry?.kind === "skip") {
         verdicts.push(
           skipped(
-            `the doc did not carry this citation at ${base.ref} (${notCarried})`,
+            `the doc did not carry this citation at ${base.ref} (${carry.reason})`,
           ),
         );
         continue;
@@ -476,10 +507,24 @@ export function analyzeCitationDrift(
         info = loadFileInfo(root, base, file, renames);
         files.set(file, info);
       }
+      if (info.skip !== undefined) {
+        verdicts.push(skipped(info.skip));
+        continue;
+      }
+      const verdict = judge(citation, file, info, base);
+      // A citation paired with the ref only by file and numbers may have been
+      // fixed by hand against the current file, in which case "moving" it
+      // would break a correct citation. It is reported, never rewritten.
       verdicts.push(
-        info.skip !== undefined
-          ? skipped(info.skip)
-          : judge(citation, file, info, base),
+        carry?.kind === "by-numbers" && verdict.status === "moved"
+          ? {
+              ...verdict,
+              status: "changed",
+              reason: `matched to the citation at ${base.ref} by file and numbers only (the sentence changed since), so it may already have been fixed by hand; check it, it is not re-pointed`,
+              newStartLine: undefined,
+              newEndLine: undefined,
+            }
+          : verdict,
       );
     }
   }
