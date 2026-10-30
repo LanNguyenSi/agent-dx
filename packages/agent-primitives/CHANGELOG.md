@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `worktree create` now fetches with `--no-prune-tags` (`git fetch --quiet
+  --no-recurse-submodules --no-prune-tags origin`), so a `fetch.pruneTags` or
+  `remote.origin.pruneTags` repository setting cannot delete a tag that only
+  the local checkout has. Remote-tracking branches are still updated, and
+  still pruned when `fetch.prune` is on.
+
 ## [0.19.0] - 2026-10-28
 
 ### Added

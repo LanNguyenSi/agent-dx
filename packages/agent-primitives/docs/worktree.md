@@ -16,7 +16,7 @@ agent-primitives worktree create --repo ~/src/app --branch fix/login --base orig
 In this order:
 
 1. Validates the options and every precondition below. A refusal changes nothing. A SIGINT or SIGTERM that arrived during this step ends the command here, and one that arrived during steps 2 and 3 ends it before step 4, with nothing created (see [Time bounds](#time-bounds)).
-2. Fetches `origin` (unless `--no-fetch`). This updates remote-tracking refs only.
+2. Fetches `origin` as `git fetch --quiet --no-recurse-submodules --no-prune-tags origin` (unless `--no-fetch`). This updates remote-tracking refs only; `--no-prune-tags` keeps a `fetch.pruneTags` or `remote.origin.pruneTags` setting from deleting a tag only this repository has.
 3. Resolves the base: `--base`, or `origin/<default branch>` (see Default base below).
 4. Runs `git worktree add --no-track -b <branch> -- <path> <base>` from the main checkout.
 5. Writes the `.ai/run` pointer (with `--run`), when git ignores that path.

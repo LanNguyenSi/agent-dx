@@ -386,7 +386,13 @@ function fetchOrigin(
   }
   const r = git(
     repo.mainCheckout,
-    ["fetch", "--quiet", "--no-recurse-submodules", "origin"],
+    [
+      "fetch",
+      "--quiet",
+      "--no-recurse-submodules",
+      "--no-prune-tags",
+      "origin",
+    ],
     { boundMs: FETCH_TIMEOUT_MS, onTimeout: "report" },
   );
   if (r.error !== undefined || r.status !== 0) {

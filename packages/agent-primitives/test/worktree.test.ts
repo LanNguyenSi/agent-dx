@@ -251,6 +251,104 @@ describe("worktree create: base, branch and path", () => {
     expect(fresh.json.runBase).toBe(`run-base[repo] = ${advanced}`);
   });
 
+  it("keeps a local-only tag under fetch.prune and fetch.pruneTags, and still updates and prunes remote-tracking branches", async () => {
+    const f = makeFixture();
+    const advanced = advanceOrigin(f);
+    // Stale by construction: the ref exists locally while `gone` was never
+    // pushed, so the CLI's fetch is what prunes it. Written with update-ref
+    // rather than push-then-delete because whether a push to a URL that
+    // matches remote.origin.url writes back to refs/remotes/origin/* (which
+    // would drop the ref before the precondition) depends on the git build
+    // and on how the URL is spelled, so it is not platform independent.
+    git(f.repo, ["update-ref", "refs/remotes/origin/gone", f.mainSha]);
+    expect(
+      gitStatus(f.repo, [
+        "show-ref",
+        "--verify",
+        "--quiet",
+        "refs/remotes/origin/gone",
+      ]),
+    ).toBe(0);
+    git(f.repo, ["tag", "local-only"]);
+    git(f.repo, ["config", "fetch.prune", "true"]);
+    git(f.repo, ["config", "fetch.pruneTags", "true"]);
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "keep-tags",
+      "--path",
+      path.join(f.base, "wt-keep-tags"),
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.fetch.status).toBe("fetched");
+    // The fetch ran: origin/main moved to the commit from the other clone.
+    expect(r.json.base.sha).toBe(advanced);
+    // --no-prune-tags on the command line wins over fetch.pruneTags: the
+    // tag only this checkout has survives.
+    expect(git(f.repo, ["tag", "--list"]).trim()).toBe("local-only");
+    // fetch.prune still applies: the remote-tracking ref whose branch is
+    // absent on origin is pruned.
+    expect(
+      gitStatus(f.repo, [
+        "show-ref",
+        "--verify",
+        "--quiet",
+        "refs/remotes/origin/gone",
+      ]),
+    ).toBe(1);
+  });
+
+  it("keeps a local-only tag under remote.origin.prune and remote.origin.pruneTags, and still updates remote-tracking branches", async () => {
+    const f = makeFixture();
+    const advanced = advanceOrigin(f);
+    git(f.repo, ["tag", "local-only"]);
+    // The per-remote pair: remote.origin.pruneTags only fires when pruning
+    // is active for the remote in general.
+    git(f.repo, ["config", "remote.origin.prune", "true"]);
+    git(f.repo, ["config", "remote.origin.pruneTags", "true"]);
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "keep-tags-remote-cfg",
+      "--path",
+      path.join(f.base, "wt-keep-tags-remote-cfg"),
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.fetch.status).toBe("fetched");
+    expect(r.json.base.sha).toBe(advanced);
+    // --no-prune-tags wins over remote.origin.pruneTags too.
+    expect(git(f.repo, ["tag", "--list"]).trim()).toBe("local-only");
+  });
+
+  it("keeps a local-only tag when remote.origin.pruneTags overrides a false fetch.pruneTags", async () => {
+    const f = makeFixture();
+    const advanced = advanceOrigin(f);
+    git(f.repo, ["tag", "local-only"]);
+    // Precedence: remote.origin.pruneTags overrides fetch.pruneTags, so
+    // git would prune tags here even though fetch.pruneTags is false;
+    // the command-line flag still wins over both keys.
+    git(f.repo, ["config", "fetch.prune", "true"]);
+    git(f.repo, ["config", "fetch.pruneTags", "false"]);
+    git(f.repo, ["config", "remote.origin.pruneTags", "true"]);
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "keep-tags-cfg-precedence",
+      "--path",
+      path.join(f.base, "wt-keep-tags-cfg-precedence"),
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.fetch.status).toBe("fetched");
+    expect(r.json.base.sha).toBe(advanced);
+    expect(git(f.repo, ["tag", "--list"]).trim()).toBe("local-only");
+  });
+
   it("creates from --base, with no upstream either", async () => {
     const f = makeFixture();
     git(f.repo, ["checkout", "-q", "-b", "develop"]);
