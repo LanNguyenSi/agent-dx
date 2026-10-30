@@ -254,12 +254,13 @@ describe("worktree create: base, branch and path", () => {
   it("keeps a local-only tag under fetch.prune and fetch.pruneTags, and still updates and prunes remote-tracking branches", async () => {
     const f = makeFixture();
     const advanced = advanceOrigin(f);
-    git(f.repo, ["push", "-q", "origin", "main:refs/heads/gone"]);
-    git(f.repo, ["fetch", "-q", "origin"]);
-    // Deleted on the server (pushed to the URL, not the remote name, so
-    // git does not write the deletion back to the local tracking ref):
-    // refs/remotes/origin/gone is stale until the CLI's fetch prunes it.
-    git(f.repo, ["push", "-q", f.origin, "--delete", "gone"]);
+    // Stale by construction: the ref exists locally while `gone` was never
+    // pushed, so the CLI's fetch is what prunes it. Written with update-ref
+    // rather than push-then-delete because whether a push to a URL that
+    // matches remote.origin.url writes back to refs/remotes/origin/* (which
+    // would drop the ref before the precondition) depends on the git build
+    // and on how the URL is spelled, so it is not platform independent.
+    git(f.repo, ["update-ref", "refs/remotes/origin/gone", f.mainSha]);
     expect(
       gitStatus(f.repo, [
         "show-ref",
@@ -287,7 +288,8 @@ describe("worktree create: base, branch and path", () => {
     // --no-prune-tags on the command line wins over fetch.pruneTags: the
     // tag only this checkout has survives.
     expect(git(f.repo, ["tag", "--list"]).trim()).toBe("local-only");
-    // fetch.prune still applies: the branch deleted on origin is pruned.
+    // fetch.prune still applies: the remote-tracking ref whose branch is
+    // absent on origin is pruned.
     expect(
       gitStatus(f.repo, [
         "show-ref",
