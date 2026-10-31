@@ -64,6 +64,17 @@
     "typescript": "^5.3.3",
     "vitest": "^4.1.6"
   },
+  "overrides": {
+    "@eslint/config-array": {
+      "minimatch": "^11.0.3"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.3"
+    },
+    "eslint": {
+      "minimatch": "^11.0.3"
+    }
+  },
   "engines": {
     "node": ">=20"
   }
