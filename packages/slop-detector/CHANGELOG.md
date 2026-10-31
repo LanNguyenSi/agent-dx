@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - **`zod` ^4.6.7** (GHSA-mrhx-c7xc-m3w5): the dependency range and lockfile now resolve the v4 core, which is where the advisory is fixed. `src/config.ts` moved to the native v4 API and `src/mcp.ts` runs unchanged on it (`z.partialRecord` keeps `packs:` partial; value-dependent `.refine` messages became `.superRefine`, since v4 silently drops the v3 function-parameter form). Config validation accepts and rejects exactly what it accepted and rejected before; the issue JSON inside the `Invalid config at ...` message changed zod's default fields (for example an unknown pack id now reports `unrecognized_keys` instead of `invalid_enum_value`). The `slop_check` tool schema is unchanged except for the `additionalProperties: false` key the SDK no longer emits for stripping objects, and its input-validation errors carry zod 4's default wording (for example `Invalid input: expected string, received number at text`).
+- **`@hono/node-server` 2.1.5** (GHSA-rmxm-3fg6-px4f), installed through `@modelcontextprotocol/sdk`: the lockfile resolves 2.1.5 (was 2.0.12), which fixes `serveStatic` decoding the request path a second time so that middleware on static paths could be bypassed. Lockfile-only, within the existing range. The MCP server in `src/mcp.ts` uses the stdio transport only, so the HTTP adapter is not on a path this tool runs.
 
 ## [0.9.0] - 2026-10-12
 
