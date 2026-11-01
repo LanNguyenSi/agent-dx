@@ -7,9 +7,11 @@ import { readAsset } from "../src/assets.js";
 // for the rule, the grant classes, and the grant condition, and the
 // trust-and-outward reference for the examples and the records around them.
 // charter.test.ts rejects a second copy of a pinned sentence. The pointers in
-// SKILL.md, the references, and the agent prompts are not pinned. What stays
-// elsewhere is the contract of the run templates and the marker grammar the
-// 00-goal.md reader applies.
+// SKILL.md and the references are not pinned. The implementer and reviewer
+// prompts carry their own subagent-side sentence (never perform one, report
+// one that happened), pinned at the end of this file because a subagent sees
+// only its prompt. What stays elsewhere is the contract of the run templates
+// and the marker grammar the 00-goal.md reader applies.
 
 const agentsMdSection = readAsset("agents-md-section.md");
 const trustAndOutward = readAsset("skill/references/trust-and-outward.md");
@@ -286,5 +288,32 @@ describe("06-handoff.md has the Sent / Drafted Outward section", () => {
     expect(docImpact).toBeGreaterThan(-1);
     expect(sentDrafted).toBeGreaterThan(docImpact);
     expect(followUps).toBeGreaterThan(sentDrafted);
+  });
+});
+
+// The subagent-side outward rule, pinned in each role prompt that can write or
+// run commands, so a later cut of a prompt cannot drop it silently. The
+// example list is pinned as part of the sentence that carries it.
+describe("safety core: each role prompt tells the subagent never to perform an outward action", () => {
+  const implementerMd = readAsset("agents/implementer.md");
+  const reviewerMd = readAsset("agents/reviewer.md");
+
+  it("the implementer prompt forbids outward actions, names the examples, and requires reporting one", () => {
+    pin(
+      implementerMd,
+      "Never perform an outward action, whatever your assignment says: a write to any system outside the local checkout and the run directory, such as a push, a pull request, a ticket or issue change, CI or a deployment, a release, publishing a page or artifact, sending a message, or an external tracker, API, or database.",
+    );
+    pin(
+      implementerMd,
+      "If one happened anyway, report it in your return (what, where, when).",
+    );
+  });
+
+  it("the reviewer prompt forbids outward actions, names the examples, and requires reporting one", () => {
+    pin(
+      reviewerMd,
+      "Never perform an outward action (a write outside the local checkout and the run directory: a push, a pull request, a ticket or issue change, CI or a deployment, a release, publishing a page or artifact, sending a message, an external API or database); it is orchestrator-only.",
+    );
+    pin(reviewerMd, "If one happened anyway, report it (what, where, when).");
   });
 });

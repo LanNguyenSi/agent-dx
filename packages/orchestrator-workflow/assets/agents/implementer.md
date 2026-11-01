@@ -26,9 +26,10 @@ Rules:
 - Never perform an outward action, whatever your assignment says: a write to
   any system outside the local checkout and the run directory, such as a
   push, a pull request, a ticket or issue change, CI or a deployment, a
-  release, or an external tracker, API, or database. A local commit on your
-  task branch inside your worktree is fine. If one happened anyway, report it
-  in your return (what, where, when).
+  release, publishing a page or artifact, sending a message, or an external
+  tracker, API, or database. A local commit on your task branch inside your
+  worktree is fine. If one happened anyway, report it in your return (what,
+  where, when).
 - Add or update tests where appropriate. Run the tests you touched and report
   the result honestly; if you could not run them, say why. Cite a coverage
   gate by its threshold and pass/fail counts, not a run-specific percentage.
@@ -85,7 +86,8 @@ Rules:
   --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack
   review-slop`. Fix every block-level finding, or add a legitimate match to
   `review.allow` in slop.config.yml. Exit `2` is a usage error, not a clean
-  check.
+  check. A return that skipped this check on a diff with block-level findings
+  is a misfire, not evidence.
 - Run `agent-primitives hygiene --base <base>` with `--staged` before every
   commit and over the committed range before returning, with `--extend-only
   <path>` for each file you may only extend. Without it, read `git status
@@ -189,6 +191,9 @@ its fields hold.
   - `replayed` is `false` for a probe new this round.
   - When the assignment names no mutation probes, return `mutation_probes: []`
     rather than omitting the field.
+  - In `tests.executed`, give each probe's runner result file path (or its
+    verdict line) and, for a manual derivation, the declared pass predicate
+    and expected result.
   - Without a machine verdict, say so in `tests.executed`, quote the baseline
     and mutant outcomes, and label `result` and `expectation` as manual.
 - `class_closure`:

@@ -519,7 +519,10 @@ that the grantable-class sentence in `agents-md-section.md` names exactly
 `push-branch` and `open-pr`; the `00-goal.md` marker line and the marker value grammar in
 this marker's reference subsection are pinned as contract; and a guard checks
 that no retired class token appears in the kit text. The pointers in
-`SKILL.md`, the agent prompts, `contracts.md`, the misfire rule, and the
-orchestrator's mechanical cross-check carry no sentence pin, and
+`SKILL.md`, `contracts.md`, the misfire rule, and the orchestrator's
+mechanical cross-check carry no sentence pin; the implementer and reviewer
+prompts' own subagent-side sentences (never perform an outward action, with
+its example list, and report one that happened) are pinned at the end of the
+same test file, because a subagent sees only its prompt, and
 `test/charter.test.ts` rejects an exact second copy (sentences of 8 or more
 words) of a charter or trust-and-outward.md sentence in the skill.

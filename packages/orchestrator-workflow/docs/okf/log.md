@@ -3060,7 +3060,7 @@
   violated | not_applicable` now, not just `met | violated`, since a
   `not_applicable` probe (the mutant could not be applied, so no `result`
   was measured) has nothing for `met`/`violated` to report
-  (`implementer.md:139#"expectation: met | violated | not_applicable"`,
+  (`implementer.md:141#"expectation: met | violated | not_applicable"`,
   `packages/orchestrator-workflow/assets/skill/references/contracts.md:150#"expectation: met | violated | not_applicable"`).
   The two `not_applicable` verdicts that used to share one bare label
   (a probe with no reapplicable definition, not a regression, versus a
@@ -3070,14 +3070,14 @@
   fix-round replay rule states the regression signal (step 6, the
   installed prompt's matching bullet, and SKILL.md's output-contract
   prose paragraph)
-  (`implementer.md:50#"no definition recorded"`,
+  (`implementer.md:51#"no definition recorded"`,
   `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:83#"no definition recorded"`). The prompt's
   `expectation` sentence dropped its `--expect` mention (the
   agent-primitives flag name); both copies now say "matched what the
   probe was expected to do", tool-agnostic like the rest of the prompt
   (the flag pointer stays only in `CHANGELOG.md`'s own prose)
-  (`implementer.md:185#"needs a measured"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:185#"needs a measured"`). The verify/mutation-
+  (`implementer.md:187#"needs a measured"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:187#"needs a measured"`). The verify/mutation-
   probe-runner bullet (`implementer.md` only, no SKILL.md mirror) now
   says where the definition fields come from when a runner reports a
   probe's mutant record separately from its result fields
@@ -3209,8 +3209,8 @@
   implementer.md): a replayed probe whose `expectation` is now `violated`,
   or which can no longer be applied, is the regression signal; `result`
   alone is not
-  (`implementer.md:185#"needs a measured"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:178#"are the exact text swapped there"`). The
+  (`implementer.md:187#"needs a measured"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:180#"are the exact text swapped there"`). The
   `04-implementation-summary.md` template's Mutation Probes table gained
   matching columns
   (`assets/templates/04-implementation-summary.md:53#"| Round | Mutant | File | Anchor | Before | After | Verified Applied Via | Result | Expectation | Reason | Restored Verified | Replayed |"`).
@@ -3234,9 +3234,9 @@
   file (`CHANGELOG.md`'s own 17-line `[Unreleased]` insertion, the one
   live anchored citation into it above); a small number of citations
   landing on a line whose own text changed were re-anchored by hand
-  rather than only re-numbered (`packages/orchestrator-workflow/assets/agents/implementer.md:190#"When the assignment names no mutation probes, return"`,
+  rather than only re-numbered (`packages/orchestrator-workflow/assets/agents/implementer.md:192#"When the assignment names no mutation probes, return"`,
   `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:86#"A replayed probe whose"`,
-  `implementer.md:51#"replayed probe whose"`). Two pre-existing
+  `implementer.md:52#"replayed probe whose"`). Two pre-existing
   numeric-only (no string anchor) citations into `implementer.md` in an
   older entry below (implementer.md at historical lines 41-66, implementer.md at historical lines 41-67) were
   left unbumped, per this file's own stated convention that recorded
