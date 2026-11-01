@@ -1,5 +1,10 @@
 # Bundle log
 
+- 2026-11-01T15:15:58Z, CHANGELOG `[Unreleased]` entry: word counts updated to the prompts after the restored
+  guards, and the runbook sentence separates a listed runbook's authority from classifying a diff; the
+  entry was rewrapped to the same line count. Re-verified: none of `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` or `subagent-contracts-superset.md` cites the changed sentences.
+  Re-stamped all three.
 - 2026-11-01T15:04:50Z, role prompts, review round: both prompts name publishing a page or artifact and sending a
   message among the outward examples again, and `test/outward-actions.test.ts` now pins each prompt's
   subagent-side outward sentence; `run-state-lifecycle-and-markers.md` says so instead of "the agent
