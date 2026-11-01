@@ -1,5 +1,10 @@
 # Bundle log
 
+- 2026-11-01T14:35:21Z, coverage exception dropped from the reference: `assets/skill/references/evidence-and-probes.md`
+  no longer says the prompts allow a coverage percentage cited with commit and run count, matching the
+  slimmed prompts; the paragraphs were rewrapped so no line moved. Re-verified: none of
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` or `subagent-contracts-superset.md`
+  describes that exception, and their citations into the reference still resolve. Re-stamped all three.
 - 2026-11-01T11:43:24Z, reviewer prompt, measured revision: the replay evaluation showed the first cut of
   `assets/agents/reviewer.md` grading confirmed defects lower and drifting on the `introduced_by_delta`
   enum, so four clauses of the previous prompt are back: the claimed-checks calibration sentence (low
