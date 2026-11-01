@@ -9,27 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The implementer and reviewer prompts are cut down to what the subagent
-  itself does, the implementer from about 2,800 to about 1,700 words and the
-  reviewer from about 3,300 to about 2,300; both stay self-contained. Each
-  prompt's outward rule is the subagent version: never perform an outward
-  action, a local commit in the worktree is fine, and one that happened anyway
-  is reported; what the run's `outward` marker grants concerns only the
-  orchestrator. The reviewer takes a runbook's authority from the briefing's
-  `runbooks` field alone (an operator runbook is a binding checklist, a data
-  runbook is notes) instead of deriving it from pins, curated bundles, and the
-  read-at-sha record. The implementer names `agent-primitives hygiene` for
-  commit hygiene with a short fallback (the backup-suffix list and the BSD
-  `sed -i` detail are gone), copies the items `agent-primitives probe --report
-  mutation-probes` prints into `mutation_probes`, and runs repros against
-  adversarial fixtures through `agent-primitives guard`, which the reviewer
-  prompt names too. The byte-count-ceiling and coverage rules are shorter; the
-  coverage rule no longer carries the exception for a percentage cited with its
-  commit and run count. Return structures, field names, enums, mandatory-field
-  rules, and the safety-core sentences (the reviewer's read-only rule and its
-  in-place exception) are unchanged. The reviewer prompt was measured against
-  the previous one with the replay evaluation under `eval/`; the figures are in
-  the pull request. The installed implementer and reviewer files report as
+- The implementer and reviewer prompts are cut down to what the subagent itself
+  does, the implementer from about 2,800 to about 1,750 words and the reviewer
+  from about 3,300 to about 2,400; both stay self-contained. Each prompt's outward
+  rule is the subagent version: never perform an outward action, a local commit in
+  the worktree is fine, and one that happened anyway is reported; what the run's
+  `outward` marker grants concerns only the orchestrator. The reviewer takes a
+  listed runbook's authority from the briefing's `runbooks` field alone (operator:
+  binding checklist, data: notes) instead of deriving it from pins, curated
+  bundles, and the read-at-sha record; whether a diff touches an operator runbook
+  still comes from the curated dirs and pins the briefing names. The implementer
+  names `agent-primitives hygiene` for commit hygiene with a short fallback (the
+  backup-suffix list and the BSD `sed -i` detail are gone), copies the items
+  `agent-primitives probe --report mutation-probes` prints into `mutation_probes`,
+  and runs repros against adversarial fixtures through `agent-primitives guard`,
+  which the reviewer prompt names too. The byte-count-ceiling and coverage rules
+  are shorter; the coverage rule no longer carries the exception for a percentage
+  cited with its commit and run count. Return structures, field names, enums,
+  mandatory-field rules, and the safety-core sentences (the reviewer's read-only
+  rule and its in-place exception) are unchanged. The reviewer prompt was measured
+  against the previous one with the replay evaluation under `eval/`; the figures
+  are in the pull request. The installed implementer and reviewer files report as
   outdated until refreshed.
 
 ## [0.48.0] - 2026-10-25
