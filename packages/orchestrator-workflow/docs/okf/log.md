@@ -1,5 +1,20 @@
 # Bundle log
 
+- 2026-11-01T15:04:50Z, role prompts, review round: both prompts name publishing a page or artifact and sending a
+  message among the outward examples again, and `test/outward-actions.test.ts` now pins each prompt's
+  subagent-side outward sentence; `run-state-lifecycle-and-markers.md` says so instead of "the agent
+  prompts carry no sentence pin". The reviewer prompt again checks runbook diffs against each runbook's
+  base version with operator-ness taken from the curated dirs and pins the briefing names, and keeps the
+  granted-push, `summary`-claim, stale-reference and legacy-report clauses; an unbounded
+  process-spawning test is a finding of its own. The implementer prompt again treats a skipped slop check
+  as a misfire and asks for each probe's runner result path or verdict line and, for a manual
+  derivation, the declared predicate and expected result. In `subagent-contracts-superset.md` the
+  probe-verdict section describes that sentence with a citation, the slop paragraph names the misfire
+  clause again, and the sentence that said the probe section names no tool now names `agent-primitives
+  probe --report mutation-probes`. Every anchored citation into the two prompts in that doc,
+  `review-gate-and-waivers.md` and this log was re-pointed to the line that now carries its anchor.
+  Re-verified: the other claims of the three docs hold. Re-stamped: `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`.
 - 2026-11-01T14:35:21Z, coverage exception dropped from the reference: `assets/skill/references/evidence-and-probes.md`
   no longer says the prompts allow a coverage percentage cited with commit and run count, matching the
   slimmed prompts; the paragraphs were rewrapped so no line moved. Re-verified: none of
