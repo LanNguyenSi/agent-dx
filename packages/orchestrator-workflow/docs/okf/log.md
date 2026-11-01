@@ -1,5 +1,16 @@
 # Bundle log
 
+- 2026-11-01T11:43:24Z, reviewer prompt, measured revision: the replay evaluation showed the first cut of
+  `assets/agents/reviewer.md` grading confirmed defects lower and drifting on the `introduced_by_delta`
+  enum, so four clauses of the previous prompt are back: the claimed-checks calibration sentence (low
+  when the reviewer's own rerun confirms the claim, the ordinary gate severity when the evidence
+  contradicts it), "under the ordinary severity gate" in the runbook and recurrence bullets (the latter
+  again "not by a fixed floor"), and the enum restatement in the `introduced_by_delta` field note. The
+  lines below them moved by up to four; every anchored citation into the prompt in
+  `subagent-contracts-superset.md` and `review-gate-and-waivers.md` was re-pointed to the line that now
+  carries its anchor, and the recurrence paragraph of `subagent-contracts-superset.md` again names the
+  severity gate. Re-verified: the other claims of both docs hold. Re-stamped:
+  `review-gate-and-waivers.md`, `subagent-contracts-superset.md`.
 - 2026-11-01T09:07:20Z, slimmer implementer and reviewer prompts: `assets/agents/implementer.md` and
   `assets/agents/reviewer.md` are cut down to what each subagent does (the subagent version of the
   outward rule, runbook authority from the briefing's `runbooks` field only, `agent-primitives hygiene`,
