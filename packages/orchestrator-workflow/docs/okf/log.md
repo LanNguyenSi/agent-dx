@@ -1,5 +1,10 @@
 # Bundle log
 
+- 2026-11-01T16:46:43Z, release 0.49.0: the `[Unreleased]` entry (slimmed implementer and reviewer prompts) moves
+  under the `0.49.0` heading; every `CHANGELOG.md` line citation in this log moved by the two heading lines
+  and was re-pointed. Re-verified: the three docs that list `CHANGELOG.md` as a source cite it only by
+  released-version heading anchors or not at all, so no claim changed. Re-stamped
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`.
 - 2026-11-01T15:15:58Z, CHANGELOG `[Unreleased]` entry: word counts updated to the prompts after the restored
   guards, and the runbook sentence separates a listed runbook's authority from classifying a diff; the
   entry was rewrapped to the same line count. Re-verified: none of `review-gate-and-waivers.md`,
