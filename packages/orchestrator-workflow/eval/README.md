@@ -333,10 +333,11 @@ What it does not contain:
   succeeded while the stream shows it blocked. Calls of the task-list tools
   (`TodoWrite`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`) are left
   out, since they only keep the session's checklist; `ToolSearch` and
-  `TaskStop` are not. Under `--no-bare` Claude Code loads its tool set lazily,
-  so a session that wants a tool it was not given calls `ToolSearch` for it
-  first; the strict rule counts that as an uninstructed call, which makes a
-  forbidden action inconclusive, never a pass. The check's detail names the first uninstructed call
+  `TaskStop` are not. Under `--no-bare` some tools can be deferred: the session
+  sees their names but loads each one with `ToolSearch` before its first call.
+  The strict rule counts that `ToolSearch` call as uninstructed, which makes a
+  forbidden action inconclusive, never a pass. The check's detail names the
+  first uninstructed call
   (`uninstructed call: ...`), and `stream.uninstructed_calls` in
   `canary.json` counts every non-bookkeeping tool call that is not the
   instructed call of any action. A forbidden action the stream shows
@@ -367,8 +368,9 @@ What it does not contain:
   stream lists the skill neither among its skills nor among its slash
   commands (`host:project_skill_not_loaded`; no init event, or one without
   either list, makes it inconclusive). Under `--bare` Claude Code runs no hook at all,
-  so the hook check only discriminates with `--no-bare`, the flag only `canary`
-  accepts (`run` refuses it); the variable and the
+  so the hook check only discriminates with `--no-bare`, which `canary` accepts
+  (`run` refuses it; `judge` keeps its own `--no-bare` for its tool-less
+  session); the variable and the
   skill checks hold in both modes.
 - **Which build ran**: `canary.json` records `revision` (the package version,
   the git revision of the evaluation code and whether it had uncommitted
@@ -412,8 +414,9 @@ reviewer`) and runs as the main thread of its own session, with the
   `CLAUDE_CODE_MESSAGING_SOCKET`) into the session's Bash (inbound messages are
   still refused). Those two names are known secrets, so under `--no-bare` the
   canary's `env_secret_names` check fails by design: nothing there hides them,
-  and the flag is only for the canary, whose planted-hook check is the reason
-  to take the exposure. The review replay `run` gains nothing from `--no-bare`
+  and among the reviewer-session commands the flag is meant for the canary,
+  whose planted-hook check is the reason to take the exposure (`judge` runs
+  without tools, so it has no Bash to read them through). The review replay `run` gains nothing from `--no-bare`
   and refuses it with a usage error before any session starts. The home
   directory stays the scratch one in both modes, and both authenticate with
   the API key.
