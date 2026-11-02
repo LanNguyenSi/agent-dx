@@ -13138,3 +13138,10 @@ re-pointed to `CHANGELOG.md:1286#"The implementer"` and
 every other `CHANGELOG.md:` citation across the bundle is
 heading-anchored (`#[x.y.z]`) and unaffected by a line shift. Confirmed
 both anchor strings still read at their new lines before re-pointing.
+
+The eval `run` refusal of `--no-bare` added a `### Security` bullet under
+`## [Unreleased]` in CHANGELOG.md. review-gate-and-waivers.md,
+run-state-lifecycle-and-markers.md and subagent-contracts-superset.md list
+CHANGELOG.md as a source; all their CHANGELOG citations are heading-anchored
+(`#[x.y.z]`), none cites `[Unreleased]`, so no claim changed; re-stamped all
+three at 2026-11-02T13:29:59Z after confirming that.
