@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The review replay `run` under `eval/` rejects `--no-bare` with a usage error
+  before any session or child process starts: without `--bare`, Claude Code
+  injects its messaging channel variables (`CLAUDE_CODE_MESSAGING_TOKEN` and
+  `CLAUDE_CODE_MESSAGING_SOCKET`) into the session's Bash, which a replay gains
+  nothing from. `canary` keeps the flag for the planted-hook check, whose
+  `env_secret_names` verdict fails by design under `--no-bare`.
+
 ## [0.49.0] - 2026-11-01
 
 ### Changed
