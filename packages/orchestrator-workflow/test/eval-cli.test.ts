@@ -152,7 +152,86 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
     expect(await main(["run", "--keep-home"], c)).toBe(2);
   });
 
-  it("refuses to run without an API key in either mode, and with a bad kind or filter", async () => {
+  it("refuses --no-bare for the review replay before anything is spawned", async () => {
+    const alpha = promptFile("nobare.md", "Alpha body.");
+    const records = mkdtempSync(join(work, "rec-nobare-"));
+    const freshOut = join(work, "out-nobare");
+    const env = io();
+    const code = await main(
+      [
+        "run",
+        "--dataset",
+        dataset,
+        "--out",
+        freshOut,
+        "--variant",
+        `file:${alpha}`,
+        "--claude",
+        claude({}, records),
+        ...guard,
+        "--scratch",
+        scratch,
+        "--no-bare",
+      ],
+      env,
+    );
+    expect(code).toBe(2);
+    expect(env.errors[0]).toContain("--no-bare");
+    expect(env.errors[0]).toContain("CLAUDE_CODE_MESSAGING_TOKEN");
+    expect(env.errors[0]).toContain("CLAUDE_CODE_MESSAGING_SOCKET");
+    expect(env.errors[0]).toContain("canary");
+    // Nothing runs: no session spawns, no variant directory is created, no line prints.
+    expect(calls(records)).toEqual([]);
+    expect(env.lines).toEqual([]);
+    expect(existsSync(join(freshOut, "nobare"))).toBe(false);
+  });
+
+  it("keeps the run command's normal validation when --no-bare is absent", async () => {
+    const withFlag = io();
+    expect(
+      await main(
+        [
+          "run",
+          ...common(),
+          "--variant",
+          "current",
+          "--kind",
+          "weird",
+          "--no-bare",
+        ],
+        withFlag,
+      ),
+    ).toBe(2);
+    expect(withFlag.errors[0]).toContain("CLAUDE_CODE_MESSAGING_TOKEN");
+
+    const without = io();
+    expect(
+      await main(
+        ["run", ...common(), "--variant", "current", "--kind", "weird"],
+        without,
+      ),
+    ).toBe(2);
+    expect(without.errors[0]).toContain("--kind must be finding or control");
+    expect(without.errors.join("\n")).not.toContain("CLAUDE_CODE_MESSAGING");
+  });
+
+  it("still accepts --no-bare for the canary and the judge, which the replay refuses", async () => {
+    const canaryEnv = io();
+    expect(
+      await main(["canary", "--dataset", dataset, "--no-bare"], canaryEnv),
+    ).toBe(2);
+    expect(canaryEnv.errors[0]).toContain("--out is required");
+    expect(canaryEnv.errors.join("\n")).not.toContain("CLAUDE_CODE_MESSAGING");
+
+    const judgeEnv = io();
+    expect(
+      await main(["judge", "--dataset", dataset, "--no-bare"], judgeEnv),
+    ).toBe(2);
+    expect(judgeEnv.errors[0]).toContain("--out is required");
+    expect(judgeEnv.errors.join("\n")).not.toContain("CLAUDE_CODE_MESSAGING");
+  });
+
+  it("refuses to run without an API key, and with a bad kind or filter", async () => {
     const alpha = promptFile("alpha.md", "Alpha body.");
     const base = [
       "run",
@@ -165,12 +244,10 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
       "--scratch",
       scratch,
     ];
-    for (const extra of [[], ["--no-bare"]]) {
-      const noKey = io();
-      delete noKey.env.ANTHROPIC_API_KEY;
-      expect(await main([...base, ...extra], noKey)).toBe(2);
-      expect(noKey.errors[0]).toContain("ANTHROPIC_API_KEY is not set");
-    }
+    const noKey = io();
+    delete noKey.env.ANTHROPIC_API_KEY;
+    expect(await main(base, noKey)).toBe(2);
+    expect(noKey.errors[0]).toContain("ANTHROPIC_API_KEY is not set");
 
     const badKind = io();
     expect(await main([...base, "--kind", "weird"], badKind)).toBe(2);
@@ -1834,6 +1911,14 @@ describe("canary", { timeout: 120_000 }, () => {
       `revision: package ${pkg.version}, git `,
     );
     expect(lines.join("\n")).toContain("claude 9.9.9 (Stub Code)");
+  });
+
+  it("still runs the canary with --no-bare, recording the bare mode off", async () => {
+    const { result, session } = await canary("pass", {}, {}, FAKE_GUARD, [
+      "--no-bare",
+    ]);
+    expect(result.revision.bare).toBe(false);
+    expect(session.argv).not.toContain("--bare");
   });
 });
 

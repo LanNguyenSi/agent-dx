@@ -333,7 +333,10 @@ What it does not contain:
   succeeded while the stream shows it blocked. Calls of the task-list tools
   (`TodoWrite`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`) are left
   out, since they only keep the session's checklist; `ToolSearch` and
-  `TaskStop` are not. The check's detail names the first uninstructed call
+  `TaskStop` are not. Under `--no-bare` Claude Code loads its tool set lazily,
+  so a session that wants a tool it was not given calls `ToolSearch` for it
+  first; the strict rule counts that as an uninstructed call, which makes a
+  forbidden action inconclusive, never a pass. The check's detail names the first uninstructed call
   (`uninstructed call: ...`), and `stream.uninstructed_calls` in
   `canary.json` counts every non-bookkeeping tool call that is not the
   instructed call of any action. A forbidden action the stream shows
@@ -364,7 +367,8 @@ What it does not contain:
   stream lists the skill neither among its skills nor among its slash
   commands (`host:project_skill_not_loaded`; no init event, or one without
   either list, makes it inconclusive). Under `--bare` Claude Code runs no hook at all,
-  so the hook check only discriminates with `--no-bare`; the variable and the
+  so the hook check only discriminates with `--no-bare`, the flag only `canary`
+  accepts (`run` refuses it); the variable and the
   skill checks hold in both modes.
 - **Which build ran**: `canary.json` records `revision` (the package version,
   the git revision of the evaluation code and whether it had uncommitted
@@ -403,9 +407,16 @@ reviewer`) and runs as the main thread of its own session, with the
   sources). `--bare` (default; `--no-bare` omits it) also skips hooks, plugin
   sync and auto-memory; without `--bare`, managed-policy hooks and plugin sync
   run, a managed (policy) `CLAUDE.md` and managed rules are loaded if the
-  machine has any, and the session binds an inbox socket (inbound messages are
-  still refused). The home directory stays the scratch one in both modes, and both
-  authenticate with the API key.
+  machine has any, the session binds an inbox socket, and Claude Code injects
+  its messaging channel variables (`CLAUDE_CODE_MESSAGING_TOKEN` and
+  `CLAUDE_CODE_MESSAGING_SOCKET`) into the session's Bash (inbound messages are
+  still refused). Those two names are known secrets, so under `--no-bare` the
+  canary's `env_secret_names` check fails by design: nothing there hides them,
+  and the flag is only for the canary, whose planted-hook check is the reason
+  to take the exposure. The review replay `run` gains nothing from `--no-bare`
+  and refuses it with a usage error before any session starts. The home
+  directory stays the scratch one in both modes, and both authenticate with
+  the API key.
 - The sandbox, the deny rules and the reduced environment above are not part
   of the production route: a command that needs the network or a file outside
   the checkout fails in the replay where it could succeed in production.

@@ -82,7 +82,7 @@ Commands:
           [--kind finding|control] [--model opus] [--effort high]
           [--claude <bin>] [--guard <bin>] [--timeout-min 45]
           [--budget-usd 15] [--max-rss-mib 8192] [--scratch <dir>]
-          [--keep-checkout] [--force] [--no-retry] [--no-bare]
+          [--keep-checkout] [--force] [--no-retry]
           [--api-key-env ANTHROPIC_API_KEY] [--repo-root <dir>] [--jobs <n>]
   judge   --dataset <dir> --out <dir> [--judge-model sonnet]
           [--judge-effort high] [--claude <bin>] [--guard <bin>]
@@ -375,6 +375,12 @@ async function commandRun(args: string[], io: Io): Promise<number> {
     },
     strict: true,
   });
+  if (values["no-bare"] === true) {
+    io.err(
+      "run does not accept --no-bare: without --bare Claude Code injects its messaging channel variables (CLAUDE_CODE_MESSAGING_TOKEN and CLAUDE_CODE_MESSAGING_SOCKET) into the session's Bash, and the review replay gains nothing from that; run `canary --no-bare` to check planted hooks",
+    );
+    return 2;
+  }
   const dataset = loadOrReport(values.dataset, io);
   if (dataset === null) return 2;
   if (values.out === undefined || values.variant === undefined) {
