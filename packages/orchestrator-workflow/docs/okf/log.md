@@ -1,5 +1,10 @@
 # Bundle log
 
+- 2026-11-03T15:05:37Z, outward sentence pinned in the explorer, advisor and task-slicer prompts, with a new `[Unreleased]`
+  CHANGELOG bullet (CHANGELOG citations in this log re-pointed by +5). Re-verified: `subagent-contracts-superset.md`
+  cites prompt lines outside the edited bullets and the line counts did not change; `run-state-lifecycle-and-markers.md`
+  now names all five role prompts whose subagent-side sentence is pinned; `review-gate-and-waivers.md` cites
+  `CHANGELOG.md` only by released-version anchors. Re-stamped all three.
 - 2026-11-01T16:46:43Z, release 0.49.0: the `[Unreleased]` entry (slimmed implementer and reviewer prompts) moves
   under the `0.49.0` heading; every `CHANGELOG.md` line citation in this log moved by the two heading lines
   and was re-pointed. Re-verified: the three docs that list `CHANGELOG.md` as a source cite it only by
