@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The explorer, advisor, and task-slicer prompts now state the subagent outward
+  rule with the same example list as the implementer and reviewer prompts
+  (including publishing a page or artifact and sending a message), and
+  `test/outward-actions.test.ts` pins each sentence, so deleting one fails the
+  suite. Rendered effort-tier variants carry the same body.
 - The review replay `run` under `eval/` rejects `--no-bare` with a usage error
   before any session or child process starts: without `--bare`, Claude Code
   injects its messaging channel variables (`CLAUDE_CODE_MESSAGING_TOKEN` and
