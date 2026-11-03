@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-11-02T13:29:59Z
+timestamp: 2026-11-03T15:05:37Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -520,9 +520,9 @@ that the grantable-class sentence in `agents-md-section.md` names exactly
 this marker's reference subsection are pinned as contract; and a guard checks
 that no retired class token appears in the kit text. The pointers in
 `SKILL.md`, `contracts.md`, the misfire rule, and the orchestrator's
-mechanical cross-check carry no sentence pin; the implementer and reviewer
-prompts' own subagent-side sentences (never perform an outward action, with
-its example list, and report one that happened) are pinned at the end of the
+mechanical cross-check carry no sentence pin; the implementer, reviewer,
+explorer, advisor and task-slicer prompts' own subagent-side sentences (never
+perform an outward action, with its example list, and report one) are pinned at the end of the
 same test file, because a subagent sees only its prompt, and
 `test/charter.test.ts` rejects an exact second copy (sentences of 8 or more
 words) of a charter or trust-and-outward.md sentence in the skill.

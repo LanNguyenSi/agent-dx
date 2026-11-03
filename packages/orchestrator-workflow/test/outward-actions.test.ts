@@ -7,8 +7,8 @@ import { readAsset } from "../src/assets.js";
 // for the rule, the grant classes, and the grant condition, and the
 // trust-and-outward reference for the examples and the records around them.
 // charter.test.ts rejects a second copy of a pinned sentence. The pointers in
-// SKILL.md and the references are not pinned. The implementer and reviewer
-// prompts carry their own subagent-side sentence (never perform one, report
+// SKILL.md and the references are not pinned. Every role prompt (implementer,
+// reviewer, explorer, advisor, task-slicer) carries its own subagent-side sentence (never perform one, report
 // one that happened), pinned at the end of this file because a subagent sees
 // only its prompt. What stays elsewhere is the contract of the run templates
 // and the marker grammar the 00-goal.md reader applies.
@@ -292,8 +292,10 @@ describe("06-handoff.md has the Sent / Drafted Outward section", () => {
 });
 
 // The subagent-side outward rule, pinned in each role prompt that can write or
-// run commands, so a later cut of a prompt cannot drop it silently. The
-// example list is pinned as part of the sentence that carries it.
+// run commands (the explorer, advisor, and task-slicer have Bash and the
+// messaging tools too; only Edit and Write are excluded), so a later cut of a
+// prompt cannot drop it silently. The example list is pinned as part of the
+// sentence that carries it.
 describe("safety core: each role prompt tells the subagent never to perform an outward action", () => {
   const implementerMd = readAsset("agents/implementer.md");
   const reviewerMd = readAsset("agents/reviewer.md");
@@ -316,4 +318,28 @@ describe("safety core: each role prompt tells the subagent never to perform an o
     );
     pin(reviewerMd, "If one happened anyway, report it (what, where, when).");
   });
+
+  // The read-only roles share one sentence shape with the reviewer; only the
+  // role-specific clause between the two halves differs. Rendered variants
+  // carry the asset body verbatim (rendered-variants.test.ts), so pinning the
+  // source covers every tier and harness.
+  const OUTWARD_HEAD =
+    "Never perform an outward action (a write outside the local checkout and the run directory: a push, a pull request, a ticket or issue change, CI or a deployment, a release, publishing a page or artifact, sending a message, an external API or database); it is orchestrator-only.";
+  const REPORT_TAIL = "If one happened anyway, report it (what, where, when).";
+  it.each([
+    ["explorer", "You read and report."],
+    ["advisor", "You analyze and recommend."],
+    [
+      "task-slicer",
+      "Return task records for the orchestrator to delegate, do not file them yourself.",
+    ],
+  ])(
+    "the %s prompt forbids outward actions, names the examples, and requires reporting one",
+    (role, clause) => {
+      pin(
+        readAsset(`agents/${role}.md`),
+        `${OUTWARD_HEAD} ${clause} ${REPORT_TAIL}`,
+      );
+    },
+  );
 });
