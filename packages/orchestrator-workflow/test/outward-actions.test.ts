@@ -7,8 +7,8 @@ import { readAsset } from "../src/assets.js";
 // for the rule, the grant classes, and the grant condition, and the
 // trust-and-outward reference for the examples and the records around them.
 // charter.test.ts rejects a second copy of a pinned sentence. The pointers in
-// SKILL.md and the references are not pinned. The implementer and reviewer
-// prompts carry their own subagent-side sentence (never perform one, report
+// SKILL.md and the references are not pinned. Every role prompt (implementer,
+// reviewer, explorer, advisor, task-slicer) carries its own subagent-side sentence (never perform one, report
 // one that happened), pinned at the end of this file because a subagent sees
 // only its prompt. What stays elsewhere is the contract of the run templates
 // and the marker grammar the 00-goal.md reader applies.
@@ -293,8 +293,9 @@ describe("06-handoff.md has the Sent / Drafted Outward section", () => {
 
 // The subagent-side outward rule, pinned in each role prompt that can write or
 // run commands (the explorer, advisor, and task-slicer have Bash and the
-// messaging tools too; only Edit and Write are excluded), so a later cut of a prompt cannot drop it silently. The
-// example list is pinned as part of the sentence that carries it.
+// messaging tools too; only Edit and Write are excluded), so a later cut of a
+// prompt cannot drop it silently. The example list is pinned as part of the
+// sentence that carries it.
 describe("safety core: each role prompt tells the subagent never to perform an outward action", () => {
   const implementerMd = readAsset("agents/implementer.md");
   const reviewerMd = readAsset("agents/reviewer.md");
