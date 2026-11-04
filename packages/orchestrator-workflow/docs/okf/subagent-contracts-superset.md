@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-11-04T14:09:40Z
+timestamp: 2026-11-04T14:12:36Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -149,7 +149,7 @@ trivial change.
   Both copies also gained a `commits` field; see
   [Commits field](#commits-field) below.
 - Reviewer: `packages/orchestrator-workflow/assets/skill/references/contracts.md:222#"## Reviewer output contract"`
-  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:208#"role: reviewer"`. Both
+  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:210#"role: reviewer"`. Both
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below. Both
   also gained a per-finding `recurrence` field; see
@@ -342,7 +342,7 @@ observed for, the recorded incident count, and the separate watchdog-stall
 incident's outcome. The watchdog-stall exception itself was reworded the
 same way, dropping "in the one measured incident of that class, it stalled
 a second time" down to just the outcome (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:35#"explicitly constrained respawn produced a"`), since the
-incident count is now evidence rather than rule text too. `packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:130#"gate's documentation (grounding-mcp) for the full"`
+incident count is now evidence rather than rule text too. `packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:132#"gate's documentation (grounding-mcp) for the full"`
 (the run-state paragraph, out of this section but touched by the same
 placement pass) similarly drops a pinned `grounding-mcp 0.6.0` version
 number in favor of "the consuming gate's documentation (grounding-mcp)".
@@ -385,12 +385,12 @@ Actions run-step shell replay, whose rules reach a briefing only for a diff that
 same field: `sample_size: not_applicable` is allowed when the replay itself has
 no meaningful sample size
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:267#"second, explicitly non-probabilistic trigger for the same field, with"`;
-`packages/orchestrator-workflow/assets/agents/reviewer.md:255#"non-probabilistic trigger for the same field: report it here too"`). The
+`packages/orchestrator-workflow/assets/agents/reviewer.md:257#"non-probabilistic trigger for the same field: report it here too"`). The
 installed `packages/orchestrator-workflow/assets/agents/reviewer.md:163#"lint) do not trigger this."`
 prompt keeps the trigger in its `reproduction` field note and the replay rules in the `github-actions-replay.md` skill reference. Both output
 contracts gained a matching `reproduction` field
 (`method, sample_size, result, matches_implementer_claim`,
-`packages/orchestrator-workflow/assets/skill/references/contracts.md:251#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:222#"residual_risks:"`); `matches_implementer_claim`
+`packages/orchestrator-workflow/assets/skill/references/contracts.md:251#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:224#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
@@ -539,13 +539,13 @@ round on it; see `packages/orchestrator-workflow/CHANGELOG.md`'s
 The reviewer output contract gained a per-finding `recurrence: new |
 repeated` field, added to both copies identically
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:240#"recurrence: new | repeated"` and
-`packages/orchestrator-workflow/assets/agents/reviewer.md:217#"recurrence: new | repeated"`, same field, same
+`packages/orchestrator-workflow/assets/agents/reviewer.md:219#"recurrence: new | repeated"`, same field, same
 line-relative position inside the findings item in both). It classifies
 each finding against earlier review rounds on the same task: `new` for a
 defect class not previously found there, `repeated` for one that already
 appeared; on a task's first round every finding is `new` by definition
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:304#"Review-round escalation budget's trigger."`). The
-installed `reviewer.md:243#"whenever the defect class matches an earlier round's finding"`
+installed `reviewer.md:245#"whenever the defect class matches an earlier round's finding"`
 prompt instructs the classification directly (`new` on a first round,
 `repeated` on a later one when the defect class matches); the round number
 reaches it from the orchestrator's briefing (a step 7 addition,
@@ -603,7 +603,7 @@ permission was tightened the same way in this task: it names the
 replayed-and-killed probes by their mutant definition and
 `verified_applied_via` value rather than only their id, since an id
 alone cannot be skipped by this rule either
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:283#"the orchestrator's reviewer briefing names the replayed probes the"`). Run mode `single` inverts this permission: the orchestrator is then the author of the probes, so the same step defines once what a named probe is (its full definition or a resolved immutable plan-and-result reference, never an id alone), requires the reviewer to replay every named orchestrator probe, and to report, in the existing `reproduction` field, whether each replayed verdict matches the recorded one, a mismatch also setting `matches_implementer_claim: mismatched` (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:290#"that skip permission does not apply"). The reviewer prompt carries the duty in its own words, because a reviewer runs without the skill, applies it under any `review_method` (its `normal` row lists the replay among the obligations no method suspends), and keeps it inert unless the briefing names the mode (packages/orchestrator-workflow/assets/agents/reviewer.md:196#"When the briefing names run mode"); `contracts.md` only points to the step and adds no output field (packages/orchestrator-workflow/assets/skill/references/contracts.md:314#"no output field is added for it"). No test pins the duty's wording; the reviewer's rule that a mutant is applied only through the probe runner belongs to its read-only rule, which is pinned at the reviewer prompt only, and `rendered-variants.test.ts` checks every rendered reviewer variant against the asset body.
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:283#"the orchestrator's reviewer briefing names the replayed probes the"`). Run mode `single` inverts this permission: the orchestrator is then the author of the probes, so the same step defines once what a named probe is (its full definition or a resolved immutable plan-and-result reference, never an id alone), requires the reviewer to replay every named orchestrator probe, and to report, in the existing `reproduction` field, whether each replayed verdict matches the recorded one, a mismatch also setting `matches_implementer_claim: mismatched` (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:290#"that skip permission does not apply"). The reviewer prompt carries the duty in its own words, because a reviewer runs without the skill, applies it under any `review_method` (its `normal` row lists the replay among the obligations no method suspends), and keeps it inert unless the briefing names the mode (packages/orchestrator-workflow/assets/agents/reviewer.md:198#"When the briefing names run mode"); `contracts.md` only points to the step and adds no output field (packages/orchestrator-workflow/assets/skill/references/contracts.md:314#"no output field is added for it"). No test pins the duty's wording; the reviewer's rule that a mutant is applied only through the probe runner belongs to its read-only rule, which is pinned at the reviewer prompt only, and `rendered-variants.test.ts` checks every rendered reviewer variant against the asset body.
 
 The pins that hold them: an exact sub-field-name pin at the implementer
 prompt, independent of the byte-for-byte cross-copy equality check
@@ -668,7 +668,7 @@ reviewer compares its search against the Class Closure row of
 Class match, not site match, decides `recurrence: repeated`: the reviewer
 sets it whenever a finding's defect class matches an earlier round's
 finding, even at a site the earlier round never touched
-(`reviewer.md:243-244#"new site."`).
+(`reviewer.md:245-246#"new site."`).
 
 Step 8 of the detailed workflow halts at the first `recurrence: repeated`
 finding whose class a previous round's fix already addressed and whose
@@ -792,7 +792,7 @@ the effort tier, and two matching reviewer output-contract fields,
 `method_applied` and `withdrawn`, added to both copies identically
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:252#"method_applied: normal | rigorous | adversarial"`
 and
-`packages/orchestrator-workflow/assets/agents/reviewer.md:229#"method_applied: normal | rigorous | adversarial"`,
+`packages/orchestrator-workflow/assets/agents/reviewer.md:231#"method_applied: normal | rigorous | adversarial"`,
 same field, same line-relative position right after
 `matches_implementer_claim`, the same byte-for-byte-block rigor already
 applied to `reproduction` and the findings block above). The three
@@ -830,7 +830,7 @@ in the same round, not carried into the next one, and reported under
 Emit `withdrawn: []` when nothing was withdrawn, the same
 not-omitted-vs-empty distinction already applied to `mutation_probes`
 and `commits` above
-(`packages/orchestrator-workflow/assets/agents/reviewer.md:261#"withdrawn. Report the method you actually applied"`
+(`packages/orchestrator-workflow/assets/agents/reviewer.md:263#"withdrawn. Report the method you actually applied"`
 and
 `packages/orchestrator-workflow/assets/skill/references/contracts.md:314#"when nothing was withdrawn."`).
 
@@ -913,7 +913,7 @@ yourself before recording their rows in `04-implementation-summary.md`."
 "A quoted probe verdict is not a named result of the verification set, so
 the set's missing-or-extra rule does not apply to it."
 The reviewer prompt applies the same rules to its own measurements
-(`packages/orchestrator-workflow/assets/agents/reviewer.md:259#"how you derived the result) and carry the same values"`):
+(`packages/orchestrator-workflow/assets/agents/reviewer.md:261#"how you derived the result) and carry the same values"`):
 "For probes you run, quote the runner's verdict (or say there is none and
 how you derived the result) and carry the same values into any finding."
 The single-mode replay rule carries the corresponding measured fields

@@ -501,7 +501,7 @@ describe("the run pointer and keyed run-base marker are specified in the skill's
 
   it("SKILL.md Run state names worktree create --setup and --smoke and the npm ci trap", () => {
     expect(runStateSection).toContain(
-      "When a task runs in its own linked worktree, create it with `agent-primitives worktree create --setup '<install command>'` and `--smoke <command>` for a repository whose tests need an install or a build first, and never pass `--pre 'npm ci'` inside a probe's linked worktree.",
+      "When a task runs in its own linked worktree, create it with `agent-primitives worktree create --setup '<install command>'` and `--smoke <command>` for a repository whose tests need an install or a build first, and never pass `--pre 'npm ci'` inside a probe's linked worktree: the copy links the dependency directories to the source tree, so an install there rewrites the real `node_modules`.",
     );
   });
 });

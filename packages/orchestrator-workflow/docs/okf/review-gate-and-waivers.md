@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-11-04T14:09:40Z
+timestamp: 2026-11-04T14:12:36Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -105,7 +105,7 @@ rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
 resupply it instead of inferring one from the findings list"
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:259-261#"instead of inferring one from the findings list."`; the installed `reviewer.md:249#"leave it blank or omit it."` prompt carries the mirrored
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:259-261#"instead of inferring one from the findings list."`; the installed `reviewer.md:251#"leave it blank or omit it."` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.
@@ -371,7 +371,7 @@ implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
 same rule (`reviewer.md:163#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:251#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:222#"residual_risks:"`); `matches_implementer_claim`
+field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:251#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:224#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -395,7 +395,7 @@ all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
 `packages/orchestrator-workflow/assets/skill/references/contracts.md:259-261#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing: ask the reviewer to resupply it, rather than infer one from the
-findings, and the installed `reviewer.md:249#"leave it blank or omit it."` prompt carries the mirrored
+findings, and the installed `reviewer.md:251#"leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part
