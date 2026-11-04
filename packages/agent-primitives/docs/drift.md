@@ -145,6 +145,15 @@ and the other fixed fields); a dotted path descends into objects
 `-m` does not shorten a printed field; only the printed line is bounded by
 it. A field this run did not produce prints `null`.
 
+`warnings`, `logs`, `fullResult` and `truncated` are taken from the emitted
+envelope (so a "full result not written" warning and the reduction marker
+show, and `truncated` agrees with `warnings`), while every other field comes
+from the unreduced result. `--summary` builds its `warning:` rows and
+`warnings=N` from the same emitted warnings but leaves out the two notices
+`-m` adds to the JSON view (`envelope is N characters; requested max-chars
+M could not be met` and `result reduced to the fixed fields only: ...`), so
+only the command's own warnings are listed and counted.
+
 Both views take precedence over `-f`, are bounded by `-m`, are mutually
 exclusive (naming both is a `usage_error` with exit `2` before anything
 runs, as is an unknown `--print` field, which lists this command's own

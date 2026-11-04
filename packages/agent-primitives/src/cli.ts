@@ -1226,10 +1226,6 @@ program
           fullResult,
         ),
       () => renderVerifyText(result, envelope),
-      // The same marker the emitted envelope got above.
-      (unreduced) => {
-        if (pendingEnvelopePatch.truncated) unreduced.truncated = true;
-      },
     );
   });
 
@@ -1552,6 +1548,7 @@ function emitProbe(
     const source: Record<string, unknown> = {
       ...unreduced,
       logs: envelope.logs,
+      truncated: envelope.truncated,
       ...(envelope.warnings === undefined
         ? {}
         : { warnings: envelope.warnings }),
@@ -1595,19 +1592,32 @@ interface ViewCliOptions {
   print?: string[];
 }
 
+/** The two notices `buildEnvelope` adds when it could not fit the bound
+ * (`envelope is N characters; requested max-chars M could not be met`,
+ * `result reduced to the fixed fields only: ...`). They describe the JSON
+ * view, so `--summary` leaves them out of its rows and its warning count;
+ * the command's own warnings and `full result not written ...` stay. */
+const REDUCTION_NOTICE =
+  /^(envelope is \d+ characters; requested max-chars |result reduced to the fixed fields only: )/;
+
+function withoutReductionNotices(warnings: string[]): string[] {
+  return warnings.filter((w) => !REDUCTION_NOTICE.test(w));
+}
+
 /**
  * Emits the envelope of `hygiene`, `drift` or `verify`, or, with
  * `--summary` / `--print`, the selected view of it instead. The exit code
  * is the one already computed for the envelope, which is built unchanged
  * either way. `--print` reads the unreduced envelope (the payload the
- * result-full file carries), with `logs`, `warnings` and `fullResult`
- * overlaid from the emitted one: the result-full path and a "full result
- * not written" warning only exist after the real build ran. Only the
+ * result-full file carries), with `logs`, `warnings`, `fullResult` and
+ * `truncated` overlaid from the emitted one: the result-full path, a
+ * "full result not written" warning and the reduction marker only exist
+ * after the real build ran (and verify sets `truncated` on the emitted
+ * envelope after `buildEnvelope` for a capped failures list). Only the
  * printed text is bounded by `-m`. `renderSummary` gets the saved full
- * result path (when one was written) and the emitted warnings.
- * `patchUnreduced` carries a field the caller sets on the emitted
- * envelope after `buildEnvelope` (verify's `truncated`) over to the
- * unreduced one.
+ * result path (when one was written) and the emitted warnings without
+ * the reduction and overrun notices (`withoutReductionNotices`), which
+ * describe the JSON view the summary does not print.
  */
 function emitView(
   opts: ViewCliOptions,
@@ -1617,7 +1627,6 @@ function emitView(
   envelopeInput: EnvelopeInput,
   renderSummary: (fullResult: string | undefined, warnings: string[]) => string,
   textRenderer: () => string,
-  patchUnreduced?: (unreduced: Record<string, unknown>) => void,
 ): void {
   if (opts.print !== undefined) {
     const unreduced = buildEnvelope({
@@ -1625,10 +1634,10 @@ function emitView(
       persistFullResult: false,
       maxChars: Number.MAX_SAFE_INTEGER,
     }).envelope;
-    patchUnreduced?.(unreduced);
     const source: Record<string, unknown> = {
       ...unreduced,
       logs: envelope.logs,
+      truncated: envelope.truncated,
       ...(envelope.warnings === undefined
         ? {}
         : { warnings: envelope.warnings }),
@@ -1646,7 +1655,11 @@ function emitView(
     writeAndExit(
       renderSummary(
         fullResultPathOf(envelope),
-        Array.isArray(envelope.warnings) ? (envelope.warnings as string[]) : [],
+        withoutReductionNotices(
+          Array.isArray(envelope.warnings)
+            ? (envelope.warnings as string[])
+            : [],
+        ),
       ),
       exitCode,
     );

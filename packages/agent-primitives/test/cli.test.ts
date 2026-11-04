@@ -3316,7 +3316,7 @@ describe("cli: probe", () => {
     expect(applied.line_content).toBeUndefined();
   });
 
-  it("line_content is printable with --print and absent when the substring was found", async () => {
+  it("line_content is printable with --print, absent for an out-of-range line and absent when the -M substring is found", async () => {
     const repo = fullSuiteRepo();
     const refused = await spawnCli([
       "-C",
@@ -3349,6 +3349,28 @@ describe("cli: probe", () => {
     const parsed = JSON.parse(outOfRange.stdout);
     expect(parsed.reason).toBe("mutant_not_applicable");
     expect(parsed.line_content).toBeUndefined();
+    // The substring is on the line: the mutant applies and nothing is refused.
+    const found = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-M",
+      "n > 0",
+      "-w",
+      "n < 0",
+      "-t",
+      "node -e 0",
+      "-i",
+      "inplace",
+    ]);
+    const foundParsed = JSON.parse(found.stdout);
+    expect(foundParsed.reason).not.toBe("mutant_not_applicable");
+    expect(foundParsed.mutant.line).toBe(2);
+    expect(foundParsed.line_content).toBeUndefined();
   });
 
   it("prints the full-suite hint before the baseline run starts, not after (view mode)", async () => {

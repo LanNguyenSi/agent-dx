@@ -124,8 +124,8 @@ How a `-c` item resolves:
   duplicated `-c` name does.
 
 `-x` alone does not replace the default list: `verify -x name=cmd` runs
-`build`, `typecheck`, `lint` and `test` as well as `name`, and each of the
-four without a script is a `no_script` non-pass. When at least one `-x` is
+`build`, `typecheck`, `lint` and `test` as well as `name`, and each default
+check without a script or `-x` override is a `no_script` non-pass. When at least one `-x` is
 given and `-c` is not, the `warnings` carry
 `hint: -x given without -c: the default check list (build,typecheck,lint,test) still runs; pass -c <names> to choose the run set`.
 Giving `-c` (even an empty list) or giving no `-x` leaves it out.
@@ -330,7 +330,7 @@ result; they work like the views of [probe](probe.md#compact-views---summary---p
 and a final totals line:
 
 ```text
-<name> | <pass|fail|skipped|error> | exit=<code|-> | <N>ms | passed=N failed=N skipped=N errors=N[ | reason=no_script][ | first failure: <file:line: message>]
+<name> | <pass|fail|skipped|error> | exit=<code|-> | <N>ms | passed=N failed=N skipped=N errors=N[ | reason=<reason>][ | first failure: <file:line: message>]
 totals: status=<pass|fail|error> [reason=<reason>] checks=N pass=N fail=N skipped=N error=N totalDurationMs=N warnings=N fullResult=<path>
 ```
 
@@ -349,6 +349,15 @@ so `-m` does not shorten a printed field; `--max-failures` still caps each
 check's `failures` list and sets `truncated` as it does for the JSON
 envelope, with the uncapped list in `verify-full-*.json`. Only the printed
 line is bounded by `-m`. A field this run did not produce prints `null`.
+
+`warnings`, `logs`, `fullResult` and `truncated` are taken from the emitted
+envelope (so a "full result not written" warning and the reduction marker
+show, and `truncated` agrees with `warnings`), while every other field comes
+from the unreduced result. `--summary` builds its `warning:` rows and
+`warnings=N` from the same emitted warnings but leaves out the two notices
+`-m` adds to the JSON view (`envelope is N characters; requested max-chars
+M could not be met` and `result reduced to the fixed fields only: ...`), so
+only the command's own warnings are listed and counted.
 
 Both views take precedence over `-f`, are bounded by `-m`, are mutually
 exclusive (naming both is a `usage_error` with exit `2` before anything

@@ -382,6 +382,50 @@ describe("drift --summary", () => {
   });
 });
 
+describe("a reduced run (small -m)", () => {
+  it("drift --summary neither prints nor counts the envelope's own reduction and overrun notices", async () => {
+    const repo = driftRepo();
+    const json = await spawnCli(["-C", repo, "-m", "400", ...DRIFT_ARGS]);
+    const warnings = JSON.parse(json.stdout).warnings as string[];
+    // The fixture really produces both notices in the JSON view.
+    expect(warnings.some((w) => w.startsWith("envelope is "))).toBe(true);
+    expect(
+      warnings.some((w) => w.startsWith("result reduced to the fixed fields")),
+    ).toBe(true);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      "400",
+      ...DRIFT_ARGS,
+      "--summary",
+    ]);
+    expect(run.code).toBe(1);
+    expect(run.stdout).not.toContain("warning:");
+    expect(run.stdout).not.toContain("requested max-chars");
+    expect(run.stdout).not.toContain("fixed fields only");
+    expect(run.stdout).toMatch(/ warnings=0 fullResult=\S+result-full-/);
+  });
+
+  it("drift --print truncated,warnings under a bound that reduces the envelope prints truncated: true beside the reduction warnings", async () => {
+    const repo = driftRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      "600",
+      ...DRIFT_ARGS,
+      "--print",
+      "truncated,warnings",
+    ]);
+    const printed = JSON.parse(run.stdout);
+    expect(printed.truncated).toBe(true);
+    expect(
+      (printed.warnings as string[]).some((w) => w.startsWith("envelope is ")),
+    ).toBe(true);
+  });
+});
+
 describe("drift --summary under --strict", () => {
   it("flags an allowlisted site that --strict reports in sites", async () => {
     const repo = driftRepo();

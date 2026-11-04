@@ -2256,7 +2256,10 @@ dotted path descends into objects (`mutation_probe.result`,
 `plan.summary`) and is read from the full result (what
 `result-full-*.json` holds), not from the `-m`-reduced envelope, so a
 field the JSON view shortened or cut still prints whole; only the
-printed line itself is bounded by `-m`. A top-level name outside the envelope's field list is a
+printed line itself is bounded by `-m`. The exceptions are `warnings`,
+`logs`, `fullResult` and `truncated`, which come from the emitted envelope
+(they only exist after the real build, and `truncated` then agrees with the
+reduction warnings beside it). A top-level name outside the envelope's field list is a
 `usage_error` raised before the probe runs, naming the field and listing
 the known ones; a known field this run did not produce (for example
 `test` after a failing baseline) prints `null`, as does a dotted path
