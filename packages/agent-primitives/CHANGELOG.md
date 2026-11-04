@@ -144,6 +144,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The skill (`assets/skill/SKILL.md`) names the verify repo preset and
+  `--repeat`, the compact views on `verify`, `hygiene` and `drift`, the plan's
+  per-mutant `test`, hygiene's intended deletions, drift's identifier ignore
+  and local-binding rule, and the patch branch guard, each with the flags to
+  use and the fields to read.
 - `probe`: the full-suite hint for a command such as `npm test` without
   `--timeout` is now a warning in the JSON envelope instead of a stderr
   line, appended after the probe's own warnings, so `2>&1 | <json parser>`
