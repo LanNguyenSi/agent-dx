@@ -21,6 +21,14 @@ single `probe` with a `killed`/`survived` verdict takes its exit code
 from `mutation_probe.expectation` instead (`0` met, `1` violated), so
 under `--expect pass` a `survived` exits `0`; see [probe.md](probe.md).
 
+`warnings` is where a command's notices belong when the output is the JSON
+envelope: stdout and stderr stay one parseable stream (`2>&1 | <json
+parser>`), and the field is held out of the reduction. A notice meant for a
+person watching a run (the `probe` full-suite hint) is appended to
+`warnings` in that case and goes to stderr only for `-f text` and the
+`--summary`/`--print`/`--report` views, whose stdout is not the envelope; a
+command's own warnings stay ahead of an appended notice.
+
 `buildEnvelope` produces the whole envelope, and `applyCaps` applies the
 four structural caps (`CapLimits`) to a plain object in one pass,
 returning a new structure with every cut marked in place. Both are

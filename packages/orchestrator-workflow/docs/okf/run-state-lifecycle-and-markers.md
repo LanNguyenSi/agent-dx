@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-11-03T15:05:37Z
+timestamp: 2026-11-04T14:12:36Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -62,19 +62,19 @@ prose to the kit.
 byte-exact by packages/orchestrator-workflow/test/template-markers.test.ts:55-57#"<!-- solution-acceptance: run-base = TODO -->").
 At run creation the orchestrator replaces `TODO` with the pre-change repo
 HEAD (`git rev-parse HEAD`), recorded before the run's first implementation
-commit (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:118#"recorded before the first implementation commit of the"). Despite sharing the `solution-acceptance:` prefix
+commit (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:125#"recorded before the first implementation commit of the"). Despite sharing the `solution-acceptance:` prefix
 with the two verdict markers below, run-base is not a verdict: it is a
 change-binding signal for run-completeness readers, and it fails **open**
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:121#"it does not block anything, the reader just falls back"). Left as `TODO` it does not block anything, the reader
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:128#"it does not block anything, the reader just falls back"). Left as `TODO` it does not block anything, the reader
 just falls back to a tolerant day-granular date heuristic. When filled, the
 recorded sha must resolve in the repo, be an ancestor of HEAD, and must not
 lie behind the fork point of the change (the merge-base with the remote
-default branch) (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:124#"change (the merge-base with the remote default branch);"). The in-repo changelog entry adds the
+default branch) (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:131#"change (the merge-base with the remote default branch);"). The in-repo changelog entry adds the
 consumer's malformed-value behavior: a valid sha gets an exact binding, a
 malformed value blocks explicitly via a 7-40 hex guard, and only a bare
 `TODO` falls back to the date heuristic
 (`packages/orchestrator-workflow/CHANGELOG.md:#[0.9.0]#"grounding-mcp 0.6.0 reads this marker"`;
-packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:125#"gate's documentation (grounding-mcp) for the full" points to "the
+packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:132#"gate's documentation (grounding-mcp) for the full" points to "the
 consuming gate's documentation (grounding-mcp) for the full consumer
 semantics" (0.24.0 placement pass dropped the pinned `0.6.0` version
 number from this pointer; the CHANGELOG's 0.9.0 entry above still carries
@@ -107,14 +107,14 @@ belongs in `.gitignore`
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:106#"absolute path."). Write it before the first implementation
 commit, overwrite it at the start of every later run, and remove it when no
 run is active, since a pointer left behind keeps binding that worktree to
-the old run (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:113#"document, not the kit's.").
+the old run (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:120#"document, not the kit's.").
 
 The run-completeness reader resolves the run through the pointer first. When
 no pointer file exists, it falls back to that repository's own `.ai/runs/`
 and takes the run there that sorts newest by directory name; a broken
 pointer (one whose target does not resolve) is rejected outright rather
 than falling back
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:113#"document, not the kit's."). The scan fallback is only
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:120#"document, not the kit's."). The scan fallback is only
 right when the run actually lives in that repository and sorts last: the
 consumer's own test suite (agent-grounding, packages/grounding-mcp,
 `tests/ow-run-completeness.test.ts`) measures this directly. With no pointer
@@ -132,8 +132,8 @@ Step 1 of the Workflow carries the matching instruction to write the pointer
 in every worktree the run touches
 (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:15#"in every worktree the run touches."), and each of the
 three per-harness bullets under Harness notes repeats that the pointer rule
-applies unchanged regardless of harness (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:183#"applies unchanged.";
-packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:186#"pointer rule from Run state applies unchanged."; packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:201#"pointer rule from Run state applies unchanged.").
+applies unchanged regardless of harness (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:190#"applies unchanged.";
+packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:193#"pointer rule from Run state applies unchanged."; packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:208#"pointer rule from Run state applies unchanged.").
 The policy section installed into `AGENTS.md` no longer repeats the pointer or
 the keyed `run-base[<repo-basename>]` marker: it is a short charter, and the
 Run state section of the reference above is their one site.
@@ -146,7 +146,7 @@ repository's basename for a linked worktree) and the value is that
 repository's pre-change HEAD. Write the marker exactly in that form, on its
 own line: a deviating line is either rejected (it blocks the run) or not
 recognised at all (the binding for that repository is silently missing)
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:135#"for that repository is silently missing)."). The consumer's own tests
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:142#"for that repository is silently missing)."). The consumer's own tests
 measure both halves of that generalisation: a rejected line is `malformed`
 (uppercase field name, whitespace before the colon, and extra dashes in the
 comment opener are each their own malformed-blocker test), and a marker
@@ -156,7 +156,7 @@ placeholder example directly below the unkeyed run-base marker
 (packages/orchestrator-workflow/assets/templates/00-goal.md:4#"<!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->"),
 and readers ignore a placeholder key of the literal shape `<repo-basename>`
 as a documentation example, until the placeholder key is actually replaced
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:132#"until the placeholder key is replaced"). A real key left with
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:139#"until the placeholder key is replaced"). A real key left with
 the placeholder value `<sha>` is not ignored the same way: the value is
 read as-is and the verdict layer blocks it, since `<sha>` is not a commit
 sha. Unlike the pointer, this marker line is written into a
@@ -191,11 +191,11 @@ one (template-markers.test.ts:99-100#"goalTemplate.matchAll(runBaseRe)"). In
 `docs-consistency.test.ts`, one `describe` block pins the skill's Run state
 section as the one site that specifies the pointer and the keyed marker:
 the `.ai/run` contract with its own specific phrases
-(docs-consistency.test.ts:464-470#"make sure it is ignored"), the keyed
+(docs-consistency.test.ts:482-488#"make sure it is ignored"), the keyed
 example verbatim
-(docs-consistency.test.ts:473-474#"run-base[<repo-basename>] = <sha>"), and the
+(docs-consistency.test.ts:491-492#"run-base[<repo-basename>] = <sha>"), and the
 keyed-marker grammar rule with both deviation outcomes
-(docs-consistency.test.ts:477-480#"either rejected (it blocks the run) or not recognised at all"). The other
+(docs-consistency.test.ts:495-498#"either rejected (it blocks the run) or not recognised at all"). The other
 places that mention the pointer (step 1, the harness notes, the policy
 section's Run state bullet, the README, and the INSTALL-AGENT.md write-surface
 listings) are copies of that section and carry no sentence pin.
@@ -341,7 +341,7 @@ the loop-closer and cites the motivating evidence: four upkeep sweeps on
 (`CHANGELOG.md:#[0.12.0]`). The hook's sentences carry no sentence pin; the
 template side is the contract and stays pinned: the optional Knowledge Bundle
 section of `06-handoff.md` and its outcome vocabulary
-(docs-consistency.test.ts:437-440#"Outcome: updated | not affected | follow-up filed.",
+(docs-consistency.test.ts:455-458#"Outcome: updated | not affected | follow-up filed.",
 checked as `## Knowledge Bundle` plus `Outcome: updated | not affected |
 follow-up filed.`).
 
@@ -364,7 +364,7 @@ anything inside it.
 (role enumeration, the safety core, task-slicer/subagent-contract field
 superset); only its Run state `describe` block above and its
 `06-handoff.md template carries the Knowledge Bundle section`
-(docs-consistency.test.ts:434-440#"Outcome: updated | not affected | follow-up filed.") `describe` block are this doc's topic.
+(docs-consistency.test.ts:452-458#"Outcome: updated | not affected | follow-up filed.") `describe` block are this doc's topic.
 The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see
@@ -407,19 +407,19 @@ run-base lines, shipped with its default value instead of a `TODO`
 (packages/orchestrator-workflow/assets/templates/00-goal.md:5#"<!-- solution-acceptance: mode = delegated -->").
 The value is `single`, `delegated`, or `batch`, and a missing or unrecognised
 value means `delegated`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:209#"The marker is a record for the orchestrator, the reviewer,"),
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:216#"The marker is a record for the orchestrator, the reviewer,"),
 so a run created from an older template is a `delegated` run without any
 edit. No reader enforces the marker
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:210#"and the operator; no reader enforces it."):
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:217#"and the operator; no reader enforces it."):
 it tells the reviewer and the operator who implemented, and it is what a
 briefing quotes. The three definitions, the selection rule by the shape of
 the work, the run files each mode requires, and the rule that a mode switch
 is a D-ID row and never a new run are stated once, in the reference's last
 section
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:204#"## Run mode");
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:211#"## Run mode");
 `SKILL.md` and the reference's Intent only point there. `single` makes
 `01-plan.md` and `02-tasks.md` optional (it records its runbook selection in `03-decisions.md` instead of `01-plan.md`'s `## Runbooks` section) and keeps `04-implementation-summary.md`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:234#"Run files per mode:"),
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:241#"Run files per mode:"),
 because the verification set, the mutation probes, and the run's own runbook consultation record
 (packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:87#"## Runbooks Consulted")
 live there; `batch` adds an Integration section to the same template
@@ -461,13 +461,13 @@ ignored and reported while a grantable token next to it keeps its grant; and
 a missing marker, more than one `outward` line, or a malformed line means
 `none`, so every outward action falls back to per-action operator
 confirmation
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:148-157#"need per-action operator confirmation."). Unlike `run-base`,
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:155-164#"need per-action operator confirmation."). Unlike `run-base`,
 `acceptance-recommendation`, `final-status`, and `mode`, this marker
 deliberately does not share the `solution-acceptance:` prefix; the reason is
 a namespace one, to keep an authorization grant out of the acceptance-verdict
 reader's key space altogether rather than depend on that reader's own
 tolerance of an unknown key
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:139-144#"to stay silent about it."). The chosen shape mirrors the kit's other
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:146-151#"to stay silent about it."). The chosen shape mirrors the kit's other
 plain-record marker, `03-decisions.md`'s
 `<!-- review-round-escalation: choice = n/a -->`, rather than inventing a
 third comment grammar.
@@ -502,7 +502,7 @@ subsection of run-state-and-harness.md points to both. The value grammar
 follows the
 one-normative-place pattern of the run mode marker above instead: that
 subsection is its one definition site
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:148#"This subsection is the one definition site of the marker's value grammar."),
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:155#"This subsection is the one definition site of the marker's value grammar."),
 and the charter states the orchestrator-only
 scope. AGENTS.md's Outward-facing actions section
 defines an outward action itself by boundary (any write to a system outside
