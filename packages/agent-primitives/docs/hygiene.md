@@ -89,7 +89,10 @@ argument or revision is a usage error (exit `2`).
   not read, a docblock line without a leading `*` (for example `  @test`)
   neither sets nor keeps a marker, and a same-line attribute whose
   arguments contain `]` is not seen through, so the method on that line
-  counts only by its `test` name. An over-count (method-like lines in
+  counts only by its `test` name. Inside an open attribute group a `Test`
+  name is read from two consecutive lines at a time, so one split over more
+  lines is missed, and a bare `Test` argument elsewhere in the group (for
+  example `DataProvider(Test)`) can mark the next method. An over-count (method-like lines in
   block comments or heredocs) can offset a real deletion in the same file.
   The count is a text heuristic, not a
   parser: it can miss a case written in an unusual shape, and it cannot
