@@ -68,9 +68,33 @@ argument or revision is a usage error (exit `2`).
   starting with `it(` or `test(` (including `.skip`, `.only`,
   `.each(...)` forms), `def test_`, `func Test`, or `@test`/`@Test`. In a
   `.php` file only PHPUnit methods count: a method named `test*`, or one
-  preceded by an `@test` docblock tag or a `#[Test]` attribute (short or
-  fully qualified), each method once; a `function test...(` line inside a
-  heredoc is counted as well. The count is a text heuristic, not a
+  carrying an `@test` docblock tag or a `#[Test]` attribute (short or fully
+  qualified), each method once; the attribute or a single-line
+  `/** @test */` docblock may also sit on the method's own line. The
+  invariant: a line matching the method pattern is always counted when its
+  name starts with `test` or a marker is pending; no comment, string or
+  attribute state can hide a method line. `@test` marks only on docblock
+  lines (`/**`, ` *` or `*/`) and on the method's own line, never in a
+  `//` or `#` comment or in code. A marker still waiting for its method is
+  dropped at the first later line that is neither blank nor a docblock,
+  comment or attribute line, and by every counted method. An attribute
+  group that closes on a later line is followed until its brackets balance
+  (counting `[` and `]` plainly): it only keeps a pending marker alive and
+  sets it when the group names `Test`, it never hides a method line, and
+  it ends at the first method line or the first line that closes it.
+  Documented limits: a method-like line inside a `/* */` block comment or
+  a heredoc/nowdoc body is counted (an over-count, never a hidden method),
+  a bracket misread inside an attribute can keep or drop one marker, a
+  docblock or attribute that follows the modifiers on the method line is
+  not read, a docblock line without a leading `*` (for example `  @test`)
+  neither sets nor keeps a marker, and a same-line attribute whose
+  arguments contain `]` is not seen through, so the method on that line
+  counts only by its `test` name. Inside an open attribute group a `Test`
+  name is read from two consecutive lines at a time, so one split over more
+  lines is missed, and a bare `Test` argument elsewhere in the group (for
+  example `DataProvider(Test)`) can mark the next method. An over-count (method-like lines in
+  block comments or heredocs) can offset a real deletion in the same file.
+  The count is a text heuristic, not a
   parser: it can miss a case written in an unusual shape, and it cannot
   tell a deliberately removed case from an accidental one, so a flagged
   drop is a prompt to explain it, not proof of a mistake. Carries

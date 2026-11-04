@@ -809,12 +809,17 @@ never a silent drop, with one exception: the refusal of a directory
 repository content named because it resolves outside the root (a
 composer `vendor-dir` that is a symlink out of the repository) is not
 reported as a warning when another candidate of the same round for the
-same destination (in the copy's own spelling) was accepted, such as the
-operator's `--link`, the worktree link manifest or an outside plan's
-`link` list for that path. The destination is planned to be linked (a
-later syscall-time refusal is reported on its own), so the warning
-would contradict `isolation.linked`. Such a superseded refusal is not
-dropped either: it appears, with the very text it would have carried,
+same destination was accepted -- met on either key: the copy's own
+spelling of it, or (for a gitignored destination the copy carries under
+no spelling, where two case variants of one source-tree entry would
+elsewhere stay two strings) the source tree's own name of the entry --
+such as the operator's `--link`, the worktree link manifest or an
+outside plan's `link` list for that path. The source-tree spelling match
+assumes the copy and the source tree are on volumes with the same case
+rules, and nothing verifies that assumption. The destination is planned to
+be linked (a later syscall-time refusal is reported on its own), so the
+warning would contradict `isolation.linked`. Such a superseded refusal is
+not dropped either: it appears, with the very text it would have carried,
 in the `isolation.supersededRefusals` array (`string[]`, present only
 when non-empty), next to the `isolation.linked` entry that overrides
 it. Every other refusal keeps its

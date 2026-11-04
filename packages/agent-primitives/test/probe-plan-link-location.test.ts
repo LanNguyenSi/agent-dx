@@ -238,6 +238,68 @@ describe("probe --plan: a plan outside the repository gets the --link policy for
     );
   }, 60000);
 
+  it("a case-VARIANT composer vendor-dir superseded by the operator's --link: one entry of the source tree, two spellings the gitignored copy cannot tell apart", async () => {
+    const fx = makeFixture();
+    fs.writeFileSync(
+      path.join(fx.repo, "composer.json"),
+      JSON.stringify({ config: { "vendor-dir": "Lib" } }),
+    );
+    // The on-disk entry is the gitignored `lib` symlink; `Lib` is the
+    // composer spelling. On a case-insensitive volume they are one
+    // entry, and the refusal of the named twin must be superseded by the
+    // accepted --link even though the gitignored copy carries neither
+    // spelling and each candidate keeps its own there.
+    const insensitive = caseInsensitiveVolume(fx.repo);
+
+    const run = await spawnCli([
+      "-C",
+      fx.repo,
+      "-l",
+      path.join(fx.base, "logs-case-variant"),
+      "-m",
+      "100000",
+      "probe",
+      "--file",
+      "src/a.sh",
+      "-n",
+      "1",
+      "-M",
+      "x=1",
+      "-w",
+      "x=2",
+      "-t",
+      "node test.js",
+      "--link",
+      "lib",
+    ]);
+    const envelope = JSON.parse(run.stdout) as {
+      status: string;
+      warnings: string[];
+      isolation?: {
+        linked?: string[];
+        supersededRefusals?: string[];
+      };
+    };
+
+    expect(envelope.status).toBe("killed");
+    expect(
+      envelope.warnings.filter((w) => w.includes("skipped linking")),
+    ).toEqual([]);
+    expect(envelope.isolation?.linked).toContain(path.join(fx.repo, "lib"));
+    if (insensitive) {
+      expect(envelope.isolation?.supersededRefusals).toHaveLength(1);
+      expect(envelope.isolation?.supersededRefusals?.[0]).toContain(
+        "resolves outside the repository root",
+      );
+    } else {
+      // A case-sensitive volume has no entry named `Lib` at all, so the
+      // composer discovery (which offers only directories that exist)
+      // never presents the named candidate and there is no refusal to
+      // supersede: today's behaviour, and what the fix must not change.
+      expect(envelope.isolation?.supersededRefusals).toBeUndefined();
+    }
+  }, 60000);
+
   it("isolation.supersededRefusals stays absent when no refusal was superseded", async () => {
     const fx = makeFixture();
 

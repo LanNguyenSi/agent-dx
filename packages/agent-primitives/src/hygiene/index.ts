@@ -109,32 +109,119 @@ export function countTestCases(content: string, filePath?: string): number {
   return count;
 }
 
+/** A method line: optional leading attribute groups (`#[...]`, several),
+ * an optional single-line `/** ... *\/` docblock, then the modifiers and
+ * the name. An attribute whose arguments contain `]` is not seen
+ * through, and a docblock or attribute on a method line is read only when
+ * it comes before the modifiers. */
 const PHP_FUNCTION =
-  /^\s*(?:(?:public|protected|private|static|final|abstract)\s+)*function\s+&?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/;
+  /^(\s*(?:#\[[^\]]*\]\s*)*(?:\/\*\*.*?\*\/\s*)?)(?:(?:public|protected|private|static|final|abstract)\s+)*function\s+&?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/;
 const PHP_DOC_TEST_TAG = /(?:^|[\s*])@test\b/;
 const PHP_TEST_ATTRIBUTE =
   /#\[\s*(?:[^\]]*,\s*)?\\?(?:PHPUnit\\Framework\\Attributes\\)?Test\s*(?:\(\s*\))?\s*[,\]]/;
+/** The `Test` attribute name inside the continuation of an attribute group
+ * (the `#[` is on an earlier line): tested on the previous and the current
+ * line only, so a long continuation stays linear. */
+const PHP_TEST_ATTRIBUTE_CONTINUATION =
+  /(?:^|[\s,\[(])\\?(?:PHPUnit\\Framework\\Attributes\\)?Test\s*(?:\(\s*\))?\s*[,\]]/;
+/** A docblock line (`/**`, ` *` or `*\/`): only these lines may carry the
+ * `@test` marker. */
+const PHP_DOCBLOCK_LINE = /^\s*(?:\/\*\*|\*)/;
+/** A comment line (a `//` or `#` line comment, or a plain `/*` opener;
+ * not an attribute): it neither sets nor clears the pending marker. */
+const PHP_COMMENT_LINE = /^\s*(?:\/\/|\/\*|#(?!\[))/;
+
+/** `[` minus `]` on a line: how far an attribute group opened on this line
+ * is from being closed. */
+function bracketDelta(line: string): number {
+  let delta = 0;
+  for (const ch of line) {
+    if (ch === "[") delta += 1;
+    else if (ch === "]") delta -= 1;
+  }
+  return delta;
+}
 
 /** PHPUnit test methods: a method whose name starts with `test`, or a
- * method preceded by an `@test` docblock tag or a `#[Test]` attribute
- * (short or fully qualified). Each method counts once, so a method with
- * both a `test*` name and a marker is one case, and removing only the
- * marker from such a method is not a drop. A text heuristic: a
- * `function test...(` line at the start of a heredoc line is counted
- * too. */
+ * method carrying an `@test` docblock tag or a `#[Test]` attribute
+ * (short or fully qualified); the attribute or a single-line docblock
+ * may also sit on the method line itself, before the modifiers. Each
+ * method counts once, so a method with both a `test*` name and a marker
+ * is one case, and removing only the marker from such a method is not a
+ * drop.
+ *
+ * A line-by-line heuristic, not a parser, with one invariant: a line that
+ * matches the method pattern is always counted when its name starts with
+ * `test` or a marker is pending, and no comment, string or attribute state
+ * can hide it. The `@test` marker is set only on docblock lines (`/**`,
+ * ` *` or `*\/`) and on the method line itself; a `//` or `#` comment and
+ * code never set it. A pending marker is cleared by the next non-blank
+ * line that is not a docblock, comment or attribute line, and by every
+ * counted method. An attribute group whose `]` comes on a later line is
+ * followed until it balances: it only keeps the pending marker alive and
+ * sets it when the group names `Test`, it never hides a method line, and
+ * it ends at the first method line or the first line that closes it.
+ * Documented limits: a method-like line inside a block comment, heredoc
+ * or nowdoc is counted (the accepted over-count direction); a bracket
+ * misread inside an attribute can keep or drop one marker but hide no
+ * method; and a docblock or attribute that follows the modifiers on the
+ * method line is not read. */
 export function countPhpTestMethods(content: string): number {
   let count = 0;
   let pendingMarker = false;
+  let inAttribute = false;
+  let attributeDepth = 0;
+  let previousLine = "";
   for (const line of content.split("\n")) {
     const fn = PHP_FUNCTION.exec(line);
     if (fn !== null) {
-      if (pendingMarker || fn[1].startsWith("test")) count += 1;
+      const prefix = fn[1] ?? "";
+      const sameLineMarker =
+        PHP_TEST_ATTRIBUTE.test(prefix) ||
+        (prefix.includes("/**") && PHP_DOC_TEST_TAG.test(prefix));
+      if ((fn[2] ?? "").startsWith("test") || pendingMarker || sameLineMarker) {
+        count += 1;
+      }
       pendingMarker = false;
+      inAttribute = false;
+      attributeDepth = 0;
       continue;
     }
-    if (PHP_DOC_TEST_TAG.test(line) || PHP_TEST_ATTRIBUTE.test(line)) {
-      pendingMarker = true;
+    if (inAttribute) {
+      attributeDepth += bracketDelta(line);
+      if (
+        !pendingMarker &&
+        PHP_TEST_ATTRIBUTE_CONTINUATION.test(previousLine + "\n" + line)
+      ) {
+        pendingMarker = true;
+      }
+      previousLine = line;
+      if (attributeDepth <= 0) {
+        inAttribute = false;
+        attributeDepth = 0;
+      }
+      continue;
     }
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    if (trimmed.startsWith("#[")) {
+      const delta = bracketDelta(line);
+      if (delta > 0) {
+        inAttribute = true;
+        attributeDepth = delta;
+        previousLine = line;
+        if (PHP_TEST_ATTRIBUTE.test(line)) pendingMarker = true;
+      } else if (PHP_TEST_ATTRIBUTE.test(line)) {
+        pendingMarker = true;
+      }
+      continue;
+    }
+    if (PHP_DOCBLOCK_LINE.test(line)) {
+      if (PHP_DOC_TEST_TAG.test(line)) pendingMarker = true;
+      continue;
+    }
+    if (PHP_COMMENT_LINE.test(line)) continue;
+    pendingMarker = false;
   }
   return count;
 }

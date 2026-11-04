@@ -18,6 +18,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment` through a shared probe in `test/helpers/ps-usable.ts`.
   Where `ps` runs nothing is skipped.
 
+### Fixed
+
+- `probe` link policy: a provenance refusal is now superseded when an
+  accepted link names the same destination in either the copy's spelling or
+  the source tree's own name of the entry. On a case-insensitive volume a
+  composer `vendor-dir` of `Vendor` plus `--link vendor` named one
+  gitignored entry the copy spells as two strings, and printed a
+  contradictory "skipped linking" warning next to the `isolation.linked`
+  entry; the entry's on-disk name now meets the two spellings and the
+  refusal moves to `isolation.supersededRefusals`.
+- `hygiene` PHP test counter: a line matching the method pattern is now
+  always counted when its name starts with `test` or a marker is pending,
+  so no comment, string or attribute can hide a method line and let a deleted
+  test go unreported; a `#[Test]` attribute or a single-line
+  `/** @test */` docblock on the method's own line counts that method
+  instead of being missed and leaking its marker onto the next one,
+  `@test` only marks on docblock lines, a pending marker is dropped at the
+  first line that is neither blank nor a docblock, comment or attribute
+  line, and an attribute group closing on a later line keeps a pending
+  marker alive and sets it when it names `Test` without ever hiding a
+  method. Documented limits: method-like lines inside block comments,
+  heredocs or nowdocs are counted, a bracket misread inside an attribute
+  can keep or drop one marker, a docblock or attribute after the
+  modifiers on the method line is not read, a docblock line without a
+  leading `*` (for example `  @test`) neither sets nor keeps a marker, a
+  same-line attribute whose arguments contain `]` is not seen through (the
+  method on that line counts only by its `test` name), and an over-count
+  can offset a real deletion in the same file.
+
 ## [0.19.1] - 2026-11-01
 
 ### Fixed

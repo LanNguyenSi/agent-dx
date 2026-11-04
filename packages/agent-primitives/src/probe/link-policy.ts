@@ -643,12 +643,21 @@ export function planLinks(
 ): LinkPlan {
   const links: PlannedLink[] = [];
   // Every refusal, in evaluation order. A refusal carries a `destination`
-  // (the copy's own spelling) only when it may be superseded by an
+  // (the copy's own spelling) and a `rootKey` (the source tree's own
+  // spelling of the same place) only when it may be superseded by an
   // accepted candidate for that destination: see the end of the function.
-  const refusals: { warning: string; destination: string | undefined }[] = [];
+  const refusals: {
+    warning: string;
+    destination: string | undefined;
+    rootKey: string | undefined;
+  }[] = [];
   const warnings = {
     push(warning: string): void {
-      refusals.push({ warning, destination: undefined });
+      refusals.push({
+        warning,
+        destination: undefined,
+        rootKey: undefined,
+      });
     },
   };
   for (const candidate of candidates) {
@@ -690,6 +699,7 @@ export function planLinks(
             "inside it",
         ),
         destination: ctx.canonicalRelPath(relPath),
+        rootKey: ctx.canonicalRootRelPath(relPath),
       });
       continue;
     }
@@ -890,18 +900,34 @@ export function planLinks(
   // it concerns ends up unlinked. Another candidate of this round for the
   // same destination that was accepted (typically the operator's own
   // `--link` for a path a `composer.json` also names) already provides
-  // that link, so the refused twin would only be noise. The check runs
-  // after the loop, so candidate order cannot matter, and it only filters
-  // what is reported: no accept/refuse decision above depends on it. The
-  // superseded refusals are not dropped: they are returned separately, so
-  // a reader can still see what was refused and quietly overridden.
+  // that link, so the refused twin would only be noise. ONE DIRECTORY is
+  // asked on EITHER key: the copy's own spelling of the destination
+  // (which rule 4 and every earlier comparison use), or the SOURCE
+  // tree's own name of the entry it sits at. The copy key alone is not
+  // enough for the gitignored destinations these links exist for: with
+  // nothing on disk in the copy under any spelling, `canonicalRelPath`
+  // leaves each candidate its given one, and on a case-insensitive volume
+  // a `vendor-dir` of `Vendor` and an operator's `--link vendor` then
+  // name one entry of the source tree -- where rule 1b found a symlink
+  // resolving outside the root, so the entry IS there -- under two
+  // strings the copy cannot tell apart. `canonicalRootRelPath` reads that
+  // entry's on-disk name back by lstat identity and meets the two
+  // spellings. The check runs after the loop, so candidate order cannot
+  // matter, and it only filters what is reported: no accept/refuse
+  // decision above depends on it. The superseded refusals are not
+  // dropped: they are returned separately, so a reader can still see what
+  // was refused and quietly overridden.
   const linkedDestinations = new Set(links.map((l) => l.canonicalRelPath));
+  const linkedRootKeys = new Set(
+    links.map((l) => ctx.canonicalRootRelPath(l.relPath)),
+  );
   const reported: string[] = [];
   const supersededRefusals: string[] = [];
   for (const refusal of refusals) {
     if (
       refusal.destination !== undefined &&
-      linkedDestinations.has(refusal.destination)
+      (linkedDestinations.has(refusal.destination) ||
+        (refusal.rootKey !== undefined && linkedRootKeys.has(refusal.rootKey)))
     ) {
       supersededRefusals.push(refusal.warning);
     } else {
