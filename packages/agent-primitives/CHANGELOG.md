@@ -17,21 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contradictory "skipped linking" warning next to the `isolation.linked`
   entry; the entry's on-disk name now meets the two spellings and the
   refusal moves to `isolation.supersededRefusals`.
-- `hygiene` PHP test counter: a `#[Test]` attribute or a single-line
-  `/** @test */` docblock on the method's own line now counts that method
-  instead of being missed and leaking its marker onto the next one; lines
-  inside a `/* */` block comment or a heredoc/nowdoc body are no longer
-  counted, `@test` only marks inside a docblock, and a pending marker is
-  dropped at the first line that is neither blank nor a docblock, comment
-  or attribute line. A `/*` or `<<<` inside a quoted string literal opens no
-  state, a heredoc body ends at a line that starts with its label followed
-  by a character that cannot continue the label (PHP 7.3's own rule), and an
-  attribute group closing on a later line no longer drops the marker above
-  it. A state still open at the end of the file is taken for a misread and
-  the file is recounted with that state off, keeping the higher count, so a
-  misread can no longer hide every later method and let a deleted test go
-  unreported. Documented limits: attribute arguments containing `]`, and a
-  docblock or attribute after the modifiers on the method line.
+- `hygiene` PHP test counter: a line matching the method pattern is now
+  always counted when its name starts with `test` or a marker is pending,
+  so no comment, string or attribute can hide a method and let a deleted
+  test go unreported; a `#[Test]` attribute or a single-line
+  `/** @test */` docblock on the method's own line counts that method
+  instead of being missed and leaking its marker onto the next one,
+  `@test` only marks on docblock lines, a pending marker is dropped at the
+  first line that is neither blank nor a docblock, comment or attribute
+  line, and an attribute group closing on a later line keeps a pending
+  marker alive and sets it when it names `Test` without ever hiding a
+  method. Documented limits: method-like lines inside block comments,
+  heredocs or nowdocs are counted, a bracket misread inside an attribute
+  can keep or drop one marker, and a docblock or attribute after the
+  modifiers on the method line is not read.
 
 ## [0.19.1] - 2026-11-01
 

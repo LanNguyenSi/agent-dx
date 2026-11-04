@@ -70,24 +70,23 @@ argument or revision is a usage error (exit `2`).
   `.php` file only PHPUnit methods count: a method named `test*`, or one
   carrying an `@test` docblock tag or a `#[Test]` attribute (short or fully
   qualified), each method once; the attribute or a single-line
-  `/** @test */` docblock may also sit on the method's own line. PHP is
-  counted per line: a line inside a `/* */` block comment or a
-  heredoc/nowdoc body never counts, an `@test` outside a docblock (in a
-  `//` or `#` comment, or in code) never marks, an attribute group that
-  closes on a later line keeps the marker it carries and does not clear a
-  pending one, and a marker still waiting for its method is dropped at the
-  first line that is neither blank nor a docblock, comment or attribute
-  line. A heredoc body ends at a line that starts (ignoring indentation)
-  with its label followed by a character that cannot continue the label,
-  which has been PHP's own rule since 7.3, and a `/*` or `<<<` inside a
-  quoted string literal opens no state. When a state is nevertheless still
-  open at the end of the file (an unterminated heredoc or block comment, or
-  an attribute whose `]` never comes), the counter takes it for a misread
-  and recounts the whole file with that state off, keeping the higher
-  count: a misread can only raise a count, never lower it, so a deleted
-  test never disappears behind a state. Shapes the PHP counter does not
-  read: an attribute whose arguments contain `]`, and a docblock or
-  attribute that follows the modifiers on the method line.
+  `/** @test */` docblock may also sit on the method's own line. The
+  invariant: a line matching the method pattern is always counted when its
+  name starts with `test` or a marker is pending; no comment, string or
+  attribute state can hide a method line. `@test` marks only on docblock
+  lines (`/**`, ` *` or `*/`) and on the method's own line, never in a
+  `//` or `#` comment or in code. A marker still waiting for its method is
+  dropped at the first later line that is neither blank nor a docblock,
+  comment or attribute line, and by every counted method. An attribute
+  group that closes on a later line is followed until its brackets balance
+  (counting `[` and `]` plainly): it only keeps a pending marker alive and
+  sets it when the group names `Test`, it never hides a method line, and
+  it ends at the first method line or the first line that closes it.
+  Documented limits: a method-like line inside a `/* */` block comment or
+  a heredoc/nowdoc body is counted (an over-count, never a hidden method),
+  a bracket misread inside an attribute can keep or drop one marker, and a
+  docblock or attribute that follows the modifiers on the method line is
+  not read.
   The count is a text heuristic, not a
   parser: it can miss a case written in an unusual shape, and it cannot
   tell a deliberately removed case from an accidental one, so a flagged

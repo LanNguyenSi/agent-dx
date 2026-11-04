@@ -193,18 +193,18 @@ describe("helpers", () => {
     expect(countPhpTestMethods(src)).toBe(2);
   });
 
-  it("does not count function lines inside a block comment whose lines carry no star prefix", () => {
+  it("counts method-like lines inside a block comment, the documented limit", () => {
     const src = [
       "  /*",
       "  public function testInBlockComment(): void {}",
-      "  function testAlsoInBlock(): void {}",
+      "  function testInComment(): void {}",
       "  */",
       "  public function testAfter(): void {}",
     ].join("\n");
-    expect(countPhpTestMethods(src)).toBe(1);
+    expect(countPhpTestMethods(src)).toBe(3);
   });
 
-  it("does not count function lines inside heredocs and nowdocs, quoted forms and indented terminators included", () => {
+  it("counts method-like lines inside heredocs and nowdocs, quoted forms and indented terminators included, the documented limit", () => {
     const src = [
       "  public function setUp(): void {",
       "    $a = <<<EOD",
@@ -218,7 +218,7 @@ describe("helpers", () => {
       "    QT;",
       "  }",
     ].join("\n");
-    expect(countPhpTestMethods(src)).toBe(0);
+    expect(countPhpTestMethods(src)).toBe(3);
   });
 
   it("does not leak a class docblock @test onto the next method", () => {
@@ -252,7 +252,7 @@ describe("helpers", () => {
     expect(countPhpTestMethods(inString)).toBe(0);
   });
 
-  it("does not open a block comment on a /* inside a string literal", () => {
+  it("keeps every method counted below a /* inside a string literal", () => {
     const src = [
       "<?php",
       "final class FooTest extends TestCase {",
@@ -269,7 +269,7 @@ describe("helpers", () => {
     expect(countPhpTestMethods(src)).toBe(4);
   });
 
-  it("does not open a block comment on an escaped quote before the /*", () => {
+  it("keeps every method counted below an escaped quote before a /*", () => {
     const src = [
       "  public function setUp(): void {",
       "    $s = 'it\\'s /* fine';",
@@ -282,7 +282,7 @@ describe("helpers", () => {
     expect(countPhpTestMethods(src)).toBe(3);
   });
 
-  it("does not open a heredoc on a <<< inside a string literal", () => {
+  it("keeps every method counted below a conflict marker string and a heredoc opener string", () => {
     const conflict = [
       "<?php",
       "final class FooTest extends TestCase {",
@@ -312,26 +312,26 @@ describe("helpers", () => {
     expect(countPhpTestMethods(opener)).toBe(2);
   });
 
-  it("closes a heredoc on any PHP 7.3 terminator and on nothing that continues the label", () => {
+  it("counts every method around a heredoc for each PHP 7.3 terminator shape including EOT .", () => {
     const terminated = (terminator: string): string =>
       [
         "  public function setUp(): void {",
-        "    $a = <<<EOD",
+        "    $a = <<<EOT",
         "function testInHeredoc(): void {}",
         terminator,
         "  }",
         "  public function testAfter(): void {}",
       ].join("\n");
     for (const terminator of [
-      "EOD;",
-      "EOD,",
-      "EOD)",
-      "EOD .",
-      "EOD]",
-      "EOD->",
-      "EOD",
+      "EOT;",
+      "EOT,",
+      "EOT)",
+      "EOT .",
+      "EOT]",
+      "EOT->",
+      "EOT",
     ]) {
-      expect(countPhpTestMethods(terminated(terminator)), terminator).toBe(1);
+      expect(countPhpTestMethods(terminated(terminator)), terminator).toBe(2);
     }
     const inArguments = [
       "  public function setUp(): void {",
@@ -341,7 +341,7 @@ describe("helpers", () => {
       "  }",
       "  public function testAfter(): void {}",
     ].join("\n");
-    expect(countPhpTestMethods(inArguments)).toBe(1);
+    expect(countPhpTestMethods(inArguments)).toBe(2);
     const nextLineParen = [
       "  public function setUp(): void {",
       "    foo(<<<EOD",
@@ -351,7 +351,7 @@ describe("helpers", () => {
       "  }",
       "  public function testAfter(): void {}",
     ].join("\n");
-    expect(countPhpTestMethods(nextLineParen)).toBe(1);
+    expect(countPhpTestMethods(nextLineParen)).toBe(2);
     const longerLabel = [
       "  public function setUp(): void {",
       "    $a = <<<EOD",
@@ -361,7 +361,7 @@ describe("helpers", () => {
       "  }",
       "  public function testAfter(): void {}",
     ].join("\n");
-    expect(countPhpTestMethods(longerLabel)).toBe(1);
+    expect(countPhpTestMethods(longerLabel)).toBe(2);
     const bodyThatLooksLikeATerminator = [
       "  public function setUp(): void {",
       "    $a = <<<EOD",
@@ -371,7 +371,7 @@ describe("helpers", () => {
       "  }",
       "  public function testAfter(): void {}",
     ].join("\n");
-    expect(countPhpTestMethods(bodyThatLooksLikeATerminator)).toBe(1);
+    expect(countPhpTestMethods(bodyThatLooksLikeATerminator)).toBe(2);
   });
 
   it("keeps a pending marker across a multi-line attribute", () => {
@@ -410,24 +410,7 @@ describe("helpers", () => {
     expect(countPhpTestMethods(noMarkerInContinuation)).toBe(1);
   });
 
-  it("recounts with the state off when a state never closes", () => {
-    const unterminatedHeredoc = [
-      "<?php",
-      "final class FooTest extends TestCase {",
-      "  public function testOne(): void {}",
-      "  public function body(): string {",
-      "    return <<<EOD",
-      "function testInBody(): void {}",
-      "still in the heredoc, the file ends here",
-    ].join("\n");
-    const stateless = unterminatedHeredoc
-      .split("\n")
-      .filter((l) => !l.includes("<<<EOD"))
-      .join("\n");
-    expect(countPhpTestMethods(unterminatedHeredoc)).toBe(
-      countPhpTestMethods(stateless),
-    );
-    expect(countPhpTestMethods(unterminatedHeredoc)).toBe(2);
+  it("counts every method when a block comment, heredoc or attribute never closes", () => {
     const unterminatedComment = [
       "<?php",
       "final class FooTest extends TestCase {",
@@ -437,6 +420,16 @@ describe("helpers", () => {
       "  the file ends inside the comment",
     ].join("\n");
     expect(countPhpTestMethods(unterminatedComment)).toBe(2);
+    const unterminatedHeredoc = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function testOne(): void {}",
+      "  public function body(): string {",
+      "    return <<<EOD",
+      "function testInBody(): void {}",
+      "still in the heredoc, the file ends here",
+    ].join("\n");
+    expect(countPhpTestMethods(unterminatedHeredoc)).toBe(2);
     const unterminatedAttribute = [
       "<?php",
       "final class FooTest extends TestCase {",
@@ -446,6 +439,73 @@ describe("helpers", () => {
       "  public function testTwo(): void {}",
     ].join("\n");
     expect(countPhpTestMethods(unterminatedAttribute)).toBe(2);
+  });
+
+  it("never hides a method behind a glob line comment, a hash glob comment or a trailing glob comment", () => {
+    const lineComment = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  // see src/*",
+      "  public function testOne(): void {}",
+      "  public function testTwo(): void {}",
+      "  /** helper */",
+      "  private function helper(): void {}",
+      "}",
+    ].join("\n");
+    expect(countPhpTestMethods(lineComment)).toBe(2);
+    const hashComment = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  # tests/fixtures/*.json",
+      "  public function testOne(): void {}",
+      "  public function testTwo(): void {}",
+      "}",
+    ].join("\n");
+    expect(countPhpTestMethods(hashComment)).toBe(2);
+    const trailing = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function setUp(): void {",
+      "    $x = 1; // see src/*",
+      "  }",
+      "  public function testOne(): void {}",
+      "  public function testTwo(): void {}",
+      "}",
+    ].join("\n");
+    expect(countPhpTestMethods(trailing)).toBe(2);
+  });
+
+  it("never hides a method or drops its marker behind a multi-line string whose body holds /*", () => {
+    const src = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function setUp(): void {",
+      "    $s = 'first line",
+      "/* still the string",
+      "';",
+      "  }",
+      "  /** @test */",
+      "  public function works(): void {}",
+      "}",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(1);
+  });
+
+  it("never hides a method behind an attribute with a bracket inside a string", () => {
+    const balanced = [
+      "  #[TestWith(['/^\\[/'])]",
+      "  public function testOne(): void {}",
+      "  public function testTwo(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(balanced)).toBe(2);
+    const opensAContinuation = [
+      "  #[TestWith(['/^\\['])]",
+      "  public function testOne(): void {}",
+      "  public function testTwo(): void {}",
+      "  #[Bar(']')]",
+      "  public function testThree(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(opensAContinuation)).toBe(3);
   });
 
   it("routes .php paths to the PHP counter only", () => {
@@ -960,6 +1020,47 @@ describe("hygiene CLI", () => {
     expect(out.findings[0]).toMatchObject({
       kind: "test_cases_dropped",
       path: "tests/FooTest.php",
+      baseCases: 5,
+      headCases: 4,
+    });
+  });
+
+  it("flags a PHPUnit test deleted below a // see src/* comment and above a docblock through the CLI", async () => {
+    const repo = initRepo();
+    const fixture = (n: number): string =>
+      [
+        "<?php",
+        "final class FooTest extends TestCase {",
+        "  // see src/*",
+        ...Array.from(
+          { length: n },
+          (_, i) => `  public function test${String(i)}(): void {}`,
+        ),
+        "  /** helper */",
+        "  private function helper(): void {}",
+        "  /** @test */",
+        "  public function four(): void {}",
+        "}",
+        "",
+      ].join("\n");
+    write(repo, "tests/SeeTest.php", fixture(4));
+    commitAll(repo, "php tests");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "tests/SeeTest.php", fixture(3));
+    commitAll(repo);
+    const run = await spawnCli(["-C", repo, "hygiene", "--base", base]);
+    expect(run.code).toBe(1);
+    const out = JSON.parse(run.stdout) as {
+      findings: {
+        kind: string;
+        path: string;
+        baseCases: number;
+        headCases: number;
+      }[];
+    };
+    expect(out.findings[0]).toMatchObject({
+      kind: "test_cases_dropped",
+      path: "tests/SeeTest.php",
       baseCases: 5,
       headCases: 4,
     });

@@ -119,47 +119,12 @@ const PHP_FUNCTION =
 const PHP_DOC_TEST_TAG = /(?:^|[\s*])@test\b/;
 const PHP_TEST_ATTRIBUTE =
   /#\[\s*(?:[^\]]*,\s*)?\\?(?:PHPUnit\\Framework\\Attributes\\)?Test\s*(?:\(\s*\))?\s*[,\]]/;
-/** `<<<ID`, `<<<"ID"` or `<<<'ID'`: the opening line of a
- * heredoc/nowdoc, label captured. */
-const PHP_HEREDOC_START = /<<<\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/;
-
-/** Whether `line` is the terminator of a heredoc/nowdoc opened with label
- * `id`: its trimmed start is the label and the next character is not an
- * identifier character (the PHP 7.3 flexible rule), so `EOT;`, `EOT,`,
- * `EOT)`, `EOT .`, `EOT]`, `EOT->` and a bare `EOT` line all close, while
- * `EOTX;` continues the label and does not. */
-function closesHeredoc(line: string, id: string): boolean {
-  const t = line.trimStart();
-  if (!t.startsWith(id)) return false;
-  const next = t[id.length];
-  return next === undefined || !/[A-Za-z0-9_]/.test(next);
-}
-
-/** Unescaped `quote` characters in `line` before `index` (a backslash
- * escapes the next character). */
-function countUnescapedQuotes(
-  line: string,
-  quote: string,
-  index: number,
-): number {
-  let count = 0;
-  for (let i = 0; i < index; i += 1) {
-    if (line[i] !== quote) continue;
-    let backslashes = 0;
-    for (let j = i - 1; j >= 0 && line[j] === "\\"; j -= 1) backslashes += 1;
-    if (backslashes % 2 === 0) count += 1;
-  }
-  return count;
-}
-
-/** Whether index `index` of `line` sits inside a quoted string: the
- * unescaped `'` or the unescaped `"` count before it is odd. */
-function insideStringLiteral(line: string, index: number): boolean {
-  return (
-    countUnescapedQuotes(line, "'", index) % 2 === 1 ||
-    countUnescapedQuotes(line, '"', index) % 2 === 1
-  );
-}
+/** A docblock line (`/**`, ` *` or `*\/`): only these lines may carry the
+ * `@test` marker. */
+const PHP_DOCBLOCK_LINE = /^\s*(?:\/\*\*|\*)/;
+/** A comment line (a `//` or `#` line comment, or a plain `/*` opener;
+ * not an attribute): it neither sets nor clears the pending marker. */
+const PHP_COMMENT_LINE = /^\s*(?:\/\/|\/\*|#(?!\[))/;
 
 /** `[` minus `]` on a line: how far an attribute group opened on this line
  * is from being closed. */
@@ -172,54 +137,36 @@ function bracketDelta(line: string): number {
   return delta;
 }
 
-/** The three across-line states of `countPhpTestMethods`, each of which
- * the fail-safe can switch off. */
-interface PhpStates {
-  heredoc: boolean;
-  blockComment: boolean;
-  attribute: boolean;
-}
-
-interface PhpScan {
-  count: number;
-  heredocOpen: boolean;
-  blockCommentOpen: boolean;
-  attributeOpen: boolean;
-}
-
-function scanPhpContent(content: string, states: PhpStates): PhpScan {
+/** PHPUnit test methods: a method whose name starts with `test`, or a
+ * method carrying an `@test` docblock tag or a `#[Test]` attribute
+ * (short or fully qualified); the attribute or a single-line docblock
+ * may also sit on the method line itself, before the modifiers. Each
+ * method counts once, so a method with both a `test*` name and a marker
+ * is one case, and removing only the marker from such a method is not a
+ * drop.
+ *
+ * A line-by-line heuristic, not a parser, with one invariant: a line that
+ * matches the method pattern is always counted when its name starts with
+ * `test` or a marker is pending, and no comment, string or attribute state
+ * can hide it. The `@test` marker is set only on docblock lines (`/**`,
+ * ` *` or `*\/`) and on the method line itself; a `//` or `#` comment and
+ * code never set it. A pending marker is cleared by the next non-blank
+ * line that is not a docblock, comment or attribute line, and by every
+ * counted method. An attribute group whose `]` comes on a later line is
+ * followed until it balances: it only keeps the pending marker alive and
+ * sets it when the group names `Test`, it never hides a method line, and
+ * it ends at the first method line or the first line that closes it.
+ * Documented limits: a method-like line inside a block comment, heredoc
+ * or nowdoc is counted (the accepted over-count direction); a bracket
+ * misread inside an attribute can keep or drop one marker but hide no
+ * method; and a docblock or attribute that follows the modifiers on the
+ * method line is not read. */
+export function countPhpTestMethods(content: string): number {
   let count = 0;
   let pendingMarker = false;
-  let heredoc: string | undefined;
-  let blockComment: "doc" | "plain" | undefined;
   let attributeText: string | undefined;
   let attributeDepth = 0;
   for (const line of content.split("\n")) {
-    if (heredoc !== undefined) {
-      if (closesHeredoc(line, heredoc)) heredoc = undefined;
-      continue;
-    }
-    if (blockComment !== undefined) {
-      const end = line.indexOf("*/");
-      if (
-        blockComment === "doc" &&
-        PHP_DOC_TEST_TAG.test(end === -1 ? line : line.slice(0, end))
-      ) {
-        pendingMarker = true;
-      }
-      if (end !== -1) blockComment = undefined;
-      continue;
-    }
-    if (attributeText !== undefined) {
-      attributeText += "\n" + line;
-      attributeDepth += bracketDelta(line);
-      if (attributeDepth <= 0) {
-        if (PHP_TEST_ATTRIBUTE.test(attributeText)) pendingMarker = true;
-        attributeText = undefined;
-        attributeDepth = 0;
-      }
-      continue;
-    }
     const fn = PHP_FUNCTION.exec(line);
     if (fn !== null) {
       const prefix = fn[1] ?? "";
@@ -230,27 +177,25 @@ function scanPhpContent(content: string, states: PhpStates): PhpScan {
         count += 1;
       }
       pendingMarker = false;
+      attributeText = undefined;
+      attributeDepth = 0;
+      continue;
+    }
+    if (attributeText !== undefined) {
+      attributeText += "\n" + line;
+      attributeDepth += bracketDelta(line);
+      if (PHP_TEST_ATTRIBUTE.test(attributeText)) pendingMarker = true;
+      if (attributeDepth <= 0) {
+        attributeText = undefined;
+        attributeDepth = 0;
+      }
       continue;
     }
     const trimmed = line.trim();
     if (trimmed === "") continue;
-    const start = line.indexOf("/*");
-    if (
-      start !== -1 &&
-      (trimmed.startsWith("/*") || !insideStringLiteral(line, start))
-    ) {
-      const doc = line.startsWith("/**", start);
-      const end = line.indexOf("*/", start + 2);
-      const body = end === -1 ? line.slice(start) : line.slice(start, end);
-      if (doc && PHP_DOC_TEST_TAG.test(body)) pendingMarker = true;
-      if (end === -1 && states.blockComment) {
-        blockComment = doc ? "doc" : "plain";
-      }
-      continue;
-    }
     if (trimmed.startsWith("#[")) {
       const delta = bracketDelta(line);
-      if (delta > 0 && states.attribute) {
+      if (delta > 0) {
         attributeText = line;
         attributeDepth = delta;
       } else if (PHP_TEST_ATTRIBUTE.test(line)) {
@@ -258,64 +203,14 @@ function scanPhpContent(content: string, states: PhpStates): PhpScan {
       }
       continue;
     }
-    if (trimmed.startsWith("//") || trimmed.startsWith("#")) continue;
-    const hd = states.heredoc ? PHP_HEREDOC_START.exec(line) : null;
-    if (hd !== null && !insideStringLiteral(line, hd.index)) heredoc = hd[2];
+    if (PHP_DOCBLOCK_LINE.test(line)) {
+      if (PHP_DOC_TEST_TAG.test(line)) pendingMarker = true;
+      continue;
+    }
+    if (PHP_COMMENT_LINE.test(line)) continue;
     pendingMarker = false;
   }
-  return {
-    count,
-    heredocOpen: heredoc !== undefined,
-    blockCommentOpen: blockComment !== undefined,
-    attributeOpen: attributeText !== undefined,
-  };
-}
-
-/** PHPUnit test methods: a method whose name starts with `test`, or a
- * method carrying an `@test` docblock tag or a `#[Test]` attribute
- * (short or fully qualified); the attribute or a single-line docblock
- * may also sit on the method line itself, before the modifiers. Each
- * method counts once, so a method with both a `test*` name and a marker
- * is one case, and removing only the marker from such a method is not a
- * drop.
- *
- * A documented line heuristic, not a parser, with three states kept
- * across lines: a heredoc/nowdoc body (from an opening `<<<ID` line until
- * a line whose trimmed start is `ID` followed by a non-identifier
- * character or nothing) never counts and never marks; a `/* ... *\/` block
- * comment never counts as a method, and only a `/**` docblock may set the
- * `@test` marker, never a `//` or `#` comment or code; and an attribute
- * group whose `]` comes on a later line is followed until that line, which
- * neither sets nor clears the pending marker (a `Test` in the group still
- * marks the method). Otherwise the pending marker set by a docblock tag or
- * an attribute line is cleared by the next non-blank line that is not a
- * docblock, comment or attribute line, and by every counted method. A
- * `/*` or `<<<` inside a quoted string literal opens no state, and a state
- * still open at the end of the file (an unterminated heredoc, block
- * comment or attribute) is taken for a misread: the whole file is counted
- * again with that state off and the higher count wins, so a misread can
- * hide nothing. Shapes it does not read: an attribute whose arguments
- * contain `]`, and a docblock or attribute that follows the modifiers on
- * the method line. */
-export function countPhpTestMethods(content: string): number {
-  const states: PhpStates = {
-    heredoc: true,
-    blockComment: true,
-    attribute: true,
-  };
-  let best = 0;
-  for (;;) {
-    const scan = scanPhpContent(content, states);
-    if (scan.count > best) best = scan.count;
-    const misread =
-      (scan.heredocOpen && states.heredoc) ||
-      (scan.blockCommentOpen && states.blockComment) ||
-      (scan.attributeOpen && states.attribute);
-    if (!misread) return best;
-    if (scan.heredocOpen) states.heredoc = false;
-    if (scan.blockCommentOpen) states.blockComment = false;
-    if (scan.attributeOpen) states.attribute = false;
-  }
+  return count;
 }
 
 interface ChangedFile {
