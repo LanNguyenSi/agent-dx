@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `probe` link policy: a provenance refusal is now superseded when an
+  accepted link names the same destination in either the copy's spelling or
+  the source tree's own name of the entry. On a case-insensitive volume a
+  composer `vendor-dir` of `Vendor` plus `--link vendor` named one
+  gitignored entry the copy spells as two strings, and printed a
+  contradictory "skipped linking" warning next to the `isolation.linked`
+  entry; the entry's on-disk name now meets the two spellings and the
+  refusal moves to `isolation.supersededRefusals`.
+- `hygiene` PHP test counter: a `#[Test]` attribute or a single-line
+  `/** @test */` docblock on the method's own line now counts that method
+  instead of being missed and leaking its marker onto the next one; lines
+  inside a `/* */` block comment or a heredoc/nowdoc body are no longer
+  counted, `@test` only marks inside a docblock, and a pending marker is
+  dropped at the first line that is neither blank nor a docblock, comment
+  or attribute line. Documented limits: attribute arguments containing `]`,
+  heredoc terminators sharing a line with code, and `/*` or `<<<` inside a
+  string literal.
+
 ## [0.19.1] - 2026-11-01
 
 ### Fixed

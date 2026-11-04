@@ -169,6 +169,89 @@ describe("helpers", () => {
     expect(countPhpTestMethods(src)).toBe(0);
   });
 
+  it("counts a same-line Test attribute and does not mark the next method", () => {
+    expect(countPhpTestMethods("  #[Test] public function a(): void {}")).toBe(
+      1,
+    );
+    const src = [
+      "  #[Test] public function a(): void {}",
+      "  public function helper(): void {}",
+      "  public function testB(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(2);
+  });
+
+  it("counts a same-line @test docblock and does not mark the next method", () => {
+    expect(
+      countPhpTestMethods("  /** @test */ public function a(): void {}"),
+    ).toBe(1);
+    const src = [
+      "  /** @test */ public function a(): void {}",
+      "  public function helper(): void {}",
+      "  public function testB(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(2);
+  });
+
+  it("does not count function lines inside a block comment whose lines carry no star prefix", () => {
+    const src = [
+      "  /*",
+      "  public function testInBlockComment(): void {}",
+      "  function testAlsoInBlock(): void {}",
+      "  */",
+      "  public function testAfter(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(1);
+  });
+
+  it("does not count function lines inside heredocs and nowdocs, quoted forms and indented terminators included", () => {
+    const src = [
+      "  public function setUp(): void {",
+      "    $a = <<<EOD",
+      "function testInHeredoc(): void {}",
+      "EOD;",
+      "    $b = <<<'TXT'",
+      "function testInNowdoc(): void {}",
+      "TXT;",
+      '    $c = <<<"QT"',
+      "function testInHeredocQuoted(): void {}",
+      "    QT;",
+      "  }",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(0);
+  });
+
+  it("does not leak a class docblock @test onto the next method", () => {
+    const src = [
+      "<?php",
+      "/**",
+      " * @test",
+      " */",
+      "class FooTest extends TestCase {",
+      "  private function helper(): void {}",
+      "}",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(0);
+  });
+
+  it("does not treat @test in a line comment, or a Test attribute inside a string, as a marker", () => {
+    const lineComment = [
+      "  // @test",
+      "  public function helper(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(lineComment)).toBe(0);
+    const hashComment = [
+      "  # @test",
+      "  public function helper(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(hashComment)).toBe(0);
+    const inString = [
+      "  $s = '#[Test]';",
+      "  public function helper(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(inString)).toBe(0);
+  });
+
   it("routes .php paths to the PHP counter only", () => {
     const php = "  public function testOne(): void {}\n@test\n";
     expect(countTestCases(php, "tests/src/Unit/FooTest.php")).toBe(1);

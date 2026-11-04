@@ -66,11 +66,19 @@ argument or revision is a usage error (exit `2`).
   alphanumeric `*Test.java`, or `*Test.php`) whose count of test-case
   markers is lower at the head than at the base. A marker is a line
   starting with `it(` or `test(` (including `.skip`, `.only`,
-  `.each(...)` forms), `def test_`, `func Test`, or `@test`/`@Test`. In a
+  `.each(...)` forms), `def test_`, `func Test`, or   `@test`/`@Test`. In a
   `.php` file only PHPUnit methods count: a method named `test*`, or one
-  preceded by an `@test` docblock tag or a `#[Test]` attribute (short or
-  fully qualified), each method once; a `function test...(` line inside a
-  heredoc is counted as well. The count is a text heuristic, not a
+  carrying an `@test` docblock tag or a `#[Test]` attribute (short or fully
+  qualified), each method once; the attribute or a single-line
+  `/** @test */` docblock may also sit on the method's own line. PHP is
+  counted per line: a line inside a `/* */` block comment or a
+  heredoc/nowdoc body never counts, an `@test` outside a docblock (in a
+  `//` or `#` comment, or in code) never marks, and a marker still waiting
+  for its method is dropped at the first line that is neither blank nor a
+  docblock, comment or attribute line. Shapes the PHP counter does not
+  read: an attribute whose arguments contain `]`, a heredoc terminator
+  sharing its line with code, and `/*` or `<<<` inside a string literal.
+  The count is a text heuristic, not a
   parser: it can miss a case written in an unusual shape, and it cannot
   tell a deliberately removed case from an accidental one, so a flagged
   drop is a prompt to explain it, not proof of a mistake. Carries

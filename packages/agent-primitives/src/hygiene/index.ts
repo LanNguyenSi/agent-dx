@@ -109,32 +109,111 @@ export function countTestCases(content: string, filePath?: string): number {
   return count;
 }
 
+/** A method line: optional leading attribute groups (`#[...]`, several),
+ * an optional single-line `/** ... *\/` docblock, then the modifiers and
+ * the name. An attribute whose arguments contain `]` is not seen
+ * through, and a terminator that shares its line with code (docblock or
+ * comment after the signature) is part of the matched prefix, not read
+ * separately. */
 const PHP_FUNCTION =
-  /^\s*(?:(?:public|protected|private|static|final|abstract)\s+)*function\s+&?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/;
+  /^(\s*(?:#\[[^\]]*\]\s*)*(?:\/\*\*.*?\*\/\s*)?)(?:(?:public|protected|private|static|final|abstract)\s+)*function\s+&?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/;
 const PHP_DOC_TEST_TAG = /(?:^|[\s*])@test\b/;
 const PHP_TEST_ATTRIBUTE =
   /#\[\s*(?:[^\]]*,\s*)?\\?(?:PHPUnit\\Framework\\Attributes\\)?Test\s*(?:\(\s*\))?\s*[,\]]/;
+/** `<<<ID`, `<<<"ID"` or `<<<'ID'`: the opening line of a
+ * heredoc/nowdoc, label captured. */
+const PHP_HEREDOC_START = /<<<\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/;
+
+/** Whether `line` is the terminator of a heredoc/nowdoc opened with
+ * label `id`: its trimmed start is the label, followed by `;`, `,`, `)`
+ * or end of line (the indented closing marker PHP 7.3 allows is a
+ * terminator too), and nothing that could continue the label. */
+function closesHeredoc(line: string, id: string): boolean {
+  const t = line.trimStart();
+  if (!t.startsWith(id)) return false;
+  const next = t[id.length];
+  if (next !== undefined && /[A-Za-z0-9_]/.test(next)) return false;
+  const rest = t.slice(id.length).trim();
+  return (
+    rest === "" ||
+    rest.startsWith(";") ||
+    rest.startsWith(",") ||
+    rest.startsWith(")")
+  );
+}
 
 /** PHPUnit test methods: a method whose name starts with `test`, or a
- * method preceded by an `@test` docblock tag or a `#[Test]` attribute
- * (short or fully qualified). Each method counts once, so a method with
- * both a `test*` name and a marker is one case, and removing only the
- * marker from such a method is not a drop. A text heuristic: a
- * `function test...(` line at the start of a heredoc line is counted
- * too. */
+ * method carrying an `@test` docblock tag or a `#[Test]` attribute
+ * (short or fully qualified); the attribute or a single-line docblock
+ * may also sit on the method line itself, before the modifiers. Each
+ * method counts once, so a method with both a `test*` name and a marker
+ * is one case, and removing only the marker from such a method is not a
+ * drop.
+ *
+ * A documented line heuristic, not a parser, with three states kept
+ * across lines: a heredoc/nowdoc body (from an opening `<<<ID` line
+ * until a line whose trimmed start is `ID` followed by `;`, `,`, `)` or
+ * end of line) never counts and never marks; a `/* ... *\/` block
+ * comment never counts as a method, and only a `/**` docblock may set
+ * the `@test` marker, never a `//` or `#` comment or code; and the
+ * pending marker set by a docblock tag or an attribute line is cleared
+ * by the next non-blank line that is not a docblock, comment or
+ * attribute line, and by every counted method. Shapes it does not read:
+ * an attribute whose arguments contain `]`, a heredoc terminator that
+ * shares its line with code, and a `/*` or `<<<` inside a string
+ * literal. */
 export function countPhpTestMethods(content: string): number {
   let count = 0;
   let pendingMarker = false;
+  let heredoc: string | undefined;
+  let blockComment: "doc" | "plain" | undefined;
   for (const line of content.split("\n")) {
+    if (heredoc !== undefined) {
+      if (closesHeredoc(line, heredoc)) heredoc = undefined;
+      continue;
+    }
+    if (blockComment !== undefined) {
+      const end = line.indexOf("*/");
+      if (
+        blockComment === "doc" &&
+        PHP_DOC_TEST_TAG.test(end === -1 ? line : line.slice(0, end))
+      ) {
+        pendingMarker = true;
+      }
+      if (end !== -1) blockComment = undefined;
+      continue;
+    }
     const fn = PHP_FUNCTION.exec(line);
     if (fn !== null) {
-      if (pendingMarker || fn[1].startsWith("test")) count += 1;
+      const prefix = fn[1] ?? "";
+      const sameLineMarker =
+        PHP_TEST_ATTRIBUTE.test(prefix) ||
+        (prefix.includes("/**") && PHP_DOC_TEST_TAG.test(prefix));
+      if ((fn[2] ?? "").startsWith("test") || pendingMarker || sameLineMarker) {
+        count += 1;
+      }
       pendingMarker = false;
       continue;
     }
-    if (PHP_DOC_TEST_TAG.test(line) || PHP_TEST_ATTRIBUTE.test(line)) {
-      pendingMarker = true;
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    const start = line.indexOf("/*");
+    if (start !== -1) {
+      const doc = line.startsWith("/**", start);
+      const end = line.indexOf("*/", start + 2);
+      const body = end === -1 ? line.slice(start) : line.slice(start, end);
+      if (doc && PHP_DOC_TEST_TAG.test(body)) pendingMarker = true;
+      if (end === -1) blockComment = doc ? "doc" : "plain";
+      continue;
     }
+    if (trimmed.startsWith("#[")) {
+      if (PHP_TEST_ATTRIBUTE.test(line)) pendingMarker = true;
+      continue;
+    }
+    if (trimmed.startsWith("//") || trimmed.startsWith("#")) continue;
+    const hd = PHP_HEREDOC_START.exec(line);
+    if (hd !== null) heredoc = hd[2];
+    pendingMarker = false;
   }
   return count;
 }

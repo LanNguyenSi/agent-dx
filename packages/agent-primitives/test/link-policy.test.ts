@@ -1341,6 +1341,52 @@ describe("planLinks: a refusal another candidate of the round supersedes is not 
     expect(plan.warnings).toEqual([]);
   });
 
+  it("matches on the source tree's own name when the copy cannot: a gitignored destination keeps each spelling distinct there, the source tree's entry has one on-disk name", () => {
+    const { root, named } = vendorShapes();
+    // The destination is gitignored, so the copy carries nothing under it
+    // in any spelling and `canonicalRelPath` (the default identity here)
+    // leaves `vendor` and `Vendor` two strings. The source tree DOES
+    // carry the entry (rule 1b found the symlink), and its canonicaliser
+    // reads both spellings back to the one on-disk name.
+    const operator = { absDir: path.join(root, "Vendor") };
+
+    const plan = planLinks(
+      [named, operator],
+      ctx(root, {
+        canonicalRootRelPath: (relPath) => relPath.toLowerCase(),
+      }),
+    );
+
+    expect(plan.links.map((l) => l.candidate)).toEqual([operator]);
+    expect(plan.warnings).toEqual([]);
+    expect(plan.supersededRefusals).toHaveLength(1);
+  });
+
+  it("keeps the refusal when the accepted link is a different source entry: neither the copy key nor the root key matches", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.symlinkSync(outside, path.join(root, "alpha"));
+    fs.symlinkSync(outside, path.join(root, "beta"));
+
+    const named = {
+      absDir: path.join(root, "alpha"),
+      namedBy: `"alpha" named in "vendor-dir" of ${root}/composer.json`,
+    };
+    const operator = { absDir: path.join(root, "Beta") };
+
+    const plan = planLinks(
+      [named, operator],
+      ctx(root, {
+        canonicalRootRelPath: (relPath) => relPath.toLowerCase(),
+      }),
+    );
+
+    expect(plan.links.map((l) => l.candidate)).toEqual([operator]);
+    expect(plan.supersededRefusals).toEqual([]);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toContain("resolves outside the repository root");
+  });
+
   it("keeps the warning for a hazard of the target: a tracked target is refused for repository content even when the operator links the same path", () => {
     const root = makeTmpDir();
     fs.mkdirSync(path.join(root, "src"));
