@@ -4,7 +4,7 @@ Throwaway measurement, not shipped, not referenced by `package.json`. It asks
 whether a heuristic that lists the added or changed behaviour branches in
 `base..head` and marks those without a planned mutant would have listed the
 surviving mutants that reviewers found on branches the implementer or lane
-never probed. Tracker task: agent-dx 5d7efe11.
+never probed. The tracker task that asked for this spike is referenced from the pull request.
 
 ## Verdict
 
@@ -23,8 +23,9 @@ Do not build it as specified (list branches that have no planned mutant).
 - The reason recall is low is not that the enumerator misses branches. It
   lists 14 of 22 survivors as candidates (64%, 73% tuned). The reason is that
   14 of 22 survivors sit within 3 lines of a planned mutant, 6 of them on the
-  same line (the implementer mutated that line, and the reviewer found a
-  second mutation of it that survived) and 8 within 1 to 3 lines (a
+  same line (a planned mutant sits on that line; whether the survivor is a
+  second operator on the same line is not measured here, and one of the six
+  is a missing check scored by hand) and 8 within 1 to 3 lines (a
   neighbouring branch was probed). A "no planned mutant here" marker cannot
   see either class.
 
@@ -220,8 +221,19 @@ absolute terms (278).
 
 - The 22 survivors are what reviewers chose to try, biased toward branches
   they thought unprobed; that favours the enumerator and it still falls short.
-  Controls are tasks whose review found no survivor, not tasks proven to have
-  none, so control noise says nothing about precision.
+  Controls are tasks whose review found no unjustified surviving mutant, not
+  tasks proven to have none: two of them (agent-relay #132, harness #764)
+  carry a justified survivor or an unpinned-test note, and agent-relay #132
+  also appears in the exclusion list. Controls only feed the noise
+  comparison, so control noise says nothing about precision.
+- Pseudo-replication and fix-round dependence: the 22 survivors come from 9
+  distinct pull requests (agent-tasks #732 and agent-dx #606 appear with two
+  review rounds each, depsight #236 and #238 touch the same script). In the
+  re-review rounds the planned mutants include probes written in response to
+  the earlier round's survivors, which makes adjacency likelier by
+  construction. Dropping the three re-review cases leaves 17 survivors with
+  4 same-line, 6 within 1 to 3 lines and 7 farther (59% near a probe instead
+  of 64%); the conclusion holds.
 - Line numbers of planned mutants come from the implementer's return and may
   have shifted by a few lines to the review's head; text anchors were resolved
   at the review's head. The effect on the 3-line rule is small and in the
@@ -261,8 +273,9 @@ shape, which is a hypothesis for a follow-up and was not measured here:
 
 1. List each candidate with the planned mutant's operator next to it (`??`
    fallback, comparison, constant, removal) instead of a covered/uncovered
-   flag. 6 survivors were a second mutation of an already mutated line, and
-   a per-line list of what was tried would show the untried operator.
+   flag. 6 survivors sit on a line that already had a planned mutant, and
+   a per-line list of what was tried would show an untried operator (a
+   hypothesis, not measured here).
 2. Restrict the list to `default` and `conditional` candidates; `flag` and
    `early-return` add 30% of the candidates and list no survivor that
    `default` and `conditional` do not already list (15 of 22 either way).
