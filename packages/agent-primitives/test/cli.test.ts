@@ -3228,6 +3228,20 @@ describe("cli: probe", () => {
     });
   });
 
+  it("--report keeps the hint on stderr and out of the report", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_REFUSAL,
+      "--report",
+      "mutation-probes",
+    ]);
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(Array.isArray(JSON.parse(run.stdout))).toBe(true);
+    expect(run.stdout).not.toContain("looks like a full test suite");
+  });
+
   it("--summary keeps the hint on stderr, and its note is the refusal message, not the hint", async () => {
     const repo = fullSuiteRepo();
     const run = await spawnCli([

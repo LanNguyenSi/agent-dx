@@ -257,6 +257,26 @@ describe.each(CASES)("$name --summary and --print (CLI)", (c) => {
     expect(small.code).toBe(c.exit);
   });
 
+  it("--print logs names the saved full result of a reduced run, as the emitted envelope does", async () => {
+    const repo = c.repo();
+    const logs = makeTmpDir();
+    const view = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "-m",
+      "600",
+      ...c.args,
+      "--print",
+      "logs",
+    ]);
+    const printed = JSON.parse(view.stdout);
+    expect(
+      (printed.logs as string[]).some((l) => /result-full-\S+\.json$/.test(l)),
+    ).toBe(true);
+  });
+
   it("every top-level field of the envelope, reduced or full, and of the saved full result is printable", async () => {
     const repo = c.repo();
     const logs = makeTmpDir();
@@ -352,6 +372,37 @@ describe("drift --summary", () => {
     expect(lines).toEqual([
       "README.md:3 | OldThing | doc | OldThing is the entry point.",
       "totals: status=fail removed=1 sites=1 allowlisted=0 warnings=0",
+    ]);
+  });
+});
+
+describe("drift --summary under --strict", () => {
+  it("flags an allowlisted site that --strict reports in sites", async () => {
+    const repo = driftRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...DRIFT_ARGS,
+      "--allow",
+      "README.md",
+      "--strict",
+      "--summary",
+    ]);
+    expect(run.stdout.trimEnd().split("\n")).toEqual([
+      "README.md:3 | OldThing | doc | allowlisted | OldThing is the entry point.",
+      "totals: status=fail removed=1 sites=1 allowlisted=1 warnings=0",
+    ]);
+    // Without --strict the allowlisted site is not a row.
+    const plain = await spawnCli([
+      "-C",
+      repo,
+      ...DRIFT_ARGS,
+      "--allow",
+      "README.md",
+      "--summary",
+    ]);
+    expect(plain.stdout.trimEnd().split("\n")).toEqual([
+      "totals: status=ok removed=1 sites=0 allowlisted=1 warnings=0",
     ]);
   });
 });

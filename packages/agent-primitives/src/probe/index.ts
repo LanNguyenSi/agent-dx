@@ -998,8 +998,8 @@ async function runProbePipeline(
         ...(refusal.baseline !== undefined
           ? { baseline: refusal.baseline }
           : {}),
-        ...(refusal.reason === "mutant_not_applicable" &&
-        refusedLineContent !== undefined
+        // Only the dry run sets it, and only for `mutant_not_applicable`.
+        ...(refusedLineContent !== undefined
           ? { line_content: refusedLineContent }
           : {}),
         isolation: isolationField,
