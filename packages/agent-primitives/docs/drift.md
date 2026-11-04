@@ -115,7 +115,13 @@ binding of its own, and its sites are allowlisted with reason
 `local-binding`. Where none exists, behaviour is exactly as before: the
 sites are reported as usual. The trailing word boundary that shape needs
 is `-w`'s own (git's `-E` on a BSD regex build reads `\b` as a literal,
-which would silently match nothing). Limits: indentation is a proxy for
+which would silently match nothing). Two shapes the grep itself matches
+are not live declarations and are filtered after the grep: a comment line
+(`// const stamp = old approach`, whose text before the keyword names a
+comment) and a longer name whose next character `-w` reads as a word
+boundary (`let retired$old`, because git treats `$` as a non-word
+character); only a hit with live declaration text around the name counts.
+Limits: indentation is a proxy for
 scope, not a scope analysis, so an indented declaration inside a block
 that still leaves a name unreachable at head is suppressed too, while a
 top-level `let` reassigned by a local of the same name is not; and the
@@ -174,7 +180,7 @@ totals line:
 
 ```text
 <path>:<line> | <identifier> | <doc|comment>[ | allowlisted] | <text, at most 140 characters>
-totals: status=<ok|fail> removed=N sites=N allowlisted=N warnings=N [fullResult=<path>]
+totals: status=<ok|fail> removed=N sites=N allowlisted=N warnings=N ignored=N [fullResult=<path>]
 ```
 
 `fullResult=` appears when the envelope was reduced to fit `-m` and the

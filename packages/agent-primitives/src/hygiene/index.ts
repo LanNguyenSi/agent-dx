@@ -284,9 +284,10 @@ function declaresMore(a: number | "all", b: number | "all"): boolean {
 /**
  * Parses one raw intended-deletion spec: `<path>`, `<path>=<n>` (a
  * positive integer) or `<path>=all`. The count is read after the LAST
- * `=` (a documented limit: a path whose own name contains `=` can only be
- * declared with a bare `=all`-free spec). A bare path means `"all"`. An
- * empty path, `=0`, a negative or a non-integer count is a usage error.
+ * `=`, so a path whose own name contains `=` must always carry an
+ * explicit `=<n>` or `=all` (the bare form is read as a count and
+ * rejected); a bare path elsewhere means `"all"`. An empty path, `=0`,
+ * a negative or a non-integer count is a usage error.
  */
 export function parseIntendedDeletion(
   raw: string,

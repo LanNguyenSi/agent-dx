@@ -58,8 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `intended deletion not used: <path>` without changing the status, two
   declarations of one path collapse to the larger count, and the envelope
   echoes `intended_declarations` and keeps `intended_deletions` whole under
-  `--max-chars` reduction. `=0`, a negative, a non-integer and an empty path
-  are usage errors.
+  `--max-chars` reduction, and the `--summary` totals line gains an
+  `intended_deletions=N` counter. `=0`, a negative, a non-integer and an
+  empty path are usage errors.
 - `drift` identifier ignore and local-binding rule: `--ignore-identifier
   <name>` (repeatable) and `--ignore-identifier-file <file>` allowlist every
   site of a name with the reason `ignored identifier "<name>"`, echoing each
@@ -69,9 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the reason `local binding "<name>" still declared at head` when one
   `git grep` at head still finds a `(const|let|var|function|class) <name>`
   declaration of that name, and the name is echoed with source
-  `local-binding`; `--strict` shows everything either suppressed, and the
+  `local-binding`; `--strict` shows everything either suppressed, the
   extracted identifiers now carry the `exported` and `indented` facts the
-  rule keys off.
+  rule keys off, and the `--summary` totals line gains an `ignored=N`
+  counter.
 
 ### Changed
 

@@ -159,6 +159,48 @@ function capSiteText(text: string): string {
   return `${text.slice(0, SITE_TEXT_MAX_CHARS)}...`;
 }
 
+/** The declaration keywords the head-side binding query greps for (see
+ * `grepHeadDeclarations`). */
+const DECLARATION_KEYWORDS = ["const", "let", "var", "function", "class"];
+
+/**
+ * Whether one head-side grep hit is a live declaration of `name` rather
+ * than a mention grep's shape cannot tell apart. `git grep -w -E` matches
+ * any line CARRYING `(const|let|var|function|class) <name>`, so two shapes
+ * reach the caller without being declarations: a comment line (`// const
+ * stamp = old approach`) and a longer name whose next character git's `-w`
+ * reads as a word boundary (`let retired$old` - git treats `$` as a
+ * non-word character). A hit counts only when (i) the text before the
+ * keyword, trimmed, names no comment (`//`, `*`, `/*` or `#`) and (ii) the
+ * character right after `name` is absent or outside `[A-Za-z0-9_$]`; a
+ * real declaration satisfies both.
+ */
+function isLiveHeadDeclaration(text: string, name: string): boolean {
+  for (const keyword of DECLARATION_KEYWORDS) {
+    const needle = `${keyword} ${name}`;
+    for (
+      let at = text.indexOf(needle);
+      at !== -1;
+      at = text.indexOf(needle, at + 1)
+    ) {
+      const before = text.slice(0, at).trim();
+      if (
+        before.startsWith("//") ||
+        before.startsWith("/*") ||
+        before.startsWith("*") ||
+        before.startsWith("#")
+      ) {
+        continue;
+      }
+      const after =
+        at + needle.length < text.length ? text[at + needle.length] : "";
+      if (after !== "" && /[A-Za-z0-9_$]/.test(after)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
 interface SiteAllowDecision {
   allowlisted: boolean;
   reason?: string;
@@ -359,7 +401,14 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
       );
       continue;
     }
-    if (head.status === 0) localBindings.add(name);
+    if (
+      head.status === 0 &&
+      parseGrepOutput(head.stdout, headSha).some((hit) =>
+        isLiveHeadDeclaration(hit.text, name),
+      )
+    ) {
+      localBindings.add(name);
+    }
   }
 
   const ignoredIdentifiers: IgnoredIdentifier[] = [

@@ -257,6 +257,12 @@ function escapeRegExp(text: string): string {
  * one (the macOS system build) reads `\b` as a literal rather than a word
  * boundary, which would silently match nothing.
  *
+ * Two shapes that match here are not live declarations and are filtered
+ * after the grep, in the caller (`isLiveHeadDeclaration`): a comment line
+ * (`// const stamp = old approach`) and a longer name whose next character
+ * `-w` reads as a word boundary (`let retired$old`, because git treats `$`
+ * as a non-word character).
+ *
  * Limits, documented in docs/drift.md: a name bound by destructuring
  * (`const { err } = ...`) and a function parameter are not declaration
  * shapes and are not seen, and neither is a Python `def <name>` or a Go

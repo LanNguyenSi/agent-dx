@@ -1607,6 +1607,27 @@ describe("hygiene intended deletions", () => {
       { path: "src/a.ts", declared: "all" },
     ]);
   });
+
+  it("reads the count after the LAST `=`: a path whose name contains `=` needs an explicit count", () => {
+    const repo = initRepo();
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    // The bare form of such a path is read as a count (everything after
+    // the LAST `=`) and rejected: `y.test.ts` is no count at all.
+    expect(() =>
+      hygiene({ cwd: repo, base, intendedDeletions: ["test/x=y.test.ts"] }),
+    ).toThrow(UsageError);
+    // `=<n>` and `=all` both work: the path keeps the `=` and the count
+    // is what follows the LAST one.
+    const ok = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/x=y.test.ts=all", "test/p=q.test.ts=2"],
+    });
+    expect(ok.intendedDeclarations).toEqual([
+      { path: "test/x=y.test.ts", declared: "all" },
+      { path: "test/p=q.test.ts", declared: 2 },
+    ]);
+  });
 });
 
 describe("hygiene intended deletions CLI", () => {

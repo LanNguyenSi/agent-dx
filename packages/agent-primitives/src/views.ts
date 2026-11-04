@@ -150,7 +150,7 @@ export function renderHygieneSummary(
   ];
   const c = result.counts;
   const totals = withFullResult(
-    `totals: status=${result.status} files=${c.files} findings=${result.findings.length} backup_files=${c.backupFiles} extend_only_rewrites=${c.extendOnlyRewrites} test_case_drops=${c.testCaseDrops} warnings=${result.warnings.length}`,
+    `totals: status=${result.status} files=${c.files} findings=${result.findings.length} backup_files=${c.backupFiles} extend_only_rewrites=${c.extendOnlyRewrites} test_case_drops=${c.testCaseDrops} warnings=${result.warnings.length} intended_deletions=${c.intendedDeletions}`,
     fullResult,
   );
   return fitSummary(rows, [totals], maxChars, "line", fullResult);
@@ -172,7 +172,7 @@ export function renderDriftSummary(
   ];
   const c = result.counts;
   const totals = withFullResult(
-    `totals: status=${result.status} removed=${c.removed} sites=${c.sites} allowlisted=${c.allowlisted} warnings=${result.warnings.length}`,
+    `totals: status=${result.status} removed=${c.removed} sites=${c.sites} allowlisted=${c.allowlisted} warnings=${result.warnings.length} ignored=${result.ignoredIdentifiers.length}`,
     fullResult,
   );
   return fitSummary(rows, [totals], maxChars, "line", fullResult);

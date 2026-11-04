@@ -97,11 +97,11 @@ argument or revision is a usage error (exit `2`).
   block comments or heredocs) can offset a real deletion in the same file.
   The count is a text heuristic, not a
   parser: it can miss a case written in an unusual shape, and it cannot
-   tell a deliberately removed case from an accidental one, so a flagged
-   drop is a prompt to explain it, not proof of a mistake. Carries
-   `baseCases` and `headCases`. A drop the caller declares with
-   `--intended-deletion` is allowed instead of reported; see "Intended
-   deletions".
+  tell a deliberately removed case from an accidental one, so a flagged
+  drop is a prompt to explain it, not proof of a mistake. Carries
+  `baseCases` and `headCases`. A drop the caller declares with
+  `--intended-deletion` is allowed instead of reported; see "Intended
+  deletions".
 
 ## Options
 
@@ -137,8 +137,9 @@ is repeatable; `--intended-deletion-file` takes one declaration per line,
 ignoring blank lines and `#` comments, resolves the file itself against the
 `-C` directory like `--extend-only-file`, and keeps the paths inside it
 relative to the repository root. A bare path means `all`. The count is read
-after the LAST `=`, so a path whose own name contains `=` cannot carry a
-numeric count. `=0`, a negative, a non-integer and an empty path are usage
+after the LAST `=`, so a path whose own name contains `=` must always
+carry an explicit `=<n>` or `=all`; the bare form is read as a count and
+rejected. `=0`, a negative, a non-integer and an empty path are usage
 errors (exit `2`), like an out-of-range `--max-delete-percent`.
 
 The count is an at-most bound in the same units the counter uses: JS/TS
@@ -181,7 +182,7 @@ and a final totals line:
 
 ```text
 <kind> | <path> | <detail>
-totals: status=<ok|fail> files=N findings=N backup_files=N extend_only_rewrites=N test_case_drops=N warnings=N [fullResult=<path>]
+totals: status=<ok|fail> files=N findings=N backup_files=N extend_only_rewrites=N test_case_drops=N warnings=N intended_deletions=N [fullResult=<path>]
 ```
 
 `fullResult=` appears when the envelope was reduced to fit `-m` and the

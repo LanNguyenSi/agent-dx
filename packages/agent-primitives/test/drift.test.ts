@@ -1738,6 +1738,185 @@ describe("drift (local-binding rule)", () => {
     expect(result.ignoredIdentifiers).toEqual([]);
   });
 
+  it("never lets the local-binding reason overwrite a glob or released-section reason, and still echoes the local binding", async () => {
+    // The documented precedence: the local-binding rule is a default that
+    // only speaks up when nothing else allowlisted the site, so its reason
+    // never overwrites a CHANGELOG or glob reason on an ignored-shaped
+    // name, while the name is echoed with source `local-binding` all the
+    // same.
+    const [baseSource, headSource] = localDeclPair("err", true);
+    const { repo, base } = buildRemovalRepo("err", baseSource, headSource);
+    writeFile(
+      repo,
+      "CHANGELOG.md",
+      "# Changelog\n\n## 1.2.0\n\n- err is documented as the error type.\n",
+    );
+    const head = commit(repo, "released changelog entry");
+    const strict = await drift({
+      cwd: repo,
+      base,
+      head,
+      allow: ["notes.md"],
+      strict: true,
+    });
+    const globSite = findSite(strict.sites, "notes.md", 3);
+    expect(globSite?.allowlistReason).toMatch(
+      /matched --allow glob "notes\.md"/,
+    );
+    const sectionSite = findSite(strict.sites, "CHANGELOG.md", 5);
+    expect(sectionSite?.allowlistReason).toMatch(
+      /released changelog section "1\.2\.0"/,
+    );
+    expect(strict.ignoredIdentifiers).toContainEqual({
+      name: "err",
+      source: "local-binding",
+    });
+  });
+
+  it("does not see a head-side declaration of a longer name sharing the prefix (the -w boundary)", async () => {
+    // The word boundary `git grep -w` promises: a head-side `const errFoo`
+    // is never a declaration of `err`, so the local-binding rule stays off
+    // a name whose only head-side "declaration" is a longer identifier.
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function removedHolder() {",
+        '  const err = new Error("x");',
+        "  return err;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nerr is the helper this module uses.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function keep() {",
+        '  const errFoo = new Error("kept");',
+        "  return errFoo;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("err");
+    expect(result.status).toBe("fail");
+    expect(result.allowlisted).toEqual([]);
+    expect(result.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("does not count a comment-shaped head-side grep hit as a live declaration", async () => {
+    // `git grep -w -E` matches any line CARRYING the declaration shape, so
+    // a comment `// const stamp = old approach` greps as a hit; the
+    // consumer filters it out, and the site is reported as usual.
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function removedHolder() {",
+        "  const stamp = pick();",
+        "  return stamp;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nstamp is the helper this module uses.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(
+      repo,
+      "src/a.ts",
+      "// const stamp = old approach\nexport const placeholder = 1;\n",
+    );
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("stamp");
+    expect(result.allowlisted).toEqual([]);
+    expect(result.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("does not count a head-side hit whose name is followed by a $ as a live declaration", async () => {
+    // git's `-w` reads `$` as a non-word character, so `let retired$old`
+    // greps as a `(let) retired` hit; the consumer's own trailing-character
+    // check filters it out, and the site is reported as usual.
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function removedHolder() {",
+        "  const retired = pick();",
+        "  return retired;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nretired is the helper this module uses.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(
+      repo,
+      "src/a.ts",
+      "let retired$old = 1;\nexport const placeholder = 1;\n",
+    );
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("retired");
+    expect(result.allowlisted).toEqual([]);
+    expect(result.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("still counts a real head-side declaration as a live one (positive control)", async () => {
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function removedHolder() {",
+        "  const retired = pick();",
+        "  return retired;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    // Untouched by the range (a re-added declaration in the range would
+    // read as moved, not removed, and keep the rule off the name).
+    writeFile(repo, "src/keep.ts", "const retired = 1;\n");
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nretired is the helper this module uses.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(repo, "src/a.ts", "export const placeholder = 1;\n");
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(findSite(result.sites, "notes.md", 3)).toBeUndefined();
+    expect(findSite(result.allowlisted, "notes.md", 3)?.allowlistReason).toBe(
+      'local binding "retired" still declared at head',
+    );
+    expect(result.ignoredIdentifiers).toContainEqual({
+      name: "retired",
+      source: "local-binding",
+    });
+  });
+
   it("does not touch an exported removed declaration even with a local of the name at head", async () => {
     const { repo, base, head } = buildRemovalRepo(
       "now",

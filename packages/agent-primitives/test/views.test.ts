@@ -370,7 +370,7 @@ describe("hygiene --summary", () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^backup_file \| notes\.bak \| /);
     expect(lines[1]).toBe(
-      "totals: status=fail files=1 findings=1 backup_files=1 extend_only_rewrites=0 test_case_drops=0 warnings=0",
+      "totals: status=fail files=1 findings=1 backup_files=1 extend_only_rewrites=0 test_case_drops=0 warnings=0 intended_deletions=0",
     );
   });
 
@@ -386,8 +386,36 @@ describe("hygiene --summary", () => {
     ]);
     expect(run.code).toBe(0);
     expect(run.stdout.trimEnd().split("\n")).toEqual([
-      "totals: status=ok files=0 findings=0 backup_files=0 extend_only_rewrites=0 test_case_drops=0 warnings=0",
+      "totals: status=ok files=0 findings=0 backup_files=0 extend_only_rewrites=0 test_case_drops=0 warnings=0 intended_deletions=0",
     ]);
+  });
+
+  it("the totals line counts intended deletions applied", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "test_a.test.ts"),
+      'it("one", () => {});\nit("two", () => {});\n',
+    );
+    commit(repo, "base");
+    fs.writeFileSync(
+      path.join(repo, "test_a.test.ts"),
+      'it("one", () => {});\n',
+    );
+    commit(repo, "drop one case");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      "HEAD~1",
+      "--intended-deletion",
+      "test_a.test.ts=1",
+      "--summary",
+    ]);
+    const lines = run.stdout.trimEnd().split("\n");
+    expect(lines[lines.length - 1]).toBe(
+      "totals: status=ok files=1 findings=0 backup_files=0 extend_only_rewrites=0 test_case_drops=0 warnings=0 intended_deletions=1",
+    );
   });
 });
 
@@ -398,7 +426,22 @@ describe("drift --summary", () => {
     const lines = run.stdout.trimEnd().split("\n");
     expect(lines).toEqual([
       "README.md:3 | OldThing | doc | OldThing is the entry point.",
-      "totals: status=fail removed=1 sites=1 allowlisted=0 warnings=0",
+      "totals: status=fail removed=1 sites=1 allowlisted=0 warnings=0 ignored=0",
+    ]);
+  });
+
+  it("the totals line counts the ignored identifiers", async () => {
+    const repo = driftRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...DRIFT_ARGS,
+      "--ignore-identifier",
+      "OldThing",
+      "--summary",
+    ]);
+    expect(run.stdout.trimEnd().split("\n")).toEqual([
+      "totals: status=ok removed=1 sites=0 allowlisted=1 warnings=0 ignored=1",
     ]);
   });
 });
@@ -426,7 +469,9 @@ describe("a reduced run (small -m)", () => {
     expect(run.stdout).not.toContain("warning:");
     expect(run.stdout).not.toContain("requested max-chars");
     expect(run.stdout).not.toContain("fixed fields only");
-    expect(run.stdout).toMatch(/ warnings=0 fullResult=\S+result-full-/);
+    expect(run.stdout).toMatch(
+      / warnings=0 ignored=0 fullResult=\S+result-full-/,
+    );
   });
 
   it("drift --print truncated,warnings takes both from the emitted envelope: truncated: true and the same warnings as the JSON run at that bound", async () => {
@@ -470,7 +515,7 @@ describe("drift --summary under --strict", () => {
     ]);
     expect(run.stdout.trimEnd().split("\n")).toEqual([
       "README.md:3 | OldThing | doc | allowlisted | OldThing is the entry point.",
-      "totals: status=fail removed=1 sites=1 allowlisted=1 warnings=0",
+      "totals: status=fail removed=1 sites=1 allowlisted=1 warnings=0 ignored=0",
     ]);
     // Without --strict the allowlisted site is not a row.
     const plain = await spawnCli([
@@ -482,7 +527,7 @@ describe("drift --summary under --strict", () => {
       "--summary",
     ]);
     expect(plain.stdout.trimEnd().split("\n")).toEqual([
-      "totals: status=ok removed=1 sites=0 allowlisted=1 warnings=0",
+      "totals: status=ok removed=1 sites=0 allowlisted=1 warnings=0 ignored=0",
     ]);
   });
 });
