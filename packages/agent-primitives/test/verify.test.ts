@@ -15,6 +15,7 @@ import {
   DEFAULT_CHECKS,
   DEFAULT_DETECTORS,
   deriveCheckName,
+  XOVERRIDE_WITHOUT_CHECKS_HINT,
 } from "../src/verify/index.js";
 import {
   phpunitZeroTestsVerdict,
@@ -132,6 +133,90 @@ describe("verify: check resolution", () => {
     });
   });
 
+  describe("-x without -c hint", () => {
+    const HINT =
+      "hint: -x given without -c: the default check list (build,typecheck,lint,test) still runs; pass -c <names> to choose the run set";
+
+    it("fires when -x is given and no -c is: the default list still runs", async () => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, {});
+      const { fn, calls } = makeStubExec();
+      const result = await verify({
+        cwd,
+        logDir: makeTmpDir(),
+        overrides: { mycheck: "echo hi" },
+        execFn: fn,
+      });
+      expect(XOVERRIDE_WITHOUT_CHECKS_HINT).toBe(HINT);
+      expect(result.warnings).toContain(HINT);
+      // The hint is the claim it makes: the default checks were looked up
+      // beside the override.
+      expect(result.checks.map((c) => c.name)).toEqual([
+        "build",
+        "typecheck",
+        "lint",
+        "test",
+        "mycheck",
+      ]);
+      expect(calls).toEqual(["echo hi"]);
+    });
+
+    it("fires once for several -x", async () => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, {});
+      const result = await verify({
+        cwd,
+        logDir: makeTmpDir(),
+        overrides: { a: "echo a", b: "echo b" },
+        execFn: makeStubExec().fn,
+      });
+      expect(result.warnings.filter((w) => w === HINT)).toHaveLength(1);
+    });
+
+    it("does not fire when -c is given, even an empty list", async () => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, {});
+      for (const checks of [["mycheck"], []]) {
+        const result = await verify({
+          cwd,
+          logDir: makeTmpDir(),
+          checks,
+          overrides: { mycheck: "echo hi" },
+          execFn: makeStubExec().fn,
+        });
+        expect(result.warnings).not.toContain(HINT);
+      }
+    });
+
+    it("does not fire with neither -x nor -c", async () => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, {
+        build: "b",
+        typecheck: "t",
+        lint: "l",
+        test: "x",
+      });
+      const result = await verify({
+        cwd,
+        logDir: makeTmpDir(),
+        execFn: makeStubExec().fn,
+      });
+      expect(result.warnings).toEqual([]);
+    });
+
+    it("does not fire with -c and no -x", async () => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, { test: "x" });
+      const result = await verify({
+        cwd,
+        logDir: makeTmpDir(),
+        checks: ["test"],
+        execFn: makeStubExec().fn,
+      });
+      expect(result.warnings).toEqual([]);
+    });
+  });
+
   it("a requested check with neither an override nor a matching script is an explicit no_script non-pass", async () => {
     const cwd = makeTmpDir();
     // A second, resolvable check keeps this run from being all-skipped
@@ -158,7 +243,7 @@ describe("verify: check resolution", () => {
     });
     expect(result.checks[0].summary.skipped).toBe(1);
     expect(result.warnings).toContain(
-      "lint: no_script: no -x override or matching package.json script",
+      "lint: no_script: no -x override or matching package.json script; pass -c with the checks this repo has",
     );
     expect(result.status).toBe("error");
 

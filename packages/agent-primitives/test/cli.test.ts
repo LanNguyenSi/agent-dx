@@ -3006,7 +3006,7 @@ describe("cli: probe", () => {
     expect(looksLikeFullSuiteTestCommand(cmd)).toBe(expected);
   });
 
-  it("a full-suite-shaped command (npm test) with no --timeout prints one stderr line naming --timeout before the baseline starts", async () => {
+  it("a full-suite-shaped command (npm test) with no --timeout prints one stderr line naming --timeout before the baseline starts, in a view mode", async () => {
     const repo = initRepo();
     fs.writeFileSync(
       path.join(repo, "fixture.js"),
@@ -3042,6 +3042,7 @@ describe("cli: probe", () => {
       "npm test",
       "-i",
       "inplace",
+      "--summary",
     ]);
 
     expect(run.stderr).toContain("looks like a full test suite");
@@ -3100,7 +3101,243 @@ describe("cli: probe", () => {
     expect(run.stderr).not.toContain("looks like a full test suite");
   });
 
-  it("prints the full-suite hint before the baseline run starts, not after", async () => {
+  /** A repo whose `npm test` is full-suite-shaped and passes, with a
+   * three-line fixture; `-n 2` is `  return n > 0;`. */
+  function fullSuiteRepo(): string {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        name: "full-suite-fixture",
+        version: "1.0.0",
+        scripts: { test: 'node -e "process.exit(0)"' },
+      }),
+    );
+    commitAll(repo);
+    return repo;
+  }
+
+  const FULL_SUITE_PROBE = [
+    "probe",
+    "--file",
+    "fixture.js",
+    "-n",
+    "2",
+    "-r",
+    "  return false;",
+    "-t",
+    "npm test",
+    "-i",
+    "inplace",
+  ];
+  /** A refusal that needs no baseline: the `-M` text is not on line 2. */
+  const FULL_SUITE_REFUSAL = [
+    "probe",
+    "--file",
+    "fixture.js",
+    "-n",
+    "2",
+    "-M",
+    "zzz-not-there",
+    "-w",
+    "x",
+    "-t",
+    "npm test",
+    "-i",
+    "inplace",
+  ];
+
+  it("JSON mode: the full-suite hint is a warning in the envelope and nothing goes to stderr, so stdout plus stderr parses as one JSON document", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli(["-C", repo, ...FULL_SUITE_PROBE]);
+    expect(run.stderr).toBe("");
+    // What `2>&1 | <json parser>` reads.
+    const parsed = JSON.parse(run.stdout + run.stderr);
+    const hint = parsed.warnings.at(-1) as string;
+    expect(hint).toContain("looks like a full test suite");
+    expect(hint).toContain("--timeout");
+    // Exactly once.
+    expect(
+      parsed.warnings.filter((w: string) => w.includes("full test suite")),
+    ).toHaveLength(1);
+  });
+
+  it("JSON mode with --timeout: no hint in the envelope warnings", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_PROBE,
+      "--timeout",
+      "30",
+    ]);
+    expect(run.stderr).toBe("");
+    expect(
+      (JSON.parse(run.stdout).warnings as string[]).filter((w) =>
+        w.includes("full test suite"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("JSON mode: the hint is appended after the probe's own warnings, so a refusal message stays warnings[0]", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli(["-C", repo, ...FULL_SUITE_REFUSAL]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout + run.stderr);
+    expect(parsed.reason).toBe("mutant_not_applicable");
+    expect(parsed.warnings).toHaveLength(2);
+    expect(parsed.warnings[0]).toBe("substring not found on line 2");
+    expect(parsed.warnings[1]).toContain("looks like a full test suite");
+  });
+
+  it("-f text keeps the hint on stderr and out of the rendering", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-f",
+      "text",
+      ...FULL_SUITE_REFUSAL,
+    ]);
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(run.stdout).not.toContain("looks like a full test suite");
+  });
+
+  it("--print keeps the hint on stderr and out of the printed warnings", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_REFUSAL,
+      "--print",
+      "warnings",
+    ]);
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(JSON.parse(run.stdout)).toEqual({
+      warnings: ["substring not found on line 2"],
+    });
+  });
+
+  it("--summary keeps the hint on stderr, and its note is the refusal message, not the hint", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_REFUSAL,
+      "--summary",
+    ]);
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(run.stdout).toContain("note: substring not found on line 2");
+    expect(run.stdout).not.toContain("looks like a full test suite");
+  });
+
+  it("--plan prints no full-suite hint, on stderr or in the envelope", async () => {
+    const repo = fullSuiteRepo();
+    fs.writeFileSync(
+      path.join(repo, "plan.json"),
+      JSON.stringify({
+        test: "npm test",
+        mutants: [
+          { file: "fixture.js", line: 2, match: "zzz-not-there", with: "x" },
+        ],
+      }),
+    );
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      "plan.json",
+      "-i",
+      "inplace",
+    ]);
+    expect(run.stderr).toBe("");
+    expect(run.stdout).not.toContain("looks like a full test suite");
+  });
+
+  it("a refused -M reports the line it looked at as line_content, on the single probe and the plan item, without changing reason or exit code", async () => {
+    const repo = fullSuiteRepo();
+    const single = await spawnCli(["-C", repo, ...FULL_SUITE_REFUSAL]);
+    expect(single.code).toBe(2);
+    const parsedSingle = JSON.parse(single.stdout);
+    expect(parsedSingle.status).toBe("inconclusive");
+    expect(parsedSingle.reason).toBe("mutant_not_applicable");
+    expect(parsedSingle.line_content).toBe("return n > 0;");
+
+    fs.writeFileSync(
+      path.join(repo, "plan.json"),
+      JSON.stringify({
+        test: "npm test",
+        mutants: [
+          { file: "fixture.js", line: 2, match: "zzz-not-there", with: "x" },
+          { file: "fixture.js", line: 2, match: "n > 0", with: "n < 0" },
+        ],
+      }),
+    );
+    const plan = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      "plan.json",
+      "-i",
+      "inplace",
+    ]);
+    const parsedPlan = JSON.parse(plan.stdout);
+    const [refused, applied] = parsedPlan.plan.results;
+    expect(refused.reason).toBe("mutant_not_applicable");
+    expect(refused.line_content).toBe("return n > 0;");
+    // An applied mutant carries no line_content.
+    expect(applied.line_content).toBeUndefined();
+  });
+
+  it("line_content is printable with --print and absent when the substring was found", async () => {
+    const repo = fullSuiteRepo();
+    const refused = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_REFUSAL,
+      "--print",
+      "line_content,reason",
+    ]);
+    expect(JSON.parse(refused.stdout)).toEqual({
+      line_content: "return n > 0;",
+      reason: "mutant_not_applicable",
+    });
+    const outOfRange = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "99",
+      "-M",
+      "n",
+      "-w",
+      "m",
+      "-t",
+      "node -e 0",
+      "-i",
+      "inplace",
+    ]);
+    const parsed = JSON.parse(outOfRange.stdout);
+    expect(parsed.reason).toBe("mutant_not_applicable");
+    expect(parsed.line_content).toBeUndefined();
+  });
+
+  it("prints the full-suite hint before the baseline run starts, not after (view mode)", async () => {
     // Observable ordering, not just presence: the test command writes a
     // marker file the instant it runs, so "before the baseline starts"
     // is asserted against a real event this run produced rather than
@@ -3160,6 +3397,7 @@ describe("cli: probe", () => {
       "npm test",
       "-i",
       "inplace",
+      "--summary",
     ]);
     child.stderr.setEncoding("utf8");
     let hintSeen = false;

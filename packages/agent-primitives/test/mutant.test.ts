@@ -11,6 +11,8 @@ import {
   DELETED_FILE_HASH,
   DIFF_EXCERPT_MAX_CHARS,
   DIFF_EXCERPT_MAX_LINES,
+  LINE_CONTENT_MAX_CHARS,
+  capLineContent,
   formatMutantSummary,
   formatVerifiedAppliedVia,
   listPatchTouchedPaths,
@@ -74,6 +76,82 @@ describe("computeMutant: replace form", () => {
     expect(result.newContent).toContain("  return false;");
     expect(result.newContent).not.toContain("return n > 0;");
     expect(result.mutatedHash).not.toBe("");
+  });
+
+  it("carries the line it looked at as lineContent when the substring is not found: trimmed, whole when it fits", async () => {
+    const result = await computeMutant(
+      {
+        form: "match",
+        file: "/x/fixture.js",
+        line: 2,
+        matchText: "zzz-not-there",
+        withText: "x",
+      },
+      { root: "/x", logDir: makeTmpDir(), originalContent: ORIGINAL },
+    );
+    expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.lineContent).toBe("return n > 0;");
+    // The reason string is unchanged by the new field.
+    expect(result.reason).toBe("substring not found on line 2");
+  });
+
+  it("caps lineContent at LINE_CONTENT_MAX_CHARS with a trailing ... marker, and leaves a line of exactly that length alone", async () => {
+    const exact = "a".repeat(LINE_CONTENT_MAX_CHARS);
+    const longer = "b".repeat(LINE_CONTENT_MAX_CHARS + 50);
+    const ask = (line: string) =>
+      computeMutant(
+        {
+          form: "match",
+          file: "/x/fixture.js",
+          line: 1,
+          matchText: "zzz-not-there",
+          withText: "x",
+        },
+        { root: "/x", logDir: makeTmpDir(), originalContent: line },
+      );
+    const atCap = await ask(`  ${exact}  `);
+    expect(atCap.applicable).toBe(false);
+    if (atCap.applicable) return;
+    expect(atCap.lineContent).toBe(exact);
+    const over = await ask(longer);
+    expect(over.applicable).toBe(false);
+    if (over.applicable) return;
+    expect(over.lineContent).toHaveLength(LINE_CONTENT_MAX_CHARS);
+    expect(over.lineContent?.endsWith("...")).toBe(true);
+    expect(over.lineContent?.startsWith("bbb")).toBe(true);
+  });
+
+  it("capLineContent trims whitespace before measuring", () => {
+    expect(capLineContent("\t  hello  \r")).toBe("hello");
+  });
+
+  it("gives no lineContent for the other refusals of a match mutant (empty -M, replacement identical to the matched text, out of range)", async () => {
+    const base = { form: "match" as const, file: "/x/fixture.js" };
+    const ctx = () => ({
+      root: "/x",
+      logDir: makeTmpDir(),
+      originalContent: ORIGINAL,
+    });
+    const refusals = [
+      await computeMutant(
+        { ...base, line: 2, matchText: "", withText: "x" },
+        ctx(),
+      ),
+      await computeMutant(
+        { ...base, line: 2, matchText: "n", withText: "n" },
+        ctx(),
+      ),
+      await computeMutant(
+        { ...base, line: 999, matchText: "n", withText: "x" },
+        ctx(),
+      ),
+    ];
+    for (const r of refusals) {
+      expect(r.applicable).toBe(false);
+      if (r.applicable) continue;
+      expect(r.lineContent).toBeUndefined();
+    }
   });
 
   it("is not applicable for a line number out of range, with a one-line reason", async () => {

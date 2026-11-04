@@ -123,10 +123,18 @@ How a `-c` item resolves:
 - Identical command items collapse to one check, the same way a
   duplicated `-c` name does.
 
+`-x` alone does not replace the default list: `verify -x name=cmd` runs
+`build`, `typecheck`, `lint` and `test` as well as `name`, and each of the
+four without a script is a `no_script` non-pass. When at least one `-x` is
+given and `-c` is not, the `warnings` carry
+`hint: -x given without -c: the default check list (build,typecheck,lint,test) still runs; pass -c <names> to choose the run set`.
+Giving `-c` (even an empty list) or giving no `-x` leaves it out.
+
 Check resolution, per name: an `-x` override wins; otherwise a matching
 `package.json` `scripts[name]` runs as `npm run <name> --silent`; a requested
 name with neither is recorded as `status: "skipped", reason: "no_script"`,
-with a warning naming the missing script. It is an explicit non-pass: the
+with a warning naming the missing script and the remedy (`pass -c with the
+checks this repo has`). It is an explicit non-pass: the
 overall result is `status: "error"`, exit `2`, even when other requested
 checks pass. Supply the command deliberately with `-x name=command` when
 that is intended. When the resolved check list is empty (e.g. `-c ''`), or
@@ -313,3 +321,38 @@ warning, and the result carries `reason: "aborted"`. The CLI prints none
 of that on a signal (see the "Signals, locks and recovery" section of
 [probe.md](probe.md)).
 
+## Compact views: --summary and --print
+
+`--summary` and `--print <field,...>` print a second rendering of the same
+result; they work like the views of [probe](probe.md#compact-views---summary---print-and---report).
+
+`--summary` prints one line per check, one `warning:` line per warning,
+and a final totals line:
+
+```text
+<name> | <pass|fail|skipped|error> | exit=<code|-> | <N>ms | passed=N failed=N skipped=N errors=N[ | reason=no_script][ | first failure: <file:line: message>]
+totals: status=<pass|fail|error> [reason=<reason>] checks=N pass=N fail=N skipped=N error=N totalDurationMs=N warnings=N fullResult=<path>
+```
+
+`fullResult=` names the saved `result-full-*.json`; `verify` writes it on
+every run. `-m` is a character budget: rows that do not fit are replaced
+by one marker line naming how many were omitted, and the totals line is
+always printed.
+
+`--print` prints one JSON object on one line, one key per requested field
+in the order given. A name is a top-level envelope field (`status`,
+`reason`, `checks`, `totalDurationMs`, `warnings`, `logs`, `truncated`,
+`fullResult` and the other fixed fields); a dotted path descends into
+objects but not into arrays, so a single check is not addressable
+(`checks.0.name` prints `null`). Fields are read from the unreduced result,
+so `-m` does not shorten a printed field; `--max-failures` still caps each
+check's `failures` list and sets `truncated` as it does for the JSON
+envelope, with the uncapped list in `verify-full-*.json`. Only the printed
+line is bounded by `-m`. A field this run did not produce prints `null`.
+
+Both views take precedence over `-f`, are bounded by `-m`, are mutually
+exclusive (naming both is a `usage_error` with exit `2` before anything
+runs, as is an unknown `--print` field, which lists this command's own
+fields), and leave the envelope schema, the exit code and the saved full
+result untouched. A usage error prints the JSON `usage_error` envelope as
+for every other command.

@@ -51,6 +51,14 @@ import {
 } from "./probe/summary.js";
 import { linkEntryUsageError } from "./probe/link-list.js";
 import {
+  DRIFT_PRINTABLE_FIELDS,
+  HYGIENE_PRINTABLE_FIELDS,
+  VERIFY_PRINTABLE_FIELDS,
+  renderDriftSummary,
+  renderHygieneSummary,
+  renderVerifySummary,
+} from "./views.js";
+import {
   init,
   renderInitText,
   ALL_HARNESSES,
@@ -1088,6 +1096,12 @@ program
     },
   );
 
+/** The two flag definitions `hygiene`, `drift` and `verify` share. */
+const SUMMARY_FLAG_HELP = (what: string): string =>
+  `print one line per ${what} and a totals line instead of the JSON envelope; -m bounds its characters and the totals line is always kept; takes precedence over -f; exit codes unchanged`;
+const PRINT_FLAG_HELP =
+  "print only these comma-separated top-level envelope fields (dotted paths descend into objects, not into arrays) as one JSON object instead of the envelope; read from the unreduced result, so -m does not shorten a field; an unknown field is a usage error; takes precedence over -f; exit codes unchanged";
+
 interface VerifyCliOptions {
   checks?: string[];
   exec: Record<string, string>;
@@ -1095,6 +1109,8 @@ interface VerifyCliOptions {
   failFast?: boolean;
   timeout?: string;
   maxFailures?: string;
+  summary?: boolean;
+  print?: string[];
 }
 
 program
@@ -1127,9 +1143,16 @@ program
     parseMaxFailures,
     String(DEFAULT_MAX_FAILURES),
   )
+  .option("--summary", SUMMARY_FLAG_HELP("check"))
+  .option(
+    "--print <fields>",
+    PRINT_FLAG_HELP,
+    printOptionParser(VERIFY_PRINTABLE_FIELDS),
+  )
   .action(async (opts: VerifyCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    requireExclusiveViews(opts, "verify");
     const result = await verify({
       cwd: global.cwd,
       logDir: global.logDir,
@@ -1165,7 +1188,7 @@ program
       currentRunId(),
     );
 
-    const { envelope, exitCode } = buildEnvelope({
+    const envelopeInput: EnvelopeInput = {
       version: VERSION,
       command: "verify",
       persistFullResult: true,
@@ -1181,7 +1204,8 @@ program
       },
       maxChars: global.maxChars,
       logDir: global.logDir,
-    });
+    };
+    const { envelope, exitCode } = buildEnvelope(envelopeInput);
     // The max-failures cap is applied before buildEnvelope ever sees the
     // result, so its own size-triggered reduction may not fire even
     // though real content was cut: mark truncated explicitly whenever
@@ -1189,11 +1213,23 @@ program
     if (pendingEnvelopePatch.truncated) {
       envelope.truncated = true;
     }
-    emit(
+    emitView(
+      opts,
       envelope,
       exitCode,
-      { format: global.format, maxChars: global.maxChars },
+      global,
+      envelopeInput,
+      (fullResult, emittedWarnings) =>
+        renderVerifySummary(
+          { ...result, warnings: emittedWarnings },
+          global.maxChars,
+          fullResult,
+        ),
       () => renderVerifyText(result, envelope),
+      // The same marker the emitted envelope got above.
+      (unreduced) => {
+        if (pendingEnvelopePatch.truncated) unreduced.truncated = true;
+      },
     );
   });
 
@@ -1363,15 +1399,22 @@ interface ProbeCliOptions {
   replayed?: boolean;
 }
 
-/** `--print` value: validated while the options are parsed, so an unknown
- * field is a usage error before the probe spends a run. */
-function parsePrintOption(value: string): string[] {
-  try {
-    return parsePrintFields(value);
-  } catch (err) {
-    throw new InvalidArgumentError((err as Error).message);
-  }
+/** `--print` value parser for a command's own field list (`probe`'s is
+ * the default): validated while the options are parsed, so an unknown
+ * field is a usage error before the command spends a run. */
+function printOptionParser(
+  allowed?: readonly string[],
+): (value: string) => string[] {
+  return (value) => {
+    try {
+      return parsePrintFields(value, allowed);
+    } catch (err) {
+      throw new InvalidArgumentError((err as Error).message);
+    }
+  };
 }
+
+const parsePrintOption = printOptionParser();
 
 /** The report kinds `--report` accepts, in the option's own vocabulary.
  * `mutation-probes` prints the orchestrator implementer contract's
@@ -1390,24 +1433,36 @@ function parseReportOption(value: string): string {
   return value;
 }
 
-/** The view options `probe` accepts together, checked once the whole
- * option set is in: `--summary`, `--print` and `--report` are three
- * renderings of one result, so naming more than one has no honest
- * winner (a usage error, exactly as `--summary` with `--print` already
- * was); `--replayed` shapes only the `--report mutation-probes` items,
- * so it is refused outright rather than silently ignored without them. */
-function requireExclusiveViews(opts: ProbeCliOptions): void {
+/** The view options a command accepts together, checked once the whole
+ * option set is in: `--summary`, `--print` and `--report` are renderings
+ * of one result, so naming more than one has no honest winner (a usage
+ * error, exactly as `--summary` with `--print` already was); `--replayed`
+ * shapes only the `--report mutation-probes` items, so it is refused
+ * outright rather than silently ignored without them. `hygiene`, `drift`
+ * and `verify` have `--summary` and `--print` only, so only the first
+ * check can apply to them. `command` names the command in the message. */
+function requireExclusiveViews(
+  opts: {
+    summary?: boolean;
+    print?: string[];
+    report?: string;
+    replayed?: boolean;
+  },
+  command: string = "probe",
+): void {
   if (opts.summary && opts.print !== undefined) {
-    throw new UsageError("probe: --summary and --print are mutually exclusive");
+    throw new UsageError(
+      `${command}: --summary and --print are mutually exclusive`,
+    );
   }
   if (opts.report !== undefined && (opts.summary || opts.print !== undefined)) {
     throw new UsageError(
-      "probe: --report is mutually exclusive with --summary and --print",
+      `${command}: --report is mutually exclusive with --summary and --print`,
     );
   }
   if (opts.replayed && opts.report === undefined) {
     throw new UsageError(
-      "probe: --replayed requires --report (it only shapes the printed " +
+      `${command}: --replayed requires --report (it only shapes the printed ` +
         "report items; the JSON envelope and the other views are unchanged " +
         "by it)",
     );
@@ -1532,6 +1587,77 @@ function emitProbe(
     format: global.format,
     maxChars: global.maxChars,
   });
+}
+
+/** The view flags `hygiene`, `drift` and `verify` share. */
+interface ViewCliOptions {
+  summary?: boolean;
+  print?: string[];
+}
+
+/**
+ * Emits the envelope of `hygiene`, `drift` or `verify`, or, with
+ * `--summary` / `--print`, the selected view of it instead. The exit code
+ * is the one already computed for the envelope, which is built unchanged
+ * either way. `--print` reads the unreduced envelope (the payload the
+ * result-full file carries), with `logs`, `warnings` and `fullResult`
+ * overlaid from the emitted one: the result-full path and a "full result
+ * not written" warning only exist after the real build ran. Only the
+ * printed text is bounded by `-m`. `renderSummary` gets the saved full
+ * result path (when one was written) and the emitted warnings.
+ * `patchUnreduced` carries a field the caller sets on the emitted
+ * envelope after `buildEnvelope` (verify's `truncated`) over to the
+ * unreduced one.
+ */
+function emitView(
+  opts: ViewCliOptions,
+  envelope: Record<string, unknown>,
+  exitCode: number,
+  global: ResolvedGlobal,
+  envelopeInput: EnvelopeInput,
+  renderSummary: (fullResult: string | undefined, warnings: string[]) => string,
+  textRenderer: () => string,
+  patchUnreduced?: (unreduced: Record<string, unknown>) => void,
+): void {
+  if (opts.print !== undefined) {
+    const unreduced = buildEnvelope({
+      ...envelopeInput,
+      persistFullResult: false,
+      maxChars: Number.MAX_SAFE_INTEGER,
+    }).envelope;
+    patchUnreduced?.(unreduced);
+    const source: Record<string, unknown> = {
+      ...unreduced,
+      logs: envelope.logs,
+      ...(envelope.warnings === undefined
+        ? {}
+        : { warnings: envelope.warnings }),
+      ...(envelope.fullResult === undefined
+        ? {}
+        : { fullResult: envelope.fullResult }),
+    };
+    writeAndExit(
+      boundText(renderPrint(source, opts.print), global.maxChars),
+      exitCode,
+    );
+    return;
+  }
+  if (opts.summary) {
+    writeAndExit(
+      renderSummary(
+        fullResultPathOf(envelope),
+        Array.isArray(envelope.warnings) ? (envelope.warnings as string[]) : [],
+      ),
+      exitCode,
+    );
+    return;
+  }
+  emit(
+    envelope,
+    exitCode,
+    { format: global.format, maxChars: global.maxChars },
+    textRenderer,
+  );
 }
 
 /** The `--report` definition-fill for a single probe with no `mutant`
@@ -2021,19 +2147,31 @@ program
     const testCommand = opts.test;
     const mutantChoice = resolveMutantForm(opts);
     // A full-suite-shaped command with no `--timeout` runs twice, serially
-    // (the baseline, then the mutant), with no bound on either: printed
-    // to stderr before the baseline starts, so the notice reaches an
-    // operator watching the run rather than only showing up as a slow
-    // command with no explanation. Never affects the envelope itself.
+    // (the baseline, then the mutant), with no bound on either. Where the
+    // output is the JSON envelope the hint joins its `warnings` (appended
+    // after the probe's own, so a refusal message stays first) and stdout
+    // plus stderr stay one parseable stream (`2>&1 | jq`); for `-f text`
+    // and the views it is printed to stderr before the baseline starts,
+    // so the notice reaches an operator watching the run rather than only
+    // showing up as a slow command with no explanation. Never changes the
+    // envelope's verdict fields.
+    let fullSuiteHint: string | undefined;
     if (
       opts.timeout === undefined &&
       looksLikeFullSuiteTestCommand(testCommand)
     ) {
-      process.stderr.write(
+      fullSuiteHint =
         `agent-primitives probe: "${testCommand}" looks like a full test ` +
-          `suite; the baseline and the mutant run it serially with no ` +
-          `time bound -- pass --timeout <seconds> to cap each run.\n`,
-      );
+        `suite; the baseline and the mutant run it serially with no ` +
+        `time bound -- pass --timeout <seconds> to cap each run.`;
+    }
+    const hintInEnvelope =
+      global.format !== "text" &&
+      !opts.summary &&
+      opts.print === undefined &&
+      opts.report === undefined;
+    if (fullSuiteHint !== undefined && !hintInEnvelope) {
+      process.stderr.write(`${fullSuiteHint}\n`);
     }
     // Handed to `probe` for the duration of the call: it owns SIGINT and
     // SIGTERM while it runs, because it has a mutated file to restore
@@ -2092,7 +2230,10 @@ program
       status: envelopeStatus,
       durationMs: Date.now() - start,
       cwd: global.cwd,
-      warnings: result.warnings,
+      warnings:
+        fullSuiteHint !== undefined && hintInEnvelope
+          ? [...result.warnings, fullSuiteHint]
+          : result.warnings,
       logs: [
         ...(result.baseline !== undefined ? [result.baseline.logPath] : []),
         ...(result.test !== undefined ? [result.test.logPath] : []),
@@ -2103,6 +2244,9 @@ program
         ...(result.mutant !== undefined ? { mutant: result.mutant } : {}),
         ...(result.mutation_probe !== undefined
           ? { mutation_probe: result.mutation_probe }
+          : {}),
+        ...(result.line_content !== undefined
+          ? { line_content: result.line_content }
           : {}),
         ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
         ...(result.env !== undefined ? { env: result.env } : {}),
@@ -2252,6 +2396,8 @@ interface DriftCliOptions {
   head: string;
   allow: string[];
   strict?: boolean;
+  summary?: boolean;
+  print?: string[];
 }
 
 function collectAllow(value: string, previous: string[]): string[] {
@@ -2306,9 +2452,16 @@ program
     "--strict",
     "also report allowlisted sites in sites[], flagged with allowlisted/allowlistReason",
   )
+  .option("--summary", SUMMARY_FLAG_HELP("reported site"))
+  .option(
+    "--print <fields>",
+    PRINT_FLAG_HELP,
+    printOptionParser(DRIFT_PRINTABLE_FIELDS),
+  )
   .action(async (opts: DriftCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    requireExclusiveViews(opts, "drift");
     const result = await drift({
       cwd: global.cwd,
       base: opts.base,
@@ -2316,7 +2469,7 @@ program
       allow: opts.allow,
       strict: Boolean(opts.strict),
     });
-    const { envelope, exitCode } = buildEnvelope({
+    const envelopeInput: EnvelopeInput = {
       version: VERSION,
       command: "drift",
       status: result.status,
@@ -2344,11 +2497,20 @@ program
       keepWhole: ["counts"],
       maxChars: global.maxChars,
       logDir: global.logDir,
-    });
-    emit(
+    };
+    const { envelope, exitCode } = buildEnvelope(envelopeInput);
+    emitView(
+      opts,
       envelope,
       exitCode,
-      { format: global.format, maxChars: global.maxChars },
+      global,
+      envelopeInput,
+      (fullResult, emittedWarnings) =>
+        renderDriftSummary(
+          { ...result, warnings: emittedWarnings },
+          global.maxChars,
+          fullResult,
+        ),
       () => renderDriftText(result),
     );
   });
@@ -2360,6 +2522,8 @@ interface HygieneCliOptions {
   extendOnly: string[];
   extendOnlyFile?: string;
   maxDeletePercent: string;
+  summary?: boolean;
+  print?: string[];
 }
 
 function renderHygieneText(result: HygieneResult): string {
@@ -2406,9 +2570,16 @@ program
     "flag an extend-only file that loses more than this percent of its base lines",
     String(DEFAULT_MAX_DELETE_PERCENT),
   )
+  .option("--summary", SUMMARY_FLAG_HELP("finding"))
+  .option(
+    "--print <fields>",
+    PRINT_FLAG_HELP,
+    printOptionParser(HYGIENE_PRINTABLE_FIELDS),
+  )
   .action(async (opts: HygieneCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    requireExclusiveViews(opts, "hygiene");
     const extendOnly = [...opts.extendOnly];
     if (opts.extendOnlyFile !== undefined) {
       let text: string;
@@ -2435,7 +2606,7 @@ program
       extendOnly,
       maxDeletePercent: Number(opts.maxDeletePercent),
     });
-    const { envelope, exitCode } = buildEnvelope({
+    const envelopeInput: EnvelopeInput = {
       version: VERSION,
       command: "hygiene",
       status: result.status,
@@ -2457,11 +2628,20 @@ program
       keepWhole: ["counts"],
       maxChars: global.maxChars,
       logDir: global.logDir,
-    });
-    emit(
+    };
+    const { envelope, exitCode } = buildEnvelope(envelopeInput);
+    emitView(
+      opts,
       envelope,
       exitCode,
-      { format: global.format, maxChars: global.maxChars },
+      global,
+      envelopeInput,
+      (fullResult, emittedWarnings) =>
+        renderHygieneSummary(
+          { ...result, warnings: emittedWarnings },
+          global.maxChars,
+          fullResult,
+        ),
       () => renderHygieneText(result),
     );
   });

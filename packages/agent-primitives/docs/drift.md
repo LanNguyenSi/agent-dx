@@ -116,3 +116,38 @@ a `. `/`; ` sentence boundary within that lookback), or more than about
 20 characters after it, is still reported rather than allowlisted; use
 `--allow` or reword the mention to bring it inside the window.
 
+## Compact views: --summary and --print
+
+`--summary` and `--print <field,...>` print a second rendering of the same
+result; they work like the views of [probe](probe.md#compact-views---summary---print-and---report).
+
+`--summary` prints one line per site in `sites` (the allowlisted ones too
+under `--strict`, flagged), one `warning:` line per warning, and a final
+totals line:
+
+```text
+<path>:<line> | <identifier> | <doc|comment>[ | allowlisted] | <text, at most 140 characters>
+totals: status=<ok|fail> removed=N sites=N allowlisted=N warnings=N [fullResult=<path>]
+```
+
+`fullResult=` appears when the envelope was reduced to fit `-m` and the
+complete result was saved. `-m` is a character budget: rows that do not
+fit are replaced by one marker line naming how many were omitted, and the
+totals line is always printed.
+
+`--print` prints one JSON object on one line, one key per requested field
+in the order given. A name is a top-level envelope field (`status`,
+`sites`, `allowlisted`, `removed_identifiers`, `counts`, `base_sha`,
+`head_sha`, `merge_base`, `base`, `head`, `warnings`, `logs`, `fullResult`
+and the other fixed fields); a dotted path descends into objects
+(`counts.sites`) but not into arrays, so a single site is not addressable
+(`sites.0` prints `null`). Fields are read from the unreduced result, so
+`-m` does not shorten a printed field; only the printed line is bounded by
+it. A field this run did not produce prints `null`.
+
+Both views take precedence over `-f`, are bounded by `-m`, are mutually
+exclusive (naming both is a `usage_error` with exit `2` before anything
+runs, as is an unknown `--print` field, which lists this command's own
+fields), and leave the envelope schema, the exit code and the saved full
+result untouched. A usage error prints the JSON `usage_error` envelope as
+for every other command.

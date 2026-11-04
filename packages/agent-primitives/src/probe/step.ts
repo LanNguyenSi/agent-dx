@@ -85,6 +85,8 @@ export type PreparedMutant =
   | {
       ok: false;
       reason: "mutant_not_applicable" | "git_apply_timeout" | "aborted";
+      /** See `MutantNotApplicable.lineContent`. */
+      lineContent?: string;
       logPaths: string[];
     };
 
@@ -181,6 +183,9 @@ export async function prepareMutant(
     return {
       ok: false,
       reason: computed.reasonCode ?? "mutant_not_applicable",
+      ...(computed.lineContent !== undefined
+        ? { lineContent: computed.lineContent }
+        : {}),
       logPaths: computed.logPaths,
     };
   }

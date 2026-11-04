@@ -1959,8 +1959,16 @@ run: worth knowing before a probe over, say, `npx vitest run --coverage`
 sits for minutes running the whole suite twice. A targeted command such
 as `vitest run test/x.test.ts` (a file argument after `run`) or
 `npm test -- test/x.test.ts` prints nothing; passing `--timeout` also
-suppresses it, whatever the command looks like. The stderr line is
-never part of the JSON envelope.
+suppresses it, whatever the command looks like.
+
+Where the hint goes depends on the output. When the output is the JSON
+envelope (no `-f text`, no `--summary`/`--print`/`--report`), it is
+appended to the envelope's `warnings`, after any warning the probe itself
+raised, and nothing is written to stderr, so `2>&1 | <json parser>` reads
+one valid document. For `-f text` and the views it stays one stderr line
+printed before the baseline starts, because a person watching the run
+needs it before the wait, and it is not part of the printed text. A
+`--plan` run prints no hint in either place.
 
 ## Signals, locks and recovery
 
@@ -2207,10 +2215,14 @@ What a run that stops early prints, by case:
   unreadable plan file; a stopped plan still reports one `not_applicable`
   item per mutant it never reached).
 
-They are flags on `probe` rather than a new `-f` value: `-f` is a global
-option shared by every command and `probe` is the only one with a
-per-mutant verdict to summarise, and `--print` needs an argument, which a
-format value cannot carry.
+They are flags rather than a new `-f` value: `-f` is a global option
+shared by every command, and `--print` needs an argument, which a format
+value cannot carry. `hygiene`, `drift` and `verify` have `--summary` and
+`--print` too, with their own line formats and field lists (see
+[hygiene](hygiene.md#compact-views---summary-and---print),
+[drift](drift.md#compact-views---summary-and---print) and
+[verify](verify.md#compact-views---summary-and---print)); `--report` and
+`--replayed` are `probe`'s alone.
 
 `--summary` prints one line per mutant, fields separated by ` | `:
 
@@ -2451,7 +2463,7 @@ above.
 | `worktree_sync_failed` | absent | absent | syncing the `-i worktree` copy (the tracked-diff apply, or an untracked-file copy) failed |
 | `target_not_synced` | absent | absent | `--file` is gitignored, so `-i worktree` never synced a copy of it to mutate |
 | `backup_verification_failed` | absent | absent | the pre-mutation backup does not hash-match the target right after it was taken |
-| `mutant_not_applicable` | absent | absent | the dry run (before the baseline) found the mutant does not apply -- the string is not on the line, the patch does not apply cleanly, etc. |
+| `mutant_not_applicable` | absent | absent | the dry run (before the baseline) found the mutant does not apply -- the string is not on the line (the refusal then also carries `line_content`, see below), the patch does not apply cleanly, etc. |
 | `git_apply_timeout` | absent | absent | the dry run's own `git apply` hit its bound and was killed |
 | `aborted` | present | present | a SIGINT/SIGTERM landed during the baseline phase (its `--pre`, or the baseline test itself); see the `exitOnSignal` note above for why this is a library-caller-only row |
 | `pre_failed` | present | present | `--pre` exited non-zero during the baseline phase |
@@ -2477,6 +2489,20 @@ mutant-phase outcome (`apply_hash_mismatch`, `restore_failed`,
 `pre_failed`/`aborted`), because a real apply was already attempted
 against the real target by then; this table's `absent` row for each of
 those two names only the earlier, setup-phase site.
+
+When the `mutant_not_applicable` cause is `-M/--match` text that is not on
+the named line (`substring not found on line N`), the result also carries
+`line_content`: the line as the file has it, trimmed and capped at 300
+characters with a trailing `...` when longer, so the caller can correct
+the substring without opening the file. It sits at the top level of a
+single probe's result and on the `plan.results[]` item of a `--plan`
+mutant, and `--print line_content` reads it. The status stays
+`inconclusive`, `reason` stays `mutant_not_applicable` and the exit code
+stays `2`; the other causes of that reason (an empty `-M`, a replacement
+identical to the matched text, a line out of range, a patch that does not
+apply) carry no `line_content`. `--summary` and `--report` do not print
+it. The line is repository content, the same class as the `mutant.before`
+the result already echoes for an applied mutant.
 
 `aborted` is itself a three-site reason, the mirror image of
 `mutant_not_applicable`/`git_apply_timeout` above: this table's `present`
