@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own mutants `not_run` with its reason (plan `inconclusive`,
   `mutant_inconclusive`); a failing first one refuses the plan as before;
   a later baseline that rewrote a target ends the plan
-  `target_changed_during_baseline`. The envelope adds `plan.baselines`
+  `target_changed_during_baseline`, and one stopped by a signal ends it
+  `aborted`, each settling the backups the way the first baseline does in
+  the same case. The envelope adds `plan.baselines`
   and each result's `test_command` and `baseline_index`, lists every
   baseline log in `logs`, and `--summary` gains a `test=` column and one
   line per baseline when the plan names more than one command. A plan

@@ -251,10 +251,15 @@ export interface RunSetupRefusal {
    * field entirely. */
   reportsMutant: boolean;
   /** Set when this refusal is the baseline gate's (`runBaselineGate`):
-   * the baseline, or the `--pre` ahead of it, ran. Absent on every
-   * refusal made before that point. The single probe ignores it; a plan
-   * reads it to tell a first baseline that failed from one never run. */
+   * the baseline's `--pre` or test command ran, unless
+   * `baselineNotStarted` below says neither could be started. Absent on
+   * every refusal made before the gate. The single probe ignores both; a
+   * plan reads them to tell a first baseline that failed from one never
+   * run. */
   fromBaselineGate?: true;
+  /** Set beside `fromBaselineGate` when the gate refused before starting
+   * either command (`pycache_isolation_failed`). */
+  baselineNotStarted?: true;
 }
 
 /** Everything a run needs before its first mutant may be applied: the
@@ -305,6 +310,11 @@ export interface RunSetupInput {
   timeoutMs?: number;
   gitApplyTimeoutMs: number;
   testCommand: string;
+  /** How the `-i worktree` escape refusal names `testCommand`: a plan
+   * whose first command came from a mutant's own `test` passes that plan
+   * path (`plan.mutants[0].test`). Omitted, it is "the test command (-t)",
+   * the single probe's and a plan-level `test`'s label. */
+  testCommandLabel?: string;
   /** A plan's further test commands (one per baseline group after the
    * first), each with the plan path that names it: scanned by the
    * `-i worktree` escape check beside `testCommand`, before anything
@@ -437,6 +447,7 @@ export async function openRunSetup(
       logPaths?: string[];
       baseline?: ExecPhaseField;
       fromBaselineGate?: boolean;
+      baselineNotStarted?: boolean;
     } = {},
   ): RunSetupOutcome => ({
     ok: false,
@@ -448,6 +459,9 @@ export async function openRunSetup(
       ...(extra.baseline !== undefined ? { baseline: extra.baseline } : {}),
       ...(extra.fromBaselineGate === true
         ? { fromBaselineGate: true as const }
+        : {}),
+      ...(extra.baselineNotStarted === true
+        ? { baselineNotStarted: true as const }
         : {}),
       // Mechanical, not a per-call flag: every refusal's `reportsMutant`
       // comes from the one shared contract (`REFUSAL_RESULT_SHAPE`,
@@ -523,7 +537,8 @@ export async function openRunSetup(
     );
     if (testRegions.length > 0) {
       escapes.push({
-        channel: ISOLATION_ESCAPE_CHANNEL_LABEL.testCommand,
+        channel:
+          input.testCommandLabel ?? ISOLATION_ESCAPE_CHANNEL_LABEL.testCommand,
         hint: ISOLATION_ESCAPE_FIX_HINT,
         regions: testRegions,
       });
@@ -978,6 +993,7 @@ export async function openRunSetup(
       logPaths: [...stepLogPaths, ...gate.logPaths],
       ...(gate.baseline !== undefined ? { baseline: gate.baseline } : {}),
       fromBaselineGate: true,
+      baselineNotStarted: !gate.started,
     });
   }
 
@@ -1028,8 +1044,10 @@ export interface BaselineGateInput {
 /** What `runBaselineGate` decided: the baseline mutants may be measured
  * against, or the refusal its own checks reached. A refusal's `message`
  * is NOT yet in `warnings` (the caller appends it, the way `refuse()`
- * does), and `logPaths` names only the exec logs this gate produced
- * beyond the baseline test's own (the failing `--pre`'s). */
+ * does), `logPaths` names only the exec logs this gate produced beyond
+ * the baseline test's own (the failing `--pre`'s), and `started` is
+ * false only when neither `--pre` nor the test command could be started
+ * (`pycache_isolation_failed`). */
 export type BaselineGateOutcome =
   | { ok: true; baseline: ExecPhaseField; baselineOutput: BaselineOutput }
   | {
@@ -1038,6 +1056,7 @@ export type BaselineGateOutcome =
       message?: string;
       baseline?: ExecPhaseField;
       logPaths: string[];
+      started: boolean;
     };
 
 /**
@@ -1076,6 +1095,7 @@ export async function runBaselineGate(
       reason: "pycache_isolation_failed",
       message: baselineRun.isolationError,
       logPaths: [],
+      started: false,
     };
   }
   if (!baselineRun.ok) {
@@ -1109,6 +1129,7 @@ export async function runBaselineGate(
       reason: preAborted ? "aborted" : "pre_failed",
       message: preMessage,
       logPaths: [baselineRun.pre.logPath],
+      started: true,
     };
   }
   const baselineTest = baselineRun.test;
@@ -1192,7 +1213,7 @@ export async function runBaselineGate(
           ? `the baseline run's own output cannot be read for whether any test executed at all (${zeroTestsEvidence.via}); see ${baselineTest.logPath}`
           : `the baseline run's own output shows no test was actually executed (${zeroTestsEvidence.via}); see ${baselineTest.logPath}`,
       );
-      return { ok: false, reason, baseline, logPaths: [] };
+      return { ok: false, reason, baseline, logPaths: [], started: true };
     }
   }
 
@@ -1273,6 +1294,7 @@ export async function runBaselineGate(
         reason: "baseline_evidence_not_matched",
         baseline,
         logPaths: [],
+        started: true,
       };
     }
 
@@ -1324,6 +1346,7 @@ export async function runBaselineGate(
       reason: baselineTest.aborted ? "aborted" : "baseline_failed",
       baseline,
       logPaths: [],
+      started: true,
     };
   }
 
@@ -1387,6 +1410,7 @@ export async function runBaselineGate(
       message: targetChangedDuringBaselineMessage(changed.subject),
       baseline,
       logPaths: [],
+      started: true,
     };
   }
 
@@ -1411,6 +1435,7 @@ export async function runBaselineGate(
         reason: "baseline_evidence_not_matched",
         baseline,
         logPaths: [],
+        started: true,
       };
     }
   }

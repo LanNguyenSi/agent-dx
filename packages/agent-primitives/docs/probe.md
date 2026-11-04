@@ -2770,8 +2770,9 @@ command's baseline: the zero-tests guard's byte-identical-output fallback
 compares a mutant's output with that baseline's, never with the first
 one's. The lock, the worktree sync, the backups and the restore slot are
 shared by all of them, as for one command, and the `-i worktree` escape
-check covers every command before anything runs, naming the plan path
-that carries it (`plan.mutants[1].test`).
+check covers every command before anything runs, naming a command that
+came from a mutant's own `test` by that plan path (`plan.mutants[1].test`)
+and the plan-level `test` as "the test command (-t)", as before.
 
 When a baseline fails:
 
@@ -2789,20 +2790,32 @@ When a baseline fails:
   `status: "inconclusive"`, `reason: "mutant_inconclusive"` (exit `2`).
   The failing baseline's warnings carry the prefix
   `plan.baselines[<i>] (<command>): `, and a failing `--pre`'s log joins
-  the plan's own setup logs.
+  the plan's own setup logs. For `pycache_isolation_failed` neither
+  command could be started, so that baseline is recorded `not_run` (with
+  the reason) rather than `failed`.
 - A later one that rewrote a target, whether it passed or failed, ends
   the plan before any mutant is applied: `reason:
   "target_changed_during_baseline"`, every mutant `not_run`, the target
-  left as that baseline wrote it and the backups dropped, the handling
-  the first baseline gets. Every later measurement would otherwise rest
-  on a changed tree. A later baseline stopped by a signal ends the plan
-  `reason: "aborted"` in the same way.
+  left as that baseline wrote it. Every later measurement would
+  otherwise rest on a changed tree. The backups go the way the first
+  baseline sends them in the same case: a passing baseline that rewrote
+  a target drops every backup, as the first baseline's own
+  `target_changed_during_baseline` refusal does; a failing one keeps the
+  rewritten target's backup, named in a warning ("its pre-baseline
+  content is kept at ..."), and drops the others, as a failing first
+  baseline does.
+- A later one stopped by a signal ends the plan before any mutant is
+  applied too: `reason: "aborted"`, every mutant `not_run`, the backups
+  settled as a stopped first baseline settles them (kept, and named,
+  only for a target the baseline rewrote).
 
 `plan.baselines[]` holds `{ index, command, status, reason?, exitCode?,
 durationMs?, logPath?, timedOut?, entries }` per baseline, in that order:
 `status` is `passed` (its mutants were measured against it), `failed` (it
 or its `--pre` ran; `reason` says why) or `not_run` (the plan ended
-before it, a refusal before any baseline included); the four phase fields
+before it, a refusal before any baseline included, with no `reason`; or
+it could not be started at all, with `reason:
+"pycache_isolation_failed"`); the four phase fields
 are present once its test phase ran; `entries` lists the `index` of each
 mutant measured against it. `plan.baseline` stays the first baseline's
 test phase. Each `results[i]` carries `test_command` (the command it ran,

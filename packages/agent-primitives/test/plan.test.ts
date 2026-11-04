@@ -23,6 +23,7 @@ import { expectNoIsolationLeftovers } from "./helpers/no-leftovers.js";
 import { sha256File } from "../src/hash.js";
 import { execCommand } from "../src/exec.js";
 import { applyPatchForReal, computeMutant } from "../src/probe/mutant.js";
+import { beginPyCacheIsolation } from "../src/probe/pycache.js";
 import {
   beginInplace,
   beginWorktree,
@@ -46,6 +47,14 @@ vi.mock("../src/probe/mutant.js", async (importOriginal) => {
     ...actual,
     computeMutant: vi.fn(actual.computeMutant),
     applyPatchForReal: vi.fn(actual.applyPatchForReal),
+  };
+});
+vi.mock("../src/probe/pycache.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/probe/pycache.js")>();
+  return {
+    ...actual,
+    beginPyCacheIsolation: vi.fn(actual.beginPyCacheIsolation),
   };
 });
 vi.mock("../src/probe/isolation.js", async (importOriginal) => {
@@ -3089,48 +3098,322 @@ describe("probePlan(): one baseline per distinct test command", () => {
     expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
   }, 60000);
 
-  it("a later command's baseline that rewrites a target ends the plan target_changed_during_baseline, before any mutant, whether that baseline passed or failed", async () => {
-    for (const tail of ["", "; exit 1"]) {
-      useLockDir();
-      const { repo } = initRepo();
-      const target = path.join(repo, "fixture.js");
-      vi.mocked(beginInplace).mockClear();
-      vi.mocked(computeMutant).mockClear();
-      const rewriting = `node -e "require('fs').writeFileSync('fixture.js', 'REWRITTEN')"${tail}`;
+  it("a later command's passing baseline that rewrites a target ends the plan target_changed_during_baseline before any mutant, every backup dropped", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    vi.mocked(beginInplace).mockClear();
+    vi.mocked(computeMutant).mockClear();
+    const rewriting = `node -e "require('fs').writeFileSync('fixture.js', 'REWRITTEN')"`;
 
-      const result = await probePlan(
+    const result = await probePlan(
+      planOptions(repo, [
+        replaceMutant(2, "  return false;"),
+        { ...replaceMutant(5, "  return true;"), testCommand: rewriting },
+      ]),
+    );
+    const backups = backupPathsTaken();
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("target_changed_during_baseline");
+    // Terminal: the first command's mutant is never reached either.
+    expect(result.results.map((r) => [r.status, r.reason])).toEqual([
+      ["not_run", undefined],
+      ["not_run", undefined],
+    ]);
+    expect(vi.mocked(computeMutant)).not.toHaveBeenCalled();
+    expect(result.baselines.map((b) => [b.status, b.reason])).toEqual([
+      ["passed", undefined],
+      ["failed", "target_changed_during_baseline"],
+    ]);
+    expect(result.warnings).toContain(
+      `plan.baselines[1] (${rewriting}): ${target} changed during the baseline run (before any mutation was applied); the target is left as the baseline run wrote it, not restored`,
+    );
+    // Left as the baseline wrote it, the backup dropped: the handling
+    // the first command's own passing baseline gives the same rewrite.
+    expect(fs.readFileSync(target, "utf8")).toBe("REWRITTEN");
+    expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+    expect(backups.length).toBeGreaterThan(0);
+    expect(backups.filter((backup) => fs.existsSync(backup))).toEqual([]);
+  }, 60000);
+
+  it("a later command's failing baseline that rewrites a target ends the plan target_changed_during_baseline, keeping that target's backup as a failing first baseline does", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const original = fs.readFileSync(target, "utf8");
+    // A second target the failing baseline leaves alone: its backup is
+    // dropped, exactly as a failing first baseline drops it.
+    const untouched = path.join(repo, "second.js");
+    fs.writeFileSync(untouched, "module.exports = 2;\n");
+    vi.mocked(beginInplace).mockClear();
+    vi.mocked(computeMutant).mockClear();
+    const rewriting = "echo '// x' >> fixture.js; exit 1";
+
+    const result = await probePlan(
+      planOptions(repo, [
+        replaceMutant(2, "  return false;"),
+        {
+          ...replaceMutant(1, "module.exports = 3;", "second.js"),
+          testCommand: rewriting,
+        },
+      ]),
+    );
+    const backups = backupPathsTaken();
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("target_changed_during_baseline");
+    expect(result.results.map((r) => [r.status, r.reason])).toEqual([
+      ["not_run", undefined],
+      ["not_run", undefined],
+    ]);
+    expect(vi.mocked(computeMutant)).not.toHaveBeenCalled();
+    expect(result.baselines.map((b) => [b.status, b.reason])).toEqual([
+      ["passed", undefined],
+      ["failed", "baseline_failed"],
+    ]);
+    expect(fs.readFileSync(target, "utf8")).toBe(`${original}// x\n`);
+    expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+    // The rewritten target's pre-baseline content is kept, and the
+    // warning names where; the untouched target's backup is gone.
+    const prefix = `plan.baselines[1] (${rewriting}): `;
+    const kept = result.warnings.find((w) =>
+      w.startsWith(
+        `${prefix}the failing baseline run also rewrote ${target}; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at `,
+      ),
+    );
+    expect(kept).toBeDefined();
+    const keptPath = (kept ?? "").split("is kept at ")[1];
+    expect(fs.readFileSync(keptPath, "utf8")).toBe(original);
+    expect(backups).toHaveLength(2);
+    expect(backups.filter((backup) => fs.existsSync(backup))).toEqual([
+      keptPath,
+    ]);
+
+    // The same failing, rewriting command as a plan's FIRST command: the
+    // same warning (without the prefix), the same backup kept.
+    useLockDir();
+    const { repo: firstRepo } = initRepo();
+    const firstTarget = path.join(firstRepo, "fixture.js");
+    vi.mocked(beginInplace).mockClear();
+    const first = await probePlan(
+      planOptions(firstRepo, [replaceMutant(2, "  return false;")], {
+        testCommand: rewriting,
+      }),
+    );
+    expect(first.reason).toBe("baseline_failed");
+    const firstKept = first.warnings.find((w) =>
+      w.startsWith(
+        `the failing baseline run also rewrote ${firstTarget}; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at `,
+      ),
+    );
+    expect(firstKept).toBeDefined();
+    expect(
+      backupPathsTaken().filter((backup) => fs.existsSync(backup)),
+    ).toHaveLength(1);
+  }, 60000);
+
+  it("a later command's baseline stopped by a signal ends the plan aborted before any mutant, leaving no backup behind", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(target, "utf8");
+    vi.mocked(beginInplace).mockClear();
+    vi.mocked(computeMutant).mockClear();
+    // The library-mode signal contract, forced the same way the I5 test
+    // above forces it (signalling this test process would race vitest's
+    // own handlers): call 1 is the first command's baseline, call 2 the
+    // second command's, reported as stopped.
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    let callCount = 0;
+    vi.mocked(execCommand).mockImplementation(
+      async (...args: Parameters<typeof execCommand>) => {
+        callCount += 1;
+        const result = await actualExec.execCommand(...args);
+        return callCount === 2 ? { ...result, aborted: true } : result;
+      },
+    );
+
+    let result: ProbePlanResult;
+    try {
+      result = await probePlan(
         planOptions(repo, [
           replaceMutant(2, "  return false;"),
-          { ...replaceMutant(5, "  return true;"), testCommand: rewriting },
+          {
+            ...replaceMutant(5, "  return true;"),
+            testCommand: "node fixture.test.js && true",
+          },
+          replaceMutant(7, "module.exports = {};"),
         ]),
       );
-      const backups = backupPathsTaken();
-
-      expect(result.status).toBe("inconclusive");
-      expect(result.reason).toBe("target_changed_during_baseline");
-      // Terminal: the first command's mutant is never reached either.
-      expect(result.results.map((r) => [r.status, r.reason])).toEqual([
-        ["not_run", undefined],
-        ["not_run", undefined],
-      ]);
-      expect(vi.mocked(computeMutant)).not.toHaveBeenCalled();
-      expect(result.baselines.map((b) => [b.status, b.reason])).toEqual([
-        ["passed", undefined],
-        [
-          "failed",
-          tail === "" ? "target_changed_during_baseline" : "baseline_failed",
-        ],
-      ]);
-      expect(result.warnings).toContain(
-        `plan.baselines[1] (${rewriting}): ${target} changed during the baseline run (before any mutation was applied); the target is left as the baseline run wrote it, not restored`,
-      );
-      // Left as the baseline wrote it, the backup dropped: the handling
-      // the first command's own baseline gives the same rewrite.
-      expect(fs.readFileSync(target, "utf8")).toBe("REWRITTEN");
-      expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
-      expect(backups.length).toBeGreaterThan(0);
-      expect(backups.filter((backup) => fs.existsSync(backup))).toEqual([]);
+    } finally {
+      vi.mocked(execCommand).mockImplementation(actualExec.execCommand);
     }
+    const backups = backupPathsTaken();
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    expect(result.results.map((r) => [r.status, r.reason])).toEqual([
+      ["not_run", undefined],
+      ["not_run", undefined],
+      ["not_run", undefined],
+    ]);
+    expect(vi.mocked(computeMutant)).not.toHaveBeenCalled();
+    expect(callCount).toBe(2);
+    expect(result.baselines.map((b) => [b.status, b.reason])).toEqual([
+      ["passed", undefined],
+      ["failed", "aborted"],
+    ]);
+    expect(result.warnings).toContain(
+      `plan.baselines[1] (node fixture.test.js && true): the baseline run was aborted; see ${result.baselines[1].logPath}`,
+    );
+    // Nothing rewrote the target, so its backup went with the decision to
+    // stop, and the target is as it was.
+    expect(backups.length).toBeGreaterThan(0);
+    expect(backups.filter((backup) => fs.existsSync(backup))).toEqual([]);
+    expect(fs.readFileSync(target, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+  }, 60000);
+
+  it("names the first command by its mutant's plan path when it escapes -i worktree's isolation copy and the plan has no plan-level test", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          {
+            ...replaceMutant(2, "  return false;"),
+            testCommand: `node ${path.join(repo, "fixture.test.js")}`,
+          },
+          {
+            ...replaceMutant(5, "  return true;"),
+            testCommand: "node fixture.test.js",
+          },
+        ],
+        { isolation: "worktree", testCommand: undefined },
+      ),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    const message = result.warnings.join("\n");
+    expect(message).toContain(
+      "plan.mutants[0].test names an absolute path under the real repository root",
+    );
+    expect(message).not.toContain("the test command (-t)");
+    expect(runsSeen(repo)).toEqual([]);
+    expectNoIsolationLeftovers(repo, lockDir);
+
+    // A plan-level `test` keeps the label it always had.
+    const { repo: planLevelRepo } = initRepo();
+    const planLevel = await probePlan(
+      planOptions(planLevelRepo, [replaceMutant(2, "  return false;")], {
+        isolation: "worktree",
+        testCommand: `node ${path.join(planLevelRepo, "fixture.test.js")}`,
+      }),
+    );
+    expect(planLevel.reason).toBe("test_command_escapes_isolation");
+    expect(planLevel.warnings.join("\n")).toContain(
+      "the test command (-t) names an absolute path",
+    );
+  }, 60000);
+
+  /** A plan over a Python target, so every `--pre`/test invocation gets
+   * its own bytecode cache directory; `failingCall` names the one
+   * `beginPyCacheIsolation` call (1-based) that cannot create it. */
+  async function pycachePlan(failingCall: number): Promise<ProbePlanResult> {
+    const { repo } = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.py"),
+      ["def positive(n):", "    return n > 0", ""].join("\n"),
+    );
+    const catches = scriptCommand("py-catches.test.js", [
+      "const content = require('node:fs').readFileSync('fixture.py', 'utf8');",
+      "process.exit(content.includes('n < 0') ? 1 : 0);",
+      "",
+    ]);
+    const actualPycache = await vi.importActual<
+      typeof import("../src/probe/pycache.js")
+    >("../src/probe/pycache.js");
+    let calls = 0;
+    vi.mocked(beginPyCacheIsolation).mockImplementation(
+      (...args: Parameters<typeof beginPyCacheIsolation>) => {
+        calls += 1;
+        return calls === failingCall
+          ? { ok: false, message: "synthetic isolation failure" }
+          : actualPycache.beginPyCacheIsolation(...args);
+      },
+    );
+    try {
+      return await probePlan(
+        planOptions(
+          repo,
+          [
+            {
+              file: "fixture.py",
+              line: 2,
+              form: "replace",
+              replaceText: "    return n < 0",
+              testCommand: catches,
+            },
+            {
+              file: "fixture.py",
+              line: 2,
+              form: "replace",
+              replaceText: "    return n >= 0",
+              testCommand: "true",
+            },
+          ],
+          { testCommand: undefined },
+        ),
+      );
+    } finally {
+      vi.mocked(beginPyCacheIsolation).mockImplementation(
+        actualPycache.beginPyCacheIsolation,
+      );
+    }
+  }
+
+  it("a later command whose baseline cannot get its Python bytecode cache directory marks only its own mutants not_run, and that baseline not_run: nothing was started", async () => {
+    useLockDir();
+    // Call 1 is the first command's baseline, call 2 the second's.
+    const result = await pycachePlan(2);
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("mutant_inconclusive");
+    expect(result.results.map((r) => [r.status, r.reason])).toEqual([
+      ["killed", undefined],
+      ["not_run", "pycache_isolation_failed"],
+    ]);
+    expect(result.baselines[0].status).toBe("passed");
+    expect(result.baselines[1]).toEqual({
+      index: 1,
+      command: "true",
+      status: "not_run",
+      reason: "pycache_isolation_failed",
+      entries: [1],
+    });
+    expect(result.warnings).toContain(
+      "plan.baselines[1] (true): synthetic isolation failure",
+    );
+  }, 60000);
+
+  it("a first command whose baseline cannot get its Python bytecode cache directory refuses the plan, that baseline recorded not_run with the reason", async () => {
+    useLockDir();
+    const result = await pycachePlan(1);
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("pycache_isolation_failed");
+    expect(result.baseline).toBeUndefined();
+    expect(result.results.map((r) => r.status)).toEqual(["not_run", "not_run"]);
+    expect(result.baselines.map((b) => [b.status, b.reason])).toEqual([
+      ["not_run", "pycache_isolation_failed"],
+      ["not_run", undefined],
+    ]);
+    expect(result.baselines[0].exitCode).toBeUndefined();
   }, 60000);
 
   it("refuses a later command that escapes -i worktree's isolation copy before anything runs, naming the plan path of that command", async () => {

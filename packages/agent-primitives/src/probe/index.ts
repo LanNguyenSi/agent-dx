@@ -53,7 +53,6 @@ import {
   openRunSetup,
   runBaselineGate,
   settleTargetsAfterNonMutatingBaseline,
-  targetChangedDuringBaselineMessage,
   type BaselineGateTarget,
   type RunSetupContext,
 } from "./setup.js";
@@ -1334,7 +1333,9 @@ export interface PlanBaselineField {
   command: string;
   /** `passed`: its mutants were measured against it. `failed`: it (or
    * the `--pre` ahead of it) ran, and its mutants are `not_run` with
-   * `reason` as theirs. `not_run`: the plan ended before it. */
+   * `reason` as theirs. `not_run`: the plan ended before it (no
+   * `reason`), or it could not be started at all (`reason:
+   * "pycache_isolation_failed"`, carried by its mutants too). */
   status: "passed" | "failed" | "not_run";
   reason?: string;
   /** The baseline test phase's own fields, once that phase ran. */
@@ -1613,7 +1614,7 @@ async function runProbePlanPipeline(
   }));
   const recordBaseline = (
     groupIndex: number,
-    status: "passed" | "failed",
+    status: PlanBaselineField["status"],
     reason: string | undefined,
     exec: ExecPhaseField | undefined,
   ): void => {
@@ -1871,8 +1872,13 @@ async function runProbePlanPipeline(
       timeoutMs: opts.timeoutMs,
       gitApplyTimeoutMs,
       // The first group's command: a plan naming one test command runs
-      // exactly the setup and baseline it always did.
+      // exactly the setup and baseline it always did. A command that
+      // came from a mutant's own `test` is named by that plan path in an
+      // escape refusal; the plan-level one keeps the label it always had.
       testCommand: groups[0].command,
+      ...(groups[0].source !== "plan.test"
+        ? { testCommandLabel: groups[0].source }
+        : {}),
       extraTestCommands: groups.slice(1).map((group) => ({
         command: group.command,
         label: group.source,
@@ -1909,11 +1915,18 @@ async function runProbePlanPipeline(
     if (!setup.ok) {
       const { refusal } = setup;
       if (refusal.logPaths !== undefined) setupLogPaths = refusal.logPaths;
-      // The first group's own baseline ran (or its `--pre` did) and
-      // refused: recorded as that group's failure. Any other refusal
-      // came before a baseline existed, and every group stays `not_run`.
+      // The first group's own baseline gate refused: recorded as that
+      // group's failure once its `--pre` or test command ran, and as
+      // `not_run` with the reason when neither could be started. Any
+      // other refusal came before a baseline existed, and every group
+      // stays `not_run`.
       if (refusal.fromBaselineGate === true) {
-        recordBaseline(0, "failed", refusal.reason, refusal.baseline);
+        recordBaseline(
+          0,
+          refusal.baselineNotStarted === true ? "not_run" : "failed",
+          refusal.reason,
+          refusal.baseline,
+        );
       }
       // Nothing was collected yet, so these are all `not_run` -- the
       // same helper the loop's own returns and the emergency path use,
@@ -1994,14 +2007,22 @@ async function runProbePlanPipeline(
       // A failing `--pre`'s own log, the same place the first group's
       // lands (the setup's logs).
       setupLogPaths.push(...gate.logPaths);
-      recordBaseline(group.index, "failed", gate.reason, gate.baseline);
+      // `started` is false only when neither `--pre` nor the test command
+      // could be started at all (`pycache_isolation_failed`): recorded as
+      // `not_run`, with that reason, rather than as a baseline that ran.
+      recordBaseline(
+        group.index,
+        gate.started ? "failed" : "not_run",
+        gate.reason,
+        gate.baseline,
+      );
       if (gate.reason === "aborted" || rt.crashHandlers.isHandling()) {
         terminal = "aborted";
         await settleTargetsAfterNonMutatingBaseline(
           gateTargets,
           warnings,
           rt.setRestoreState,
-          `${prefix}the baseline run`,
+          `${prefix}the failing baseline run`,
         );
         break;
       }
@@ -2009,20 +2030,35 @@ async function runProbePlanPipeline(
       // a passing one): the plan goes on, so a target it rewrote would
       // be what every later mutant is measured against.
       let targetChanged = gate.reason === "target_changed_during_baseline";
+      let rewroteOnFailure = false;
       if (!targetChanged) {
         const changed = await firstTargetChangedSinceBackup(gateTargets);
         if (changed !== undefined) {
           targetChanged = true;
-          warnings.push(
-            prefix + targetChangedDuringBaselineMessage(changed.subject),
-          );
+          rewroteOnFailure = true;
         }
       }
       if (targetChanged) {
-        // The same handling the first group's own refusal gives a target
-        // its baseline rewrote: left as written, the backups dropped.
+        // Either way the plan ends here, every target left as the
+        // baseline wrote it, and each backup goes the way the first
+        // group's own baseline sends it in the same case.
         terminal = "target_changed_during_baseline";
-        for (const entry of gateTargets) entry.target.discardBackup();
+        if (rewroteOnFailure) {
+          // A failing baseline that rewrote a target: what a failing
+          // first baseline gets, the rewritten target's backup kept
+          // (named in a warning) and every other backup dropped.
+          await settleTargetsAfterNonMutatingBaseline(
+            gateTargets,
+            warnings,
+            rt.setRestoreState,
+            `${prefix}the failing baseline run`,
+          );
+        } else {
+          // A passing baseline that rewrote a target: what the first
+          // baseline's own `target_changed_during_baseline` refusal
+          // does, every backup dropped.
+          for (const entry of gateTargets) entry.target.discardBackup();
+        }
         break;
       }
       failedGroups.set(group.index, gate.reason);
