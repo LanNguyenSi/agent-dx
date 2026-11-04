@@ -872,6 +872,22 @@ describe("patch branch guard: every repository that holds a target", () => {
     }
   });
 
+  it("names each repository's own root on its own edits when several refuse", () => {
+    const { base, dirs } = workspace({ one: "main", two: "master" });
+    const r = patch({ cwd: base, edits: [inRepo("one"), inRepo("two")] });
+    expect(r.status).toBe("usage_error");
+    expect(r.edits[0].detail).toContain(dirs.one);
+    expect(r.edits[0].detail).not.toContain(dirs.two);
+    expect(r.edits[1].detail).toContain(dirs.two);
+    expect(r.edits[1].detail).not.toContain(dirs.one);
+    expect(r.branchGuard.repos.map((x) => x.status)).toEqual([
+      "refused",
+      "refused",
+    ]);
+    expect(a(dirs.one)).toBe("a\n");
+    expect(a(dirs.two)).toBe("a\n");
+  });
+
   it("writes a plan of two unprotected repositories and lists both", () => {
     const { base, dirs } = workspace({ one: "task/one", two: "task/two" });
     const r = patch({ cwd: base, edits: [inRepo("one"), inRepo("two")] });
