@@ -90,7 +90,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries `source` (`exec`, `preset`, `script` or `none`) saying where its
   command came from. An older `probe` refuses a file carrying `verify`
   instead of ignoring it: that is the file's fail-closed unknown-key rule
-  working as designed, so ship the preset with the tool that reads it.
+  working as designed, so ship the preset with the tool that reads it. That
+  rule reaches inside the section too (a key other than `checks` and `order`
+  is refused as `unknown key "verify.oder"` rather than silently ignored),
+  and the `-x` given without `-c` hint names the list that actually runs, so
+  with a preset it reads `the repo preset check list (<names in run order>)`
+  instead of the built-in names.
 
 ### Changed
 

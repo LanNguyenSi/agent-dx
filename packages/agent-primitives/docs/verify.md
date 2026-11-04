@@ -184,15 +184,19 @@ Precedence, and what runs:
 
 A preset key must be a check name, must not look like an integer (a JSON
 object reorders such keys, so the file's own order could not be honoured)
-and must not be `__proto__`; a preset value must be a string naming a
-script; `order`, when present, must be an array of distinct names taken
-from `checks`. Any of those refused is `defaults_file_invalid` naming the
-key, before anything is spawned. A preset entry whose script
-`package.json` has no is that check's ordinary `no_script` non-pass, and
-its warning names the preset entry (`<name>: no_script: the repo preset
-maps this check to the npm script "<script>", which package.json has no,
-and no -x override was given`); a preset never falls back to the script of
-the check's own name.
+and must not be `__proto__`; a preset value must be a non-empty string
+naming a script; `order`, when present, must be an array of distinct names
+taken from `checks`; and `checks` and `order` are the only keys the section
+takes, so a key beside them (an `oder`, a typo for `order`) is refused the
+way an unknown top-level key is, its message naming the full path
+(`verify.oder`) rather than being read as a key that was not given. Any of
+those refused is `defaults_file_invalid` naming the key, before anything is
+spawned. A preset entry whose script `package.json` does not define is that
+check's ordinary `no_script` non-pass, and its warning names the preset
+entry (`<name>: no_script: the repo preset maps this check to the npm
+script "<script>", which package.json does not define, and no -x override
+was given`); a preset never falls back to the script of the check's own
+name.
 
 Every `CheckResult` carries `source` saying where its command came from:
 `exec` (an explicit or implicit `-x`), `preset` (the repo preset's script),
@@ -202,11 +206,16 @@ Every `CheckResult` carries `source` saying where its command came from:
 envelope carries it per check, so a reader can tell a preset's script from
 a `-x` command without recomputing the precedence.
 
-`-x` alone does not replace the default list: `verify -x name=cmd` runs
+`-x` alone does not replace the run list: `verify -x name=cmd` runs
 `build`, `typecheck`, `lint` and `test` as well as `name`, and each default
-check without a script or `-x` override is a `no_script` non-pass. When at least one `-x` is
-given and `-c` is not, the `warnings` carry
-`hint: -x given without -c: the default check list (build,typecheck,lint,test) still runs; pass -c <names> to choose the run set`.
+check without a script or `-x` override is a `no_script` non-pass. With a
+repo preset and no `-c` the same is true of the preset's own list: it runs
+beside `name` (the `file + -x` row above), not the built-in list. When at
+least one `-x` is given and `-c` is not, the `warnings` carry a hint naming
+the list that still runs: without a preset
+`hint: -x given without -c: the default check list (build,typecheck,lint,test) still runs; pass -c <names> to choose the run set`,
+with one
+`hint: -x given without -c: the repo preset check list (<names in run order>) still runs; pass -c <names> to choose the run set`.
 Giving `-c` (even an empty list) or giving no `-x` leaves it out.
 
 Check resolution, per name: an `-x` override wins; then a repo preset entry

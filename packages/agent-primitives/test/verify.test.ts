@@ -601,9 +601,18 @@ describe("verify: --max-failures", () => {
     writePackageJson(cwd, { test: "te" });
     const logDir = makeTmpDir();
     const { fn, calls } = makeStubExec();
-    await expect(
-      verify({ cwd, logDir, checks: ["test"], execFn: fn, maxFailures: 0 }),
-    ).rejects.toThrow(UsageError);
+    const err = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      maxFailures: 0,
+    }).catch((e: unknown) => e);
+    // verify's own refusal, carrying the reason the `verify` action puts in
+    // the envelope, not a bare UsageError that would report
+    // `command: "unknown"`.
+    expect(err).toBeInstanceOf(VerifyUsageError);
+    expect((err as VerifyUsageError).reason).toBe("usage_error");
     expect(calls).toEqual([]);
   });
 
@@ -1467,15 +1476,20 @@ describe("verify: --pass-regex opt-in success predicate", () => {
     writePackageJson(cwd, { test: "te" });
     const logDir = makeTmpDir();
     const { fn, calls } = makeStubExec();
-    await expect(
-      verify({
-        cwd,
-        logDir,
-        checks: ["test"],
-        execFn: fn,
-        passRegexes: { lint: compilePassRegex("^OK \\(") },
-      }),
-    ).rejects.toThrow(UsageError);
+    const err = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { lint: compilePassRegex("^OK \\(") },
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VerifyUsageError);
+    expect((err as VerifyUsageError).reason).toBe("usage_error");
+    // The message names every source of a run list, the repo preset
+    // included.
+    expect((err as Error).message).toContain(
+      "not requested (via -c/the repo preset/the default list)",
+    );
     expect(calls).toEqual([]);
   });
 
@@ -5954,6 +5968,38 @@ describe("verify: repo preset (.agent-primitives.json verify.checks)", () => {
     expect(result.checks.map((c) => c.source)).toEqual(["preset", "exec"]);
   });
 
+  it("file + -x with no -c: the hint names the PRESET list in the preset's own run order, and the built-in wording is gone", async () => {
+    // The preset counterpart of "-x without -c hint > fires when -x is
+    // given and no -c is: that case (no file) pins the built-in wording
+    // byte-for-byte, this one pins the preset wording and proves the
+    // built-in list is not what ran. `order: ["test"]` makes the run order
+    // disagree with the file's key order, so a hint built from the keys
+    // rather than the run list is caught too.
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b", t: "te" });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { build: "compile", test: "t" }, order: ["test"] },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      overrides: { lint: "echo L" },
+      execFn: fn,
+    });
+    expect(result.warnings).toContain(
+      "hint: -x given without -c: the repo preset check list (test,build) still runs; pass -c <names> to choose the run set",
+    );
+    expect(result.warnings).not.toContain(XOVERRIDE_WITHOUT_CHECKS_HINT);
+    expect(result.checks.map((c) => c.name)).toEqual(["test", "build", "lint"]);
+    expect(calls).toEqual([
+      "npm run t --silent",
+      "npm run compile --silent",
+      "echo L",
+    ]);
+  });
+
   it("file + -c + -x: -c gives the order, the preset gives the script, -x still wins where it speaks", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, { compile: "b", "test:ci": "te" });
@@ -6011,7 +6057,7 @@ describe("verify: repo preset (.agent-primitives.json verify.checks)", () => {
       reason: "no_script",
     });
     expect(result.warnings).toContain(
-      'lint: no_script: the repo preset maps this check to the npm script "eslint:strict", which package.json has no, and no -x override was given',
+      'lint: no_script: the repo preset maps this check to the npm script "eslint:strict", which package.json does not define, and no -x override was given',
     );
   });
 

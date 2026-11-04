@@ -24,6 +24,12 @@ export const DEFAULTS_FILE_NAME = ".agent-primitives.json";
  * validation pass (see `src/verify/index.ts`'s preset resolution). */
 const DEFAULTS_FILE_KEYS = ["link", "verify"] as const;
 
+/** The only keys the `verify` section recognizes, with the same fail-closed
+ * rule as the file's own top level: an unknown key inside the section is a
+ * usage error naming the full path (`verify.oder`), never a key that
+ * silently does nothing. */
+const VERIFY_SECTION_KEYS = ["checks", "order"] as const;
+
 /** A defaults file this small can only be config, never data; well
  * above what a real `link` list needs, and small enough that reading it
  * whole on every invocation is free. */
@@ -219,7 +225,11 @@ type VerifyPresetParse =
  * means). `order`, when present, is an array of distinct names taken from
  * `checks`. `checks` present but empty is `empty_preset`; every other
  * violation is `defaults_file_invalid`, each message naming the key it
- * refused.
+ * refused. An own key of the section other than `checks` and `order` is
+ * refused the same way the file's top level refuses an unknown key (the
+ * message names the full path, `verify.<key>`), and a value that is the
+ * empty string is refused as naming no script rather than as a bad first
+ * character.
  */
 function parseVerifyPreset(
   value: unknown,
@@ -236,6 +246,18 @@ function parseVerifyPreset(
     );
   }
   const section = value;
+  // Same fail-closed rule the whole file applies to its own keys: an
+  // unrecognised key inside `verify` (a typo for `order`, a `check` for
+  // `checks`) would otherwise be read as "not given" and the intent it
+  // carried would be silently dropped.
+  const extraKey = Object.keys(section).find(
+    (key) => !(VERIFY_SECTION_KEYS as readonly string[]).includes(key),
+  );
+  if (extraKey !== undefined) {
+    return invalid(
+      `unknown key "verify.${extraKey}" (only "checks" and "order" are known)`,
+    );
+  }
   if (!isJsonObject(section.checks)) {
     return invalid(
       '"verify.checks" must be an object mapping a check name to an npm script name',
@@ -271,6 +293,11 @@ function parseVerifyPreset(
     if (typeof script !== "string") {
       return invalid(
         `"verify.checks" value for "${key}" must be a string naming an npm script`,
+      );
+    }
+    if (script === "") {
+      return invalid(
+        `"verify.checks" value for "${key}" must be a non-empty script name`,
       );
     }
     if (!PRESET_SCRIPT_FIRST_CHAR.test(script)) {

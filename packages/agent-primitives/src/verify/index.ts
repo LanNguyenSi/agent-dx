@@ -438,6 +438,15 @@ function dedupePreservingOrder(names: string[]): string[] {
  * `hint:` prefix lets a caller tell it from a result warning. */
 export const XOVERRIDE_WITHOUT_CHECKS_HINT = `hint: -x given without -c: the default check list (${DEFAULT_CHECKS.join(",")}) still runs; pass -c <names> to choose the run set`;
 
+/** The same hint when a repo preset supplied the run list: the built-in
+ * names would be false there (it is the preset's list that runs), so the
+ * preset's own names in the preset's own run order are named instead. The
+ * suffix is shared with the built-in wording so a reader who knows one
+ * recognises the other. */
+function presetXOverrideWithoutChecksHint(names: string[]): string {
+  return `hint: -x given without -c: the repo preset check list (${names.join(",")}) still runs; pass -c <names> to choose the run set`;
+}
+
 /**
  * Runs the configured checks in order (build, typecheck, lint, test by
  * default) through exec.ts, one at a time, selecting a detector per check
@@ -560,8 +569,9 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   // any command is built, exactly like an invalid check name above.
   for (const name of Object.keys(passRegexes)) {
     if (!requestedAndOverrideNames.includes(name)) {
-      throw new UsageError(
-        `verify: --pass-regex names check "${name}", which is not requested (via -c/the default list) and not overridden via -x, so it would never run`,
+      throw new VerifyUsageError(
+        `verify: --pass-regex names check "${name}", which is not requested (via -c/the repo preset/the default list) and not overridden via -x, so it would never run`,
+        "usage_error",
       );
     }
   }
@@ -570,8 +580,9 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
 
   const maxFailures = options.maxFailures ?? DEFAULT_MAX_FAILURES;
   if (!Number.isInteger(maxFailures) || maxFailures < 1) {
-    throw new UsageError(
+    throw new VerifyUsageError(
       `verify: maxFailures must be a positive integer (got ${maxFailures})`,
+      "usage_error",
     );
   }
 
@@ -588,16 +599,22 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const scripts = readScripts(options.cwd);
   const warnings: string[] = [];
   warnings.push(...implicitWarnings);
-  // `-x` alone adds its check to the default list instead of replacing it:
-  // a caller who wrote `-x name=cmd` to run just that command otherwise
-  // finds build, typecheck, lint and test running (and skipped as
-  // `no_script`) beside it. Said once, in the warnings, when the default
-  // list is in effect and at least one `-x` was given.
+  // `-x` alone adds its check to the run list instead of replacing it: a
+  // caller who wrote `-x name=cmd` to run just that command otherwise finds
+  // the whole default list (or, with a repo preset, the whole preset list)
+  // running (and skipped as `no_script`) beside it. Said once, in the
+  // warnings, when no `-c` was given and at least one `-x` was; the list it
+  // names is the one that actually runs, so the preset's own names go into
+  // the preset wording.
   if (
     options.checks === undefined &&
     Object.keys(explicitOverrides).length > 0
   ) {
-    warnings.push(XOVERRIDE_WITHOUT_CHECKS_HINT);
+    warnings.push(
+      preset
+        ? presetXOverrideWithoutChecksHint(presetRunList(preset))
+        : XOVERRIDE_WITHOUT_CHECKS_HINT,
+    );
   }
   const namesNeedingScripts = names.some(
     (name) => !Object.prototype.hasOwnProperty.call(overrides, name),
@@ -663,7 +680,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       }
       warnings.push(
         resolved.presetScript !== undefined
-          ? `${name}: no_script: the repo preset maps this check to the npm script "${resolved.presetScript}", which package.json has no, and no -x override was given`
+          ? `${name}: no_script: the repo preset maps this check to the npm script "${resolved.presetScript}", which package.json does not define, and no -x override was given`
           : `${name}: no_script: no -x override or matching package.json script; pass -c with the checks this repo has`,
       );
       // Keep resolving later names: the omission is a non-pass, but

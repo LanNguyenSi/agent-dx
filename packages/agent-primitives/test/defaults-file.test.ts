@@ -199,6 +199,58 @@ describe("readDefaultsFile", () => {
     expect(result.message).toContain('"verify.checks" is empty');
   });
 
+  it("refuses an unknown key inside the verify section, naming the full path (the top level's fail-closed rule, applied to the section)", () => {
+    const root = makeTmpDir();
+    writeDefaultsFile(
+      root,
+      JSON.stringify({
+        verify: { checks: { b: "compile" }, oder: ["b"] },
+      }),
+    );
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("defaults_file_invalid");
+    expect(result.message).toContain(
+      'unknown key "verify.oder" (only "checks" and "order" are known)',
+    );
+  });
+
+  it("an unknown key inside verify is refused even when it is the only key there", () => {
+    const root = makeTmpDir();
+    writeDefaultsFile(root, JSON.stringify({ verify: { oder: ["b"] } }));
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("defaults_file_invalid");
+    expect(result.message).toContain('unknown key "verify.oder"');
+  });
+
+  it("a checks and order section with no key beside it is still accepted (the rule is about unknown keys, not about a minimum)", () => {
+    const root = makeTmpDir();
+    writeDefaultsFile(
+      root,
+      JSON.stringify({ verify: { checks: { b: "compile" }, order: ["b"] } }),
+    );
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.verify).toEqual({ checks: { b: "compile" }, order: ["b"] });
+  });
+
+  it("refuses an empty-string script name with its own message, not the leading-character one", () => {
+    const root = makeTmpDir();
+    writeDefaultsFile(root, JSON.stringify({ verify: { checks: { b: "" } } }));
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("defaults_file_invalid");
+    expect(result.message).toContain(
+      'value for "b" must be a non-empty script name',
+    );
+    expect(result.message).not.toContain("must start with a letter or a digit");
+  });
+
   it("refuses an invalid verify alongside a valid link, so the whole file (and with it every probe link) is refused", () => {
     const root = makeTmpDir();
     writeDefaultsFile(

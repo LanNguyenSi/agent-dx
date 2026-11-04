@@ -1153,14 +1153,18 @@ program
   .action(async (opts: VerifyCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
-    // A `VerifyUsageError` is verify's own refusal (an invalid check name,
-    // or a refused `.agent-primitives.json` repo preset:
-    // `defaults_file_invalid`, `empty_preset`, `defaults_file_not_readable`).
-    // It is reported here rather than by the top-level mapper so the
-    // envelope keeps naming `command: "verify"` and carries the specific
-    // reason, the way the `patch` action reports a `PatchUsageError`.
     requireExclusiveViews(opts, "verify");
     let result: VerifyResult;
+    // A `VerifyUsageError` is verify's own refusal (an invalid check name,
+    // a refused `--pass-regex`/`--max-failures`, or a refused
+    // `.agent-primitives.json` repo preset: `defaults_file_invalid`,
+    // `empty_preset`, `defaults_file_not_readable`). It is reported here
+    // rather than by the top-level mapper so the envelope keeps naming
+    // `command: "verify"` and carries the specific reason, the way the
+    // `patch` action reports a `PatchUsageError`. The view-exclusivity check
+    // above is deliberately outside and before this `try`: a `UsageError`
+    // from it is not verify's own refusal and must reach the top-level
+    // mapper, ahead of any preset error the run would otherwise report.
     try {
       result = await verify({
         cwd: global.cwd,
