@@ -459,6 +459,8 @@ describe("helpers", () => {
       "  # tests/fixtures/*.json",
       "  public function testOne(): void {}",
       "  public function testTwo(): void {}",
+      "  /** helper */",
+      "  private function helper(): void {}",
       "}",
     ].join("\n");
     expect(countPhpTestMethods(hashComment)).toBe(2);
@@ -470,9 +472,55 @@ describe("helpers", () => {
       "  }",
       "  public function testOne(): void {}",
       "  public function testTwo(): void {}",
+      "  /** helper */",
+      "  private function helper(): void {}",
       "}",
     ].join("\n");
     expect(countPhpTestMethods(trailing)).toBe(2);
+  });
+
+  it("keeps a marker across comment lines and ends an attribute continuation on its balancing line", () => {
+    const commentLines = [
+      "  /** @test */",
+      "  // reason",
+      "  # another reason",
+      "  public function works(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(commentLines)).toBe(1);
+    const balancedThenDoc = [
+      "  #[Foo(",
+      "    1,",
+      "  )]",
+      "  private $x;",
+      "  /** @test */",
+      "  public function works(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(balancedThenDoc)).toBe(1);
+    const docThenAttributeThenProperty = [
+      "  /** @test */",
+      "  #[Foo(",
+      "    1,",
+      "  )]",
+      "  private $x;",
+      "  public function helper(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(docThenAttributeThenProperty)).toBe(0);
+  });
+
+  it("reads Test on the opening line of an attribute group that stays open", () => {
+    const src = [
+      "  #[Test, TestWith(['[', 'x'])]",
+      "  public function itWorks(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(1);
+  });
+
+  it("scans a long unbalanced attribute continuation without a method line", () => {
+    const lines = ["  #[Group('[')]", "  private $x;"];
+    for (let i = 0; i < 20000; i++) lines.push(`    'data line ${i}',`);
+    expect(countPhpTestMethods(lines.join("\n"))).toBe(0);
+    const withTail = [...lines, "  public function testOne(): void {}"];
+    expect(countPhpTestMethods(withTail.join("\n"))).toBe(1);
   });
 
   it("never hides a method or drops its marker behind a multi-line string whose body holds /*", () => {

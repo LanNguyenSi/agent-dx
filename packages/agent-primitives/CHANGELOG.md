@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusal moves to `isolation.supersededRefusals`.
 - `hygiene` PHP test counter: a line matching the method pattern is now
   always counted when its name starts with `test` or a marker is pending,
-  so no comment, string or attribute can hide a method and let a deleted
+  so no comment, string or attribute can hide a method line and let a deleted
   test go unreported; a `#[Test]` attribute or a single-line
   `/** @test */` docblock on the method's own line counts that method
   instead of being missed and leaking its marker onto the next one,
@@ -29,8 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marker alive and sets it when it names `Test` without ever hiding a
   method. Documented limits: method-like lines inside block comments,
   heredocs or nowdocs are counted, a bracket misread inside an attribute
-  can keep or drop one marker, and a docblock or attribute after the
-  modifiers on the method line is not read.
+  can keep or drop one marker, a docblock or attribute after the
+  modifiers on the method line is not read, a docblock line without a
+  leading `*` (for example `  @test`) neither sets nor keeps a marker, a
+  same-line attribute whose arguments contain `]` is not seen through (the
+  method on that line counts only by its `test` name), and an over-count
+  can offset a real deletion in the same file.
 
 ## [0.19.1] - 2026-11-01
 

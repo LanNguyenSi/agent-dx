@@ -119,6 +119,11 @@ const PHP_FUNCTION =
 const PHP_DOC_TEST_TAG = /(?:^|[\s*])@test\b/;
 const PHP_TEST_ATTRIBUTE =
   /#\[\s*(?:[^\]]*,\s*)?\\?(?:PHPUnit\\Framework\\Attributes\\)?Test\s*(?:\(\s*\))?\s*[,\]]/;
+/** The `Test` attribute name inside the continuation of an attribute group
+ * (the `#[` is on an earlier line): tested on the previous and the current
+ * line only, so a long continuation stays linear. */
+const PHP_TEST_ATTRIBUTE_CONTINUATION =
+  /(?:^|[\s,\[(])\\?(?:PHPUnit\\Framework\\Attributes\\)?Test\s*(?:\(\s*\))?\s*[,\]]/;
 /** A docblock line (`/**`, ` *` or `*\/`): only these lines may carry the
  * `@test` marker. */
 const PHP_DOCBLOCK_LINE = /^\s*(?:\/\*\*|\*)/;
@@ -164,8 +169,9 @@ function bracketDelta(line: string): number {
 export function countPhpTestMethods(content: string): number {
   let count = 0;
   let pendingMarker = false;
-  let attributeText: string | undefined;
+  let inAttribute = false;
   let attributeDepth = 0;
+  let previousLine = "";
   for (const line of content.split("\n")) {
     const fn = PHP_FUNCTION.exec(line);
     if (fn !== null) {
@@ -177,16 +183,21 @@ export function countPhpTestMethods(content: string): number {
         count += 1;
       }
       pendingMarker = false;
-      attributeText = undefined;
+      inAttribute = false;
       attributeDepth = 0;
       continue;
     }
-    if (attributeText !== undefined) {
-      attributeText += "\n" + line;
+    if (inAttribute) {
       attributeDepth += bracketDelta(line);
-      if (PHP_TEST_ATTRIBUTE.test(attributeText)) pendingMarker = true;
+      if (
+        !pendingMarker &&
+        PHP_TEST_ATTRIBUTE_CONTINUATION.test(previousLine + "\n" + line)
+      ) {
+        pendingMarker = true;
+      }
+      previousLine = line;
       if (attributeDepth <= 0) {
-        attributeText = undefined;
+        inAttribute = false;
         attributeDepth = 0;
       }
       continue;
@@ -196,8 +207,10 @@ export function countPhpTestMethods(content: string): number {
     if (trimmed.startsWith("#[")) {
       const delta = bracketDelta(line);
       if (delta > 0) {
-        attributeText = line;
+        inAttribute = true;
         attributeDepth = delta;
+        previousLine = line;
+        if (PHP_TEST_ATTRIBUTE.test(line)) pendingMarker = true;
       } else if (PHP_TEST_ATTRIBUTE.test(line)) {
         pendingMarker = true;
       }

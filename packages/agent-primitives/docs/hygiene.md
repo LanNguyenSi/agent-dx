@@ -84,9 +84,13 @@ argument or revision is a usage error (exit `2`).
   it ends at the first method line or the first line that closes it.
   Documented limits: a method-like line inside a `/* */` block comment or
   a heredoc/nowdoc body is counted (an over-count, never a hidden method),
-  a bracket misread inside an attribute can keep or drop one marker, and a
+  a bracket misread inside an attribute can keep or drop one marker, a
   docblock or attribute that follows the modifiers on the method line is
-  not read.
+  not read, a docblock line without a leading `*` (for example `  @test`)
+  neither sets nor keeps a marker, and a same-line attribute whose
+  arguments contain `]` is not seen through, so the method on that line
+  counts only by its `test` name. An over-count (method-like lines in
+  block comments or heredocs) can offset a real deletion in the same file.
   The count is a text heuristic, not a
   parser: it can miss a case written in an unusual shape, and it cannot
   tell a deliberately removed case from an accidental one, so a flagged
