@@ -95,6 +95,30 @@ function verifyRepo(): string {
   return repo;
 }
 
+/**
+ * The length of this run's unreduced envelope, measured with a roomy `-m`.
+ * Temp-path lengths differ between machines (a long scratch path here, a
+ * short one on CI), and so does the envelope, so a fixed small `-m` may or
+ * may not reduce it; a bound derived from the run itself always does.
+ */
+async function wholeLength(base: string[], args: string[]): Promise<number> {
+  const whole = await spawnCli([...base, "-m", "100000", ...args]);
+  return whole.stdout.trimEnd().length;
+}
+
+/** Half the unreduced envelope: below the point where the reduction can
+ * find any structure that fits, on any platform, so the envelope is
+ * reduced and carries the overrun notices. */
+async function halfBound(base: string[], args: string[]): Promise<string> {
+  return String(Math.max(1, Math.floor((await wholeLength(base, args)) / 2)));
+}
+
+/** One character under the unreduced envelope: reduced on any platform,
+ * and still roomy enough for a short `--print` line. */
+async function justUnderBound(base: string[], args: string[]): Promise<string> {
+  return String(Math.max(1, (await wholeLength(base, args)) - 1));
+}
+
 type Case = {
   name: string;
   fields: readonly string[];
@@ -197,15 +221,9 @@ describe.each(CASES)(
     it("--print reads the unreduced result: a small -m does not shorten or cut a printed field", async () => {
       const repo = c.repo();
       const logs = makeTmpDir();
-      const reduced = await spawnCli([
-        "-C",
-        repo,
-        "-l",
-        logs,
-        "-m",
-        "600",
-        ...c.args,
-      ]);
+      const base = ["-C", repo, "-l", logs];
+      const bound = await halfBound(base, c.args);
+      const reduced = await spawnCli([...base, "-m", bound, ...c.args]);
       expect(JSON.parse(reduced.stdout).truncated).toBe(true);
       const full = await spawnCli([
         "-C",
@@ -249,27 +267,28 @@ describe.each(CASES)(
         "-l",
         logs,
         "-m",
-        "600",
+        bound,
         ...c.args,
         "--print",
         key,
       ]);
       // Bounded only as printed text, never reduced inside: it still holds
       // the whole field up to the text bound.
-      expect(small.stdout.length).toBeLessThanOrEqual(600);
+      expect(small.stdout.length).toBeLessThanOrEqual(Number(bound));
       expect(small.code).toBe(c.exit);
     });
 
     it("--print logs names the saved full result of a reduced run, as the emitted envelope does", async () => {
       const repo = c.repo();
       const logs = makeTmpDir();
+      const bound = await halfBound(["-C", repo, "-l", logs], c.args);
       const view = await spawnCli([
         "-C",
         repo,
         "-l",
         logs,
         "-m",
-        "600",
+        bound,
         ...c.args,
         "--print",
         "logs",
@@ -286,7 +305,8 @@ describe.each(CASES)(
       const repo = c.repo();
       const logs = makeTmpDir();
       const keys = new Set<string>();
-      for (const max of ["600", "100000"]) {
+      const bound = await halfBound(["-C", repo, "-l", logs], c.args);
+      for (const max of [bound, "100000"]) {
         const run = await spawnCli([
           "-C",
           repo,
@@ -385,7 +405,8 @@ describe("drift --summary", () => {
 describe("a reduced run (small -m)", () => {
   it("drift --summary neither prints nor counts the envelope's own reduction and overrun notices", async () => {
     const repo = driftRepo();
-    const json = await spawnCli(["-C", repo, "-m", "400", ...DRIFT_ARGS]);
+    const bound = await halfBound(["-C", repo], DRIFT_ARGS);
+    const json = await spawnCli(["-C", repo, "-m", bound, ...DRIFT_ARGS]);
     const warnings = JSON.parse(json.stdout).warnings as string[];
     // The fixture really produces both notices in the JSON view.
     expect(warnings.some((w) => w.startsWith("envelope is "))).toBe(true);
@@ -396,7 +417,7 @@ describe("a reduced run (small -m)", () => {
       "-C",
       repo,
       "-m",
-      "400",
+      bound,
       ...DRIFT_ARGS,
       "--summary",
     ]);
@@ -407,22 +428,30 @@ describe("a reduced run (small -m)", () => {
     expect(run.stdout).toMatch(/ warnings=0 fullResult=\S+result-full-/);
   });
 
-  it("drift --print truncated,warnings under a bound that reduces the envelope prints truncated: true beside the reduction warnings", async () => {
+  it("drift --print truncated,warnings takes both from the emitted envelope: truncated: true and the same warnings as the JSON run at that bound", async () => {
     const repo = driftRepo();
+    const bound = await justUnderBound(["-C", repo], DRIFT_ARGS);
+    const json = await spawnCli(["-C", repo, "-m", bound, ...DRIFT_ARGS]);
+    const emitted = JSON.parse(json.stdout);
+    // Precondition: this bound really reduces the envelope.
+    expect(emitted.truncated).toBe(true);
     const run = await spawnCli([
       "-C",
       repo,
       "-m",
-      "600",
+      bound,
       ...DRIFT_ARGS,
       "--print",
       "truncated,warnings",
     ]);
     const printed = JSON.parse(run.stdout);
     expect(printed.truncated).toBe(true);
-    expect(
-      (printed.warnings as string[]).some((w) => w.startsWith("envelope is ")),
-    ).toBe(true);
+    // Whether the reduction fit (no notice) or overran (notices), the
+    // printed warnings agree with the emitted ones in kind and count.
+    const kind = (w: string): string => w.split(/[:;0-9]/)[0];
+    expect((printed.warnings as string[]).map(kind)).toEqual(
+      (emitted.warnings as string[]).map(kind),
+    );
   });
 });
 
