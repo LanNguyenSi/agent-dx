@@ -2177,6 +2177,601 @@ describe("verify: an aborted run", () => {
   });
 });
 
+describe("verify: --repeat", () => {
+  /** Stub execFn for a repeated check: `makeStubExec` answers a command the
+   * same way every time it is asked, which cannot describe a check whose
+   * runs disagree. This one answers each command from its own list, in call
+   * order, repeating its last entry once the list runs out (so a check that
+   * must pass three times is written `[{ exitCode: 0 }]`). Every exec
+   * option is recorded, so a test can pin the per-run log file name and the
+   * per-run timeout rather than only the number of runs. */
+  function makeSequencedStubExec(
+    responses: Record<string, Partial<ExecResult>[]>,
+  ): {
+    fn: ExecLike;
+    calls: string[];
+    logFiles: (string | undefined)[];
+    timeouts: (number | undefined)[];
+  } {
+    const calls: string[] = [];
+    const perCommand = new Map<string, number>();
+    const logFiles: (string | undefined)[] = [];
+    const timeouts: (number | undefined)[] = [];
+    const fn: ExecLike = async (cmd, options) => {
+      calls.push(cmd);
+      logFiles.push(options.logFileName);
+      timeouts.push(options.timeoutMs);
+      const sequence = responses[cmd] ?? [];
+      const seen = perCommand.get(cmd) ?? 0;
+      perCommand.set(cmd, seen + 1);
+      const r = sequence[Math.min(seen, sequence.length - 1)] ?? {};
+      return {
+        exitCode: r.exitCode ?? 0,
+        durationMs: r.durationMs ?? 1,
+        stdoutTail: r.stdoutTail ?? "",
+        stderrTail: r.stderrTail ?? "",
+        logPath: path.join(options.logDir, options.logFileName ?? "stub.log"),
+        timedOut: r.timedOut ?? false,
+        aborted: r.aborted ?? false,
+        logWriteFailed: false,
+        outputMayBeIncomplete: r.outputMayBeIncomplete ?? false,
+        stdioClosed: r.stdioClosed ?? true,
+        stdoutTruncated: r.stdoutTruncated ?? false,
+        stderrTruncated: r.stderrTruncated ?? false,
+      };
+    };
+    return { fn, calls, logFiles, timeouts };
+  }
+
+  /** A detector that turns every non-empty output line into one failure, so
+   * a test can hand a check a known failures list per run and watch how the
+   * runs' lists merge. */
+  const lineFailuresDetector: Detector = {
+    name: "lines",
+    matches: () => true,
+    parse: ({ output }): DetectorParseResult => ({
+      summary: { passed: 0, failed: 0, skipped: 0, errors: 0, warnings: 0 },
+      failures: output
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((message) => ({ message })),
+      warnings: [],
+    }),
+  };
+
+  it.each([[0], [-1], [2.5], [101]])(
+    "repeat %p is a usage error, before any command is built",
+    async (repeat) => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, { test: "te" });
+      const logDir = makeTmpDir();
+      const { fn, calls } = makeStubExec();
+      await expect(
+        verify({ cwd, logDir, checks: ["test"], execFn: fn, repeat }),
+      ).rejects.toThrow(UsageError);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it("repeat 1 (the default) reports no per-run field at all: the check row is exactly the shape a single run always had", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeSequencedStubExec({});
+    const repeated = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 1,
+    });
+    const defaulted = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: makeStubExec().fn,
+    });
+    expect(calls).toEqual(["npm run test --silent"]);
+    for (const result of [repeated, defaulted]) {
+      expect(result.checks[0]).not.toHaveProperty("runs");
+      expect(result.checks[0]).not.toHaveProperty("passed");
+      expect(result.checks[0]).not.toHaveProperty("failed");
+      expect(result.checks[0]).not.toHaveProperty("flaky");
+      expect(result.checks[0]).not.toHaveProperty("runLogs");
+    }
+    // The log keeps today's name too: no `.1` suffix for a single run.
+    expect(repeated.checks[0].logPath).toContain("/test.log");
+  });
+
+  it("every run passing is a pass, and the per-run fields say so", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeSequencedStubExec({
+      "npm run test --silent": [{ exitCode: 0 }],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 3,
+    });
+    expect(calls).toHaveLength(3);
+    expect(result.checks[0]).toMatchObject({
+      status: "pass",
+      runs: 3,
+      passed: 3,
+      failed: 0,
+      flaky: false,
+    });
+    expect(result.status).toBe("pass");
+  });
+
+  it("every run failing is a fail with flaky false (the runs agreed, which is not flakiness)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [{ exitCode: 1 }],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 2,
+    });
+    expect(result.checks[0]).toMatchObject({
+      status: "fail",
+      runs: 2,
+      passed: 0,
+      failed: 2,
+      flaky: false,
+    });
+    expect(result.status).toBe("fail");
+  });
+
+  it("a run that passed beside a run that failed is a fail with flaky true", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [{ exitCode: 0 }, { exitCode: 1 }],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 2,
+    });
+    expect(result.checks[0]).toMatchObject({
+      status: "fail",
+      runs: 2,
+      passed: 1,
+      failed: 1,
+      flaky: true,
+    });
+    expect(result.status).toBe("fail");
+  });
+
+  it("an errored run beside a failed run is an error (error beats fail), and flaky stays a statement about passes", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [{ exitCode: 1 }, { exitCode: 127 }],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 2,
+    });
+    expect(result.checks[0]).toMatchObject({
+      status: "error",
+      runs: 2,
+      passed: 0,
+      failed: 2,
+      // Nothing passed, so nothing disagreed: `flaky` is about a check
+      // that sometimes works, not about a check that has two bad days.
+      flaky: false,
+    });
+    expect(result.status).toBe("error");
+  });
+
+  it("an errored run beside a passed run is an error with flaky true", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [
+        { exitCode: 0 },
+        { exitCode: null, timedOut: true, stdoutTail: "hang" },
+      ],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 2,
+    });
+    expect(result.checks[0]).toMatchObject({
+      status: "error",
+      runs: 2,
+      passed: 1,
+      failed: 1,
+      flaky: true,
+    });
+  });
+
+  it("one flaky check beside a clean one: both rows are right, and the summary and exit code are the last run's", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { flaky: "f", clean: "c" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeSequencedStubExec({
+      "npm run flaky --silent": [
+        { exitCode: 0, durationMs: 1 },
+        { exitCode: 1, durationMs: 2 },
+        { exitCode: 0, durationMs: 4 },
+      ],
+      "npm run clean --silent": [{ exitCode: 0, durationMs: 8 }],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["flaky", "clean"],
+      execFn: fn,
+      repeat: 3,
+    });
+    expect(calls).toHaveLength(6);
+    expect(result.checks[0]).toMatchObject({
+      name: "flaky",
+      status: "fail",
+      runs: 3,
+      passed: 2,
+      failed: 1,
+      flaky: true,
+      // Last run's numbers, not any average of them: exit code 0 even
+      // though the check as a whole is a non-pass, and the sum of 1+2+4.
+      exitCode: 0,
+      durationMs: 7,
+    });
+    expect(result.checks[1]).toMatchObject({
+      name: "clean",
+      status: "pass",
+      runs: 3,
+      passed: 3,
+      failed: 0,
+      flaky: false,
+      durationMs: 24,
+    });
+    expect(result.status).toBe("fail");
+  });
+
+  it("--fail-fast stops the repeat loop at the first run that did not pass and never starts the next check", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te", other: "o" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeSequencedStubExec({
+      "npm run test --silent": [
+        { exitCode: 0 },
+        { exitCode: 1 },
+        { exitCode: 0 },
+      ],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test", "other"],
+      execFn: fn,
+      repeat: 3,
+      failFast: true,
+    });
+    // Run 1 passed, run 2 did not, run 3 was never executed, and the check
+    // behind this one was never started.
+    expect(calls).toEqual(["npm run test --silent", "npm run test --silent"]);
+    expect(result.checks.map((c) => c.name)).toEqual(["test"]);
+    expect(result.checks[0]).toMatchObject({
+      status: "fail",
+      runs: 2,
+      passed: 1,
+      failed: 1,
+      flaky: true,
+    });
+  });
+
+  it("--timeout applies to every run, not only the first", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn, timeouts } = makeSequencedStubExec({
+      "npm run test --silent": [{ exitCode: 0 }],
+    });
+    await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 3,
+      timeoutMs: 1500,
+    });
+    expect(timeouts).toEqual([1500, 1500, 1500]);
+  });
+
+  it("each run writes its own log file, and logs carries the first run's plus every failing run's", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn, logFiles } = makeSequencedStubExec({
+      "npm run test --silent": [
+        { exitCode: 0 },
+        { exitCode: 1 },
+        { exitCode: 0 },
+        { exitCode: 1 },
+      ],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 4,
+    });
+    // `<name>.<k>.log` from 1, so two runs can never append into one file.
+    expect(logFiles).toEqual([
+      "test.1.log",
+      "test.2.log",
+      "test.3.log",
+      "test.4.log",
+    ]);
+    const logs = result.logs.map((l) => path.basename(l));
+    expect(logs).toEqual(["test.1.log", "test.2.log", "test.4.log"]);
+    // The check's own `logPath` is the last run's, matching its summary and
+    // exit code.
+    expect(path.basename(result.checks[0].logPath as string)).toBe(
+      "test.4.log",
+    );
+    // And the full result lists every run's log with its exit code.
+    expect(result.checks[0]).not.toHaveProperty("runLogs");
+  });
+
+  it("the full result of a capped repeated check lists every run's log and exit code", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [
+        { exitCode: 1, stdoutTail: "a\nb" },
+        { exitCode: 1, stdoutTail: "b\nc" },
+      ],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 2,
+      maxFailures: 2,
+      detectors: [lineFailuresDetector],
+    });
+    expect(result.truncatedByMaxFailures).toBe(true);
+    const full = result.fullChecks?.[0];
+    expect(full?.runLogs?.map((r) => r.exitCode)).toEqual([1, 1]);
+    expect(
+      full?.runLogs?.map((r) => path.basename(r.logPath as string)),
+    ).toEqual(["test.1.log", "test.2.log"]);
+  });
+
+  it("an uncapped repeated run still carries fullChecks: repeat 2 is the smallest count that needs them", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    // Nothing is capped (three distinct failures across the runs, no
+    // `maxFailures`), so `truncatedByMaxFailures` is false and the only
+    // reason the uncapped rows exist at all is the repeat: `repeat 2` is the
+    // boundary, the smallest count whose per-run record is needed.
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [
+        { exitCode: 1, stdoutTail: "a\nb" },
+        { exitCode: 1, stdoutTail: "b\nc" },
+      ],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 2,
+      detectors: [lineFailuresDetector],
+    });
+    expect(result.truncatedByMaxFailures).toBe(false);
+    const full = result.fullChecks?.[0];
+    expect(full?.runLogs).toHaveLength(2);
+    expect(full?.runLogs?.map((r) => r.exitCode)).toEqual([1, 1]);
+    expect(
+      full?.runLogs?.map((r) => path.basename(r.logPath as string)),
+    ).toEqual(["test.1.log", "test.2.log"]);
+  });
+
+  it("failures merge across the runs de-duplicated, in first-seen order", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [
+        { exitCode: 1, stdoutTail: "a\nb" },
+        { exitCode: 1, stdoutTail: "b\nc" },
+      ],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 2,
+      detectors: [lineFailuresDetector],
+    });
+    expect(result.checks[0].failures.map((f) => f.message)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+    expect(result.truncatedByMaxFailures).toBe(false);
+  });
+
+  it("--max-failures caps the merged list once (not each run's), and fullChecks keeps the whole merge", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [
+        { exitCode: 1, stdoutTail: "a\nb" },
+        { exitCode: 1, stdoutTail: "b\nc" },
+      ],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 2,
+      maxFailures: 2,
+      detectors: [lineFailuresDetector],
+    });
+    // Two per run would have fitted under the cap twice over: what is capped
+    // here is the three-entry union.
+    expect(result.checks[0].failures.map((f) => f.message)).toEqual(["a", "b"]);
+    expect(result.truncatedByMaxFailures).toBe(true);
+    expect(result.fullChecks?.[0].failures.map((f) => f.message)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+
+  it("an identical per-run warning is reported once", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [{ exitCode: 1 }],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 3,
+    });
+    expect(
+      result.warnings.filter((w) => w === "test: detector_matched_nothing"),
+    ).toHaveLength(1);
+  });
+
+  it("an abort between runs ends the repeat loop and the run, naming the checks behind it", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { build: "b", test: "t" });
+    const logDir = makeTmpDir();
+    const controller = new AbortController();
+    const calls: string[] = [];
+    // The abort lands while the first run is finishing (the run itself
+    // completed, so it is a result worth keeping); no later run, and no
+    // later check, is started.
+    const fn: ExecLike = async (cmd, options) => {
+      calls.push(cmd);
+      if (calls.length === 1) controller.abort();
+      return {
+        exitCode: 0,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(options.logDir, options.logFileName ?? "stub.log"),
+        timedOut: false,
+        aborted: false,
+        logWriteFailed: false,
+        outputMayBeIncomplete: false,
+        stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    };
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["build", "test"],
+      execFn: fn,
+      repeat: 3,
+      signal: controller.signal,
+    });
+    expect(calls).toEqual(["npm run build --silent"]);
+    expect(result.checks.map((c) => c.name)).toEqual(["build"]);
+    expect(result.checks[0]).toMatchObject({
+      status: "pass",
+      runs: 1,
+      passed: 1,
+      failed: 0,
+      flaky: false,
+    });
+    expect(result.status).toBe("error");
+    expect(result.reason).toBe("aborted");
+    expect(
+      result.warnings.some(
+        (w) => w.includes("test") && w.includes("never started"),
+      ),
+    ).toBe(true);
+  });
+
+  it("an abort between runs of the last (or only) check is still reported as an aborted run", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "t" });
+    const logDir = makeTmpDir();
+    const controller = new AbortController();
+    const calls: string[] = [];
+    // The abort lands while the first run finishes, and this is the only
+    // check: the between-runs break ends the repeat loop, and the caller's
+    // own between-checks check has no next iteration to fire in, so the
+    // abort reaches the result only if the stopped loop itself reports it.
+    const fn: ExecLike = async (cmd, options) => {
+      calls.push(cmd);
+      if (calls.length === 1) controller.abort();
+      return {
+        exitCode: 0,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(options.logDir, options.logFileName ?? "stub.log"),
+        timedOut: false,
+        aborted: false,
+        logWriteFailed: false,
+        outputMayBeIncomplete: false,
+        stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    };
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 3,
+      signal: controller.signal,
+    });
+    expect(calls).toEqual(["npm run test --silent"]);
+    expect(result.checks).toHaveLength(1);
+    expect(result.checks[0]).toMatchObject({ status: "pass", runs: 1 });
+    expect(result.status).toBe("error");
+    expect(result.reason).toBe("aborted");
+    expect(result.warnings).toContain(
+      "aborted: the run was stopped after the last check",
+    );
+  });
+});
+
 describe("vitestDetector: captured real output", () => {
   it("matches a mixed run, a green run, and the no-test-files case", () => {
     expect(

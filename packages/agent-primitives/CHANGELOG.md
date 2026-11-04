@@ -71,6 +71,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries `branch_guard` (`status`, `reason`, and `repos`: one entry per
   repository with `root`, `status`, `branch`, `protected`, `sources`,
   `reason`), without free text. See [docs/patch.md](docs/patch.md#branch-guard).
+- `verify --repeat <n>` (API `repeat`): runs every check n times,
+  sequentially, for a check whose suite fails intermittently. One resolution
+  per check and n executions of it, each with its own log file
+  `<name>.<k>.log`, and the check reports the runs merged: `status` is `pass`
+  only when every run passed, otherwise the worst status seen with `error`
+  beating `fail`; `flaky` says the runs disagreed; `runs`/`passed`/`failed`
+  count the runs actually performed; `failures` is the de-duplicated union
+  across the runs, capped once by `--max-failures`; `summary` and `exitCode`
+  come from the last run and `durationMs` sums them all. The envelope's
+  `logs` carry the first run's log plus every failing run's, and above 1
+  the run always writes the full result file `verify-full-<runId>.json`,
+  whether or not `--max-failures` cut anything, listing every run's own log
+  and exit code. `--fail-fast` stops at the first run that did not pass,
+  `--timeout` applies to each run on its own, and an abort between runs
+  ends the loop (naming the stop after the last check when no check is
+  left behind). n is an integer from 1 (the default, which leaves the
+  envelope exactly as it was) to 100 written in plain decimal digits; 0, a
+  fraction, a negative number, an exponent or hexadecimal spelling, above
+  100, or the flag given twice is a usage error.
 
 ### Changed
 
