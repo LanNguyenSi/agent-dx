@@ -114,3 +114,48 @@ argument or revision is a usage error (exit `2`).
 The result also carries `counts` (`files`, `backupFiles`,
 `extendOnlyRewrites`, `testCaseDrops`), which is kept whole when the
 envelope is reduced to fit `--max-chars`.
+
+## Compact views: --summary and --print
+
+`--summary` and `--print <field,...>` print a second rendering of the same
+result; they work like the views of [probe](probe.md#compact-views---summary---print-and---report).
+
+`--summary` prints one line per finding, one `warning:` line per warning,
+and a final totals line:
+
+```text
+<kind> | <path> | <detail>
+totals: status=<ok|fail> files=N findings=N backup_files=N extend_only_rewrites=N test_case_drops=N warnings=N [fullResult=<path>]
+```
+
+`fullResult=` appears when the envelope was reduced to fit `-m` and the
+complete result was saved. `-m` is a character budget: rows that do not
+fit are replaced by one marker line naming how many were omitted, and the
+totals line is always printed.
+
+`--print` prints one JSON object on one line, one key per requested field
+in the order given. A name is a top-level envelope field (`status`,
+`findings`, `counts`, `base_sha`, `head_sha`, `merge_base`,
+`max_delete_percent`, `extend_only`, `base`, `head`, `warnings`, `logs`,
+`fullResult` and the other fixed fields); a dotted path descends into
+objects (`counts.files`) but not into arrays, so a single finding is not
+addressable (`findings.0` prints `null`). Fields are read from the
+unreduced result, so `-m` does not shorten a printed field; only the
+printed line is bounded by it. A field this run did not produce prints
+`null`.
+
+`warnings`, `logs`, `fullResult` and `truncated` are taken from the emitted
+envelope (so a "full result not written" warning and the reduction marker
+show, and `truncated` agrees with `warnings`), while every other field comes
+from the unreduced result. `--summary` builds its `warning:` rows and
+`warnings=N` from the same emitted warnings but leaves out the two notices
+`-m` adds to the JSON view (`envelope is N characters; requested max-chars
+M could not be met` and `result reduced to the fixed fields only: ...`), so
+only the command's own warnings are listed and counted.
+
+Both views take precedence over `-f`, are bounded by `-m`, are mutually
+exclusive (naming both is a `usage_error` with exit `2` before anything
+runs, as is an unknown `--print` field, which lists this command's own
+fields), and leave the envelope schema, the exit code and the saved full
+result untouched. A usage error prints the JSON `usage_error` envelope as
+for every other command.

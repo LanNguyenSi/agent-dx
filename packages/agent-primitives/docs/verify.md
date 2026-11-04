@@ -46,7 +46,7 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
   the buffer's first/last character) `probe`'s own `--pass-regex`/
   `passWhen.regex` already use. Once a check's name has an entry here, a
   match against that check's combined stdout+stderr decides `status:
-  "pass"`/`"fail"` in place of its exit code, whatever that exit code is
+"pass"`/`"fail"` in place of its exit code, whatever that exit code is
   -- for a test runner whose exit code alone is not trustworthy (PHPUnit
   9.6 exiting non-zero on a green suite purely over deprecation notices
   is the motivating case): a match on a non-zero exit is a `pass`, with a
@@ -170,17 +170,17 @@ package `-C` pointed at.
 
 Precedence, and what runs:
 
-| Input | What runs |
-| --- | --- |
-| file alone (no `-c`) | the preset's own list (`order`, then the remaining keys in file order), NOT the built-in list; every check resolves to its preset script |
-| `-c` alone (no file) | unchanged: the `-c` names, each resolved against `package.json` |
-| file + `-c` | the `-c` order selects from the union of the preset names and the built-ins; a selected preset name still runs its preset script |
-| file + `-x` | the run list is the preset list; `-x` wins for the check it names, the other preset entries resolve as usual |
-| file + `-c` + `-x` | `-c` gives the order, the preset gives the script, `-x` wins wherever it speaks (an implicit `-x` from a command `-c` item counts as `-x`) |
-| `verify` key absent | the built-in list, exactly as before this option existed |
-| `checks` empty | nothing runs: `status: "usage_error"`, `reason: "empty_preset"`, exit `2` |
-| file absent | unchanged: the built-in list |
-| invalid file | nothing runs: `status: "usage_error"`, `reason: "defaults_file_invalid"` (or `defaults_file_not_readable` for a directory, an unreadable file or one over the 64 KiB cap), exit `2`, the message naming the path and the offending key |
+| Input                | What runs                                                                                                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| file alone (no `-c`) | the preset's own list (`order`, then the remaining keys in file order), NOT the built-in list; every check resolves to its preset script                                                                                               |
+| `-c` alone (no file) | unchanged: the `-c` names, each resolved against `package.json`                                                                                                                                                                        |
+| file + `-c`          | the `-c` order selects from the union of the preset names and the built-ins; a selected preset name still runs its preset script                                                                                                       |
+| file + `-x`          | the run list is the preset list; `-x` wins for the check it names, the other preset entries resolve as usual                                                                                                                           |
+| file + `-c` + `-x`   | `-c` gives the order, the preset gives the script, `-x` wins wherever it speaks (an implicit `-x` from a command `-c` item counts as `-x`)                                                                                             |
+| `verify` key absent  | the built-in list, exactly as before this option existed                                                                                                                                                                               |
+| `checks` empty       | nothing runs: `status: "usage_error"`, `reason: "empty_preset"`, exit `2`                                                                                                                                                              |
+| file absent          | unchanged: the built-in list                                                                                                                                                                                                           |
+| invalid file         | nothing runs: `status: "usage_error"`, `reason: "defaults_file_invalid"` (or `defaults_file_not_readable` for a directory, an unreadable file or one over the 64 KiB cap), exit `2`, the message naming the path and the offending key |
 
 A preset key must be a check name, must not look like an integer (a JSON
 object reorders such keys, so the file's own order could not be honoured)
@@ -202,11 +202,20 @@ Every `CheckResult` carries `source` saying where its command came from:
 envelope carries it per check, so a reader can tell a preset's script from
 a `-x` command without recomputing the precedence.
 
+`-x` alone does not replace the default list: `verify -x name=cmd` runs
+`build`, `typecheck`, `lint` and `test` as well as `name`, and each default
+check without a script or `-x` override is a `no_script` non-pass. When at least one `-x` is
+given and `-c` is not, the `warnings` carry
+`hint: -x given without -c: the default check list (build,typecheck,lint,test) still runs; pass -c <names> to choose the run set`.
+Giving `-c` (even an empty list) or giving no `-x` leaves it out.
+
 Check resolution, per name: an `-x` override wins; then a repo preset entry
 runs the script it names; otherwise a matching `package.json`
 `scripts[name]` runs as `npm run <name> --silent`; a requested name with
 none of these is recorded as `status: "skipped", reason: "no_script"`,
-with a warning naming the missing script. It is an explicit non-pass: the
+with a warning naming the missing script and, when no preset entry
+named it, the remedy (`pass -c with the checks this repo has`). It is an
+explicit non-pass: the
 overall result is `status: "error"`, exit `2`, even when other requested
 checks pass. Supply the command deliberately with `-x name=command` when
 that is intended. When the resolved check list is empty (e.g. `-c ''`), or
@@ -393,3 +402,47 @@ warning, and the result carries `reason: "aborted"`. The CLI prints none
 of that on a signal (see the "Signals, locks and recovery" section of
 [probe.md](probe.md)).
 
+## Compact views: --summary and --print
+
+`--summary` and `--print <field,...>` print a second rendering of the same
+result; they work like the views of [probe](probe.md#compact-views---summary---print-and---report).
+
+`--summary` prints one line per check, one `warning:` line per warning,
+and a final totals line:
+
+```text
+<name> | <pass|fail|skipped|error> | exit=<code|-> | <N>ms | passed=N failed=N skipped=N errors=N[ | reason=<reason>][ | first failure: <file:line: message>]
+totals: status=<pass|fail|error> [reason=<reason>] checks=N pass=N fail=N skipped=N error=N totalDurationMs=N warnings=N fullResult=<path>
+```
+
+`fullResult=` names the saved `result-full-*.json`; `verify` writes it on
+every run. `-m` is a character budget: rows that do not fit are replaced
+by one marker line naming how many were omitted, and the totals line is
+always printed.
+
+`--print` prints one JSON object on one line, one key per requested field
+in the order given. A name is a top-level envelope field (`status`,
+`reason`, `checks`, `totalDurationMs`, `warnings`, `logs`, `truncated`,
+`fullResult` and the other fixed fields); a dotted path descends into
+objects but not into arrays, so a single check is not addressable
+(`checks.0.name` prints `null`). Fields are read from the unreduced result,
+so `-m` does not shorten a printed field; `--max-failures` still caps each
+check's `failures` list and sets `truncated` as it does for the JSON
+envelope, with the uncapped list in `verify-full-*.json`. Only the printed
+line is bounded by `-m`. A field this run did not produce prints `null`.
+
+`warnings`, `logs`, `fullResult` and `truncated` are taken from the emitted
+envelope (so a "full result not written" warning and the reduction marker
+show, and `truncated` agrees with `warnings`), while every other field comes
+from the unreduced result. `--summary` builds its `warning:` rows and
+`warnings=N` from the same emitted warnings but leaves out the two notices
+`-m` adds to the JSON view (`envelope is N characters; requested max-chars
+M could not be met` and `result reduced to the fixed fields only: ...`), so
+only the command's own warnings are listed and counted.
+
+Both views take precedence over `-f`, are bounded by `-m`, are mutually
+exclusive (naming both is a `usage_error` with exit `2` before anything
+runs, as is an unknown `--print` field, which lists this command's own
+fields), and leave the envelope schema, the exit code and the saved full
+result untouched. A usage error prints the JSON `usage_error` envelope as
+for every other command.

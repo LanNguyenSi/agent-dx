@@ -434,6 +434,10 @@ function dedupePreservingOrder(names: string[]): string[] {
   return out;
 }
 
+/** The warning for `-x` given without `-c` (see `verify()`); a stable
+ * `hint:` prefix lets a caller tell it from a result warning. */
+export const XOVERRIDE_WITHOUT_CHECKS_HINT = `hint: -x given without -c: the default check list (${DEFAULT_CHECKS.join(",")}) still runs; pass -c <names> to choose the run set`;
+
 /**
  * Runs the configured checks in order (build, typecheck, lint, test by
  * default) through exec.ts, one at a time, selecting a detector per check
@@ -584,6 +588,17 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const scripts = readScripts(options.cwd);
   const warnings: string[] = [];
   warnings.push(...implicitWarnings);
+  // `-x` alone adds its check to the default list instead of replacing it:
+  // a caller who wrote `-x name=cmd` to run just that command otherwise
+  // finds build, typecheck, lint and test running (and skipped as
+  // `no_script`) beside it. Said once, in the warnings, when the default
+  // list is in effect and at least one `-x` was given.
+  if (
+    options.checks === undefined &&
+    Object.keys(explicitOverrides).length > 0
+  ) {
+    warnings.push(XOVERRIDE_WITHOUT_CHECKS_HINT);
+  }
   const namesNeedingScripts = names.some(
     (name) => !Object.prototype.hasOwnProperty.call(overrides, name),
   );
@@ -649,7 +664,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       warnings.push(
         resolved.presetScript !== undefined
           ? `${name}: no_script: the repo preset maps this check to the npm script "${resolved.presetScript}", which package.json has no, and no -x override was given`
-          : `${name}: no_script: no -x override or matching package.json script`,
+          : `${name}: no_script: no -x override or matching package.json script; pass -c with the checks this repo has`,
       );
       // Keep resolving later names: the omission is a non-pass, but
       // --fail-fast does not make other requested checks disappear from the

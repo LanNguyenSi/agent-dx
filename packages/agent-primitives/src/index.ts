@@ -64,6 +64,7 @@ export type {
   IsolationMode,
   MutantField,
   MutationProbeField,
+  PlanBaselineField,
   PlanMutantResult,
   PlanMutantStatus,
   PlanSummaryField,

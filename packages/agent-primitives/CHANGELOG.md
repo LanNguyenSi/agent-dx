@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `probe --plan`: a mutant may carry its own `test`, which wins over the
+  plan-level `test` (a mutant without one inherits it); the plan-level
+  `test` may be left out when every mutant has its own. Mutants whose
+  commands are the same string once trimmed share one baseline, in the
+  order their commands first appear; every baseline runs before the first
+  mutant, through the same gate the first one goes through (zero-tests
+  guard, `--pass-regex`, `--require-baseline-evidence`, the post-baseline
+  re-hash, extracted from `openRunSetup` as `runBaselineGate`), and
+  `--pre` reruns ahead of each. A failing later baseline marks only its
+  own mutants `not_run` with its reason (plan `inconclusive`,
+  `mutant_inconclusive`); a failing first one refuses the plan as before;
+  a later baseline that rewrote a target ends the plan
+  `target_changed_during_baseline`, and one stopped by a signal ends it
+  `aborted`, each settling the backups the way the first baseline does in
+  the same case. The envelope adds `plan.baselines`
+  and each result's `test_command` and `baseline_index`, lists every
+  baseline log in `logs`, and `--summary` gains a `test=` column and one
+  line per baseline when the plan names more than one command. A plan
+  naming one command runs and reports as before, apart from those added
+  fields. `ProbePlanSpec.testCommand` and `ProbePlanOptions.testCommand`
+  are optional now, `PlanMutantSpec` gains `testCommand`, and
+  `PlanBaselineField` is exported. See docs/probe.md, "A test command per
+  mutant".
+- `hygiene`, `drift` and `verify` take `--summary` and `--print <fields>`,
+  the compact views `probe` already had: `--summary` prints one line per
+  finding, site or check plus a totals line (status, counts and the saved
+  full result path when there is one), `--print` prints the named top-level
+  envelope fields as one JSON line from the unreduced result. Both take
+  precedence over `-f`, are bounded by `-m`, are mutually exclusive, and
+  leave the exit code and the envelope unchanged. `--print` field names
+  come from a per-command list; `probe`'s list and output are unchanged
+  apart from the new `line_content` field.
+- `probe`: a `-M/--match` text that is not on the named line now reports
+  `line_content`, the line as the file has it (trimmed, at most 300
+  characters with a `...` marker), on the single-probe result and on the
+  `plan.results[]` item. The status (`inconclusive`), the reason
+  (`mutant_not_applicable`) and the exit code (`2`) are unchanged.
+- `verify`: `-x` given without `-c` adds a `hint:` warning saying that the
+  default check list still runs and that `-c <names>` chooses the run set.
 - `verify` reads a repo preset from `.agent-primitives.json`:
   `verify.checks` maps a check name to the `package.json` script that
   satisfies it and the optional `verify.order` lists which of them run
@@ -31,14 +70,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `probe`: the full-suite hint for a command such as `npm test` without
+  `--timeout` is now a warning in the JSON envelope instead of a stderr
+  line, appended after the probe's own warnings, so `2>&1 | <json parser>`
+  reads one valid document. With `-f text` and with `--summary`, `--print`
+  or `--report` it is still the stderr line printed before the baseline
+  starts. A `--plan` run prints none, as before.
+- `verify`: the `no_script` warning now ends with `; pass -c with the
+checks this repo has`.
+- `scripts/spike/` holds a throwaway measurement (branch enumerator over
+  `base..head`, scoring scripts and `REPORT.md`) of whether listing changed
+  branches without a planned mutant would have surfaced the mutants that
+  reviewers later found surviving. It is not shipped and not referenced by
+  `package.json`; the report recommends not building it as specified.
 - The test suite now runs in a sandbox or environment where `ps` cannot be
   started: the helper that lists processes in `worktree-remove-list.test.ts`
   catches the error `execFile` throws synchronously, and the tests whose
   assertions need a real process table (`guard`, the `ps` reader, the
   resource-limit and process-group cases of the worktree tests, the crash
   and zombie cases) are skipped with the note `ps cannot run in this
-  environment` through a shared probe in `test/helpers/ps-usable.ts`.
+environment` through a shared probe in `test/helpers/ps-usable.ts`.
   Where `ps` runs nothing is skipped.
+- The skill's invocation-templates section now opens by telling the reader to
+  run neither `--version` nor `--help` before the first call and to copy a
+  template instead, and the `verify` template names only the checks the
+  repository has a script for.
 
 ### Fixed
 
@@ -74,7 +130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `worktree create` now fetches with `--no-prune-tags` (`git fetch --quiet
-  --no-recurse-submodules --no-prune-tags origin`), so a `fetch.pruneTags` or
+--no-recurse-submodules --no-prune-tags origin`), so a `fetch.pruneTags` or
   `remote.origin.pruneTags` repository setting cannot delete a tag that only
   the local checkout has. Remote-tracking branches are still updated, and
   still pruned when `fetch.prune` is on.
@@ -84,7 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `worktree remove --sync-main`: after a successful removal, runs `git fetch
-  --prune --no-prune-tags origin` in the main checkout and fast-forwards it to
+--prune --no-prune-tags origin` in the main checkout and fast-forwards it to
   origin's default branch, but only when no merge, cherry-pick, revert,
   rebase, `git am`, sequencer or bisect is in progress there, it is on that
   branch with no staged, unstaged or untracked change, and it is neither
@@ -193,7 +249,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   therefore ignore these variables and work on the repository's own ref
   store; `worktree create` does not refuse a value that names another one.
   They used to be looked at only by the unpushed check of `worktree
-  remove` (which still refuses a value naming a location, the caller's
+remove` (which still refuses a value naming a location, the caller's
   environment saying its git reads its refs elsewhere), while every other
   git of the run inherited them and could be moved to another ref store.
 - `worktree create`: when the add got as far as creating the worktree and
@@ -225,7 +281,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `error`/`errors`, `skipped`, `xfailed`, `xpassed`,
   `warning`/`warnings`, `deselected`, in whatever combination pytest
   prints) with its elapsed ` in <number>s` tail, plus the `no tests ran
-  in <number>s` line pytest prints with exit `5` when it collected
+in <number>s` line pytest prints with exit `5` when it collected
   nothing. `hasKnownTestSummary` matching that line (captured real
   pytest 8.4.2 output under `test/fixtures/captured/pytest-*.txt`) is
   what closes the flaky verdict: the line carries wall-clock timing
@@ -373,7 +429,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scratch directory under the log directory; git discovered the enclosing
   repository from there, resolved the patch paths relative to it and silently
   skipped every path outside the scratch directory's own subtree, so `git
-  apply` exited 0 having changed nothing and `--numstat` listed nothing, which
+apply` exited 0 having changed nothing and `--numstat` listed nothing, which
   also let a patch touching a second file pass the extra-path check unseen.
   These `git apply` calls now set `GIT_CEILING_DIRECTORIES` to the scratch
   directory's parent (and drop the repository-selection variables), so the
@@ -395,7 +451,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unpushed walk now runs in the common directory, from the commit the
   worktree's `HEAD` points at (`git rev-parse --verify HEAD^{commit}` in the
   worktree, then `git --git-dir=<common-dir> rev-list <commit> --not
-  --exclude=<symbolic refs> --remotes`), and the symbolic refs it leaves out
+--exclude=<symbolic refs> --remotes`), and the symbolic refs it leaves out
   come from the listing of the common directory
   (`git --git-dir=<common-dir> for-each-ref refs/remotes`), not from the
   worktree's: for a record in the private stack that shadows a symbolic
@@ -423,7 +479,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   objects, so a file in which a remote-tracking tip names the unpushed commit
   as its parent made `git rev-list HEAD --not --remotes` count 0 even with
   `--no-replace-objects -c core.useReplaceRefs=false`, and `remove
-  --delete-branch` deleted the branch. Writing such a file needs write access
+--delete-branch` deleted the branch. Writing such a file needs write access
   to the git directory. The calls that decide (the unpushed `rev-list`, the
   `merge-base --is-ancestor` and the `rev-parse` of the HEAD commit) now also
   run with `-c core.commitGraph=false`, which wins over a
@@ -514,7 +570,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   makes an unpushed commit look pushed or merged. With
   `git replace --graft <origin/main tip> <unpushed commit>`, a plain
   `git replace` object, or a line in `info/grafts`, `git rev-list HEAD --not
-  --remotes` counted the commit as pushed and `remove --delete-branch` exited
+--remotes` counted the commit as pushed and `remove --delete-branch` exited
   0 and deleted the branch (`--require-merged` and `list` could call it
   merged the same way). The calls that decide (the unpushed `rev-list`, the
   `merge-base --is-ancestor` and the `rev-parse` of the HEAD commit) now run
@@ -532,7 +588,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listed there.
 
 - `patch`: the git identity lookup (`git rev-parse --absolute-git-dir
-  --git-common-dir`) is bounded through the same wrapper the `worktree`
+--git-common-dir`) is bounded through the same wrapper the `worktree`
   and `drift` commands use (`bounded-spawn.ts`): git runs in a process
   group of its own, and the `/bin/sh` wrapper starts a watcher inside
   that group which waits on a pipe the patch process holds and kills the
@@ -638,10 +694,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decoy named with U+FFFD was inspected as the decoy before); whether the
   store is kept elsewhere (`extensions.refStorage = <format>://<path>`)
   from `<common-dir>/config` alone through `git config --file -
-  --no-includes`, the way git's format reader reads it, so
+--no-includes`, the way git's format reader reads it, so
   `GIT_CONFIG=/dev/null` or an included file in the caller's environment
   can no longer hide or add the value; the backend from `rev-parse
-  --show-ref-format`, with the whole `refs` tree and `packed-refs`
+--show-ref-format`, with the whole `refs` tree and `packed-refs`
   inspected for a files store and `reftable/tables.list` plus every
   listed table for a reftable store. A link, a directory reached twice or
   on another device, a special file, an entry that cannot be inspected, a
@@ -703,10 +759,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than resolved as a name (`origin/main`, or `remotes/origin/main`
   where a local branch or tag of that name exists),
   and when `origin/HEAD` is skipped `create` names `origin/HEAD is not set
-  or not usable` as the reason. Normal layouts print and behave as before.
+or not usable` as the reason. Normal layouts print and behave as before.
 - `patch`: a new command that replaces exact text in one or more files
   from a JSON edit plan (`--plan <file>`, `{"edits":[{"file","old","new",
-  "replaceAll"?}]}`) or one edit (`--file` with `--old`/`--old-file` and
+"replaceAll"?}]}`) or one edit (`--file` with `--old`/`--old-file` and
   `--new`/`--new-file`). Every edit is resolved against the current
   content of every file before anything is written; a missing, ambiguous
   or overlapping edit, a fuzzy match that would change text outside the
@@ -1039,7 +1095,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unambiguous words that do not reuse `killed`/`survived`: a dogfood run
   once misread the plan's own top-level `status: "killed"` as "the mutant
   was caught," when the mutant in question was `results[i].status:
-  "survived"`, `mutation_probe.expectation: "met"` under `--expect pass`
+"survived"`, `mutation_probe.expectation: "met"` under `--expect pass`
   (the routine, expected case) -- the field itself was already correct,
   spelled in a reused vocabulary a reader who has not read the docs can
   misread; `expectation` gives the same verdict a plainer, additive
@@ -1349,7 +1405,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the ordinary case for a fast suite) can leave a same-length mutant's
   replacement content behind an unchanged `(mtime, size)` pair.
   Reproduced both directions on the unpatched build first (`python3
-  3.9.6`, a `'?'` -> `'x'` same-length mutant, pyc header read: magic,
+3.9.6`, a `'?'` -> `'x'` same-length mutant, pyc header read: magic,
   flags, mtime, size), then closed by giving every `--pre`/test-command
   invocation of a run with a `.py` target its own fresh,
   previously-unused `PYTHONPYCACHEPREFIX` directory (never reused
@@ -1363,19 +1419,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Python target was rejected too: isolation actually guarantees
   correctness in the ordinary case, so refusing unconditionally would
   trade a working fix for a weaker one. `exit 2`/`reason:
-  "pycache_isolation_failed"` is still the fallback for the one genuine
+"pycache_isolation_failed"` is still the fallback for the one genuine
   failure the isolation setup itself has (its directory could not be
   created), the one new named reason this adds to the refusal contract;
   the JSON envelope's field set, the default isolation mode, and every
   other exit code are unchanged. A caller's own `--env
-  PYTHONPYCACHEPREFIX=...` is honoured: this run's own isolation is
+PYTHONPYCACHEPREFIX=...` is honoured: this run's own isolation is
   skipped instead of silently overridden, with a `warnings` entry naming
   the hazard and the caller's value, so the envelope's `test.env` never
   misreports what the child actually saw. Every run with a Python target
   also gets one `warnings` entry naming the injected variable up front,
   so a test suite that itself asserts on cache placement and fails its
   baseline as a result is diagnosable from the envelope alone. `doctor
-  --target <path>` reports a new `python-bytecode-cache` check, always
+--target <path>` reports a new `python-bytecode-cache` check, always
   informational (`ok: true`): when `python3` is on `PATH` it resolves
   each target's real cache path via `importlib.util.cache_from_source`
   (accurate on a host whose `python3` redirects `sys.pycache_prefix`
@@ -1428,11 +1484,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `failures` alongside `error`/`failure`, matching that PHPUnit's own tally
   counts it under `Errors:`. `TALLY_LINE`/`NAMED_COUNT` accept a two-word
   `PHPUnit <Name>: N` tally token (`PHPUnit Deprecations`, `PHPUnit
-  Warnings`, `PHPUnit Notices`); that token and the plain single-word
+Warnings`, `PHPUnit Notices`); that token and the plain single-word
   `Deprecations`/`Notices` tokens are read and left unassigned to any tally
   category, since such a count is raised inside a test that genuinely ran
   (captured real: `phpunit-two-word-deprecation-tally.txt`'s `Tests: 2,
-  Assertions: 2, PHPUnit Deprecations: 1.`, where both tests ran and
+Assertions: 2, PHPUnit Deprecations: 1.`, where both tests ran and
   passed). PHPUnit's version banner is one pattern with the major version
   captured from it, prerelease tails included (`PHPUnit 11.0.0-RC1`,
   `PHPUnit 12.0.0-alpha.1`), and it selects this detector only as a whole
@@ -1447,10 +1503,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PHP-level warning, so for major 10 and up the token is treated the way
   `Risky` already is (`executed: true`, `reportsAs: "passed"`). Captured
   real, PHPUnit 11.5.56: a single `E_USER_WARNING`-raising test, `Tests: 1,
-  Assertions: 1, Warnings: 1.`, exit `0`
+Assertions: 1, Warnings: 1.`, exit `0`
   (`phpunit-warning-test-executed.txt`), and a three-test run additionally
   raising a deprecation and a notice, `Tests: 3, Assertions: 3, Warnings: 1,
-  Deprecations: 1, Notices: 1.`, all three passing
+Deprecations: 1, Notices: 1.`, all three passing
   (`phpunit-warnings-deprecations-notices-executed.txt`). Major 9 and below,
   and any output with no banner to read, take the PHPUnit 9 reading as the
   fail-safe default, under which every PHPUnit 9 capture in this suite
@@ -1477,7 +1533,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count with no version banner in the output to read it against (`exec.ts`
   keeps a bounded tail and drops lines off the FRONT, so a long run can lose
   PHPUnit's first line while keeping its last: `Tests: 15, Assertions: 15,
-  Warnings: 15.` executed nothing read as a 9 and ran and passed all 15 read
+Warnings: 15.` executed nothing read as a 9 and ran and passed all 15 read
   as a 10+), and an output carrying PHPUnit's banner but no result report at
   all. Where two candidate readings of a version-dependent count agree, the
   verdict is that agreed value: the count is unreadable, the zero-tests
@@ -1508,7 +1564,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   11.5.56) and `phpunit-exit-mid-suite-9.txt` (9.6.36), each a three-test
   class whose second test's body is `exit(0)`. The reading requires
   PHPUnit's progress counter (`N / M (P%)`) and its post-run `Time: <t>,
-  Memory: <m>` line to be absent as well, which is what keeps a COMPLETED
+Memory: <m>` line to be absent as well, which is what keeps a COMPLETED
   run whose result report is merely suppressed out of it: PHPUnit 10 and up
   accept `--no-results`, and a green two-test suite run that way prints
   banner, counter and `Time:` line, exit `0`
@@ -1538,7 +1594,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check whose own status is `pass` while PHPUnit's output states that it
   executed no test (an empty or filtered suite, an all-skipped run, or a
   PHPUnit 9 warnings-only run such as `Tests: 1, Assertions: 0, Warnings:
-  1.`), reusing `phpunitZeroTestsVerdict` rather than re-deriving the tally
+1.`), reusing `phpunitZeroTestsVerdict` rather than re-deriving the tally
   (tracker 3a0c5242, AC of PR #227's residual (a)). The check's own `status`
   is unchanged -- `pass` stays `pass`, the status is the verdict and the
   warning is the signal -- and the wording names that status rather than an
@@ -1656,7 +1712,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (previously only on `restore_failed`); the rebuild itself is now
   skipped both when no mutant this run applied ever reached the tree
   (`mutant_not_applicable`, `git_apply_timeout`, an aborted real `git
-  apply`) and when the run's own signal was already aborted, and its
+apply`) and when the run's own signal was already aborted, and its
   own log path is folded into the result's other reported log paths.
   A run interrupted by SIGINT/SIGTERM restores the target but does not
   get this extra rebuild, documented in the README and the package
@@ -1740,7 +1796,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   remedy.
 
 - `verify` accepts an opt-in per-check success predicate, `--pass-regex
-  name=regex` (repeatable, parsed like `-x name=command`), compiled
+name=regex` (repeatable, parsed like `-x name=command`), compiled
   through the same shared `compilePassRegex` (`m` flag) `probe`'s own
   `--pass-regex`/`passWhen.regex` already use (GitHub issue #241). A
   green PHPUnit 9.6 suite can exit non-zero over deprecation notices
@@ -1800,10 +1856,10 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   that issue, not implemented here. Measured on a real Drupal
   repository, same mutant, same test, same `--pass-regex '^OK \('`:
 
-  | Isolation mode | PHPUnit result | Probe verdict |
-  | --- | --- | --- |
-  | `-i inplace` | `Tests: 11, Assertions: 17, Failures: 2` | `killed` |
-  | `-i worktree` (`docroot/core` linked) | `OK (11 tests, 17 assertions)` | `survived` |
+  | Isolation mode                        | PHPUnit result                           | Probe verdict |
+  | ------------------------------------- | ---------------------------------------- | ------------- |
+  | `-i inplace`                          | `Tests: 11, Assertions: 17, Failures: 2` | `killed`      |
+  | `-i worktree` (`docroot/core` linked) | `OK (11 tests, 17 assertions)`           | `survived`    |
 
 ### Fixed
 
@@ -1918,7 +1974,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   for a met expectation, `1` for a violated one) -- unchanged for a
   caller not passing `--expect`, since `expectation` and the old,
   now-corrected `status` always agree under the default `--expect
-  fail`. README and the package's skill updated to describe
+fail`. README and the package's skill updated to describe
   `killed`/`survived`/`expectation` under this contract. A `--plan`
   run's own `summary` gained `met`/`violated` counts alongside the
   existing `killed`/`survived`/`inconclusive`/`not_run` ones, so a
@@ -1981,7 +2037,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   own index, being case-sensitive, reports `SRC` as untracked while the
   copy carries a tracked `src` there. Three answers, all three probed:
   rules 2 and 3 (and the `:(literal)` pathspecs of the one `git
-  ls-files` listing behind rule 3) are now decided on the COPY's own
+ls-files` listing behind rule 3) are now decided on the COPY's own
   spelling of a destination, read back from its directory entry by
   inode identity rather than assumed from the source tree's spelling;
   containment is re-checked immediately before each of the three
@@ -2006,7 +2062,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   nor tracked still links), plus `canonicalDestRelPath` and the
   separator both ways in `test/link-policy.test.ts`. Every test that
   depends on the volume's case behaviour measures it (`test/helpers/
-  case-fs.ts`) and asserts the branch it is on, rather than assuming a
+case-fs.ts`) and asserts the branch it is on, rather than assuming a
   macOS host is case-insensitive.
 - The whole worktree-relative destination of a link, not only its final
   component, is now read back from the isolation copy segment by segment
@@ -2128,7 +2184,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   content is listed nowhere in the OUTER repository's index (only its
   gitlink is, at the submodule's own root), so an auto-discovered
   `node_modules -> sub/lib` under a submodule, or `node_modules ->
-  nested/lib` under a gitignored nested plain repository, read as
+nested/lib` under a gitignored nested plain repository, read as
   untracked to `isTrackedPath` and linked with no warning, while a
   `--pre` writing through either wrote straight into the nested
   checkout. `nestedRepoBoundaryRelPath` walks the target's path from the
@@ -2275,7 +2331,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   default detectors built from real captured tool output (see
   `test/fixtures/README.md`) -- `phpunit` (`OK (N tests, M assertions)`;
   `FAILURES!`/`ERRORS!`/`WARNINGS!`/`OK, but incomplete, skipped, or
-  risky tests!` plus a `Tests: N, Assertions: M, ...` tally line whose
+risky tests!` plus a `Tests: N, Assertions: M, ...` tally line whose
   named counts (`Errors`, `Failures`, `Warnings`, `Skipped`,
   `Incomplete`, `Risky`) are read by name rather than by a fixed
   position, since PHPUnit prints `Errors:` before `Failures:` -- and
@@ -2288,7 +2344,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   that run exits `0`), Failures, Errors and Risky did, so `executed` is
   the total less the first group and `passed` is what remains of it
   after failures and errors -- clamped, so `passed + failed + errors +
-  skipped + warnings` always equals the stated total and `passed` never
+skipped + warnings` always equals the stated total and `passed` never
   goes negative, for a truncated or self-contradictory tally too. A
   numbered `N) Class::method` entry becomes a `failures` entry only
   under an error or failure section header, since a risky or incomplete
@@ -2301,16 +2357,16 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   `:<digits>` (an address-and-port, say) on the entry's own first line
   is never mistaken for it. `phpstan` (` [OK] No errors` / a per-file table
   closed by ` [ERROR] Found N errors`), and `phpcs` (one `FOUND N
-  ERRORS ... AFFECTING M LINES` summary PER FILE, summed across every
+ERRORS ... AFFECTING M LINES` summary PER FILE, summed across every
   file rather than read from the first alone, over per-finding rows) --
   selected by output shape exactly like the existing vitest/tsc/eslint
   detectors, pinned to never shadow them (a vitest fixture still
   selects `vitest` with every PHP detector present as a candidate, now
   also pinned for phpstan/phpcs against `DEFAULT_DETECTORS` directly).
   `probe`'s zero-tests guard now also recognizes PHPUnit's `No tests
-  executed!` and any run whose derived executed count is zero (an
+executed!` and any run whose derived executed count is zero (an
   all-skipped run, a warnings-only run, a stated `OK (0 tests, 0
-  assertions)` -- the last defensive, not observed from a real capture),
+assertions)` -- the last defensive, not observed from a real capture),
   yielding `inconclusive`/`no_tests_executed` the same way it already
   does for vitest's and node's zero-count shapes (reusing the new
   `phpunit` detector's `phpunitZeroTestsExecuted` rather than restating
@@ -2318,7 +2374,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   misread as "nothing executed" by this guard, and an all-risky run is
   deliberately not flagged, since a risky test did run.
   `drift` now scans `.php` comment sites too: `//`, `#`, `/* ... */`,
-  and docblock ` * ` continuation lines (PHP is the only recognized
+  and docblock `*` continuation lines (PHP is the only recognized
   language that accepts both the `//`/`/* */` and `#` comment
   grammars); a `#[...]` PHP 8 attribute is excluded from the `#` line-
   comment grammar (real code, not a comment). README and the installed
@@ -2365,7 +2421,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   destination half of rule 3 (a directory named by repository content)
   now reads "could not check whether git tracks <path>; treated as
   tracked" instead of an unconditional "git tracks it" when the `git
-  ls-files` listing behind it could not run, matching the target half's
+ls-files` listing behind it could not run, matching the target half's
   own fail-closed wording; pinned by a new unit test and by the
   existing PATH-shim fixture in `test/probe-worktree.test.ts`, which now
   asserts both halves' fail-closed wording in the one envelope a failed
@@ -2403,7 +2459,7 @@ is refused on a case-sensitive one (Linux, and what CI runs on).
   `## [Unreleased]`), sits under a `docs/**/migration*` path or a
   Markdown heading naming "migration", or its line carries a small,
   documented historical-phrase word list (`former`, `no longer`, `used
-  to`, ...). Envelope carries `removed_identifiers`, `sites`,
+to`, ...). Envelope carries `removed_identifiers`, `sites`,
   `allowlisted` (each with a `reason` on an allowlisted entry) and
   `counts`; exit `0` no site reported, `1` at least one site reported,
   `2` a usage error (`cwd` outside a git work tree, a bad `--base`/
@@ -2599,7 +2655,7 @@ SKILL.md`) and the README gained an "Invocation templates" section
   whatever follows it is judged the same way, token by token, with no
   separate stripping step: `npm test -- --coverage` is still full-suite
   shaped, `npm test -- test/x.test.ts` is not), or `vitest
-  run` (bare, through `npx` or not) with nothing after it but flags,
+run` (bare, through `npx` or not) with nothing after it but flags,
   `-t <pattern>` and a forwarded `--` included (task `b00efca1`, round
   3: the npm/yarn/pnpm shapes above always stripped one leading `--`
   before judging what followed it, but the `vitest run` shape never did
@@ -2659,7 +2715,7 @@ SKILL.md`) and the README gained an "Invocation templates" section
   (`src/old-thing.yaml` -> `src/new-thing.ts`, `---`/`+++` naming
   different paths) instead of a same-path edit: a same-path edit cannot
   observe a compound mutant that disables the whole `!sawHunk &&
-  raw.startsWith("+++ ")` header branch, since `newPath ?? oldPath`
+raw.startsWith("+++ ")` header branch, since `newPath ?? oldPath`
   then falls back to the SAME file either way; a same-extension rename
   is equally unobservable, since `extractIdentifier` classifies purely
   by extension bucket. Renaming across buckets (a YAML config key
@@ -2673,7 +2729,7 @@ SKILL.md`) and the README gained an "Invocation templates" section
   `step.ts` imports `setup.ts` or `index.ts`, or if `setup.ts` imports
   `step.ts` or `index.ts` -- pinning the one-way layering `index.ts`'s
   own docblock already describes (`session.ts <- step.ts <- setup.ts
-  <- index.ts`), so far kept only by convention. Parsing the AST
+<- index.ts`), so far kept only by convention. Parsing the AST
   (rather than a regex over the source text) is what lets the guard
   cover every statement form that actually creates a module
   dependency -- `import ... from "spec"`, `export ... from "spec"`, a
@@ -2698,7 +2754,7 @@ SKILL.md`) and the README gained an "Invocation templates" section
   file's shape only; it was never meant to be run as-is.
 - `test/probe-worktree.test.ts` now pins `session.ts`'s stale-worktree
   marker removal after a successful recovery (`if (staleWt)
-  removeMarkerFor(realRoot)`) with a test that mocks `beginWorktree` to
+removeMarkerFor(realRoot)`) with a test that mocks `beginWorktree` to
   fail before it reaches its own `onWorktreeAttempt` write: the run's
   own new-worktree attempt always rewrites the same marker on success,
   which would otherwise mask an inverted condition there entirely. A
@@ -2713,11 +2769,11 @@ SKILL.md`) and the README gained an "Invocation templates" section
   so it is the one case in the file a stray hint from unrelated ambient
   state under those real defaults would actually break. The cause is
   reproduced, not merely plausible: a concurrent real `agent-primitives
-  probe -i worktree` run against the same checkout (or any live scratch
+probe -i worktree` run against the same checkout (or any live scratch
   worktree already registered against it) makes `doctor`'s
   `stale-worktree` check emit exactly one "a live probe (pid N) owns
   the scratch worktree at ..." hint, because that check reads `git
-  worktree list` for `containmentRoot(cwd)` regardless of `lockDir`;
+worktree list` for `containmentRoot(cwd)` regardless of `lockDir`;
   the shared lock directory is a second, weaker channel through the
   same check's own worktree-marker lookup. Pinning both `cwd` and
   `lockDir` to fresh, empty fixtures removes both channels.
@@ -2735,18 +2791,18 @@ SKILL.md`) and the README gained an "Invocation templates" section
   on, the `-i worktree` session, and `openTarget`'s per-file
   backup/restore, plus the shared field-shape result types every layer
   needs to name), `probe/step.ts` (the per-mutant step, `prepareMutant`
-  + `runMutantAttempt`, built on `session.ts`), and `probe/setup.ts`
-  (the shared `openRunSetup`: isolation fallback, refusals, containment,
-  the lock, stale-marker recovery, the worktree sync, every target's
-  backup, the baseline), with `index.ts` left holding the CLI-facing
-  option/result types and the two entry points, `probe()` and
-  `probePlan()`. Import direction is one way,
-  `session.ts <- step.ts <- setup.ts <- index.ts`; in this codebase
-  `setup.ts` ends up needing only `session.ts` (the mutant step it runs
-  before its own baseline is supplied by its caller). The package's
-  public surface (`src/index.ts`'s exports, `dist/index.d.ts`) is
-  unchanged; the same identity fixture above still passes without
-  regeneration.
+  - `runMutantAttempt`, built on `session.ts`), and `probe/setup.ts`
+    (the shared `openRunSetup`: isolation fallback, refusals, containment,
+    the lock, stale-marker recovery, the worktree sync, every target's
+    backup, the baseline), with `index.ts` left holding the CLI-facing
+    option/result types and the two entry points, `probe()` and
+    `probePlan()`. Import direction is one way,
+    `session.ts <- step.ts <- setup.ts <- index.ts`; in this codebase
+    `setup.ts` ends up needing only `session.ts` (the mutant step it runs
+    before its own baseline is supplied by its caller). The package's
+    public surface (`src/index.ts`'s exports, `dist/index.d.ts`) is
+    unchanged; the same identity fixture above still passes without
+    regeneration.
 - `-t/--test` is no longer enforced by the option parser (so `--plan` can
   supply it) but by the probe command itself; omitting both is still
   `status: "usage_error"`, exit `2`.
@@ -2829,7 +2885,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   tree instead, reporting `survived` for a mutant the test actually kills.
   Any of the three channels that SPELLS THE REPOSITORY ROOT OUT LITERALLY,
   IN A FORM THE SCAN MODELS, is now refused outright (`reason:
-  "test_command_escapes_isolation"`, a `usage_error`) before the run
+"test_command_escapes_isolation"`, a `usage_error`) before the run
   reaches its baseline, naming the offending channel(s), the matched
   region as that channel spells it (the root plus the path text after it,
   not the bare root), and the fix for that channel: a relative invocation
@@ -2858,7 +2914,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   enumerating what CONTINUES a path word rather than what terminates one,
   with the alphabet taken from POSIX shell word lexing, since the scanned
   string is what `sh -c` is handed: a portable filename character (`A-Z
-  a-z 0-9 . _ -`) or any non-ASCII character continues the name, so the
+a-z 0-9 . _ -`) or any non-ASCII character continues the name, so the
   match is a different path's prefix and not a mention; a `/` continues
   the word as a further component and leaves it a mention; a `\` plus any
   character other than `/`, a newline, or an ANSI-C numeric-escape starter
@@ -2879,7 +2935,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   So a sibling `<root>2`, `<root>-backup`, `<root>\ backup` (whose
   backslash escapes a space in its OWN name) or
   `<root>\`+newline+`-backup` is not a mention, while `cd
-  <root>>/dev/null`, `cd <root><&-` and a backtick closing right after the
+<root>>/dev/null`, `cd <root><&-` and a backtick closing right after the
   root each name the root itself and are refused. Enumerating the
   continuations is what makes the decision total: an unforeseen character
   ends the word, so an unforeseen spelling over-refuses (with a named
@@ -2908,7 +2964,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   `--log-dir` match right there; `--isolation inplace` is exempt, and an
   absolute path outside the repository root is left alone. A legitimate
   absolute path under the root (a cache directory, `--env
-  CACHE_DIR=<root>/.cache`) is refused too, with the same two fixes named.
+CACHE_DIR=<root>/.cache`) is refused too, with the same two fixes named.
   This is a best-effort gate on a literal spelling in a form the scan
   models, not a proof that a command stays inside the copy, and the
   residuals below are the ones known today rather than a closed set: a
@@ -2999,7 +3055,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   unexplained miss; an unparseable pattern is a usage error. Once given
   AND matched, it is also the escape hatch for the generic fallback
   above: a genuine survivor of a quiet deterministic runner (`node
-  --test --test-reporter=dot`'s bare `..`) is reported `survived` with
+--test --test-reporter=dot`'s bare `..`) is reported `survived` with
   the flag, `inconclusive`/`no_tests_executed` without it, by design.
   Available under `--plan` (a plan runs every mutant against ONE
   shared baseline, so unlike `--env` there is no second source for
@@ -3053,7 +3109,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   fixed for task `e82f341a` above. When a correction (`reconcileOneMutant`'s
   case 2, a re-cut to a hunk boundary) SHRANK an envelope that was
   already over `maxChars` before this function ran, `bound ===
-  preCorrectionLength` and the shrunk result can land at or under it
+preCorrectionLength` and the shrunk result can land at or under it
   without the shrink loop ever running (measured directly against a
   15-hunk fixture: a case-2 re-cut that naturally lands at 803 or 733
   characters, depending on the budget, both under the 805-character
@@ -3108,7 +3164,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
 
 - `probe`'s CLI envelope for a failing baseline (task `b00efca1`): a
   failing baseline used to report `status: "inconclusive"`/`reason:
-  "baseline_failed"` with `mutation_probe` entirely absent, so a
+"baseline_failed"` with `mutation_probe` entirely absent, so a
   consumer that read `mutation_probe.result` on every outcome without
   shape-sniffing threw on this one. The CLI now
   reports a literal `status: "baseline_failed"` for this case (the exit
@@ -3141,7 +3197,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   What was four scattered site-level fixes is now one formalized
   contract: `src/probe/session.ts`'s new `REFUSAL_RESULT_SHAPE` constant
   (typed `Record<RefusalReason, { mutant: boolean; mutationProbe:
-  boolean }>`, so a new `RefusalReason` with no entry fails to compile)
+boolean }>`, so a new `RefusalReason` with no entry fails to compile)
   is the single source of truth for every refusal `openRunSetup` can
   return -- not just the four covered above, but all sixteen, including
   the twelve setup-phase refusals from before the dry run (a
@@ -3152,9 +3208,9 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   `index.ts`'s envelope mapping both read this same table by `reason`
   (mechanically, not as a per-call flag), so the two locations cannot
   drift apart on a reason either already covers. `test/
-  probe-refusal-contract.test.ts` (new) provokes every one of the
+probe-refusal-contract.test.ts` (new) provokes every one of the
   sixteen reasons through `probe()` for real -- a `Record<RefusalReason,
-  Provocation>` table of its own, so a reason with no provocation also
+Provocation>` table of its own, so a reason with no provocation also
   fails to compile -- and asserts the reported envelope matches the
   contract exactly, in both directions. The README's Result shape
   section gained a "Refusal reason shape" table listing all sixteen.
@@ -3201,8 +3257,8 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   `-m`/`--max-chars` was set below the default. Carrying the excerpt once
   removes that duplication; `verified_applied_via` is now a short, bounded
   descriptor pointing at `mutant.diff` (`"git diff --no-index of the
-  before/after scratch copies: 3 hunks, 6 changed lines (3 removed, 3
-  added); see mutant.diff"`). That alone still does not GUARANTEE
+before/after scratch copies: 3 hunks, 6 changed lines (3 removed, 3
+added); see mutant.diff"`). That alone still does not GUARANTEE
   `diff.text` survives the envelope unmodified (the envelope's own
   reduction, oblivious to hunks, can still cut it further for a large
   enough `--plan` batch or a tight enough `-m`), so `probe` and
@@ -3227,15 +3283,15 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
 
   `mutation_probe.mutant`'s one-line summary names the hunk/changed-line
   totals and points at `mutant.diff` for the full excerpt (`"... (first
-  of 4 changed lines across 1 hunk; see mutant.diff (truncated); full
-  diff at mutant.diff.path)"`), and,
+of 4 changed lines across 1 hunk; see mutant.diff (truncated); full
+diff at mutant.diff.path)"`), and,
   when `removed !== added` (a pure deletion, a pure insertion, or a
   mixed edit), no longer presents a `before -> after` pair at all: an
   unequal count means the two do not correspond to each other one for
   one (the same untouched-neighbour risk `before`/`after` already carry
   for those shapes), so the summary instead names only the side actually
   removed or added (`"target.txt:5: line05 removed (1 changed line
-  across 1 hunk; see mutant.diff (whole))"`). The pair form survives only when
+across 1 hunk; see mutant.diff (whole))"`). The pair form survives only when
   `removed === added` (the `=== 1` case is the one `diff` is never
   attached for at all). Both descriptor strings, and every existing test
   asserting the old duplicated `verified_applied_via` content, are
@@ -3293,7 +3349,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
 
   The excerpt's own `git diff --no-index` read is pinned against ambient
   git config (`-c core.autocrlf=false -c diff.noprefix=false
-  --no-ext-diff --no-textconv`, the read-side counterpart to the
+--no-ext-diff --no-textconv`, the read-side counterpart to the
   write-side pins below) so neither a global `diff.external` nor a
   `core.attributesFile`-assigned `diff.<driver>.textconv` can make the
   excerpt vanish or fabricate its content silently, and its own output
@@ -3319,9 +3375,10 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   states explicitly what `killed`/`survived` mean under each `expect`
   value, since the ambiguity that report described is otherwise easy to
   read as a code defect.
+
 - `probe -p/--patch` now also pins its real `git apply`, the `-i
-  worktree` checkout, and the tracked-diff sync apply with `-c
-  core.autocrlf=false` and `-c apply.whitespace=nowarn`. A global
+worktree` checkout, and the tracked-diff sync apply with `-c
+core.autocrlf=false` and `-c apply.whitespace=nowarn`. A global
   setting for either key could otherwise make a real patch probe
   inconclusive despite its pinned dry run succeeding.
 - `probe -p/--patch`'s dry-run `git apply` (the scratch-directory check
@@ -3381,7 +3438,7 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   reading the wrong file, or an `--allow` glob written against a
   root-relative path failing to match.
 - The removed-declaration regex now also recognizes `export async
-  function`, `export abstract class`, and a generator `function*`
+function`, `export abstract class`, and a generator `function*`
   (including `export async function*`).
 - `drift`'s envelope keeps `counts` whole under `--max-chars`
   reduction, and each site's `text` is capped at 300 characters, so a
@@ -3390,8 +3447,9 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
 - `drift`'s migration-doc-path check now requires an actual `docs/**`
   subtree (a loose substring match previously also matched a path like
   `migration/docs/x.md`), and its heading parser skips fenced ``` /
-  ~~~ code blocks so a `#`-prefixed line inside one is never read as a
+  ```code blocks so a `#`-prefixed line inside one is never read as a
   Markdown heading.
+  ```
 - `drift`'s diff parser no longer misreads a removed line whose own
   content starts with `-- ` (or an added line starting with `++ `) as
   a `--- `/`+++ ` file header: those are now recognized as headers only

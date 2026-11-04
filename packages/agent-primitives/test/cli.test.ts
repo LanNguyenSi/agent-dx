@@ -3217,7 +3217,7 @@ describe("cli: probe", () => {
     expect(looksLikeFullSuiteTestCommand(cmd)).toBe(expected);
   });
 
-  it("a full-suite-shaped command (npm test) with no --timeout prints one stderr line naming --timeout before the baseline starts", async () => {
+  it("a full-suite-shaped command (npm test) with no --timeout prints one stderr line naming --timeout before the baseline starts, in a view mode", async () => {
     const repo = initRepo();
     fs.writeFileSync(
       path.join(repo, "fixture.js"),
@@ -3253,6 +3253,7 @@ describe("cli: probe", () => {
       "npm test",
       "-i",
       "inplace",
+      "--summary",
     ]);
 
     expect(run.stderr).toContain("looks like a full test suite");
@@ -3311,7 +3312,279 @@ describe("cli: probe", () => {
     expect(run.stderr).not.toContain("looks like a full test suite");
   });
 
-  it("prints the full-suite hint before the baseline run starts, not after", async () => {
+  /** A repo whose `npm test` is full-suite-shaped and passes, with a
+   * three-line fixture; `-n 2` is `  return n > 0;`. */
+  function fullSuiteRepo(): string {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        name: "full-suite-fixture",
+        version: "1.0.0",
+        scripts: { test: 'node -e "process.exit(0)"' },
+      }),
+    );
+    commitAll(repo);
+    return repo;
+  }
+
+  const FULL_SUITE_PROBE = [
+    "probe",
+    "--file",
+    "fixture.js",
+    "-n",
+    "2",
+    "-r",
+    "  return false;",
+    "-t",
+    "npm test",
+    "-i",
+    "inplace",
+  ];
+  /** A refusal that needs no baseline: the `-M` text is not on line 2. */
+  const FULL_SUITE_REFUSAL = [
+    "probe",
+    "--file",
+    "fixture.js",
+    "-n",
+    "2",
+    "-M",
+    "zzz-not-there",
+    "-w",
+    "x",
+    "-t",
+    "npm test",
+    "-i",
+    "inplace",
+  ];
+
+  it("JSON mode: the full-suite hint is a warning in the envelope and nothing goes to stderr, so stdout plus stderr parses as one JSON document", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli(["-C", repo, ...FULL_SUITE_PROBE]);
+    expect(run.stderr).toBe("");
+    // What `2>&1 | <json parser>` reads.
+    const parsed = JSON.parse(run.stdout + run.stderr);
+    const hint = parsed.warnings.at(-1) as string;
+    expect(hint).toContain("looks like a full test suite");
+    expect(hint).toContain("--timeout");
+    // Exactly once.
+    expect(
+      parsed.warnings.filter((w: string) => w.includes("full test suite")),
+    ).toHaveLength(1);
+  });
+
+  it("JSON mode with --timeout: no hint in the envelope warnings", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_PROBE,
+      "--timeout",
+      "30",
+    ]);
+    expect(run.stderr).toBe("");
+    expect(
+      (JSON.parse(run.stdout).warnings as string[]).filter((w) =>
+        w.includes("full test suite"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("JSON mode: the hint is appended after the probe's own warnings, so a refusal message stays warnings[0]", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli(["-C", repo, ...FULL_SUITE_REFUSAL]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout + run.stderr);
+    expect(parsed.reason).toBe("mutant_not_applicable");
+    expect(parsed.warnings).toHaveLength(2);
+    expect(parsed.warnings[0]).toBe("substring not found on line 2");
+    expect(parsed.warnings[1]).toContain("looks like a full test suite");
+  });
+
+  it("-f text keeps the hint on stderr and out of the rendering", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-f",
+      "text",
+      ...FULL_SUITE_REFUSAL,
+    ]);
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(run.stdout).not.toContain("looks like a full test suite");
+  });
+
+  it("--print keeps the hint on stderr and out of the printed warnings", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_REFUSAL,
+      "--print",
+      "warnings",
+    ]);
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(JSON.parse(run.stdout)).toEqual({
+      warnings: ["substring not found on line 2"],
+    });
+  });
+
+  it("--report keeps the hint on stderr and out of the report", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_REFUSAL,
+      "--report",
+      "mutation-probes",
+    ]);
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(Array.isArray(JSON.parse(run.stdout))).toBe(true);
+    expect(run.stdout).not.toContain("looks like a full test suite");
+  });
+
+  it("--summary keeps the hint on stderr, and its note is the refusal message, not the hint", async () => {
+    const repo = fullSuiteRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_REFUSAL,
+      "--summary",
+    ]);
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(run.stdout).toContain("note: substring not found on line 2");
+    expect(run.stdout).not.toContain("looks like a full test suite");
+  });
+
+  it("--plan prints no full-suite hint, on stderr or in the envelope", async () => {
+    const repo = fullSuiteRepo();
+    fs.writeFileSync(
+      path.join(repo, "plan.json"),
+      JSON.stringify({
+        test: "npm test",
+        mutants: [
+          { file: "fixture.js", line: 2, match: "zzz-not-there", with: "x" },
+        ],
+      }),
+    );
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      "plan.json",
+      "-i",
+      "inplace",
+    ]);
+    expect(run.stderr).toBe("");
+    expect(run.stdout).not.toContain("looks like a full test suite");
+  });
+
+  it("a refused -M reports the line it looked at as line_content, on the single probe and the plan item, without changing reason or exit code", async () => {
+    const repo = fullSuiteRepo();
+    const single = await spawnCli(["-C", repo, ...FULL_SUITE_REFUSAL]);
+    expect(single.code).toBe(2);
+    const parsedSingle = JSON.parse(single.stdout);
+    expect(parsedSingle.status).toBe("inconclusive");
+    expect(parsedSingle.reason).toBe("mutant_not_applicable");
+    expect(parsedSingle.line_content).toBe("return n > 0;");
+
+    fs.writeFileSync(
+      path.join(repo, "plan.json"),
+      JSON.stringify({
+        test: "npm test",
+        mutants: [
+          { file: "fixture.js", line: 2, match: "zzz-not-there", with: "x" },
+          { file: "fixture.js", line: 2, match: "n > 0", with: "n < 0" },
+        ],
+      }),
+    );
+    const plan = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      "plan.json",
+      "-i",
+      "inplace",
+    ]);
+    const parsedPlan = JSON.parse(plan.stdout);
+    const [refused, applied] = parsedPlan.plan.results;
+    expect(refused.reason).toBe("mutant_not_applicable");
+    expect(refused.line_content).toBe("return n > 0;");
+    // An applied mutant carries no line_content.
+    expect(applied.line_content).toBeUndefined();
+  });
+
+  it("line_content is printable with --print, absent for an out-of-range line and absent when the -M substring is found", async () => {
+    const repo = fullSuiteRepo();
+    const refused = await spawnCli([
+      "-C",
+      repo,
+      ...FULL_SUITE_REFUSAL,
+      "--print",
+      "line_content,reason",
+    ]);
+    expect(JSON.parse(refused.stdout)).toEqual({
+      line_content: "return n > 0;",
+      reason: "mutant_not_applicable",
+    });
+    const outOfRange = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "99",
+      "-M",
+      "n",
+      "-w",
+      "m",
+      "-t",
+      "node -e 0",
+      "-i",
+      "inplace",
+    ]);
+    const parsed = JSON.parse(outOfRange.stdout);
+    expect(parsed.reason).toBe("mutant_not_applicable");
+    expect(parsed.line_content).toBeUndefined();
+    // The substring is on the line: the mutant applies and nothing is refused.
+    const found = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-M",
+      "n > 0",
+      "-w",
+      "n < 0",
+      "-t",
+      "node -e 0",
+      "-i",
+      "inplace",
+    ]);
+    const foundParsed = JSON.parse(found.stdout);
+    expect(foundParsed.reason).not.toBe("mutant_not_applicable");
+    expect(foundParsed.mutant.line).toBe(2);
+    expect(foundParsed.line_content).toBeUndefined();
+  });
+
+  it("prints the full-suite hint before the baseline run starts, not after (view mode)", async () => {
     // Observable ordering, not just presence: the test command writes a
     // marker file the instant it runs, so "before the baseline starts"
     // is asserted against a real event this run produced rather than
@@ -3371,6 +3644,7 @@ describe("cli: probe", () => {
       "npm test",
       "-i",
       "inplace",
+      "--summary",
     ]);
     child.stderr.setEncoding("utf8");
     let hintSeen = false;
@@ -5673,4 +5947,351 @@ describe("cli: probe --plan", () => {
     // in-flight marker was ever written; the lock is released too.
     expect(fs.readdirSync(lockDir)).toEqual([]);
   }, 40000);
+});
+
+describe("cli: probe --plan with a test command per mutant", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  /** One function and a test that exits non-zero for a mutant of it,
+   * printing nothing: an envelope with no run-dependent output. */
+  function initRepo(): { repo: string; logs: string } {
+    const repo = makeTmpDir();
+    const logs = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const { isPositive } = require('./fixture.js');",
+        "if (isPositive(5) !== true) process.exit(1);",
+        "if (isPositive(0) !== false) process.exit(1);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo, logs };
+  }
+
+  function writePlan(logs: string, plan: unknown): string {
+    const planPath = path.join(logs, "plan.json");
+    fs.writeFileSync(planPath, JSON.stringify(plan));
+    return planPath;
+  }
+
+  /** Replaces what differs between two runs of the same plan: the
+   * temporary paths, the log and result-full file names, the durations
+   * and the package version. */
+  function normalized(
+    envelope: unknown,
+    repo: string,
+    logs: string,
+  ): Record<string, unknown> {
+    let text = JSON.stringify(envelope);
+    for (const [dir, token] of [
+      [repo, "<repo>"],
+      [logs, "<logs>"],
+    ]) {
+      text = text
+        .split(fs.realpathSync(dir))
+        .join(token)
+        .split(dir)
+        .join(token);
+    }
+    text = text
+      .replace(/exec-\d+-\w+\.log/g, "exec-<id>.log")
+      .replace(/result-full-[0-9a-f-]+\.json/g, "result-full-<id>.json");
+    const walk = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(walk);
+      if (value === null || typeof value !== "object") return value;
+      return Object.fromEntries(
+        Object.entries(value).map(([key, inner]) => [
+          key,
+          key === "durationMs"
+            ? 0
+            : key === "version"
+              ? "<version>"
+              : walk(inner),
+        ]),
+      );
+    };
+    return walk(JSON.parse(text)) as Record<string, unknown>;
+  }
+
+  const ONE_COMMAND_PLAN = {
+    test: "node fixture.test.js",
+    isolation: "inplace",
+    mutants: [
+      { file: "fixture.js", line: 2, replace: "  return false;" },
+      {
+        file: "fixture.js",
+        line: 4,
+        replace: "module.exports = { isPositive, extra: 1 };",
+      },
+    ],
+  };
+
+  /** The envelope this package printed for `ONE_COMMAND_PLAN` before a
+   * plan could name more than one test command, captured from that
+   * release's own build and normalized the same way as below. */
+  const ONE_COMMAND_ENVELOPE_BEFORE = {
+    tool: "agent-primitives",
+    version: "<version>",
+    command: "probe",
+    status: "survived",
+    durationMs: 0,
+    cwd: "<repo>",
+    truncated: false,
+    logs: ["<logs>/exec-<id>.log", "<logs>/result-full-<id>.json"],
+    warnings: [],
+    expectation: "violated",
+    plan: {
+      baseline: {
+        exitCode: 0,
+        durationMs: 0,
+        logPath: "<logs>/exec-<id>.log",
+        timedOut: false,
+      },
+      results: [
+        {
+          index: 0,
+          file: "<repo>/fixture.js",
+          expect: "fail",
+          status: "killed",
+          warnings: [],
+          mutant: {
+            file: "<repo>/fixture.js",
+            line: 2,
+            before: "  return n > 0;",
+            after: "  return false;",
+            form: "replace",
+          },
+          mutation_probe: {
+            mutant: "<repo>/fixture.js:2:   return n > 0; ->   return false;",
+            verified_applied_via:
+              "<repo>/fixture.js:2\n-   return n > 0;\n+   return false;",
+            result: "killed",
+            restored_verified: true,
+            expectation: "met",
+          },
+          test: {
+            command: "node fixture.test.js",
+            exitCode: 1,
+            durationMs: 0,
+            timedOut: false,
+            stdoutTail: "",
+            stderrTail: "",
+            logPath: "<logs>/exec-<id>.log",
+          },
+          logs: [],
+        },
+        {
+          index: 1,
+          file: "<repo>/fixture.js",
+          expect: "fail",
+          status: "survived",
+          warnings: [],
+          mutant: {
+            file: "<repo>/fixture.js",
+            line: 4,
+            before: "module.exports = { isPositive };",
+            after: "module.exports = { isPositive, extra: 1 };",
+            form: "replace",
+          },
+          mutation_probe: {
+            mutant:
+              "<repo>/fixture.js:4: module.exports = { isPositive }; -> module.exports = { isPositive, extra: 1 };",
+            verified_applied_via:
+              "<repo>/fixture.js:4\n- module.exports = { isPositive };\n+ module.exports = { isPositive, extra: 1 };",
+            result: "survived",
+            restored_verified: true,
+            expectation: "violated",
+          },
+          test: {
+            command: "node fixture.test.js",
+            exitCode: 0,
+            durationMs: 0,
+            timedOut: false,
+            stdoutTail: "",
+            stderrTail: "",
+            logPath: "<logs>/exec-<id>.log",
+          },
+          logs: [],
+        },
+      ],
+      summary: {
+        total: 2,
+        killed: 1,
+        survived: 1,
+        inconclusive: 0,
+        not_run: 0,
+        met: 1,
+        violated: 1,
+      },
+    },
+    isolation: {
+      mode: "inplace",
+      path: null,
+      linked: [],
+      linkedNamedBy: [],
+      syncedTrackedFiles: 0,
+      syncedUntrackedFiles: 0,
+    },
+  };
+
+  it("a plan naming one command prints the envelope it printed before, plus plan.baselines and each result's test_command and baseline_index", async () => {
+    const { repo, logs } = initRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--plan",
+      writePlan(logs, ONE_COMMAND_PLAN),
+    ]);
+    expect(run.code).toBe(1);
+    const raw = JSON.parse(run.stdout);
+    const after = normalized(raw, repo, logs);
+    const plan = after.plan as Record<string, unknown>;
+
+    // The fields a plan naming one command has always carried, unchanged:
+    expect(after.logs).toEqual(ONE_COMMAND_ENVELOPE_BEFORE.logs);
+    expect(raw.logs[0]).toBe(raw.plan.baseline.logPath);
+    expect(plan.baseline).toEqual(ONE_COMMAND_ENVELOPE_BEFORE.plan.baseline);
+    expect(plan.summary).toEqual(ONE_COMMAND_ENVELOPE_BEFORE.plan.summary);
+    // ...every other field too, the additions aside:
+    const { baselines, ...planWithoutBaselines } = plan;
+    expect({
+      ...after,
+      plan: {
+        ...planWithoutBaselines,
+        results: (plan.results as Record<string, unknown>[]).map(
+          ({
+            test_command: _command,
+            baseline_index: _index,
+            line_content: _lineContent,
+            ...rest
+          }) => rest,
+        ),
+      },
+    }).toEqual(ONE_COMMAND_ENVELOPE_BEFORE);
+    // ...and the additions themselves: one baseline, the same one.
+    expect(baselines).toEqual([
+      {
+        index: 0,
+        command: "node fixture.test.js",
+        status: "passed",
+        ...ONE_COMMAND_ENVELOPE_BEFORE.plan.baseline,
+        entries: [0, 1],
+      },
+    ]);
+    expect(raw.plan.baselines[0].logPath).toBe(raw.plan.baseline.logPath);
+    expect(
+      (plan.results as Record<string, unknown>[]).map((r) => [
+        r.test_command,
+        r.baseline_index,
+      ]),
+    ).toEqual([
+      ["node fixture.test.js", 0],
+      ["node fixture.test.js", 0],
+    ]);
+  }, 30000);
+
+  it("a plan naming two commands lists both baseline logs, in group order, before the result-full entry", async () => {
+    const { repo, logs } = initRepo();
+    const second = "node fixture.test.js && true";
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--plan",
+      writePlan(logs, {
+        isolation: "inplace",
+        mutants: [
+          {
+            file: "fixture.js",
+            line: 2,
+            replace: "  return false;",
+            test: "node fixture.test.js",
+          },
+          {
+            file: "fixture.js",
+            line: 2,
+            replace: "  return n >= 0;",
+            test: second,
+          },
+        ],
+      }),
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(
+      parsed.plan.baselines.map((b: { command: string; status: string }) => [
+        b.command,
+        b.status,
+      ]),
+    ).toEqual([
+      ["node fixture.test.js", "passed"],
+      [second, "passed"],
+    ]);
+    expect(parsed.plan.baseline.logPath).toBe(parsed.plan.baselines[0].logPath);
+    expect(parsed.logs).toEqual([
+      parsed.plan.baselines[0].logPath,
+      parsed.plan.baselines[1].logPath,
+      expect.stringMatching(/result-full-.+\.json$/),
+    ]);
+    expect(
+      parsed.plan.results.map((r: { test_command: string }) => r.test_command),
+    ).toEqual(["node fixture.test.js", second]);
+    expect(parsed.plan.results[1].test.command).toBe(second);
+  }, 30000);
+
+  it("a plan file with no test command for one of its mutants is usage_error/plan_invalid naming plan.test, before anything runs", async () => {
+    const { repo, logs } = initRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--plan",
+      writePlan(logs, {
+        mutants: [
+          {
+            file: "fixture.js",
+            line: 2,
+            replace: "  return false;",
+            test: "node fixture.test.js",
+          },
+          { file: "fixture.js", line: 2, replace: "  return n >= 0;" },
+        ],
+      }),
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("plan_invalid");
+    expect(parsed.warnings.join("\n")).toContain(
+      'plan.test must be a non-empty string unless every mutant has its own "test" (plan.mutants[1] has none)',
+    );
+    expect(parsed.plan).toBeUndefined();
+  }, 30000);
 });
