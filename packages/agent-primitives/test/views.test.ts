@@ -14,7 +14,7 @@ import {
 } from "../src/views.js";
 import type { DriftResult } from "../src/drift/index.js";
 import type { HygieneResult } from "../src/hygiene/index.js";
-import type { VerifyResult } from "../src/verify/types.js";
+import type { CheckResult, VerifyResult } from "../src/verify/types.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 
 const tmpDirs: string[] = [];
@@ -746,6 +746,63 @@ describe("view renderers: -m bound", () => {
     const v = renderVerifySummary(verify, 50);
     expect(v.trimEnd().split("\n").pop()).toMatch(
       /^totals: status=fail checks=4 pass=0 fail=4 /,
+    );
+  });
+});
+
+describe("verify --summary of a repeated check", () => {
+  const check = (
+    name: string,
+    extra: Partial<CheckResult> = {},
+  ): CheckResult => ({
+    name,
+    status: "pass",
+    exitCode: 0,
+    durationMs: 10,
+    timedOut: false,
+    summary: { passed: 1, failed: 0, skipped: 0, errors: 0, warnings: 0 },
+    failures: [],
+    ...extra,
+  });
+
+  it("a repeated line appends its run counts and a bare flaky; an unrepeated line carries neither", () => {
+    const out = renderVerifySummary(
+      {
+        status: "fail",
+        checks: [
+          check("repeated-flaky", {
+            status: "fail",
+            exitCode: 1,
+            failures: [{ message: "boom" }],
+            runs: 3,
+            passed: 2,
+            failed: 1,
+            flaky: true,
+          }),
+          check("repeated-steady", {
+            runs: 2,
+            passed: 2,
+            failed: 0,
+            flaky: false,
+          }),
+          check("single-run"),
+        ],
+        totalDurationMs: 30,
+        warnings: [],
+        logs: [],
+        truncatedByMaxFailures: false,
+      },
+      2000,
+    );
+    const lines = out.trimEnd().split("\n");
+    expect(lines[0]).toBe(
+      "repeated-flaky | fail | exit=1 | 10ms | passed=1 failed=0 skipped=0 errors=0 | first failure: boom | runs=3 runs_passed=2 runs_failed=1 | flaky",
+    );
+    expect(lines[1]).toBe(
+      "repeated-steady | pass | exit=0 | 10ms | passed=1 failed=0 skipped=0 errors=0 | runs=2 runs_passed=2 runs_failed=0",
+    );
+    expect(lines[2]).toBe(
+      "single-run | pass | exit=0 | 10ms | passed=1 failed=0 skipped=0 errors=0",
     );
   });
 });

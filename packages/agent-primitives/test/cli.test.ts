@@ -1455,6 +1455,328 @@ describe("cli verify", () => {
     expect(idFromVerifyNesting).toBe(idFromDefaultLogDir);
   });
 
+  it("--repeat 3 on a check that fails only on its second run is a flaky fail, exit 1", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // A counter written as marker files under this run's own log directory
+    // (only shell builtins: a spawned CLI sees just git/node/npm/sh on
+    // PATH): run 1 and run 3 pass, run 2 fails. The markers live under
+    // logDir, which exec.ts has already created by the time the first run's
+    // command starts.
+    const marker = path.join(logDir, "run");
+    const command =
+      `if [ -f ${marker}.1 ]; then ` +
+      `if [ -f ${marker}.2 ]; then exit 0; fi; ` +
+      `: > ${marker}.2; exit 1; fi; ` +
+      `: > ${marker}.1; exit 0`;
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "3",
+      "-x",
+      `mycheck=${command}`,
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check.status).toBe("fail");
+    expect(check.flaky).toBe(true);
+    expect(check.runs).toBe(3);
+    expect(check.passed).toBe(2);
+    expect(check.failed).toBe(1);
+    // One log file per run; the envelope's protected `logs` carries the
+    // first run's plus the failing run's, not the third run's.
+    const logs = parsed.logs as string[];
+    expect(logs.some((l: string) => l.endsWith("/mycheck.1.log"))).toBe(true);
+    expect(logs.some((l: string) => l.endsWith("/mycheck.2.log"))).toBe(true);
+    expect(logs.some((l: string) => l.endsWith("/mycheck.3.log"))).toBe(false);
+  });
+
+  it("--repeat 3 with nothing capped still persists every run's log and exit code in the full-result file", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // `exit 1` fails identically every run: the generic detector adds its
+    // single synthetic entry per check, the union de-duplicates to one
+    // failure, so nothing is capped and `truncatedByMaxFailures` stays
+    // false: exactly the common case where the per-run detail must still
+    // reach a persisted file.
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "3",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    expect(parsed.truncated).not.toBe(true);
+    const fullResultPath = (parsed.logs as string[]).find((l) =>
+      path.basename(l).startsWith("verify-full-"),
+    );
+    expect(fullResultPath).toBeDefined();
+    const written = JSON.parse(
+      fs.readFileSync(fullResultPath as string, "utf8"),
+    ) as {
+      checks: {
+        name: string;
+        runLogs?: { logPath?: string; exitCode: number | null }[];
+      }[];
+    };
+    const persisted = written.checks.find((c) => c.name === "mycheck");
+    expect(persisted?.runLogs).toHaveLength(3);
+    expect(persisted?.runLogs?.map((r) => r.exitCode)).toEqual([1, 1, 1]);
+    expect(
+      persisted?.runLogs?.map((r) => path.basename(r.logPath as string)),
+    ).toEqual(["mycheck.1.log", "mycheck.2.log", "mycheck.3.log"]);
+    // The compact envelope row keeps carrying the merge, not the per-run
+    // list.
+    const row = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(row).not.toHaveProperty("runLogs");
+  });
+
+  it("--repeat 2 (the smallest repeat above the default) with nothing capped still writes the full-result file", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // The n = 2 boundary: `--repeat 2` is the smallest count that asks for a
+    // per-run record, and nothing is capped here (`exit 1` gives the generic
+    // detector one synthetic failure per run, the union de-duplicates to
+    // one), so the only reason a full-result file appears is the repeat.
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "2",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    expect(parsed.truncated).toBe(false);
+    const fullResultPath = (parsed.logs as string[]).find((l) =>
+      path.basename(l).startsWith("verify-full-"),
+    );
+    expect(fullResultPath).toBeDefined();
+    const written = JSON.parse(
+      fs.readFileSync(fullResultPath as string, "utf8"),
+    ) as {
+      checks: {
+        name: string;
+        runLogs?: { logPath?: string; exitCode: number | null }[];
+      }[];
+    };
+    const persisted = written.checks.find((c) => c.name === "mycheck");
+    expect(persisted?.runLogs).toHaveLength(2);
+    expect(persisted?.runLogs?.map((r) => r.exitCode)).toEqual([1, 1]);
+    expect(
+      persisted?.runLogs?.map((r) => path.basename(r.logPath as string)),
+    ).toEqual(["mycheck.1.log", "mycheck.2.log"]);
+  });
+
+  it("--repeat 3 with a cap cut: the full-result file carries the uncapped union and the run logs, and the envelope is marked truncated", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // tsc-shaped lines: the tsc detector reports one failure per line, so
+    // --max-failures 2 really caps the merged union of five.
+    const noisy = `node -e "for (let i=0;i<5;i++) console.log('src/a.ts('+(i+1)+',1): error TS2322: bad '+i); process.exit(1)"`;
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "3",
+      "--max-failures",
+      "2",
+      "-x",
+      `mycheck=${noisy}`,
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.truncated).toBe(true);
+    const fullResultPath = (parsed.logs as string[]).find((l) =>
+      path.basename(l).startsWith("verify-full-"),
+    );
+    expect(fullResultPath).toBeDefined();
+    const written = JSON.parse(
+      fs.readFileSync(fullResultPath as string, "utf8"),
+    ) as {
+      checks: {
+        name: string;
+        failures: unknown[];
+        runLogs?: { exitCode: number | null }[];
+      }[];
+    };
+    const persisted = written.checks.find((c) => c.name === "mycheck");
+    // Uncapped union of five, plus every run's exit code.
+    expect(persisted?.failures).toHaveLength(5);
+    expect(persisted?.runLogs?.map((r) => r.exitCode)).toEqual([1, 1, 1]);
+  });
+
+  it("without --repeat and nothing capped, no verify-full file is written", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(
+      (parsed.logs as string[]).some((l) =>
+        path.basename(l).startsWith("verify-full-"),
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    ["0", "zero"],
+    ["101", "above the bound"],
+    ["2.5", "not an integer"],
+    ["abc", "not a number"],
+    ["1e1", "an exponent spelling of 10"],
+    ["0x3", "a hexadecimal spelling of 3"],
+    [" 3", "a leading space"],
+    ["3 ", "a trailing space"],
+    ["+3", "an explicit plus sign"],
+  ])("--repeat %s (%s) is a usage_error, exit 2", async (value) => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      value,
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    // The option parser's own message, not `verify()`'s refusal of the same
+    // number: it is the parser that stops an out-of-range repeat here, before
+    // any check is resolved.
+    expect(parsed.message).toContain(
+      `--repeat must be an integer between 1 and 100 (got "${value}")`,
+    );
+  });
+
+  it("--repeat 03 is accepted: leading zeros are digits, and the count is the number they spell", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // The accepted control beside the rejected spellings above: the digits
+    // gate says decimal digits, not "no leading zero", so `03` is 3 runs.
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "03",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check.runs).toBe(3);
+  });
+
+  it("--repeat 1 is accepted and reports no per-run field: the default's shape, stated explicitly", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "1",
+      "-x",
+      "mycheck=exit 0",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check).not.toHaveProperty("runs");
+    expect(check).not.toHaveProperty("passed");
+    expect(check).not.toHaveProperty("failed");
+    expect(check).not.toHaveProperty("flaky");
+    expect(check.logPath.endsWith("/mycheck.log")).toBe(true);
+  });
+
+  it("--repeat given twice is a usage_error, exit 2, naming both values", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "2",
+      "--repeat",
+      "3",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toContain("given once");
+    expect(parsed.message).toContain('"2"');
+    expect(parsed.message).toContain('"3"');
+  });
+
   it("an unwritable log directory parent still yields an envelope with per-check errors, not a crash", async () => {
     const cwd = makeTmpDir();
     const parentDir = makeTmpDir();

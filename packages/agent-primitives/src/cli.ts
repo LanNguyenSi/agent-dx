@@ -23,6 +23,8 @@ import {
   verify,
   DEFAULT_CHECKS,
   DEFAULT_MAX_FAILURES,
+  DEFAULT_REPEAT,
+  MAX_REPEAT,
   type ExecLike,
   type VerifyResult,
 } from "./verify/index.js";
@@ -462,6 +464,34 @@ function parseMaxFailures(value: string): string {
   if (!Number.isInteger(n) || n < 1) {
     throw new InvalidArgumentError(
       `--max-failures must be a positive integer (got "${value}")`,
+    );
+  }
+  return value;
+}
+
+/** `--repeat <n>`: a plain decimal digit string, so `Number()` never reads
+ * an exponent or hexadecimal spelling (`1e1`, `0x3`) as the count, in the
+ * integer range `verify()` validates, so an out-of-range repeat is a usage
+ * error before a single check runs. `--repeat` is deliberately registered
+ * with NO option default (unlike `--max-failures`, whose default is only a
+ * display value and never passes back through its parser): commander hands
+ * a parser the option's current value as `previous`, and with no default
+ * that is `undefined` on the first occurrence and the first value on every
+ * later one, which is the only way a second `--repeat` can be told from the
+ * first at all. A scalar flag given twice keeps its last value everywhere
+ * else in this CLI (that is what an overwriting parser does); here the two
+ * numbers are not two spellings of one setting but a caller who almost
+ * certainly meant a different count, so it is refused. */
+function parseRepeat(value: string, previous: string | undefined): string {
+  if (previous !== undefined) {
+    throw new InvalidArgumentError(
+      `--repeat may only be given once (got "${previous}" then "${value}")`,
+    );
+  }
+  const n = /^[0-9]+$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isInteger(n) || n < 1 || n > MAX_REPEAT) {
+    throw new InvalidArgumentError(
+      `--repeat must be an integer between 1 and ${MAX_REPEAT} (got "${value}")`,
     );
   }
   return value;
@@ -1113,6 +1143,7 @@ interface VerifyCliOptions {
   failFast?: boolean;
   timeout?: string;
   maxFailures?: string;
+  repeat?: string;
   summary?: boolean;
   print?: string[];
 }
@@ -1147,6 +1178,11 @@ program
     parseMaxFailures,
     String(DEFAULT_MAX_FAILURES),
   )
+  .option(
+    "--repeat <n>",
+    `run each check n times (integer 1 to ${MAX_REPEAT}, default ${DEFAULT_REPEAT}; given twice is a usage error): one resolution and n executions per check, each run with its own log file <name>.<k>.log; the check reports the runs merged (status pass only when every run passed, else the worst status seen with flaky true when the runs disagreed, failures the de-duplicated union, summary/exit code from the last run, duration summed) -- for a check whose suite fails intermittently`,
+    parseRepeat,
+  )
   .option("--summary", SUMMARY_FLAG_HELP("check"))
   .option(
     "--print <fields>",
@@ -1157,6 +1193,7 @@ program
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
     requireExclusiveViews(opts, "verify");
+    const repeat = Number(opts.repeat ?? DEFAULT_REPEAT);
     const result = await verify({
       cwd: global.cwd,
       logDir: global.logDir,
@@ -1173,6 +1210,7 @@ program
       timeoutMs:
         opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
       maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
+      repeat,
     });
 
     // The log path this writes is appended to `logs` BEFORE buildEnvelope
@@ -1190,6 +1228,7 @@ program
       warnings,
       global.logDir,
       currentRunId(),
+      repeat,
     );
 
     const envelopeInput: EnvelopeInput = {
@@ -1234,21 +1273,27 @@ program
   });
 
 /**
- * When `verify()` capped a check's own `failures` list (`--max-failures`),
- * writes the same checks with every `failures` list left uncapped to
- * `<logDir>/verify-full-<runId>.json`, pushes that path onto `logs`, and
- * sets `envelopePatch.truncated = true` for the caller to fold into the
- * real envelope (the envelope's own size-triggered reduction may never
- * fire even though real content was cut, since the cap already happened
- * before `buildEnvelope` saw the result). A no-op when nothing was
- * truncated. `runId` is a required parameter (the caller passes the same
- * run id used for the verify() call's own log nesting) so that two
- * verify runs sharing a `logDir` never collide on, or silently overwrite,
- * each other's full-result file. A write failure is never swallowed: it
- * still sets `envelopePatch.truncated` (real content actually was cut),
- * and pushes a warning onto `warnings` naming the directory and the
- * error's code (or message when there is no code) so the caller surfaces
- * it instead of silently losing the uncapped detail.
+ * Writes `<logDir>/verify-full-<runId>.json` (the same checks with every
+ * `failures` list left uncapped, and, for a repeated check, each run's
+ * own log path and exit code in `runLogs`), and pushes that path onto
+ * `logs`, whenever there is anything for it to say: `verify()` capped a
+ * check's own `failures` list (`--max-failures`), or was asked to repeat
+ * (`--repeat` above 1, whose per-run `runLogs` exist nowhere else: the
+ * compact envelope's `checks` rows carry the merged result only, so a
+ * repeated run that capped nothing would otherwise record per-run exit
+ * codes nowhere). A cap additionally sets `envelopePatch.truncated =
+ * true` for the caller to fold into the real envelope (the envelope's own
+ * size-triggered reduction may never fire even though real content was
+ * cut, since the cap already happened before `buildEnvelope` saw the
+ * result); a repeat-only write says nothing was cut, so it never sets
+ * the flag. A no-op when neither applies. `runId` is a required parameter
+ * (the caller passes the same run id used for the verify() call's own log
+ * nesting) so that two verify runs sharing a `logDir` never collide on,
+ * or silently overwrite, each other's full-result file. A write failure
+ * is never swallowed: under a cap `envelopePatch.truncated` is still set
+ * (real content actually was cut), and either way a warning names the
+ * directory and the error's code (or message when there is no code) so
+ * the caller surfaces it instead of silently losing the uncapped detail.
  * Exported and unit-tested directly (with a synthetic truncated
  * `VerifyResult`) so both effects, the truncated flag and the on-disk
  * file, are independently verified rather than only exercised indirectly
@@ -1263,8 +1308,10 @@ export function writeFullVerifyResult(
   warnings: string[],
   logDir: string,
   runId: string,
+  repeat = DEFAULT_REPEAT,
 ): void {
-  if (!result.truncatedByMaxFailures) return;
+  const capped = result.truncatedByMaxFailures;
+  if (!capped && repeat <= 1) return;
   try {
     fs.mkdirSync(logDir, { recursive: true });
     const fullResultPath = path.join(logDir, `verify-full-${runId}.json`);
@@ -1282,7 +1329,9 @@ export function writeFullVerifyResult(
       `writeFullVerifyResult: failed to write full result to ${logDir}: ${code}`,
     );
   }
-  envelopePatch.truncated = true;
+  if (capped) {
+    envelopePatch.truncated = true;
+  }
 }
 
 function renderVerifyText(
