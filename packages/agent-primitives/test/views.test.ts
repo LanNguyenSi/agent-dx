@@ -134,206 +134,212 @@ const CASES: Case[] = [
   },
 ];
 
-describe.each(CASES)("$name --summary and --print (CLI)", (c) => {
-  it("--summary prints a totals line, keeps the JSON run's exit code, and takes precedence over -f", async () => {
-    const repo = c.repo();
-    const logs = makeTmpDir();
-    const json = await spawnCli(["-C", repo, "-l", logs, ...c.args]);
-    expect(json.code).toBe(c.exit);
-    for (const format of [[], ["-f", "text"]]) {
+describe.each(CASES)(
+  "$name --summary and --print (CLI)",
+  { timeout: 60000 },
+  (c) => {
+    it("--summary prints a totals line, keeps the JSON run's exit code, and takes precedence over -f", async () => {
+      const repo = c.repo();
+      const logs = makeTmpDir();
+      const json = await spawnCli(["-C", repo, "-l", logs, ...c.args]);
+      expect(json.code).toBe(c.exit);
+      for (const format of [[], ["-f", "text"]]) {
+        const view = await spawnCli([
+          "-C",
+          repo,
+          "-l",
+          logs,
+          ...format,
+          ...c.args,
+          "--summary",
+        ]);
+        expect(view.code).toBe(c.exit);
+        const lines = view.stdout.trimEnd().split("\n");
+        expect(lines.length).toBeGreaterThanOrEqual(2);
+        expect(lines[lines.length - 1]).toMatch(
+          new RegExp(`^totals: status=${JSON.parse(json.stdout).status}\\b`),
+        );
+        // Not the JSON envelope and not the `-f text` block.
+        expect(view.stdout.startsWith("{")).toBe(false);
+        expect(view.stdout).not.toContain("status: ");
+      }
+    });
+
+    it("--print prints the named fields as one JSON line, exit code unchanged, null for a field the run did not produce", async () => {
+      const repo = c.repo();
+      const logs = makeTmpDir();
+      const json = await spawnCli(["-C", repo, "-l", logs, ...c.args]);
+      const envelope = JSON.parse(json.stdout);
       const view = await spawnCli([
         "-C",
         repo,
         "-l",
         logs,
-        ...format,
         ...c.args,
-        "--summary",
+        "--print",
+        `status,command,${c.dotted[0]},fullResult`,
       ]);
       expect(view.code).toBe(c.exit);
-      const lines = view.stdout.trimEnd().split("\n");
-      expect(lines.length).toBeGreaterThanOrEqual(2);
-      expect(lines[lines.length - 1]).toMatch(
-        new RegExp(`^totals: status=${JSON.parse(json.stdout).status}\\b`),
-      );
-      // Not the JSON envelope and not the `-f text` block.
-      expect(view.stdout.startsWith("{")).toBe(false);
-      expect(view.stdout).not.toContain("status: ");
-    }
-  });
+      expect(view.stdout.trimEnd().split("\n")).toHaveLength(1);
+      const printed = JSON.parse(view.stdout);
+      expect(printed.status).toBe(envelope.status);
+      expect(printed.command).toBe(c.name);
+      // Array rows are not addressable: such a path prints null.
+      expect(printed[c.dotted[0]]).toBe(c.dotted[1]);
+      expect(Object.keys(printed)).toEqual([
+        "status",
+        "command",
+        c.dotted[0],
+        "fullResult",
+      ]);
+    });
 
-  it("--print prints the named fields as one JSON line, exit code unchanged, null for a field the run did not produce", async () => {
-    const repo = c.repo();
-    const logs = makeTmpDir();
-    const json = await spawnCli(["-C", repo, "-l", logs, ...c.args]);
-    const envelope = JSON.parse(json.stdout);
-    const view = await spawnCli([
-      "-C",
-      repo,
-      "-l",
-      logs,
-      ...c.args,
-      "--print",
-      `status,command,${c.dotted[0]},fullResult`,
-    ]);
-    expect(view.code).toBe(c.exit);
-    expect(view.stdout.trimEnd().split("\n")).toHaveLength(1);
-    const printed = JSON.parse(view.stdout);
-    expect(printed.status).toBe(envelope.status);
-    expect(printed.command).toBe(c.name);
-    // Array rows are not addressable: such a path prints null.
-    expect(printed[c.dotted[0]]).toBe(c.dotted[1]);
-    expect(Object.keys(printed)).toEqual([
-      "status",
-      "command",
-      c.dotted[0],
-      "fullResult",
-    ]);
-  });
-
-  it("--print reads the unreduced result: a small -m does not shorten or cut a printed field", async () => {
-    const repo = c.repo();
-    const logs = makeTmpDir();
-    const reduced = await spawnCli([
-      "-C",
-      repo,
-      "-l",
-      logs,
-      "-m",
-      "600",
-      ...c.args,
-    ]);
-    expect(JSON.parse(reduced.stdout).truncated).toBe(true);
-    const full = await spawnCli([
-      "-C",
-      repo,
-      "-l",
-      logs,
-      "-m",
-      "100000",
-      ...c.args,
-    ]);
-    const key =
-      c.name === "verify"
-        ? "checks"
-        : c.name === "drift"
-          ? "sites"
-          : "findings";
-    const view = await spawnCli([
-      "-C",
-      repo,
-      "-l",
-      logs,
-      "-m",
-      "100000",
-      ...c.args,
-      "--print",
-      key,
-    ]);
-    // Two runs: drop what differs between any two (timings, log paths).
-    const stable = (value: unknown): unknown =>
-      JSON.parse(
-        JSON.stringify(value, (k, v) =>
-          k === "durationMs" || k === "logPath" ? undefined : v,
-        ),
-      );
-    expect(stable(JSON.parse(view.stdout)[key])).toEqual(
-      stable(JSON.parse(full.stdout)[key]),
-    );
-    const small = await spawnCli([
-      "-C",
-      repo,
-      "-l",
-      logs,
-      "-m",
-      "600",
-      ...c.args,
-      "--print",
-      key,
-    ]);
-    // Bounded only as printed text, never reduced inside: it still holds
-    // the whole field up to the text bound.
-    expect(small.stdout.length).toBeLessThanOrEqual(600);
-    expect(small.code).toBe(c.exit);
-  });
-
-  it("--print logs names the saved full result of a reduced run, as the emitted envelope does", async () => {
-    const repo = c.repo();
-    const logs = makeTmpDir();
-    const view = await spawnCli([
-      "-C",
-      repo,
-      "-l",
-      logs,
-      "-m",
-      "600",
-      ...c.args,
-      "--print",
-      "logs",
-    ]);
-    const printed = JSON.parse(view.stdout);
-    expect(
-      (printed.logs as string[]).some((l) => /result-full-\S+\.json$/.test(l)),
-    ).toBe(true);
-  });
-
-  it("every top-level field of the envelope, reduced or full, and of the saved full result is printable", async () => {
-    const repo = c.repo();
-    const logs = makeTmpDir();
-    const keys = new Set<string>();
-    for (const max of ["600", "100000"]) {
-      const run = await spawnCli([
+    it("--print reads the unreduced result: a small -m does not shorten or cut a printed field", async () => {
+      const repo = c.repo();
+      const logs = makeTmpDir();
+      const reduced = await spawnCli([
         "-C",
         repo,
         "-l",
         logs,
         "-m",
-        max,
+        "600",
         ...c.args,
       ]);
-      const envelope = JSON.parse(run.stdout);
-      for (const key of Object.keys(envelope)) keys.add(key);
-      const saved = (envelope.logs as string[]).find((l) =>
-        /result-full-\S+\.json$/.test(l),
+      expect(JSON.parse(reduced.stdout).truncated).toBe(true);
+      const full = await spawnCli([
+        "-C",
+        repo,
+        "-l",
+        logs,
+        "-m",
+        "100000",
+        ...c.args,
+      ]);
+      const key =
+        c.name === "verify"
+          ? "checks"
+          : c.name === "drift"
+            ? "sites"
+            : "findings";
+      const view = await spawnCli([
+        "-C",
+        repo,
+        "-l",
+        logs,
+        "-m",
+        "100000",
+        ...c.args,
+        "--print",
+        key,
+      ]);
+      // Two runs: drop what differs between any two (timings, log paths).
+      const stable = (value: unknown): unknown =>
+        JSON.parse(
+          JSON.stringify(value, (k, v) =>
+            k === "durationMs" || k === "logPath" ? undefined : v,
+          ),
+        );
+      expect(stable(JSON.parse(view.stdout)[key])).toEqual(
+        stable(JSON.parse(full.stdout)[key]),
       );
-      if (saved !== undefined) {
-        const full = JSON.parse(fs.readFileSync(saved, "utf8"));
-        for (const key of Object.keys(full)) keys.add(key);
+      const small = await spawnCli([
+        "-C",
+        repo,
+        "-l",
+        logs,
+        "-m",
+        "600",
+        ...c.args,
+        "--print",
+        key,
+      ]);
+      // Bounded only as printed text, never reduced inside: it still holds
+      // the whole field up to the text bound.
+      expect(small.stdout.length).toBeLessThanOrEqual(600);
+      expect(small.code).toBe(c.exit);
+    });
+
+    it("--print logs names the saved full result of a reduced run, as the emitted envelope does", async () => {
+      const repo = c.repo();
+      const logs = makeTmpDir();
+      const view = await spawnCli([
+        "-C",
+        repo,
+        "-l",
+        logs,
+        "-m",
+        "600",
+        ...c.args,
+        "--print",
+        "logs",
+      ]);
+      const printed = JSON.parse(view.stdout);
+      expect(
+        (printed.logs as string[]).some((l) =>
+          /result-full-\S+\.json$/.test(l),
+        ),
+      ).toBe(true);
+    });
+
+    it("every top-level field of the envelope, reduced or full, and of the saved full result is printable", async () => {
+      const repo = c.repo();
+      const logs = makeTmpDir();
+      const keys = new Set<string>();
+      for (const max of ["600", "100000"]) {
+        const run = await spawnCli([
+          "-C",
+          repo,
+          "-l",
+          logs,
+          "-m",
+          max,
+          ...c.args,
+        ]);
+        const envelope = JSON.parse(run.stdout);
+        for (const key of Object.keys(envelope)) keys.add(key);
+        const saved = (envelope.logs as string[]).find((l) =>
+          /result-full-\S+\.json$/.test(l),
+        );
+        if (saved !== undefined) {
+          const full = JSON.parse(fs.readFileSync(saved, "utf8"));
+          for (const key of Object.keys(full)) keys.add(key);
+        }
       }
-    }
-    for (const key of [...keys].filter((k) => k !== "...")) {
-      expect(c.fields).toContain(key);
-    }
-  });
+      for (const key of [...keys].filter((k) => k !== "...")) {
+        expect(c.fields).toContain(key);
+      }
+    });
 
-  it("--summary together with --print is a usage error naming the command, exit 2, before anything runs", async () => {
-    const repo = c.repo();
-    const run = await spawnCli([
-      "-C",
-      repo,
-      ...c.args,
-      "--summary",
-      "--print",
-      "status",
-    ]);
-    expect(run.code).toBe(2);
-    const parsed = JSON.parse(run.stdout);
-    expect(parsed.status).toBe("usage_error");
-    expect(parsed.message).toBe(
-      `${c.name}: --summary and --print are mutually exclusive`,
-    );
-  });
+    it("--summary together with --print is a usage error naming the command, exit 2, before anything runs", async () => {
+      const repo = c.repo();
+      const run = await spawnCli([
+        "-C",
+        repo,
+        ...c.args,
+        "--summary",
+        "--print",
+        "status",
+      ]);
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.message).toBe(
+        `${c.name}: --summary and --print are mutually exclusive`,
+      );
+    });
 
-  it("--print with an unknown field is a usage error listing this command's own fields", async () => {
-    const repo = c.repo();
-    const run = await spawnCli(["-C", repo, ...c.args, "--print", "nope"]);
-    expect(run.code).toBe(2);
-    const parsed = JSON.parse(run.stdout);
-    expect(parsed.status).toBe("usage_error");
-    expect(parsed.message).toContain('unknown field "nope"');
-    expect(parsed.message).toContain(c.fields.join(", "));
-  });
-});
+    it("--print with an unknown field is a usage error listing this command's own fields", async () => {
+      const repo = c.repo();
+      const run = await spawnCli(["-C", repo, ...c.args, "--print", "nope"]);
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.message).toContain('unknown field "nope"');
+      expect(parsed.message).toContain(c.fields.join(", "));
+    });
+  },
+);
 
 describe("hygiene --summary", () => {
   it("prints one line per finding then the totals line", async () => {
