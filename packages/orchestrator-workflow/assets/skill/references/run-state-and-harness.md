@@ -108,7 +108,9 @@ run touches to it with a pointer file, `<worktree-root>/.ai/run`:
 When a task runs in its own linked worktree, create it with
 `agent-primitives worktree create --setup '<install command>'` and `--smoke
 <command>` for a repository whose tests need an install or a build first, and
-never pass `--pre 'npm ci'` inside a probe's linked worktree.
+never pass `--pre 'npm ci'` inside a probe's linked worktree: the copy links
+the dependency directories to the source tree, so an install there rewrites
+the real `node_modules`.
 
 The pointer is how the run-completeness reader finds the run for a change.
 Without it the reader falls back to that repository's own `.ai/runs/` and

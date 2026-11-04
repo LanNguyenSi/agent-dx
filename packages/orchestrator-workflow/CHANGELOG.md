@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent-primitives features the kit already ships: a probe verdict read with
   `--summary` or `--print` instead of an ad-hoc JSON reader, stderr kept
   separate from the JSON, `verify -c` run only with the checks the repository
-  has, exact-text shell edits through `agent-primitives patch`, a reviewer that
+  has, exact-text shell edits through `agent-primitives patch` (for a reviewer
+  only outside the reviewed tree and never to apply a mutant), a reviewer that
   copies an invocation template instead of reading `--help` or calling
   `--version`, and `worktree create --setup` with `--smoke` and the warning
   against `--pre 'npm ci'` in a probe's linked worktree.

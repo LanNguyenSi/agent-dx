@@ -186,7 +186,9 @@ Rules:
 - Copy an invocation template from the skill instead of reading `--help`
   first, and never call `--version`: every envelope carries `version`.
 - Make an exact-text edit from a shell through `agent-primitives patch`
-  (`--plan` JSON or `--file/--old/--new`): every edit is verified before any
+  (`--plan` JSON or `--file/--old/--new`) only in your scratchpad or the
+  run's `evidence/` directory, never in the reviewed tree and never to apply
+  a mutant (the probe runner does that): every edit is verified before any
   file is written, all or nothing, and `--dry-run` shows the diff without
   writing.
 - A replayed probe may be named by a resolved immutable probe-plan reference

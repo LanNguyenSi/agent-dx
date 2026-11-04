@@ -444,7 +444,7 @@ describe("safety core: the reviewer's read-only rule is pinned at reviewer.md", 
 
   it("routes an exact-text shell edit through agent-primitives patch", () => {
     expect(reviewerMd).toContain(
-      "Make an exact-text edit from a shell through `agent-primitives patch` (`--plan` JSON or `--file/--old/--new`): every edit is verified before any file is written, all or nothing, and `--dry-run` shows the diff without writing.",
+      "Make an exact-text edit from a shell through `agent-primitives patch` (`--plan` JSON or `--file/--old/--new`) only in your scratchpad or the run's `evidence/` directory, never in the reviewed tree and never to apply a mutant (the probe runner does that): every edit is verified before any file is written, all or nothing, and `--dry-run` shows the diff without writing.",
     );
   });
 });
