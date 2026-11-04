@@ -1552,6 +1552,50 @@ describe("cli verify", () => {
     expect(row).not.toHaveProperty("runLogs");
   });
 
+  it("--repeat 2 (the smallest repeat above the default) with nothing capped still writes the full-result file", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // The n = 2 boundary: `--repeat 2` is the smallest count that asks for a
+    // per-run record, and nothing is capped here (`exit 1` gives the generic
+    // detector one synthetic failure per run, the union de-duplicates to
+    // one), so the only reason a full-result file appears is the repeat.
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "2",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    expect(parsed.truncated).toBe(false);
+    const fullResultPath = (parsed.logs as string[]).find((l) =>
+      path.basename(l).startsWith("verify-full-"),
+    );
+    expect(fullResultPath).toBeDefined();
+    const written = JSON.parse(
+      fs.readFileSync(fullResultPath as string, "utf8"),
+    ) as {
+      checks: {
+        name: string;
+        runLogs?: { logPath?: string; exitCode: number | null }[];
+      }[];
+    };
+    const persisted = written.checks.find((c) => c.name === "mycheck");
+    expect(persisted?.runLogs).toHaveLength(2);
+    expect(persisted?.runLogs?.map((r) => r.exitCode)).toEqual([1, 1]);
+    expect(
+      persisted?.runLogs?.map((r) => path.basename(r.logPath as string)),
+    ).toEqual(["mycheck.1.log", "mycheck.2.log"]);
+  });
+
   it("--repeat 3 with a cap cut: the full-result file carries the uncapped union and the run logs, and the envelope is marked truncated", async () => {
     const cwd = makeTmpDir();
     const logDir = makeTmpDir();
@@ -1625,6 +1669,9 @@ describe("cli verify", () => {
     ["abc", "not a number"],
     ["1e1", "an exponent spelling of 10"],
     ["0x3", "a hexadecimal spelling of 3"],
+    [" 3", "a leading space"],
+    ["3 ", "a trailing space"],
+    ["+3", "an explicit plus sign"],
   ])("--repeat %s (%s) is a usage_error, exit 2", async (value) => {
     const cwd = makeTmpDir();
     const logDir = makeTmpDir();
@@ -1648,6 +1695,33 @@ describe("cli verify", () => {
     expect(parsed.message).toContain(
       `--repeat must be an integer between 1 and 100 (got "${value}")`,
     );
+  });
+
+  it("--repeat 03 is accepted: leading zeros are digits, and the count is the number they spell", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // The accepted control beside the rejected spellings above: the digits
+    // gate says decimal digits, not "no leading zero", so `03` is 3 runs.
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "03",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check.runs).toBe(3);
   });
 
   it("--repeat 1 is accepted and reports no per-run field: the default's shape, stated explicitly", async () => {

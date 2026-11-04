@@ -196,7 +196,7 @@ function checkLine(check: CheckResult): string {
   // exit code and tallies would otherwise read as one run's own verdict.
   if (check.runs !== undefined) {
     parts.push(
-      `runs=${check.runs} passed=${check.passed} failed=${check.failed}`,
+      `runs=${check.runs} runs_passed=${check.passed} runs_failed=${check.failed}`,
     );
     if (check.flaky === true) parts.push("flaky");
   }

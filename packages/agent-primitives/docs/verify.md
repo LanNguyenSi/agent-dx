@@ -374,7 +374,10 @@ exec.ts opens a log file in append mode and two runs writing one name would
 interleave their output. The envelope's protected `logs` key carries the
 first run's log plus every failing run's: a run that passed adds nothing a
 reader needs, while the first run's log is what a `flaky` check's pass looks
-like.
+like. On every repeated run the path of that `verify-full-<runId>.json` file
+is appended to the envelope's `logs` too, the way it is when `--max-failures`
+cuts a list, while `--summary`'s `fullResult=` still names
+`result-full-<runId>.json`, the envelope's own full result.
 
 `--fail-fast` stops the repeat loop at the first run that did not pass,
 and then skips the later checks exactly as it does without `--repeat`: the
@@ -402,13 +405,15 @@ result; they work like the views of [probe](probe.md#compact-views---summary---p
 and a final totals line:
 
 ```text
-<name> | <pass|fail|skipped|error> | exit=<code|-> | <N>ms | passed=N failed=N skipped=N errors=N[ | reason=<reason>][ | first failure: <file:line: message>][ | runs=N passed=P failed=F][ | flaky]
+<name> | <pass|fail|skipped|error> | exit=<code|-> | <N>ms | passed=N failed=N skipped=N errors=N[ | reason=<reason>][ | first failure: <file:line: message>][ | runs=N runs_passed=P runs_failed=F][ | flaky]
 totals: status=<pass|fail|error> [reason=<reason>] checks=N pass=N fail=N skipped=N error=N totalDurationMs=N warnings=N fullResult=<path>
 ```
 
 A repeated check (one whose `--repeat` ran more than once) appends its run
 counts, so a reader can see the line describes a merge, and a bare `flaky`
-when its runs disagreed. `fullResult=` names the saved
+when its runs disagreed. They are named `runs_passed` and `runs_failed`
+because the `passed=` and `failed=` before them are the LAST run's test
+tallies, which count something else. `fullResult=` names the saved
 `result-full-*.json`; `verify` writes it on every run. `-m` is a character
 budget: rows that do not fit are replaced by one marker line naming how
 many were omitted, and the totals line is always printed.

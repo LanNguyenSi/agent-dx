@@ -747,10 +747,10 @@ describe("verify --summary of a repeated check", () => {
     );
     const lines = out.trimEnd().split("\n");
     expect(lines[0]).toBe(
-      "repeated-flaky | fail | exit=1 | 10ms | passed=1 failed=0 skipped=0 errors=0 | first failure: boom | runs=3 passed=2 failed=1 | flaky",
+      "repeated-flaky | fail | exit=1 | 10ms | passed=1 failed=0 skipped=0 errors=0 | first failure: boom | runs=3 runs_passed=2 runs_failed=1 | flaky",
     );
     expect(lines[1]).toBe(
-      "repeated-steady | pass | exit=0 | 10ms | passed=1 failed=0 skipped=0 errors=0 | runs=2 passed=2 failed=0",
+      "repeated-steady | pass | exit=0 | 10ms | passed=1 failed=0 skipped=0 errors=0 | runs=2 runs_passed=2 runs_failed=0",
     );
     expect(lines[2]).toBe(
       "single-run | pass | exit=0 | 10ms | passed=1 failed=0 skipped=0 errors=0",

@@ -2566,6 +2566,37 @@ describe("verify: --repeat", () => {
     ).toEqual(["test.1.log", "test.2.log"]);
   });
 
+  it("an uncapped repeated run still carries fullChecks: repeat 2 is the smallest count that needs them", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    // Nothing is capped (three distinct failures across the runs, no
+    // `maxFailures`), so `truncatedByMaxFailures` is false and the only
+    // reason the uncapped rows exist at all is the repeat: `repeat 2` is the
+    // boundary, the smallest count whose per-run record is needed.
+    const { fn } = makeSequencedStubExec({
+      "npm run test --silent": [
+        { exitCode: 1, stdoutTail: "a\nb" },
+        { exitCode: 1, stdoutTail: "b\nc" },
+      ],
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 2,
+      detectors: [lineFailuresDetector],
+    });
+    expect(result.truncatedByMaxFailures).toBe(false);
+    const full = result.fullChecks?.[0];
+    expect(full?.runLogs).toHaveLength(2);
+    expect(full?.runLogs?.map((r) => r.exitCode)).toEqual([1, 1]);
+    expect(
+      full?.runLogs?.map((r) => path.basename(r.logPath as string)),
+    ).toEqual(["test.1.log", "test.2.log"]);
+  });
+
   it("failures merge across the runs de-duplicated, in first-seen order", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, { test: "te" });
