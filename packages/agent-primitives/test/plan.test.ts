@@ -1633,7 +1633,86 @@ describe("probePlan(): a mutant that cannot be applied is inconclusive on its ow
   }, 30000);
 });
 
+/**
+ * Makes exec call number `signalAtCall` (1-based) land a signal on the
+ * run AFTER its own command has finished, with a result that is NOT
+ * itself aborted: the shape where the run's crash handler is already
+ * handling a signal (`crashHandlers.isHandling()` is true) while the
+ * phase in hand reports some other outcome. The handler is the very
+ * SIGTERM listener this run installed, called directly rather than by
+ * signalling this test process (which would also reach vitest's own
+ * handlers, see the I5 test below); library mode, so it restores and
+ * releases the lock but never exits. Returns how many exec calls ran.
+ */
+async function signalAfterExecCall(
+  signalAtCall: number,
+  run: () => Promise<ProbePlanResult>,
+): Promise<{ result: ProbePlanResult; calls: number }> {
+  const actualExec =
+    await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+  const before = new Set(process.listeners("SIGTERM"));
+  let calls = 0;
+  let signalled = false;
+  vi.mocked(execCommand).mockImplementation(
+    async (...args: Parameters<typeof execCommand>) => {
+      calls += 1;
+      const result = await actualExec.execCommand(...args);
+      if (calls === signalAtCall) {
+        const ours = process
+          .listeners("SIGTERM")
+          .filter((listener) => !before.has(listener));
+        expect(ours).toHaveLength(1);
+        (ours[0] as (signal: NodeJS.Signals) => void)("SIGTERM");
+        signalled = true;
+      }
+      return result;
+    },
+  );
+  try {
+    const result = await run();
+    expect(signalled).toBe(true);
+    // The handler finishes on its own schedule; let it settle before the
+    // caller inspects the files it may also have written.
+    await sleep(100);
+    return { result, calls };
+  } finally {
+    vi.mocked(execCommand).mockImplementation(actualExec.execCommand);
+  }
+}
+
 describe("probePlan(): a stopped run never starts the next mutant (I5)", () => {
+  it("ends the plan aborted when the signal handler is already handling a signal after a mutant whose own outcome was not aborted", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(target, "utf8");
+    vi.mocked(computeMutant).mockClear();
+
+    // Call 1 is the baseline, call 2 the first mutant's own test run: it
+    // fails (the mutant is caught), and the signal lands right after it.
+    const { result, calls } = await signalAfterExecCall(2, () =>
+      probePlan(
+        planOptions(repo, [
+          replaceMutant(2, "  return false;"),
+          replaceMutant(5, "  return true;"),
+        ]),
+      ),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    // The first mutant's own verdict stands; the second is never started.
+    expect(result.results.map((r) => [r.status, r.reason])).toEqual([
+      ["killed", undefined],
+      ["not_run", undefined],
+    ]);
+    expect(result.results[0].mutation_probe?.restored_verified).toBe(true);
+    expect(vi.mocked(computeMutant)).toHaveBeenCalledTimes(1);
+    expect(calls).toBe(2);
+    expect(fs.readFileSync(target, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+  }, 30000);
+
   it("ends the plan aborted and reports the remaining mutants not_run when a mutant's own run was stopped", async () => {
     useLockDir();
     const { repo } = initRepo();
@@ -3211,6 +3290,49 @@ describe("probePlan(): one baseline per distinct test command", () => {
     expect(
       backupPathsTaken().filter((backup) => fs.existsSync(backup)),
     ).toHaveLength(1);
+  }, 60000);
+
+  it("a later command's failing baseline ends the plan aborted when the signal handler is already handling a signal, before any mutant", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(target, "utf8");
+    vi.mocked(beginInplace).mockClear();
+    vi.mocked(computeMutant).mockClear();
+
+    // Call 1 is the first command's baseline, call 2 the second's: it
+    // fails on its own (baseline_failed, not aborted), and the signal
+    // lands right after it.
+    const { result, calls } = await signalAfterExecCall(2, () =>
+      probePlan(
+        planOptions(repo, [
+          replaceMutant(2, "  return false;"),
+          { ...replaceMutant(5, "  return true;"), testCommand: "exit 1" },
+        ]),
+      ),
+    );
+    const backups = backupPathsTaken();
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    expect(result.results.map((r) => [r.status, r.reason])).toEqual([
+      ["not_run", undefined],
+      ["not_run", undefined],
+    ]);
+    expect(vi.mocked(computeMutant)).not.toHaveBeenCalled();
+    expect(calls).toBe(2);
+    expect(
+      result.baselines.map((b) => [b.status, b.reason, b.exitCode]),
+    ).toEqual([
+      ["passed", undefined, 0],
+      ["failed", "baseline_failed", 1],
+    ]);
+    // Settled as a stopped baseline: nothing rewrote the target, so its
+    // backup is gone and the target is as it was.
+    expect(backups.length).toBeGreaterThan(0);
+    expect(backups.filter((backup) => fs.existsSync(backup))).toEqual([]);
+    expect(fs.readFileSync(target, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
   }, 60000);
 
   it("a later command's baseline stopped by a signal ends the plan aborted before any mutant, leaving no backup behind", async () => {
