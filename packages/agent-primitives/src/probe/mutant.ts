@@ -237,7 +237,25 @@ export interface MutantNotApplicable {
    * genuinely does not apply, so a probe that never got an answer is not
    * read as one that got the answer "this patch is bad". */
   reasonCode?: "mutant_not_applicable" | "git_apply_timeout" | "aborted";
+  /** Set when the `-M/--match` text was not found on the named line: the
+   * line as the file has it (trimmed, at most `LINE_CONTENT_MAX_CHARS`
+   * characters), so a caller can correct the substring without reading the
+   * file. Absent for every other cause. */
+  lineContent?: string;
   logPaths: string[];
+}
+
+/** The most `MutantNotApplicable.lineContent` carries: a longer line is
+ * cut and ends in `...`, the same way `drift` caps a matched line. */
+export const LINE_CONTENT_MAX_CHARS = 300;
+
+/** The line, trimmed and capped at `LINE_CONTENT_MAX_CHARS` characters
+ * (the `...` marker included in the cap). */
+export function capLineContent(line: string): string {
+  const trimmed = line.trim();
+  return trimmed.length > LINE_CONTENT_MAX_CHARS
+    ? trimmed.slice(0, LINE_CONTENT_MAX_CHARS - 3) + "..."
+    : trimmed;
 }
 
 export type MutantComputeResult = MutantComputed | MutantNotApplicable;
@@ -427,6 +445,7 @@ function computeMatch(
     return {
       applicable: false,
       reason: `substring not found on line ${line}`,
+      lineContent: capLineContent(original),
       logPaths: [],
     };
   if (withText === matchText)

@@ -45,6 +45,10 @@ Rules:
   pass `--report mutation-probes` (and `--replayed` for a replay) and copy
   each printed item into `mutation_probes` unchanged; never replace the
   runner's `result` or `expectation` with your own reading of the output.
+  Read a probe's verdict with `--summary` or `--print <field,...>` (or
+  `--report mutation-probes` for the return table), never with an ad-hoc JSON
+  reader of the envelope, and keep stderr separate from the JSON (`2>file`,
+  never `2>&1` into a parser).
 - On any round after the task's first, the assignment names every mutation
   probe of the earlier rounds by its definition (file, anchor, before, after).
   Replay each one with `replayed: true`. A probe recorded with only an id is
@@ -62,8 +66,10 @@ Rules:
   and the mutant's locator) may replace a repeated inline definition. Resolve
   it first; an unresolvable or stale one is `not_applicable` evidence, not a
   skipped probe. Never rewrite a prior plan for new code.
-- When a verify runner is available, run it for the checks the acceptance
-  criteria name and report its summary under `tests.executed`.
+- When a verify runner is available, run `agent-primitives verify -c <checks>`
+  for the checks the acceptance criteria name, naming only checks the repo has
+  (a repo without a `lint` or `typecheck` script is not run with the default
+  list), and report its summary under `tests.executed`.
 - Run long tests, builds, and probes in the foreground. When one call cannot
   hold a run, poll it to completion and report its result before ending your
   turn: a run that outlives your turn is not evidence.
@@ -88,6 +94,10 @@ Rules:
   `review.allow` in slop.config.yml. Exit `2` is a usage error, not a clean
   check. A return that skipped this check on a diff with block-level findings
   is a misfire, not evidence.
+- Make an exact-text edit from a shell through `agent-primitives patch`
+  (`--plan` JSON or `--file/--old/--new`): every edit is verified before any
+  file is written, all or nothing, and `--dry-run` shows the diff without
+  writing; do not hand-write a read, replace, and write script.
 - Run `agent-primitives hygiene --base <base>` with `--staged` before every
   commit and over the committed range before returning, with `--extend-only
   <path>` for each file you may only extend. Without it, read `git status

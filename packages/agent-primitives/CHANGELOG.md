@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `probe --plan`: a mutant may carry its own `test`, which wins over the
+  plan-level `test` (a mutant without one inherits it); the plan-level
+  `test` may be left out when every mutant has its own. Mutants whose
+  commands are the same string once trimmed share one baseline, in the
+  order their commands first appear; every baseline runs before the first
+  mutant, through the same gate the first one goes through (zero-tests
+  guard, `--pass-regex`, `--require-baseline-evidence`, the post-baseline
+  re-hash, extracted from `openRunSetup` as `runBaselineGate`), and
+  `--pre` reruns ahead of each. A failing later baseline marks only its
+  own mutants `not_run` with its reason (plan `inconclusive`,
+  `mutant_inconclusive`); a failing first one refuses the plan as before;
+  a later baseline that rewrote a target ends the plan
+  `target_changed_during_baseline`, and one stopped by a signal ends it
+  `aborted`, each settling the backups the way the first baseline does in
+  the same case. The envelope adds `plan.baselines`
+  and each result's `test_command` and `baseline_index`, lists every
+  baseline log in `logs`, and `--summary` gains a `test=` column and one
+  line per baseline when the plan names more than one command. A plan
+  naming one command runs and reports as before, apart from those added
+  fields. `ProbePlanSpec.testCommand` and `ProbePlanOptions.testCommand`
+  are optional now, `PlanMutantSpec` gains `testCommand`, and
+  `PlanBaselineField` is exported. See docs/probe.md, "A test command per
+  mutant".
+- `hygiene`, `drift` and `verify` take `--summary` and `--print <fields>`,
+  the compact views `probe` already had: `--summary` prints one line per
+  finding, site or check plus a totals line (status, counts and the saved
+  full result path when there is one), `--print` prints the named top-level
+  envelope fields as one JSON line from the unreduced result. Both take
+  precedence over `-f`, are bounded by `-m`, are mutually exclusive, and
+  leave the exit code and the envelope unchanged. `--print` field names
+  come from a per-command list; `probe`'s list and output are unchanged
+  apart from the new `line_content` field.
+- `probe`: a `-M/--match` text that is not on the named line now reports
+  `line_content`, the line as the file has it (trimmed, at most 300
+  characters with a `...` marker), on the single-probe result and on the
+  `plan.results[]` item. The status (`inconclusive`), the reason
+  (`mutant_not_applicable`) and the exit code (`2`) are unchanged.
+- `verify`: `-x` given without `-c` adds a `hint:` warning saying that the
+  default check list still runs and that `-c <names>` chooses the run set.
 - `patch` branch guard: the command refuses to write while any repository
   that holds a target sits on a protected branch, because the editor-tool
   hook that protects `main` and `master` never sees a shell call of
@@ -35,6 +74,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `probe`: the full-suite hint for a command such as `npm test` without
+  `--timeout` is now a warning in the JSON envelope instead of a stderr
+  line, appended after the probe's own warnings, so `2>&1 | <json parser>`
+  reads one valid document. With `-f text` and with `--summary`, `--print`
+  or `--report` it is still the stderr line printed before the baseline
+  starts. A `--plan` run prints none, as before.
+- `verify`: the `no_script` warning now ends with `; pass -c with the
+  checks this repo has`.
+- `scripts/spike/` holds a throwaway measurement (branch enumerator over
+  `base..head`, scoring scripts and `REPORT.md`) of whether listing changed
+  branches without a planned mutant would have surfaced the mutants that
+  reviewers later found surviving. It is not shipped and not referenced by
+  `package.json`; the report recommends not building it as specified.
+
 - `patch` on a protected branch now refuses (see the branch guard above);
   pass `--allow-protected` to keep the old behaviour. Under a tight `-m`
   budget `branch_guard` is reduced like any payload object, and `counts`,
@@ -50,6 +103,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and zombie cases) are skipped with the note `ps cannot run in this
   environment` through a shared probe in `test/helpers/ps-usable.ts`.
   Where `ps` runs nothing is skipped.
+- The skill's invocation-templates section now opens by telling the reader to
+  run neither `--version` nor `--help` before the first call and to copy a
+  template instead, and the `verify` template names only the checks the
+  repository has a script for.
 
 ### Fixed
 

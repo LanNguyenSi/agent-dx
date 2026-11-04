@@ -183,7 +183,10 @@ maps the status to the exit code. Each command lives in its own module:
 `probe` is split into a setup phase (`src/probe/setup.ts`: containment,
 lock, stale-marker recovery, worktree preparation, baseline) and a
 per-mutant step (`src/probe/step.ts`: in-flight marker, apply, test,
-restore, classify), which `--plan` runs once per mutant;
+restore, classify), which `--plan` runs once per mutant; a `--plan`
+whose mutants name more than one test command runs each further
+command's baseline through the same baseline gate in `setup.ts`
+(`runBaselineGate`) before its first mutant;
 [docs/probe.md](docs/probe.md) shows the order of its gates. Both phases
 go through `src/probe/session.ts`: its `runPreThenTest` starts the
 baseline's and each mutant's `--pre` and test command through
