@@ -26,6 +26,15 @@ function probePsUsable(): boolean {
 
 export const PS_USABLE: boolean = probePsUsable();
 
+// CI always has ps: a probe that fails there (an image without procps, a
+// spawn timeout) must fail loudly instead of silently skipping every test
+// that needs a process table.
+if (!PS_USABLE && process.env.CI) {
+  throw new Error(
+    "ps cannot run although CI is set: the tests that need a process table would be skipped",
+  );
+}
+
 /** The note a skipped test carries, so a skip reads as skipped for this
  * reason and no other. */
 export const PS_SKIP_NOTE = "ps cannot run in this environment";
