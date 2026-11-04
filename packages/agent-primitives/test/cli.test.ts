@@ -1455,6 +1455,135 @@ describe("cli verify", () => {
     expect(idFromVerifyNesting).toBe(idFromDefaultLogDir);
   });
 
+  it("--repeat 3 on a check that fails only on its second run is a flaky fail, exit 1", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // A counter written as marker files under this run's own log directory
+    // (only shell builtins: a spawned CLI sees just git/node/npm/sh on
+    // PATH): run 1 and run 3 pass, run 2 fails. The markers live under
+    // logDir, which exec.ts has already created by the time the first run's
+    // command starts.
+    const marker = path.join(logDir, "run");
+    const command =
+      `if [ -f ${marker}.1 ]; then ` +
+      `if [ -f ${marker}.2 ]; then exit 0; fi; ` +
+      `: > ${marker}.2; exit 1; fi; ` +
+      `: > ${marker}.1; exit 0`;
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "3",
+      "-x",
+      `mycheck=${command}`,
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check.status).toBe("fail");
+    expect(check.flaky).toBe(true);
+    expect(check.runs).toBe(3);
+    expect(check.passed).toBe(2);
+    expect(check.failed).toBe(1);
+    // One log file per run; the envelope's protected `logs` carries the
+    // first run's plus the failing run's, not the third run's.
+    const logs = parsed.logs as string[];
+    expect(logs.some((l: string) => l.endsWith("/mycheck.1.log"))).toBe(true);
+    expect(logs.some((l: string) => l.endsWith("/mycheck.2.log"))).toBe(true);
+    expect(logs.some((l: string) => l.endsWith("/mycheck.3.log"))).toBe(false);
+  });
+
+  it.each([
+    ["0", "zero"],
+    ["101", "above the bound"],
+    ["2.5", "not an integer"],
+    ["abc", "not a number"],
+  ])("--repeat %s (%s) is a usage_error, exit 2", async (value) => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      value,
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    // The option parser's own message, not `verify()`'s refusal of the same
+    // number: it is the parser that stops an out-of-range repeat here, before
+    // any check is resolved.
+    expect(parsed.message).toContain(
+      `--repeat must be an integer between 1 and 100 (got "${value}")`,
+    );
+  });
+
+  it("--repeat 1 is accepted and reports no per-run field: the default's shape, stated explicitly", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "1",
+      "-x",
+      "mycheck=exit 0",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check).not.toHaveProperty("runs");
+    expect(check).not.toHaveProperty("passed");
+    expect(check).not.toHaveProperty("failed");
+    expect(check).not.toHaveProperty("flaky");
+    expect(check.logPath.endsWith("/mycheck.log")).toBe(true);
+  });
+
+  it("--repeat given twice is a usage_error, exit 2, naming both values", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "2",
+      "--repeat",
+      "3",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toContain("given once");
+    expect(parsed.message).toContain('"2"');
+    expect(parsed.message).toContain('"3"');
+  });
+
   it("an unwritable log directory parent still yields an envelope with per-check errors, not a crash", async () => {
     const cwd = makeTmpDir();
     const parentDir = makeTmpDir();

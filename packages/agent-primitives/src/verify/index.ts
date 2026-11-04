@@ -81,6 +81,13 @@ export const DEFAULT_DETECTORS: Detector[] = [
 
 export const DEFAULT_MAX_FAILURES = 20;
 
+/** How many times one check may be run (`--repeat`/`VerifyOptions.repeat`).
+ * The default of 1 is today's behaviour and keeps the result shape exactly
+ * as it was; the bound is an operational one -- a repeat high enough to
+ * want its own progress reporting is a different tool's job. */
+export const DEFAULT_REPEAT = 1;
+export const MAX_REPEAT = 100;
+
 /** A check name reaches `npm run <name> --silent` (and a log file name)
  * unquoted; this is the conservative allowlist every resolved name (plain
  * `-c` names, the derived names of implicit `-x` checks, and `-x` keys)
@@ -371,13 +378,607 @@ function dedupePreservingOrder(names: string[]): string[] {
   return out;
 }
 
+/** Everything a check's run needs that never varies per check: built once
+ * per `verify()` call and handed to `runCheck`. */
+interface CheckRunContext {
+  options: VerifyOptions;
+  logDir: string;
+  maxFailures: number;
+  /** Validated `--repeat` count for every check in this run. */
+  repeat: number;
+  detectors: Detector[];
+  fallbackDetector: Detector;
+  execFn: ExecLike;
+  passRegexes: Record<string, RegExp>;
+}
+
+/** One check's whole contribution to the run, as returned by `runCheck`:
+ * the capped `CheckResult` (for `checks`) and the uncapped one (for
+ * `fullChecks`), the run-level `logs` and `warnings` entries this check
+ * contributes (each warning already `${name}:`-prefixed), and what the
+ * caller owes the loop after it: whether `maxFailures` cut this check's
+ * failures, whether the caller's abort stopped the run here, and whether
+ * `--fail-fast` ends it. */
+interface CheckOutcome {
+  result: CheckResult;
+  fullResult: CheckResult;
+  logs: string[];
+  warnings: string[];
+  truncatedByMaxFailures: boolean;
+  aborted: boolean;
+  stopRun: boolean;
+}
+
+/** One run of one check, as returned by `runOnce`: that single run's own
+ * `CheckResult` (its own status, exit code, duration, detector parse and
+ * failures, before anything is merged across runs), the log and warnings
+ * that run contributed, and the two things the merge cannot read back out
+ * of the result: that the command was killed by the caller's abort, and
+ * that `execFn` itself rejected. */
+interface RunOutcome {
+  result: CheckResult;
+  logs: string[];
+  warnings: string[];
+  aborted: boolean;
+  execFailed: boolean;
+}
+
+/** Key one `Failure` is de-duplicated by across a check's runs: the same
+ * file, line and message is the same finding, reported twice. A detector
+ * that locates nothing leaves both optional parts empty, which de-duplicates
+ * on the message alone (two failures of a check whose only signal is the
+ * exit code are one finding). */
+function failureKey(f: Failure): string {
+  return `${f.file ?? ""}\u0000${f.line ?? ""}\u0000${f.message}`;
+}
+
+/**
+ * Merges one check's `--repeat` runs into the outcome `verify()` merges:
+ * `status` is `pass` only when every run passed, otherwise the worst
+ * status seen (`error` beats `fail`); `runs`/`passed`/`failed` count the
+ * runs actually performed (fewer than asked for once `--fail-fast` or an
+ * abort stops the loop early); `flaky` is true when both a pass and a
+ * non-pass occurred; `failures` is the de-duplicated union across the runs
+ * in first-seen order; `summary`, `exitCode`, `timedOut` and `logPath` are
+ * the LAST run's, and `durationMs` sums every run's. Warnings de-duplicate
+ * (an identical per-run warning is one warning), and the run-level `logs`
+ * carry the first run's log plus every failing run's.
+ */
+function mergeRuns(
+  runs: RunOutcome[],
+  maxFailures: number,
+): {
+  result: CheckResult;
+  fullResult: CheckResult;
+  logs: string[];
+  warnings: string[];
+  truncatedByMaxFailures: boolean;
+  aborted: boolean;
+} {
+  const last = runs[runs.length - 1].result;
+  const statuses = runs.map((r) => r.result.status);
+  const status: CheckStatus = statuses.every((s) => s === "pass")
+    ? "pass"
+    : statuses.some((s) => s === "error")
+      ? "error"
+      : "fail";
+  const passed = statuses.filter((s) => s === "pass").length;
+
+  const seen = new Set<string>();
+  const failures: Failure[] = [];
+  for (const run of runs) {
+    for (const f of run.result.failures) {
+      const key = failureKey(f);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      failures.push(f);
+    }
+  }
+
+  const warnings: string[] = [];
+  const seenWarnings = new Set<string>();
+  for (const run of runs) {
+    for (const w of run.warnings) {
+      if (seenWarnings.has(w)) continue;
+      seenWarnings.add(w);
+      warnings.push(w);
+    }
+  }
+
+  const fullResult: CheckResult = {
+    ...last,
+    status,
+    durationMs: runs.reduce((sum, r) => sum + r.result.durationMs, 0),
+    failures,
+    runs: runs.length,
+    passed,
+    failed: runs.length - passed,
+    flaky: passed > 0 && passed < runs.length,
+    runLogs: runs.map((r) => ({
+      ...(r.result.logPath === undefined ? {} : { logPath: r.result.logPath }),
+      exitCode: r.result.exitCode,
+    })),
+  };
+
+  let cappedFailures = failures;
+  let truncatedByMaxFailures = false;
+  if (cappedFailures.length > maxFailures) {
+    cappedFailures = cappedFailures.slice(0, maxFailures);
+    truncatedByMaxFailures = true;
+  }
+  const result: CheckResult = { ...fullResult };
+  // The per-run log list belongs to the full result file only: the
+  // envelope's own `checks` rows say what happened (status, the run
+  // counts, the merged failures), and its protected `logs` key already
+  // carries the logs a reader of a compact envelope needs.
+  delete result.runLogs;
+
+  const aborted = runs[runs.length - 1].aborted;
+  return {
+    result: { ...result, failures: cappedFailures },
+    fullResult,
+    logs: runs.flatMap((r, i) =>
+      i === 0 || r.result.status !== "pass" ? r.logs : [],
+    ),
+    warnings,
+    truncatedByMaxFailures,
+    aborted,
+  };
+}
+
+/**
+ * Runs one already-resolved check, `--repeat` times when asked to, and
+ * turns its runs into the two `CheckResult` shapes and the run-level
+ * bookkeeping `verify()` merges: detector selection by output shape, the
+ * failures invariant, and this check's own `failures` cap at `maxFailures`
+ * (applied to the merged list, so one check never carries more than the
+ * cap whatever its run count). Never touches the envelope, and never stops
+ * a run of itself: the caller decides what `aborted` and `stopRun` mean for
+ * the checks behind this one.
+ */
+async function runCheck(
+  name: string,
+  command: string,
+  ctx: CheckRunContext,
+): Promise<CheckOutcome> {
+  const { options, maxFailures, repeat } = ctx;
+  const runs: RunOutcome[] = [];
+
+  for (let run = 1; run <= repeat; run++) {
+    // Checked between runs, not only before the first: once the caller
+    // has asked to stop, one more spawn of this check's own command is
+    // work nobody asked for. The check behind this one is left unstarted
+    // and named by the caller's own check of the same signal.
+    if (run > 1 && options.signal?.aborted) break;
+    const outcome = await runOnce(
+      name,
+      command,
+      ctx,
+      // One log file per run once a check repeats (exec.ts opens a log
+      // file in append mode, so two runs writing one name would
+      // interleave); a single run keeps today's `<name>.log`, so a
+      // `--repeat 1` run's log paths are byte-identical to before.
+      repeat === 1 ? `${name}.log` : `${name}.${run}.log`,
+    );
+    runs.push(outcome);
+    // An aborted run concluded nothing, and an `execFn` that rejected
+    // (an unwritable log directory, say) will reject again: neither is
+    // worth another attempt.
+    if (outcome.aborted || outcome.execFailed) break;
+    // `--fail-fast` stops at the first run that did not pass, exactly as
+    // it stops at the first check that did not pass.
+    if (options.failFast && outcome.result.status !== "pass") break;
+  }
+
+  // One run of a check that was only asked to run once is today's check:
+  // its own `CheckResult`, its own warnings, its own `maxFailures` cap,
+  // and none of the per-run fields a repeated check reports.
+  if (runs.length === 1 && repeat === 1) {
+    const only = runs[0];
+    const fullResult = only.result;
+    let cappedFailures = fullResult.failures;
+    let truncatedByMaxFailures = false;
+    if (cappedFailures.length > maxFailures) {
+      cappedFailures = cappedFailures.slice(0, maxFailures);
+      truncatedByMaxFailures = true;
+    }
+    return {
+      result: { ...fullResult, failures: cappedFailures },
+      fullResult,
+      logs: only.logs,
+      warnings: only.warnings,
+      truncatedByMaxFailures,
+      aborted: only.aborted,
+      // An aborted run stops the run whatever `--fail-fast` says; an
+      // `execFn` that rejected left the check `error`, which a
+      // `--fail-fast` run stops on exactly like any other non-pass.
+      stopRun:
+        only.aborted ||
+        (Boolean(options.failFast) && only.result.status !== "pass"),
+    };
+  }
+
+  const merged = mergeRuns(runs, maxFailures);
+  return {
+    ...merged,
+    // The merged status is `pass` only when every run passed, so this is
+    // the repeat-aware form of the single run's rule above.
+    stopRun:
+      merged.aborted ||
+      (Boolean(options.failFast) && merged.result.status !== "pass"),
+  };
+}
+
+/** One run of one check: `runCheck`'s inner step, `--repeat` aside. The
+ * `maxFailures` cap is deliberately NOT applied here: with a repeated
+ * check the cap belongs on the merged failures list, not on each run's. */
+async function runOnce(
+  name: string,
+  command: string,
+  ctx: CheckRunContext,
+  logFileName: string,
+): Promise<RunOutcome> {
+  const { options, logDir, detectors, fallbackDetector, execFn, passRegexes } =
+    ctx;
+  const warnings: string[] = [];
+  const logs: string[] = [];
+
+  let execResult: ExecResult;
+  try {
+    execResult = await execFn(command, {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      timeoutMs: options.timeoutMs,
+      logDir,
+      logFileName,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+  } catch (err) {
+    // execFn itself rejecting (e.g. exec.ts's own `fs.mkdirSync(logDir,
+    // ...)` failing because the log directory's parent is unwritable)
+    // is not a check finding: it means this check could not even be
+    // attempted. Recorded as `status: "error"` with a synthetic failure
+    // naming the error, and the run continues with every other check,
+    // exactly as any other error check would.
+    const message = err instanceof Error ? err.message : String(err);
+    const errorResult: CheckResult = {
+      name,
+      command,
+      status: "error",
+      exitCode: null,
+      durationMs: 0,
+      timedOut: false,
+      summary: { passed: 0, failed: 0, skipped: 0, errors: 1, warnings: 0 },
+      failures: [{ name, message: `exec failed: ${message}` }],
+    };
+    warnings.push(`${name}: exec failed: ${message}`);
+    // A `--pass-regex` configured for this check was never consulted
+    // either: execFn itself never returned an `ExecResult` for the
+    // predicate to test against. Said out loud, same shape as the
+    // skipped- and aborted-check warnings above, rather than left to
+    // look like the predicate was simply never given.
+    const execFailedPassRegex = getPassRegex(passRegexes, name);
+    if (execFailedPassRegex !== undefined) {
+      warnings.push(
+        `${name}: --pass-regex (${execFailedPassRegex.source}) was given but the check failed to run (exec failed), so the predicate was never consulted`,
+      );
+    }
+    return {
+      result: errorResult,
+      logs,
+      warnings,
+      aborted: false,
+      execFailed: true,
+    };
+  }
+
+  if (execResult.logWriteFailed) {
+    warnings.push(
+      `${name}: log write failed: ${execResult.logWriteError ?? "unknown error"}`,
+    );
+  } else {
+    logs.push(execResult.logPath);
+  }
+
+  // A check whose command was killed by the caller's abort never ran
+  // to a conclusion. Reported as an `error` naming the abort, and NOT
+  // through `classifyStatus`/`applyFailuresInvariant`, whose synthetic
+  // entry would read `exit code null: ...` and present a stopped run
+  // as a check that ran and produced nothing. The run stops here: the
+  // remaining checks are named in the run-level warning below rather
+  // than spawned.
+  if (execResult.aborted) {
+    const abortedResult: CheckResult = {
+      name,
+      command,
+      status: "error",
+      exitCode: execResult.exitCode,
+      durationMs: execResult.durationMs,
+      timedOut: execResult.timedOut,
+      summary: { passed: 0, failed: 0, skipped: 0, errors: 1, warnings: 0 },
+      failures: [
+        {
+          name,
+          message: `aborted: the run was stopped while ${name} was running, so this check has no result`,
+        },
+      ],
+      ...(execResult.logWriteFailed ? {} : { logPath: execResult.logPath }),
+    };
+    warnings.push(`${name}: aborted before it could finish`);
+    // A `--pass-regex` configured for this check was never consulted
+    // either: the run was killed before it produced any output to test
+    // the predicate against. Said out loud, same shape as the
+    // skipped-check warning above, rather than left to look like the
+    // predicate was simply never given.
+    const abortedPassRegex = getPassRegex(passRegexes, name);
+    if (abortedPassRegex !== undefined) {
+      warnings.push(
+        `${name}: --pass-regex (${abortedPassRegex.source}) was given but the check was aborted before it could finish, so the predicate was never consulted`,
+      );
+    }
+    return {
+      result: abortedResult,
+      logs,
+      warnings,
+      aborted: true,
+      execFailed: false,
+    };
+  }
+
+  // The command exited but something it spawned still held its
+  // stdout/stderr open, so exec.ts settled on its flush grace: the
+  // detector below parsed output that may be missing whatever was
+  // still in flight. Said out loud rather than left to look like a
+  // clean parse of the whole output.
+  if (execResult.outputMayBeIncomplete) {
+    warnings.push(
+      `${name}: the command exited while something it spawned still held its output pipes open; the captured output may be incomplete`,
+    );
+  }
+
+  const output = combinedOutput(execResult.stdoutTail, execResult.stderrTail);
+  const exitStatus = classifyStatus(execResult.exitCode, execResult.timedOut);
+  const truncated = execResult.stdoutTruncated || execResult.stderrTruncated;
+  // `--pass-regex` for this check: once given, it is this check's own
+  // verdict in place of its exit code -- "passed" is the regex matching
+  // the check's combined stdout+stderr, "failed" is the regex absent,
+  // whatever the exit code says (mirrors `probe`'s own `--pass-regex`
+  // baseline verdict, `probe/setup.ts`). Never consulted when
+  // `exitStatus` is already `error`: a timeout, exit 126/127, or an
+  // aborted run (returned above, before this line) answered nothing
+  // about pass/fail either way, so a predicate cannot override it.
+  const passRegex = getPassRegex(passRegexes, name);
+  let status: CheckStatus = exitStatus;
+  if (passRegex !== undefined && exitStatus !== "error") {
+    const matched = passRegex.test(output);
+    status = matched ? "pass" : "fail";
+    if (matched) {
+      if (execResult.exitCode !== 0) {
+        // One band of non-zero codes gets its own wording, the same
+        // distinction `probe`'s own `--pass-regex` baseline verdict
+        // makes (`probe/setup.ts`): 128 + N, what a shell reports for
+        // a child killed by signal N. A kill that lands on the check
+        // process while the `sh -c` wrapper around it SURVIVES it (an
+        // OOM killer picking the memory hog rather than the group
+        // leader is the everyday shape) still reads as an ordinary
+        // non-zero exit here, so a matching partial output printed
+        // before the kill still reads as a pass -- the verdict is not
+        // second-guessed (nothing here can tell that code apart from a
+        // runner exiting `137` of its own accord, and `--pass-regex`
+        // means "ignore the exit code" by construction), but a reader
+        // is told, since "the suite may have been cut short" is a
+        // different thing to check than deprecation noise. Shared with
+        // `probe`'s own baseline warning through `nonZeroPassWarning`
+        // (`src/pass-regex.ts`) so the wording cannot drift between
+        // the two.
+        warnings.push(
+          nonZeroPassWarning({
+            prefix: `${name}: `,
+            outputSubject: "the check's output",
+            exitSubject: "the check",
+            pattern: passRegex.source,
+            exitCode: execResult.exitCode,
+            logPath: execResult.logPath,
+          }),
+        );
+      }
+    } else {
+      warnings.push(
+        `${name}: --pass-regex (${passRegex.source}) did not match the check's output${truncationNote("check", execResult.stdoutTruncated, execResult.stderrTruncated)}; see ${execResult.logPath}`,
+      );
+    }
+  } else if (passRegex !== undefined) {
+    // `exitStatus === "error"` here: a timeout or exit 126/127 (an
+    // aborted run already returned above, before this line, with its
+    // own warning). The predicate answers nothing about a shape like
+    // that -- there is no completed run to test it against -- so it is
+    // never consulted; said out loud, same shape as the skipped-check
+    // warning above, rather than left to look like the predicate was
+    // silently dropped.
+    const errorReason = execResult.timedOut
+      ? "timed out"
+      : `exited with code ${String(execResult.exitCode)}`;
+    warnings.push(
+      `${name}: --pass-regex (${passRegex.source}) was given but the check ${errorReason}, so the predicate was never consulted`,
+    );
+  }
+  const selection = selectDetector(detectors, fallbackDetector, {
+    output,
+    command,
+    exitCode: execResult.exitCode,
+  });
+  const detector = selection.detector;
+  if (selection.ambiguousCandidates) {
+    warnings.push(
+      `${name}: ambiguous detector selection; candidates: ${selection.ambiguousCandidates.join(", ")}`,
+    );
+  }
+  let parsed = detector.parse({
+    output,
+    command,
+    exitCode: execResult.exitCode,
+  });
+
+  // A phpunit check whose own STATUS is `pass` while its tally shows
+  // zero tests actually ran (an empty/filtered suite, an all-skipped
+  // run, or a PHPUnit 9 warnings-only run such as `Tests: 1,
+  // Assertions: 0, Warnings: 1.`) still keeps that `pass` status here
+  // -- the status is the verdict, not this warning (see
+  // docs/non-js-test-runners.md) -- but
+  // a reader is told the pass is hollow. Checked against `status`, not
+  // the exit code: `--pass-regex` can decide `pass` on a non-zero exit
+  // (a green suite that PHPUnit itself exits non-zero for, over a
+  // deprecation notice, say), and the warning below is worded on that
+  // same status rather than claiming an exit code that may not be `0`
+  // at all. Reuses `phpunitZeroTestsVerdict` (the same reading
+  // `probe`'s own zero-tests guard is built on) rather than re-deriving
+  // the tally here, so the two never drift apart.
+  //
+  // Three-valued on purpose: `no_tests_executed:` is claimed ONLY for
+  // the `"zero"` reading, i.e. only where PHPUnit itself stated that
+  // nothing ran. Wherever the question cannot be answered from the
+  // output -- a tally whose reading turns on a PHPUnit major version
+  // the output does not state (a truncated capture whose banner fell
+  // off the front), or an output with no result report in it at all
+  // (a mid-suite `exit()`/`die()`) -- this warns
+  // `zero_tests_ambiguous:` with the reason instead: claiming
+  // `no_tests_executed:` there asserts something the output does not
+  // say, which is exactly the false claim both a green, banner-
+  // truncated PHPUnit 11 run and a completed `--no-results` run got
+  // from earlier versions of this branch.
+  //
+  // Both texts carry the reading's OWN `reason` rather than a
+  // hardcoded sentence about a tally line: the `"zero"` verdict has
+  // two origins (PHPUnit's `No tests executed!` line and a tally
+  // derivation), and naming the tally line for both of them was a
+  // claim about output that the explicit-statement case does not
+  // have.
+  if (status === "pass" && detector === phpunitDetector) {
+    const zeroTests = phpunitZeroTestsVerdict(output);
+    if (zeroTests.verdict === "zero") {
+      parsed = {
+        ...parsed,
+        warnings: [
+          ...parsed.warnings,
+          `no_tests_executed: phpunit executed no test at all even though the check passed: ${zeroTests.reason}.`,
+        ],
+      };
+    } else if (zeroTests.verdict === "ambiguous") {
+      parsed = {
+        ...parsed,
+        warnings: [
+          ...parsed.warnings,
+          `zero_tests_ambiguous: the check passed, but whether phpunit executed any test at all cannot be read from its own output, so no_tests_executed is not claimed either way: ${zeroTests.reason}.`,
+        ],
+      };
+    }
+  }
+
+  // The truncation adjustment runs whenever this check's own `status`
+  // already needed it (`fail`/`error`), and ADDITIONALLY whenever a
+  // predicate was actually consulted, `pass` included: a predicate can
+  // decide `pass` from a match sitting inside a truncated tail just as
+  // easily as it can decide `fail`, and either way the detector's own
+  // parsed counts may have undercounted a truncated run. A check with
+  // no predicate configured is entirely unaffected: this widens
+  // nothing for the plain exit-code path (`passRegex === undefined`
+  // never enters the second disjunct).
+  if (
+    status === "fail" ||
+    status === "error" ||
+    (passRegex !== undefined && exitStatus !== "error")
+  ) {
+    parsed = adjustForTruncatedTail(
+      parsed,
+      output,
+      truncated,
+      detector === eslintDetector,
+    );
+  }
+
+  // A predicate-decided `pass` overrules the exit code, never the
+  // detector's own parse: the detector can still have found real
+  // failures in the very output the predicate matched (a loose
+  // `--pass-regex` that matches a banner line ahead of a red summary
+  // is the motivating shape). Rather than discard that contrary
+  // evidence silently, it is said out loud -- the verdict itself is
+  // unchanged, `pass` stays `pass` (the predicate, not the detector,
+  // owns the verdict once configured), but a reader is warned the
+  // predicate may be too loose.
+  if (
+    status === "pass" &&
+    passRegex !== undefined &&
+    (parsed.summary.failed > 0 || parsed.failures.length > 0)
+  ) {
+    const parsedFailureCount =
+      parsed.failures.length > 0
+        ? parsed.failures.length
+        : parsed.summary.failed;
+    warnings.push(
+      `${name}: --pass-regex (${passRegex.source}) matched, but the ${detector.name} detector parsed ${parsedFailureCount} failure(s) of its own; the predicate may be too loose; see ${execResult.logPath}`,
+    );
+  }
+
+  if (status === "fail" || status === "error") {
+    const tail = output.trim();
+    parsed = applyFailuresInvariant(
+      parsed,
+      name,
+      execResult.exitCode,
+      execResult.timedOut,
+      tail,
+      status,
+      // A `fail` here is a predicate miss whenever a predicate was
+      // configured at all: the predicate branch above is the only way
+      // `status` becomes `fail` while `passRegex` is defined (a plain
+      // exit-code fail never has one). Labels the synthetic entry from
+      // the predicate that actually decided it, rather than the exit
+      // code the predicate was told to ignore (AC-004's second
+      // clause).
+      status === "fail" ? passRegex : undefined,
+    );
+  }
+
+  // Every detector-level warning (including any just added by the
+  // invariant above) is merged into the top-level warnings, prefixed
+  // with the check name so a caller can tell which check it came from.
+  for (const w of parsed.warnings) {
+    warnings.push(`${name}: ${w}`);
+  }
+
+  const fullResult: CheckResult = {
+    name,
+    command,
+    status,
+    exitCode: execResult.exitCode,
+    durationMs: execResult.durationMs,
+    timedOut: execResult.timedOut,
+    detector: detector.name,
+    summary: parsed.summary,
+    failures: parsed.failures,
+    logPath: execResult.logPath,
+    ...(passRegex !== undefined && exitStatus !== "error"
+      ? { passRegex: passRegex.source }
+      : {}),
+  };
+  return {
+    result: fullResult,
+    logs,
+    warnings,
+    aborted: false,
+    execFailed: false,
+  };
+}
+
 /**
  * Runs the configured checks in order (build, typecheck, lint, test by
  * default) through exec.ts, one at a time, selecting a detector per check
  * by output shape and applying the failures invariant, then caps each
- * check's own `failures` list at `maxFailures`. Never touches the
- * envelope: the caller (cli.ts) decides how `truncatedByMaxFailures` /
- * `fullChecks` map onto `truncated` and `logs`.
+ * check's own `failures` list at `maxFailures`. A check asked to `repeat`
+ * is resolved once and executed that many times, its runs merged into the
+ * one row this reports (see `runCheck`), so the cap applies to that merged
+ * list. Never touches the envelope: the caller (cli.ts) decides how
+ * `truncatedByMaxFailures` / `fullChecks` map onto `truncated` and `logs`.
  *
  * `options.signal` stops the run rather than merely killing one command:
  * the check that was running is reported as an `error` naming the abort,
@@ -489,6 +1090,13 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     );
   }
 
+  const repeat = options.repeat ?? DEFAULT_REPEAT;
+  if (!Number.isInteger(repeat) || repeat < 1 || repeat > MAX_REPEAT) {
+    throw new UsageError(
+      `verify: repeat must be an integer between 1 and ${MAX_REPEAT} (got ${repeat})`,
+    );
+  }
+
   const detectors = options.detectors ?? DEFAULT_DETECTORS;
   const fallbackDetector = options.fallbackDetector ?? genericDetector;
   const execFn: ExecLike = options.execFn ?? execCommand;
@@ -521,6 +1129,17 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   // checks it did not reach, and must not read as a run that did.
   let aborted = false;
   let notStarted: string[] = [];
+
+  const ctx: CheckRunContext = {
+    options,
+    logDir,
+    maxFailures,
+    repeat,
+    detectors,
+    fallbackDetector,
+    execFn,
+    passRegexes,
+  };
 
   for (let index = 0; index < names.length; index++) {
     const name = names[index];
@@ -572,350 +1191,18 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       continue;
     }
 
-    const command = resolved.command;
-    let execResult: ExecResult;
-    try {
-      execResult = await execFn(command, {
-        cwd: options.cwd,
-        env: options.env ?? process.env,
-        timeoutMs: options.timeoutMs,
-        logDir,
-        logFileName: `${name}.log`,
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
-    } catch (err) {
-      // execFn itself rejecting (e.g. exec.ts's own `fs.mkdirSync(logDir,
-      // ...)` failing because the log directory's parent is unwritable)
-      // is not a check finding: it means this check could not even be
-      // attempted. Recorded as `status: "error"` with a synthetic failure
-      // naming the error, and the run continues with every other check,
-      // exactly as any other error check would.
-      const message = err instanceof Error ? err.message : String(err);
-      const errorResult: CheckResult = {
-        name,
-        command,
-        status: "error",
-        exitCode: null,
-        durationMs: 0,
-        timedOut: false,
-        summary: { passed: 0, failed: 0, skipped: 0, errors: 1, warnings: 0 },
-        failures: [{ name, message: `exec failed: ${message}` }],
-      };
-      checks.push(errorResult);
-      fullChecks.push(errorResult);
-      warnings.push(`${name}: exec failed: ${message}`);
-      // A `--pass-regex` configured for this check was never consulted
-      // either: execFn itself never returned an `ExecResult` for the
-      // predicate to test against. Said out loud, same shape as the
-      // skipped- and aborted-check warnings above, rather than left to
-      // look like the predicate was simply never given.
-      const execFailedPassRegex = getPassRegex(passRegexes, name);
-      if (execFailedPassRegex !== undefined) {
-        warnings.push(
-          `${name}: --pass-regex (${execFailedPassRegex.source}) was given but the check failed to run (exec failed), so the predicate was never consulted`,
-        );
-      }
-      if (options.failFast) break;
-      continue;
-    }
-
-    if (execResult.logWriteFailed) {
-      warnings.push(
-        `${name}: log write failed: ${execResult.logWriteError ?? "unknown error"}`,
-      );
-    } else {
-      logs.push(execResult.logPath);
-    }
-
-    // A check whose command was killed by the caller's abort never ran
-    // to a conclusion. Reported as an `error` naming the abort, and NOT
-    // through `classifyStatus`/`applyFailuresInvariant`, whose synthetic
-    // entry would read `exit code null: ...` and present a stopped run
-    // as a check that ran and produced nothing. The run stops here: the
-    // remaining checks are named in the run-level warning below rather
-    // than spawned.
-    if (execResult.aborted) {
-      const abortedResult: CheckResult = {
-        name,
-        command,
-        status: "error",
-        exitCode: execResult.exitCode,
-        durationMs: execResult.durationMs,
-        timedOut: execResult.timedOut,
-        summary: { passed: 0, failed: 0, skipped: 0, errors: 1, warnings: 0 },
-        failures: [
-          {
-            name,
-            message: `aborted: the run was stopped while ${name} was running, so this check has no result`,
-          },
-        ],
-        ...(execResult.logWriteFailed ? {} : { logPath: execResult.logPath }),
-      };
-      checks.push(abortedResult);
-      fullChecks.push(abortedResult);
-      warnings.push(`${name}: aborted before it could finish`);
-      // A `--pass-regex` configured for this check was never consulted
-      // either: the run was killed before it produced any output to test
-      // the predicate against. Said out loud, same shape as the
-      // skipped-check warning above, rather than left to look like the
-      // predicate was simply never given.
-      const abortedPassRegex = getPassRegex(passRegexes, name);
-      if (abortedPassRegex !== undefined) {
-        warnings.push(
-          `${name}: --pass-regex (${abortedPassRegex.source}) was given but the check was aborted before it could finish, so the predicate was never consulted`,
-        );
-      }
+    const outcome = await runCheck(name, resolved.command, ctx);
+    checks.push(outcome.result);
+    fullChecks.push(outcome.fullResult);
+    logs.push(...outcome.logs);
+    warnings.push(...outcome.warnings);
+    if (outcome.truncatedByMaxFailures) truncatedByMaxFailures = true;
+    if (outcome.aborted) {
       aborted = true;
       notStarted = names.slice(index + 1);
       break;
     }
-
-    // The command exited but something it spawned still held its
-    // stdout/stderr open, so exec.ts settled on its flush grace: the
-    // detector below parsed output that may be missing whatever was
-    // still in flight. Said out loud rather than left to look like a
-    // clean parse of the whole output.
-    if (execResult.outputMayBeIncomplete) {
-      warnings.push(
-        `${name}: the command exited while something it spawned still held its output pipes open; the captured output may be incomplete`,
-      );
-    }
-
-    const output = combinedOutput(execResult.stdoutTail, execResult.stderrTail);
-    const exitStatus = classifyStatus(execResult.exitCode, execResult.timedOut);
-    const truncated = execResult.stdoutTruncated || execResult.stderrTruncated;
-    // `--pass-regex` for this check: once given, it is this check's own
-    // verdict in place of its exit code -- "passed" is the regex matching
-    // the check's combined stdout+stderr, "failed" is the regex absent,
-    // whatever the exit code says (mirrors `probe`'s own `--pass-regex`
-    // baseline verdict, `probe/setup.ts`). Never consulted when
-    // `exitStatus` is already `error`: a timeout, exit 126/127, or an
-    // aborted run (returned above, before this line) answered nothing
-    // about pass/fail either way, so a predicate cannot override it.
-    const passRegex = getPassRegex(passRegexes, name);
-    let status: CheckStatus = exitStatus;
-    if (passRegex !== undefined && exitStatus !== "error") {
-      const matched = passRegex.test(output);
-      status = matched ? "pass" : "fail";
-      if (matched) {
-        if (execResult.exitCode !== 0) {
-          // One band of non-zero codes gets its own wording, the same
-          // distinction `probe`'s own `--pass-regex` baseline verdict
-          // makes (`probe/setup.ts`): 128 + N, what a shell reports for
-          // a child killed by signal N. A kill that lands on the check
-          // process while the `sh -c` wrapper around it SURVIVES it (an
-          // OOM killer picking the memory hog rather than the group
-          // leader is the everyday shape) still reads as an ordinary
-          // non-zero exit here, so a matching partial output printed
-          // before the kill still reads as a pass -- the verdict is not
-          // second-guessed (nothing here can tell that code apart from a
-          // runner exiting `137` of its own accord, and `--pass-regex`
-          // means "ignore the exit code" by construction), but a reader
-          // is told, since "the suite may have been cut short" is a
-          // different thing to check than deprecation noise. Shared with
-          // `probe`'s own baseline warning through `nonZeroPassWarning`
-          // (`src/pass-regex.ts`) so the wording cannot drift between
-          // the two.
-          warnings.push(
-            nonZeroPassWarning({
-              prefix: `${name}: `,
-              outputSubject: "the check's output",
-              exitSubject: "the check",
-              pattern: passRegex.source,
-              exitCode: execResult.exitCode,
-              logPath: execResult.logPath,
-            }),
-          );
-        }
-      } else {
-        warnings.push(
-          `${name}: --pass-regex (${passRegex.source}) did not match the check's output${truncationNote("check", execResult.stdoutTruncated, execResult.stderrTruncated)}; see ${execResult.logPath}`,
-        );
-      }
-    } else if (passRegex !== undefined) {
-      // `exitStatus === "error"` here: a timeout or exit 126/127 (an
-      // aborted run already returned above, before this line, with its
-      // own warning). The predicate answers nothing about a shape like
-      // that -- there is no completed run to test it against -- so it is
-      // never consulted; said out loud, same shape as the skipped-check
-      // warning above, rather than left to look like the predicate was
-      // silently dropped.
-      const errorReason = execResult.timedOut
-        ? "timed out"
-        : `exited with code ${String(execResult.exitCode)}`;
-      warnings.push(
-        `${name}: --pass-regex (${passRegex.source}) was given but the check ${errorReason}, so the predicate was never consulted`,
-      );
-    }
-    const selection = selectDetector(detectors, fallbackDetector, {
-      output,
-      command,
-      exitCode: execResult.exitCode,
-    });
-    const detector = selection.detector;
-    if (selection.ambiguousCandidates) {
-      warnings.push(
-        `${name}: ambiguous detector selection; candidates: ${selection.ambiguousCandidates.join(", ")}`,
-      );
-    }
-    let parsed = detector.parse({
-      output,
-      command,
-      exitCode: execResult.exitCode,
-    });
-
-    // A phpunit check whose own STATUS is `pass` while its tally shows
-    // zero tests actually ran (an empty/filtered suite, an all-skipped
-    // run, or a PHPUnit 9 warnings-only run such as `Tests: 1,
-    // Assertions: 0, Warnings: 1.`) still keeps that `pass` status here
-    // -- the status is the verdict, not this warning (see
-    // docs/non-js-test-runners.md) -- but
-    // a reader is told the pass is hollow. Checked against `status`, not
-    // the exit code: `--pass-regex` can decide `pass` on a non-zero exit
-    // (a green suite that PHPUnit itself exits non-zero for, over a
-    // deprecation notice, say), and the warning below is worded on that
-    // same status rather than claiming an exit code that may not be `0`
-    // at all. Reuses `phpunitZeroTestsVerdict` (the same reading
-    // `probe`'s own zero-tests guard is built on) rather than re-deriving
-    // the tally here, so the two never drift apart.
-    //
-    // Three-valued on purpose: `no_tests_executed:` is claimed ONLY for
-    // the `"zero"` reading, i.e. only where PHPUnit itself stated that
-    // nothing ran. Wherever the question cannot be answered from the
-    // output -- a tally whose reading turns on a PHPUnit major version
-    // the output does not state (a truncated capture whose banner fell
-    // off the front), or an output with no result report in it at all
-    // (a mid-suite `exit()`/`die()`) -- this warns
-    // `zero_tests_ambiguous:` with the reason instead: claiming
-    // `no_tests_executed:` there asserts something the output does not
-    // say, which is exactly the false claim both a green, banner-
-    // truncated PHPUnit 11 run and a completed `--no-results` run got
-    // from earlier versions of this branch.
-    //
-    // Both texts carry the reading's OWN `reason` rather than a
-    // hardcoded sentence about a tally line: the `"zero"` verdict has
-    // two origins (PHPUnit's `No tests executed!` line and a tally
-    // derivation), and naming the tally line for both of them was a
-    // claim about output that the explicit-statement case does not
-    // have.
-    if (status === "pass" && detector === phpunitDetector) {
-      const zeroTests = phpunitZeroTestsVerdict(output);
-      if (zeroTests.verdict === "zero") {
-        parsed = {
-          ...parsed,
-          warnings: [
-            ...parsed.warnings,
-            `no_tests_executed: phpunit executed no test at all even though the check passed: ${zeroTests.reason}.`,
-          ],
-        };
-      } else if (zeroTests.verdict === "ambiguous") {
-        parsed = {
-          ...parsed,
-          warnings: [
-            ...parsed.warnings,
-            `zero_tests_ambiguous: the check passed, but whether phpunit executed any test at all cannot be read from its own output, so no_tests_executed is not claimed either way: ${zeroTests.reason}.`,
-          ],
-        };
-      }
-    }
-
-    // The truncation adjustment runs whenever this check's own `status`
-    // already needed it (`fail`/`error`), and ADDITIONALLY whenever a
-    // predicate was actually consulted, `pass` included: a predicate can
-    // decide `pass` from a match sitting inside a truncated tail just as
-    // easily as it can decide `fail`, and either way the detector's own
-    // parsed counts may have undercounted a truncated run. A check with
-    // no predicate configured is entirely unaffected: this widens
-    // nothing for the plain exit-code path (`passRegex === undefined`
-    // never enters the second disjunct).
-    if (
-      status === "fail" ||
-      status === "error" ||
-      (passRegex !== undefined && exitStatus !== "error")
-    ) {
-      parsed = adjustForTruncatedTail(
-        parsed,
-        output,
-        truncated,
-        detector === eslintDetector,
-      );
-    }
-
-    // A predicate-decided `pass` overrules the exit code, never the
-    // detector's own parse: the detector can still have found real
-    // failures in the very output the predicate matched (a loose
-    // `--pass-regex` that matches a banner line ahead of a red summary
-    // is the motivating shape). Rather than discard that contrary
-    // evidence silently, it is said out loud -- the verdict itself is
-    // unchanged, `pass` stays `pass` (the predicate, not the detector,
-    // owns the verdict once configured), but a reader is warned the
-    // predicate may be too loose.
-    if (
-      status === "pass" &&
-      passRegex !== undefined &&
-      (parsed.summary.failed > 0 || parsed.failures.length > 0)
-    ) {
-      const parsedFailureCount =
-        parsed.failures.length > 0
-          ? parsed.failures.length
-          : parsed.summary.failed;
-      warnings.push(
-        `${name}: --pass-regex (${passRegex.source}) matched, but the ${detector.name} detector parsed ${parsedFailureCount} failure(s) of its own; the predicate may be too loose; see ${execResult.logPath}`,
-      );
-    }
-
-    if (status === "fail" || status === "error") {
-      const tail = output.trim();
-      parsed = applyFailuresInvariant(
-        parsed,
-        name,
-        execResult.exitCode,
-        execResult.timedOut,
-        tail,
-        status,
-        // A `fail` here is a predicate miss whenever a predicate was
-        // configured at all: the predicate branch above is the only way
-        // `status` becomes `fail` while `passRegex` is defined (a plain
-        // exit-code fail never has one). Labels the synthetic entry from
-        // the predicate that actually decided it, rather than the exit
-        // code the predicate was told to ignore (AC-004's second
-        // clause).
-        status === "fail" ? passRegex : undefined,
-      );
-    }
-
-    // Every detector-level warning (including any just added by the
-    // invariant above) is merged into the top-level warnings, prefixed
-    // with the check name so a caller can tell which check it came from.
-    for (const w of parsed.warnings) {
-      warnings.push(`${name}: ${w}`);
-    }
-
-    const fullResult: CheckResult = {
-      name,
-      command,
-      status,
-      exitCode: execResult.exitCode,
-      durationMs: execResult.durationMs,
-      timedOut: execResult.timedOut,
-      detector: detector.name,
-      summary: parsed.summary,
-      failures: parsed.failures,
-      logPath: execResult.logPath,
-      ...(passRegex !== undefined && exitStatus !== "error"
-        ? { passRegex: passRegex.source }
-        : {}),
-    };
-    fullChecks.push(fullResult);
-
-    let cappedFailures = parsed.failures;
-    if (cappedFailures.length > maxFailures) {
-      cappedFailures = cappedFailures.slice(0, maxFailures);
-      truncatedByMaxFailures = true;
-    }
-    checks.push({ ...fullResult, failures: cappedFailures });
-
-    if (options.failFast && status !== "pass") break;
+    if (outcome.stopRun) break;
   }
 
   // An empty resolved check list (e.g. `-c ''`) is just as much

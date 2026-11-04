@@ -33,6 +33,10 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
 - `--max-failures <n>`: caps each check's own `failures` list, a positive
   integer, default `20`; a cut sets `truncated: true` and writes the full,
   uncapped result to the log directory.
+- `--repeat <n>`: runs each check `n` times, sequentially, instead of once:
+  an integer from `1` (the default) to `100`, and given twice is a usage
+  error. See [Repeating checks](#repeating-checks) below for what one check
+  then reports.
 - `--pass-regex <name=regex>`: opt-in per-check success predicate
   (repeatable, parsed the same way as `-x name=command`: split on the
   first `=` only, so a pattern containing `=` is preserved intact; a
@@ -292,6 +296,68 @@ top-level `warnings`, each prefixed with the check name.
 Overall `status` is `error` if any check errored or was unresolved, else
 `fail` if any check failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
 the same way every other subcommand's does.
+
+## Repeating checks
+
+`--repeat <n>` (API `repeat`) runs each check `n` times, sequentially, in
+place of the single run of today: one resolution per check (so `-c`/`-x`
+resolution, name validation and the `package.json` lookup all happen once)
+and `n` executions, each through its own command. `n` is an integer from 1
+to 100; `0`, a negative number, a fraction, anything above 100, or the flag
+given twice, is `status: "usage_error"`, exit `2`. `--repeat 1` is the
+default and leaves the envelope exactly as it was: none of the fields below
+appear, and the log file keeps its plain `<name>.log` name.
+
+A repeated check reports its runs merged into one row:
+
+- `status` is `pass` only when every run passed. Otherwise it is the worst
+  status seen across the runs, and `error` beats `fail` there exactly as it
+  does across checks: a run that timed out, exited `126`/`127`, or never
+  concluded makes the check an `error` whatever the other runs did. No new
+  status string is introduced, and the overall status rule above is
+  unchanged: it reads these merged per-check statuses like any other.
+- `runs`, `passed` and `failed` count the runs actually performed and how
+  they ended; `failed` counts every run that did not pass, an errored run
+  included. `runs` is below the requested `n` when something stopped the
+  loop early (`--fail-fast`, an abort, a check whose exec layer could not
+  even start).
+- `flaky` is true when the runs disagreed: at least one passed and at least
+  one did not. It is the reader's cue that the check's own output is one
+  sample rather than the story. A check that failed every run, and a check
+  whose runs were bad in two different ways, are both not flaky: nothing
+  passed.
+- `failures` is the union of the runs' failures, de-duplicated by
+  file+line+message (a detector that locates nothing de-duplicates on the
+  message alone), in first-seen order. `summary`, `exitCode` and `timedOut`
+  are the LAST run's, and `durationMs` sums every run's.
+- `failures` is capped by `--max-failures` once, on that merged list: the
+  cap is a limit on what the envelope reports about a check, not something
+  a repeat multiplies. A cut sets `truncated: true` and writes the full
+  result to the log directory as always; that file lists every run's own
+  log path and exit code (`runLogs`), which the compact `checks` row does
+  not carry.
+
+Each run writes its own log file, `<name>.<k>.log` from `k = 1`, because
+exec.ts opens a log file in append mode and two runs writing one name would
+interleave their output. The envelope's protected `logs` key carries the
+first run's log plus every failing run's: a run that passed adds nothing a
+reader needs, while the first run's log is what a `flaky` check's pass looks
+like.
+
+`--fail-fast` stops the repeat loop at the first run that did not pass, and
+then skips the later checks exactly as it does today: the check reports the
+runs it got (`runs` below `n`), and the checks behind it are never started.
+`--timeout` applies to each run on its own (a 30-second timeout with
+`--repeat 3` is three 30-second budgets, not one shared one), and
+`--max-failures` caps the merged list as above. An abort is looked at
+between runs as well as between checks: a run that had already started is
+reported as an aborted `error` naming the abort, a run that had not started
+yet is not started, and the checks behind this one are named in the
+run-level warning with `reason: "aborted"`, as today.
+
+`--repeat` measures; it does not raise a limit for you. To bound a repeated
+run by wall-clock time or memory (a repeat multiplies both), wrap it in
+`guard`, which caps the whole `verify` invocation rather than any one run.
 
 `SIGINT` and `SIGTERM` are handled for every subcommand: the CLI kills
 the command it is running with `SIGKILL` on that command's whole process

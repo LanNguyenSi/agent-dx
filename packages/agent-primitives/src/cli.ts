@@ -23,6 +23,8 @@ import {
   verify,
   DEFAULT_CHECKS,
   DEFAULT_MAX_FAILURES,
+  DEFAULT_REPEAT,
+  MAX_REPEAT,
   type ExecLike,
   type VerifyResult,
 } from "./verify/index.js";
@@ -450,6 +452,33 @@ function parseMaxFailures(value: string): string {
   if (!Number.isInteger(n) || n < 1) {
     throw new InvalidArgumentError(
       `--max-failures must be a positive integer (got "${value}")`,
+    );
+  }
+  return value;
+}
+
+/** `--repeat <n>`: the integer check `parseMaxFailures` applies, plus the
+ * upper bound `verify()` validates, so an out-of-range repeat is a usage
+ * error before a single check runs. `--repeat` is deliberately registered
+ * with NO option default (unlike `--max-failures`, whose default is only a
+ * display value and never passes back through its parser): commander hands
+ * a parser the option's current value as `previous`, and with no default
+ * that is `undefined` on the first occurrence and the first value on every
+ * later one, which is the only way a second `--repeat` can be told from the
+ * first at all. A scalar flag given twice keeps its last value everywhere
+ * else in this CLI (that is what an overwriting parser does); here the two
+ * numbers are not two spellings of one setting but a caller who almost
+ * certainly meant a different count, so it is refused. */
+function parseRepeat(value: string, previous: string | undefined): string {
+  if (previous !== undefined) {
+    throw new InvalidArgumentError(
+      `--repeat may only be given once (got "${previous}" then "${value}")`,
+    );
+  }
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_REPEAT) {
+    throw new InvalidArgumentError(
+      `--repeat must be an integer between 1 and ${MAX_REPEAT} (got "${value}")`,
     );
   }
   return value;
@@ -1095,6 +1124,7 @@ interface VerifyCliOptions {
   failFast?: boolean;
   timeout?: string;
   maxFailures?: string;
+  repeat?: string;
 }
 
 program
@@ -1127,6 +1157,11 @@ program
     parseMaxFailures,
     String(DEFAULT_MAX_FAILURES),
   )
+  .option(
+    "--repeat <n>",
+    `run each check n times (integer 1 to ${MAX_REPEAT}, default ${DEFAULT_REPEAT}; given twice is a usage error): one resolution and n executions per check, each run with its own log file <name>.<k>.log; the check reports the runs merged (status pass only when every run passed, else the worst status seen with flaky true when the runs disagreed, failures the de-duplicated union, summary/exit code from the last run, duration summed) -- for a check whose suite fails intermittently`,
+    parseRepeat,
+  )
   .action(async (opts: VerifyCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
@@ -1146,6 +1181,7 @@ program
       timeoutMs:
         opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
       maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
+      repeat: Number(opts.repeat ?? DEFAULT_REPEAT),
     });
 
     // The log path this writes is appended to `logs` BEFORE buildEnvelope

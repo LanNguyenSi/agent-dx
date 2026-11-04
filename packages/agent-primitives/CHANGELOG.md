@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `verify --repeat <n>` (API `repeat`): runs every check n times,
+  sequentially, for a check whose suite fails intermittently. One resolution
+  per check and n executions of it, each with its own log file
+  `<name>.<k>.log`, and the check reports the runs merged: `status` is `pass`
+  only when every run passed, otherwise the worst status seen with `error`
+  beating `fail`; `flaky` says the runs disagreed; `runs`/`passed`/`failed`
+  count the runs actually performed; `failures` is the de-duplicated union
+  across the runs, capped once by `--max-failures`; `summary` and `exitCode`
+  come from the last run and `durationMs` sums them all. The envelope's
+  `logs` carry the first run's log plus every failing run's, and the full
+  result file lists every run's log and exit code. `--fail-fast` stops at the
+  first run that did not pass, `--timeout` applies to each run on its own,
+  and an abort between runs ends the loop. n is an integer from 1 (the
+  default, which leaves the envelope exactly as it was) to 100; 0, a
+  fraction, a negative number, above 100, or the flag given twice is a usage
+  error.
+
 ### Changed
 
 - The test suite now runs in a sandbox or environment where `ps` cannot be
