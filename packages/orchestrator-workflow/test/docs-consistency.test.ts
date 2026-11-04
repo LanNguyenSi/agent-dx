@@ -429,6 +429,24 @@ describe("safety core: the reviewer's read-only rule is pinned at reviewer.md", 
     expect(reviewerMd).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
     expect(reviewerMd).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
   });
+
+  it("reads a probe's verdict through the view flags and keeps stderr out of the parser", () => {
+    expect(reviewerMd).toContain(
+      "Read a probe's verdict (a replay or your own probe) with `--summary` or `--print <field,...>` (or `--report mutation-probes` for the return table), never with an ad-hoc JSON reader of the envelope, and keep stderr separate from the JSON (`2>file`, never `2>&1` into a parser).",
+    );
+  });
+
+  it("copies an invocation template instead of reading --help or calling --version", () => {
+    expect(reviewerMd).toContain(
+      "Copy an invocation template from the skill instead of reading `--help` first, and never call `--version`: every envelope carries `version`.",
+    );
+  });
+
+  it("routes an exact-text shell edit through agent-primitives patch", () => {
+    expect(reviewerMd).toContain(
+      "Make an exact-text edit from a shell through `agent-primitives patch` (`--plan` JSON or `--file/--old/--new`): every edit is verified before any file is written, all or nothing, and `--dry-run` shows the diff without writing.",
+    );
+  });
 });
 
 describe("06-handoff.md template carries the Knowledge Bundle section", () => {
@@ -478,6 +496,12 @@ describe("the run pointer and keyed run-base marker are specified in the skill's
     expect(runStateSection).toContain("on its own line");
     expect(runStateSection).toContain(
       "either rejected (it blocks the run) or not recognised at all",
+    );
+  });
+
+  it("SKILL.md Run state names worktree create --setup and --smoke and the npm ci trap", () => {
+    expect(runStateSection).toContain(
+      "When a task runs in its own linked worktree, create it with `agent-primitives worktree create --setup '<install command>'` and `--smoke <command>` for a repository whose tests need an install or a build first, and never pass `--pre 'npm ci'` inside a probe's linked worktree.",
     );
   });
 });
@@ -1372,6 +1396,24 @@ describe("the implementer prompt prescribes the two slop-detector argv shapes th
   it("names the piped commit-message shape", () => {
     expect(implementerMd).toContain(
       "`git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack review-slop`",
+    );
+  });
+
+  it("reads a probe's verdict through the view flags and keeps stderr out of the parser", () => {
+    expect(implementerMd).toContain(
+      "Read a probe's verdict with `--summary` or `--print <field,...>` (or `--report mutation-probes` for the return table), never with an ad-hoc JSON reader of the envelope, and keep stderr separate from the JSON (`2>file`, never `2>&1` into a parser).",
+    );
+  });
+
+  it("names verify -c and the rule to run only the checks the repo has", () => {
+    expect(implementerMd).toContain(
+      "run `agent-primitives verify -c <checks>` for the checks the acceptance criteria name, naming only checks the repo has (a repo without a `lint` or `typecheck` script is not run with the default list), and report its summary under `tests.executed`.",
+    );
+  });
+
+  it("routes an exact-text shell edit through agent-primitives patch", () => {
+    expect(implementerMd).toContain(
+      "Make an exact-text edit from a shell through `agent-primitives patch` (`--plan` JSON or `--file/--old/--new`): every edit is verified before any file is written, all or nothing, and `--dry-run` shows the diff without writing; do not hand-write a read, replace, and write script.",
     );
   });
 });

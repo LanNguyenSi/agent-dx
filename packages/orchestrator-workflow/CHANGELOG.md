@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The implementer and reviewer prompts and the run-state reference now name the
+  agent-primitives features the kit already ships: a probe verdict read with
+  `--summary` or `--print` instead of an ad-hoc JSON reader, stderr kept
+  separate from the JSON, `verify -c` run only with the checks the repository
+  has, exact-text shell edits through `agent-primitives patch`, a reviewer that
+  copies an invocation template instead of reading `--help` or calling
+  `--version`, and `worktree create --setup` with `--smoke` and the warning
+  against `--pre 'npm ci'` in a probe's linked worktree.
+
 ### Security
 
 - The explorer, advisor, and task-slicer prompts now state the subagent outward

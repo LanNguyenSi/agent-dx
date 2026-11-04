@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and zombie cases) are skipped with the note `ps cannot run in this
   environment` through a shared probe in `test/helpers/ps-usable.ts`.
   Where `ps` runs nothing is skipped.
+- The skill's invocation-templates section now opens by telling the reader to
+  run neither `--version` nor `--help` before the first call and to copy a
+  template instead, and the `verify` template names only the checks the
+  repository has a script for.
 
 ### Fixed
 

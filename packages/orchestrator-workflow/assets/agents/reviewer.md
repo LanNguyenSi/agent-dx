@@ -179,6 +179,16 @@ Rules:
   clean and at the reviewed head before the runner starts, and no other
   agent may be active in that tree at the same time (see the concurrency
   rule in step 7 of the detailed workflow).
+- Read a probe's verdict (a replay or your own probe) with `--summary` or
+  `--print <field,...>` (or `--report mutation-probes` for the return table),
+  never with an ad-hoc JSON reader of the envelope, and keep stderr separate
+  from the JSON (`2>file`, never `2>&1` into a parser).
+- Copy an invocation template from the skill instead of reading `--help`
+  first, and never call `--version`: every envelope carries `version`.
+- Make an exact-text edit from a shell through `agent-primitives patch`
+  (`--plan` JSON or `--file/--old/--new`): every edit is verified before any
+  file is written, all or nothing, and `--dry-run` shows the diff without
+  writing.
 - A replayed probe may be named by a resolved immutable probe-plan reference
   (path plus revision or hash and locator); check that plan and result bind
   the checked state. A plan alone, a stale reference, or an unresolved

@@ -618,7 +618,7 @@ A fifth, adjacent test guards the read-only-role brace lists
 `INSTALL-AGENT.md` (`test/docs-consistency.test.ts:100#"expect(listed.sort()).toEqual(sortedRoles);"`); it is role-enumeration generally, not
 model-specific, but shares the same drift-prevention purpose.
 
-Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1139#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
+Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1163#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
 enumeration site: `docs/model-routing-reference.md`'s "Effort tiers"
 role/tier table (moved from README.md) against `ROLE_TIERS` and
 `DEFAULT_TIER` directly, per role and column
@@ -630,7 +630,7 @@ also covers the advisor row (`ROLE_TIERS.advisor = ["high", "xhigh"]`,
 `DEFAULT_TIER.advisor = "high"`), the test iterating `ROLES` so the new
 per-role assertions came for free from the `models.ts` addition alone, no
 test edit required. Since fix-round-1
-(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:1218#"const def = TIER_DEFS[tier];"`) guards
+(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:1242#"const def = TIER_DEFS[tier];"`) guards
 `docs/model-routing-reference.md`'s other tier-shaped table (moved from
 README.md), Tier -> model class -> model alias -> requested effort, against
 `TIER_DEFS`/`CLASS_MODELS` directly, the same

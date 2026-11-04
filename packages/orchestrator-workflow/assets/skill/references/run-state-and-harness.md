@@ -105,6 +105,11 @@ run touches to it with a pointer file, `<worktree-root>/.ai/run`:
   or `.git/info/exclude`); never commit it, it carries a machine-local
   absolute path.
 
+When a task runs in its own linked worktree, create it with
+`agent-primitives worktree create --setup '<install command>'` and `--smoke
+<command>` for a repository whose tests need an install or a build first, and
+never pass `--pre 'npm ci'` inside a probe's linked worktree.
+
 The pointer is how the run-completeness reader finds the run for a change.
 Without it the reader falls back to that repository's own `.ai/runs/` and
 takes the run there that sorts newest by directory name, which is only
