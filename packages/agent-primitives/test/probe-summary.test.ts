@@ -1387,3 +1387,259 @@ describe("mutationProbeReportItem (report builder)", () => {
     expect(mutationProbeReportItems(undefined, false)).toEqual([]);
   });
 });
+
+describe("renderProbeSummary: a plan naming more than one test command", () => {
+  const row = (
+    index: number,
+    baselineIndex: number,
+    testCommand: string,
+    killed: boolean,
+  ) => ({
+    index,
+    file: "/work/repo/a.ts",
+    ...(killed
+      ? {
+          status: "killed",
+          mutant: { file: "/work/repo/a.ts", line: index + 1 },
+          mutation_probe: {
+            result: "killed",
+            expectation: "met",
+            restored_verified: true,
+          },
+          test: {
+            stdoutTail: "",
+            stderrTail: "",
+            logPath: `/logs/m${index}.log`,
+          },
+        }
+      : { status: "not_run", reason: "baseline_failed" }),
+    logs: [],
+    baseline_index: baselineIndex,
+    test_command: testCommand,
+  });
+  const summary = {
+    total: 2,
+    killed: 1,
+    survived: 0,
+    inconclusive: 0,
+    not_run: 1,
+    met: 1,
+    violated: 0,
+  };
+
+  it("one command: no test= column and no baseline line, byte for byte what a plan without baselines prints", () => {
+    const plan = {
+      baseline: { logPath: "/logs/b0.log" },
+      results: [row(0, 0, "npm test", true), row(1, 0, "npm test", false)],
+      summary,
+    };
+    const input = {
+      status: "inconclusive",
+      reason: "mutant_inconclusive",
+      cwd: "/work/repo",
+    };
+    const without = renderProbeSummary({ ...input, plan });
+    const withOne = renderProbeSummary({
+      ...input,
+      plan: {
+        ...plan,
+        baselines: [
+          {
+            index: 0,
+            command: "npm test",
+            status: "passed",
+            logPath: "/logs/b0.log",
+            entries: [0, 1],
+          },
+        ],
+      },
+    });
+    expect(withOne).toBe(without);
+    expect(withOne).not.toContain("test=");
+    expect(withOne).not.toContain("baseline[");
+    expect(withOne.split("\n")[1]).toBe(
+      "#1 a.ts | not_run(baseline_failed) | expectation=- | restored=- | failing=- | log=/logs/b0.log",
+    );
+  });
+
+  it("two commands: each mutant line ends in its test= column, one baseline line per command sits above the totals, and log= falls back to the row's own baseline", () => {
+    const text = renderProbeSummary({
+      status: "inconclusive",
+      reason: "mutant_inconclusive",
+      cwd: "/work/repo",
+      plan: {
+        baseline: { logPath: "/logs/b0.log" },
+        baselines: [
+          {
+            index: 0,
+            command: "npm test",
+            status: "passed",
+            logPath: "/logs/b0.log",
+            entries: [0],
+          },
+          {
+            index: 1,
+            command: "npm run  test:b",
+            status: "failed",
+            reason: "baseline_failed",
+            logPath: "/logs/b1.log",
+            entries: [1],
+          },
+        ],
+        results: [
+          row(0, 0, "npm test", true),
+          row(1, 1, "npm run  test:b", false),
+        ],
+        summary,
+      },
+    });
+    expect(text.trimEnd().split("\n")).toEqual([
+      "#0 a.ts:1 | killed | expectation=met | restored=true | failing=- | log=/logs/m0.log | test=npm test",
+      "#1 a.ts | not_run(baseline_failed) | expectation=- | restored=- | failing=- | log=/logs/b1.log | test=npm run test:b",
+      "baseline[0] | passed | entries=0 | log=/logs/b0.log | test=npm test",
+      "baseline[1] | failed(baseline_failed) | entries=1 | log=/logs/b1.log | test=npm run test:b",
+      "totals: status=inconclusive reason=mutant_inconclusive total=2 killed=1 survived=0 inconclusive=0 not_run=1 met=1 violated=0",
+    ]);
+  });
+
+  it("a tight maxChars drops the mutant lines first, then the baseline lines, and always keeps the totals line", () => {
+    const input = {
+      status: "killed",
+      plan: {
+        baselines: [
+          { index: 0, command: "npm test", status: "passed", entries: [0] },
+          { index: 1, command: "npm run b", status: "passed", entries: [1] },
+        ],
+        results: [row(0, 0, "npm test", true), row(1, 1, "npm run b", true)],
+        summary: { ...summary, killed: 2, not_run: 0, met: 2 },
+      },
+    };
+    const full = renderProbeSummary(input).trimEnd().split("\n");
+    const totals = full[full.length - 1];
+    const baselineLines = full.filter((l) => l.startsWith("baseline["));
+    expect(baselineLines).toHaveLength(2);
+
+    const marker = /^\.\.\. 2 more mutant lines omitted /;
+    // Room for the tail alone: the mutant lines give way (named by the
+    // marker), every baseline line and the totals stay.
+    const noMutants = renderProbeSummary(
+      input,
+      baselineLines.join("\n").length + totals.length + 2,
+    )
+      .trimEnd()
+      .split("\n");
+    expect(noMutants[0]).toMatch(marker);
+    expect(noMutants.slice(1)).toEqual([...baselineLines, totals]);
+
+    // Room for one baseline line beside the totals: the last one goes.
+    const oneBaseline = renderProbeSummary(
+      input,
+      baselineLines[0].length + totals.length + 2,
+    )
+      .trimEnd()
+      .split("\n");
+    expect(oneBaseline[0]).toMatch(marker);
+    expect(oneBaseline.slice(1)).toEqual([baselineLines[0], totals]);
+
+    // Room for the totals alone: no baseline line is left.
+    const totalsOnly = renderProbeSummary(input, totals.length + 1)
+      .trimEnd()
+      .split("\n");
+    expect(totalsOnly[0]).toMatch(marker);
+    expect(totalsOnly.slice(1)).toEqual([totals]);
+  });
+});
+
+describe(
+  "probe --plan naming two test commands: the compact views (CLI)",
+  { timeout: 60000 },
+  () => {
+    function twoCommandPlan(repo: string): string {
+      const plan = path.join(repo, "plan.json");
+      fs.writeFileSync(
+        plan,
+        JSON.stringify({
+          test: TEST_CMD,
+          mutants: [
+            { file: "fixture.js", line: 1, replace: "module.exports = false;" },
+            {
+              file: "fixture.js",
+              line: 1,
+              replace: "module.exports = 1;",
+              test: 'node -e "process.exit(1)"',
+            },
+          ],
+        }),
+      );
+      return plan;
+    }
+
+    it("--summary ends each mutant line in its test= column and prints one baseline line per command above the totals", async () => {
+      const { repo, logs } = makeRepo();
+      const { json, view } = await both(
+        repo,
+        logs,
+        ["--plan", twoCommandPlan(repo)],
+        ["--summary"],
+      );
+      expect(view.code).toBe(json.code);
+      const lines = view.stdout.trimEnd().split("\n");
+      expect(lines).toHaveLength(5);
+      expect(lines[0]).toMatch(/^#0 \S*fixture\.js:1 \| killed /);
+      expect(lines[0].endsWith(` | test=${TEST_CMD}`)).toBe(true);
+      expect(lines[2]).toMatch(/^baseline\[0\] \| passed \| entries=0 \| log=/);
+      expect(lines[3]).toMatch(
+        /^baseline\[1\] \| failed\(baseline_failed\) \| entries=1 \| log=/,
+      );
+      // The never-run mutant's log= is its own command's baseline log,
+      // read from the same output (each spawned run logs to its own file).
+      const secondBaselineLog = /\| log=(\S+) \|/.exec(lines[3])?.[1];
+      expect(secondBaselineLog).toMatch(/\.log$/);
+      expect(lines[1]).toMatch(
+        /^#1 \S*fixture\.js \| not_run\(baseline_failed\) /,
+      );
+      expect(
+        lines[1].endsWith(
+          ` | log=${secondBaselineLog} | test=node -e "process.exit(1)"`,
+        ),
+      ).toBe(true);
+      expect(lines[4]).toBe(
+        "totals: status=inconclusive reason=mutant_inconclusive total=2 killed=1 survived=0 inconclusive=0 not_run=1 met=1 violated=0",
+      );
+    });
+
+    it("--print plan.baselines prints every baseline, and --report keeps its eleven fields per item", async () => {
+      const { repo, logs } = makeRepo();
+      const plan = twoCommandPlan(repo);
+      const { view } = await both(
+        repo,
+        logs,
+        ["--plan", plan],
+        ["--print", "plan.baselines"],
+      );
+      const printed = JSON.parse(view.stdout)["plan.baselines"];
+      expect(
+        printed.map((b: { command: string; status: string }) => [
+          b.command,
+          b.status,
+        ]),
+      ).toEqual([
+        [TEST_CMD, "passed"],
+        ['node -e "process.exit(1)"', "failed"],
+      ]);
+
+      const report = await both(
+        repo,
+        logs,
+        ["--plan", plan],
+        ["--report", "mutation-probes"],
+      );
+      const items = JSON.parse(report.view.stdout);
+      expect(items).toHaveLength(2);
+      for (const item of items) expect(Object.keys(item)).toEqual(REPORT_KEYS);
+      expect(items[0].result).toBe("killed");
+      expect(items[1].result).toBe("not_applicable");
+      expect(items[1].reason).toBe("baseline_failed");
+    });
+  },
+);

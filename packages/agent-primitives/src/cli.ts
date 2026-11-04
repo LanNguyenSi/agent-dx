@@ -1655,7 +1655,7 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
 }
 
 /** The single-mutant options `--plan` refuses outright: the plan file
- * itself carries the mutants and the command they share, so accepting
+ * itself carries the mutants and their test commands, so accepting
  * one of these beside it would mean two sources for the same value with
  * no honest precedence between them. `--env` is NOT in this set (it
  * used to be, when a plan run had no wiring for it at all): it is
@@ -1663,8 +1663,8 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
  * threaded straight through to `probePlan`'s own setup, applied to the
  * baseline and every mutant, since a plan file has no key for it to
  * conflict with. `--require-baseline-evidence` is NOT in this set
- * either, for the same reason: a plan runs every mutant against ONE
- * shared baseline, so there is no second source for this value to
+ * either, for the same reason: a plan applies it to each of its
+ * baselines alike, so there is no second source for this value to
  * conflict with. The run-shaping options (`-i`, `--expect`, `--timeout`)
  * are NOT in this set either: they override the plan's own value when
  * given (see `runProbePlanCommand`'s own docblock for that precedence).
@@ -1725,14 +1725,16 @@ function explicitlyGiven(command: Command, key: string): boolean {
 
 /**
  * Runs `probe --plan <path>`: read and validate the plan, reconcile the
- * run-shaping options with it, run every mutant against one shared
- * baseline, and emit one envelope carrying `plan: { baseline, results,
- * summary }`.
+ * run-shaping options with it, run every mutant against the baseline of
+ * its own test command (one baseline per distinct command), and emit one
+ * envelope carrying `plan: { baseline, results, summary, baselines }`.
  *
  * Precedence, one rule for every run-shaping option: a value given on
  * the command line wins over the plan file's own value, which wins over
  * the CLI default. A mutant's own `expect` wins over both, since it is
- * the only value that is per mutant rather than per run.
+ * the only value that is per mutant rather than per run; a mutant's own
+ * `test` wins over the plan's `test` the same way (there is no
+ * command-line `-t` beside `--plan` for either to compete with).
  */
 async function runProbePlanCommand(
   opts: ProbeCliOptions,
@@ -1838,9 +1840,17 @@ async function runProbePlanCommand(
     // mutant added to the plan. A per-mutant log path (its dry run, its
     // real apply) stays inside that mutant's own `plan.results[i].logs`
     // / `.test.logPath`, which the normal reduction can still cap or
-    // drop like any other payload field.
+    // drop like any other payload field. A plan naming more than one
+    // test command lists every baseline that ran, in group order: still
+    // one entry per command, never one per mutant.
     logs: [
-      ...(result.baseline !== undefined ? [result.baseline.logPath] : []),
+      ...(result.baselines.length > 1
+        ? result.baselines.flatMap((group) =>
+            group.logPath !== undefined ? [group.logPath] : [],
+          )
+        : result.baseline !== undefined
+          ? [result.baseline.logPath]
+          : []),
       ...(result.dryRunLogPaths ?? []),
     ],
     extra: {
@@ -1861,6 +1871,10 @@ async function runProbePlanCommand(
         ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
         results: result.results,
         summary: result.summary,
+        // Last, after the fields a plan naming one command has always
+        // carried: the reduction keeps an object's keys in order, so an
+        // envelope cut to `-m` gives this one up before any of those.
+        baselines: result.baselines,
       },
       isolation: result.isolation,
     },
@@ -1902,6 +1916,7 @@ async function runProbePlanCommand(
       warnings: result.warnings,
       plan: {
         baseline: result.baseline,
+        baselines: result.baselines,
         results: result.results,
         summary: { ...result.summary },
       },
@@ -1972,7 +1987,7 @@ program
   )
   .option(
     "--plan <path>",
-    `JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with ${PLAN_EXCLUSIVE_FLAG_LIST}`,
+    `JSON file with a list of mutants and their test command (the plan's, or each mutant's own), run against one baseline per distinct test command; mutually exclusive with ${PLAN_EXCLUSIVE_FLAG_LIST}`,
   )
   .option(
     "--link <dirs>",
