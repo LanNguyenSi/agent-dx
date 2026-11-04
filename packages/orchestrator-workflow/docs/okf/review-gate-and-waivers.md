@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-11-03T15:05:37Z
+timestamp: 2026-11-04T14:12:36Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -105,7 +105,7 @@ rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
 resupply it instead of inferring one from the findings list"
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:259-261#"instead of inferring one from the findings list."`; the installed `reviewer.md:239#"leave it blank or omit it."` prompt carries the mirrored
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:259-261#"instead of inferring one from the findings list."`; the installed `reviewer.md:251#"leave it blank or omit it."` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.
@@ -163,7 +163,7 @@ is now its one site; the charter only points to it
 (`agents-md-section.md:44#"The docs-only closure rule and the escalation budget are in the skill's"`), and step 8 of
 the detailed workflow does the same. It is
 pinned as sentences at that site only, in
-`test/docs-consistency.test.ts:3090#"safety core: the docs-only closing delta stays narrowly bounded at the review and recovery reference"`.
+`test/docs-consistency.test.ts:3132#"safety core: the docs-only closing delta stays narrowly bounded at the review and recovery reference"`.
 
 A second closing option sits in the same section, with its own conditions
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:180#"A second closing option covers a medium finding in the category"`).
@@ -264,7 +264,7 @@ line outside a test case keeps the round there too
 `review-and-recovery.md:241#"when any round of the task was given the"`;
 `review-and-recovery.md:246#"such a task goes through a reviewer round. On such a task the test class is"`).
 The clauses are pinned as whole sentences
-in `test/docs-consistency.test.ts:9800#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
+in `test/docs-consistency.test.ts:9842#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
 their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.
 
 ## The Decision legend in 05-review-findings.md
@@ -371,7 +371,7 @@ implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
 same rule (`reviewer.md:163#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:251#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:212#"residual_risks:"`); `matches_implementer_claim`
+field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:251#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:224#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -395,7 +395,7 @@ all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
 `packages/orchestrator-workflow/assets/skill/references/contracts.md:259-261#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing: ask the reviewer to resupply it, rather than infer one from the
-findings, and the installed `reviewer.md:239#"leave it blank or omit it."` prompt carries the mirrored
+findings, and the installed `reviewer.md:251#"leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part
@@ -413,7 +413,7 @@ Motivated by the same 16-round dogfood as the mutation-probes hardening in
 (`CHANGELOG.md:#[0.16.0]#"as a hard-mandatory"`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
 The mandatory rule is pinned in the installed reviewer prompt only
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:969#"is mandatory: always set it in your output"`);
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:993#"is mandatory: always set it in your output"`);
 `SKILL.md`'s ask-back sentence carries no sentence pin.
 
 ## Review-round escalation budget

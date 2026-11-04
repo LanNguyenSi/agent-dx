@@ -36,12 +36,18 @@ export const PRINTABLE_FIELDS: readonly string[] = [
   "isolation",
   "fullResult",
   "totalDurationMs",
+  "line_content",
 ];
 
 /** Validates a comma-separated `--print` value; returns the trimmed,
  * non-empty field paths (`a.b` descends into an object), or throws a
- * message naming the unknown top-level field and the accepted ones. */
-export function parsePrintFields(value: string): string[] {
+ * message naming the unknown top-level field and the accepted ones.
+ * `allowed` is the command's own field list; it defaults to probe's, so
+ * probe's output and messages are unchanged. */
+export function parsePrintFields(
+  value: string,
+  allowed: readonly string[] = PRINTABLE_FIELDS,
+): string[] {
   const fields = value
     .split(",")
     .map((f) => f.trim())
@@ -51,9 +57,9 @@ export function parsePrintFields(value: string): string[] {
   }
   for (const field of fields) {
     const top = field.split(".")[0];
-    if (!PRINTABLE_FIELDS.includes(top)) {
+    if (!allowed.includes(top)) {
       throw new Error(
-        `--print: unknown field "${top}" (in "${field}"); known fields: ${PRINTABLE_FIELDS.join(", ")}`,
+        `--print: unknown field "${top}" (in "${field}"); known fields: ${allowed.join(", ")}`,
       );
     }
   }
@@ -104,6 +110,20 @@ interface SummaryMutantLike {
   };
   test?: { stdoutTail?: string; stderrTail?: string; logPath?: string };
   logs?: string[];
+  /** A plan row's own baseline group (`plan.baselines[i]`) and the test
+   * command it ran. */
+  baseline_index?: number;
+  test_command?: string;
+}
+
+/** The pieces of one `plan.baselines[]` entry the summary reads. */
+interface SummaryBaselineLike {
+  index?: number;
+  command?: string;
+  status?: string;
+  reason?: string;
+  logPath?: string;
+  entries?: number[];
 }
 
 export interface SummaryInput {
@@ -123,6 +143,11 @@ export interface SummaryInput {
   fullResult?: string;
   plan?: {
     baseline?: { logPath?: string };
+    /** One per distinct test command. With more than one, every mutant
+     * line ends in its `test=` column and each baseline gets its own
+     * line above the totals; with one (or none), the summary is exactly
+     * what a plan naming one command always printed. */
+    baselines?: SummaryBaselineLike[];
     results: SummaryMutantLike[];
     summary?: Record<string, number>;
   };
@@ -163,6 +188,9 @@ function mutantLine(
   row: SummaryMutantLike,
   baselineLog: string,
   cwd: string | undefined,
+  /** The `test=` column, appended last so every column before it stays
+   * where a plan naming one command has always printed it. */
+  testCommand?: string,
 ): string {
   const rawFile = row.mutant?.file ?? row.file;
   const file = rawFile === undefined ? undefined : relativeTo(cwd, rawFile);
@@ -193,30 +221,70 @@ function mutantLine(
     // passed, so an error-shaped line in its output is noise.
     `failing=${verdict === "killed" ? firstFailingLine(row.test) : "-"}`,
     `log=${log || "-"}`,
+    ...(testCommand !== undefined ? [`test=${oneLine(testCommand)}`] : []),
   ];
   return parts.join(" | ");
+}
+
+/** One line per baseline of a plan naming more than one test command:
+ * its position, its status (with the reason a failed one carries), the
+ * mutants measured against it, its log, and its command, last. */
+function baselineLine(entry: SummaryBaselineLike, position: number): string {
+  const status = entry.status ?? "-";
+  return [
+    `baseline[${String(entry.index ?? position)}]`,
+    entry.reason !== undefined ? `${status}(${entry.reason})` : status,
+    `entries=${entry.entries !== undefined && entry.entries.length > 0 ? entry.entries.join(",") : "-"}`,
+    `log=${entry.logPath ?? "-"}`,
+    `test=${oneLine(entry.command ?? "-")}`,
+  ].join(" | ");
 }
 
 /**
  * One line per mutant (id, verdict, expectation, restored_verified, first
  * failing test, log path) and a final `totals:` line. A run that never
  * reached a mutant (usage error, plan file refusal) prints its status and
- * reason on the totals line alone.
+ * reason on the totals line alone. A plan naming more than one test
+ * command also ends every mutant line in a `test=` column and prints one
+ * line per baseline above the totals; a plan naming one prints neither.
  *
  * `maxChars` bounds the mutant lines only: the totals line (and the note
- * line, when it fits) always survive, and a marker line names how many
- * mutant lines were left out.
+ * and baseline lines, when they fit) always survive, and a marker line
+ * names how many mutant lines were left out.
  */
 export function renderProbeSummary(
   input: SummaryInput,
   maxChars: number = Number.POSITIVE_INFINITY,
 ): string {
   const lines: string[] = [];
+  const baselineLines: string[] = [];
   let counts: Record<string, number>;
   if (input.plan !== undefined) {
     const baselineLog = input.plan.baseline?.logPath ?? "";
+    const baselines = input.plan.baselines ?? [];
+    const severalCommands = baselines.length > 1;
     for (const row of input.plan.results) {
-      lines.push(mutantLine(row, baselineLog, input.cwd));
+      // A row's `log=` fallback is its own group's baseline: the one it
+      // was (or would have been) measured against.
+      const group =
+        row.baseline_index !== undefined
+          ? baselines[row.baseline_index]
+          : undefined;
+      lines.push(
+        mutantLine(
+          row,
+          group?.logPath ?? baselineLog,
+          input.cwd,
+          severalCommands
+            ? (row.test_command ?? group?.command ?? "-")
+            : undefined,
+        ),
+      );
+    }
+    if (severalCommands) {
+      for (const [position, entry] of baselines.entries()) {
+        baselineLines.push(baselineLine(entry, position));
+      }
     }
     const s = input.plan.summary ?? {};
     counts = {
@@ -264,17 +332,20 @@ export function renderProbeSummary(
     };
   }
   const head = `status=${input.status}${input.reason !== undefined ? ` reason=${input.reason}` : ""}`;
-  const tail: string[] = [
-    `totals: ${head} total=${counts.total} killed=${counts.killed} survived=${counts.survived} inconclusive=${counts.inconclusive} not_run=${counts.not_run} met=${counts.met} violated=${counts.violated}`,
-  ];
+  const totals = `totals: ${head} total=${counts.total} killed=${counts.killed} survived=${counts.survived} inconclusive=${counts.inconclusive} not_run=${counts.not_run} met=${counts.met} violated=${counts.violated}`;
+  const tail: string[] = [...baselineLines, totals];
   const note = input.message ?? input.warnings?.[0];
   if (counts.total === 0 && note !== undefined) {
     tail.push(`note: ${oneLine(note)}`);
   }
   const size = (rows: string[]): number =>
     rows.reduce((n, r) => n + r.length + 1, 0);
-  // Drop the note before the totals when even the tail does not fit.
-  while (tail.length > 1 && size(tail) > maxChars) tail.pop();
+  // Drop the note, then the baseline lines (last first), before the
+  // totals when even the tail does not fit.
+  while (tail.length > 1 && size(tail) > maxChars) {
+    const totalsAt = tail.indexOf(totals);
+    tail.splice(totalsAt < tail.length - 1 ? tail.length - 1 : totalsAt - 1, 1);
+  }
   const markerWith = (omitted: number, hint: string): string =>
     `... ${omitted} more mutant line${omitted === 1 ? "" : "s"} omitted (-m ${maxChars} characters); ${hint}`;
   // The path joins the marker only when the marker with it fits beside the

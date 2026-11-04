@@ -33,12 +33,19 @@ export interface PlanMutantSpec {
   /** This mutant's own `expect`, when the plan gave it one; it wins over
    * the plan-level default and over a `--expect` on the command line. */
   expect?: ExpectVerdict;
+  /** This mutant's own test command (the entry's `test` key), when the
+   * plan gave it one; it wins over the plan-level `test`, which a mutant
+   * without one inherits. Mutants whose commands are the same string
+   * once trimmed share one baseline (see `probePlan`). */
+  testCommand?: string;
 }
 
 /** A validated plan: what the file said, nothing resolved and nothing
  * defaulted except where a default is part of the schema. */
 export interface ProbePlanSpec {
-  testCommand: string;
+  /** The plan-level `test`: required unless every mutant names its own
+   * (`PlanMutantSpec.testCommand`), absent only then. */
+  testCommand?: string;
   preCommand?: string;
   isolation?: IsolationMode;
   expect?: ExpectVerdict;
@@ -105,6 +112,7 @@ const MUTANT_KEYS = [
   "with",
   "patch",
   "expect",
+  "test",
 ] as const;
 
 function invalid(
@@ -192,7 +200,8 @@ function readBounded(fd: number, size: number): string {
  *    forever with no writer), an unreadable file, or one past
  *    `PLAN_MAX_BYTES` is `plan_not_readable` without a single byte being
  *    loaded.
- * 2. The schema: JSON object, known keys only, `test` present, `mutants`
+ * 2. The schema: JSON object, known keys only, a test command for every
+ *    mutant (the plan-level `test`, or the entry's own `test`), `mutants`
  *    non-empty, and exactly one mutant form per entry. Every refusal names
  *    the offending path inside the plan (`mutants[2].patch`), so a caller
  *    fixing the file is never left guessing which entry was meant.
@@ -337,9 +346,36 @@ export function validatePlan(
       `is not a known plan key (${PLAN_KEYS.join(", ")})`,
     );
   }
-  const test = readString(parsed.test, planPath, "plan.test");
-  if (!test.ok) return test.result;
-  const plan: ProbePlanSpec = { testCommand: test.value, mutants: [] };
+  const plan: ProbePlanSpec = { mutants: [] };
+  if (parsed.test !== undefined) {
+    const test = readString(parsed.test, planPath, "plan.test");
+    if (!test.ok) return test.result;
+    plan.testCommand = test.value;
+  } else {
+    // The plan-level `test` may be left out only when every mutant names
+    // its own: checked here, ahead of every other key, so a plan with no
+    // test command at all is refused naming `plan.test` exactly as it
+    // was before entries could carry one. The entry's own `test` value is
+    // validated with the rest of that entry below.
+    const without = Array.isArray(parsed.mutants)
+      ? parsed.mutants.findIndex(
+          (raw) => !isPlainObject(raw) || raw.test === undefined,
+        )
+      : -1;
+    if (
+      !Array.isArray(parsed.mutants) ||
+      parsed.mutants.length === 0 ||
+      without !== -1
+    ) {
+      return invalid(
+        planPath,
+        "plan.test",
+        without === -1
+          ? 'must be a non-empty string unless every mutant has its own "test"'
+          : `must be a non-empty string unless every mutant has its own "test" (plan.mutants[${String(without)}] has none)`,
+      );
+    }
+  }
   if (parsed.pre !== undefined) {
     const pre = readString(parsed.pre, planPath, "plan.pre");
     if (!pre.ok) return pre.result;
@@ -471,6 +507,11 @@ export function validatePlan(
       );
       if (!expect.ok) return expect.result;
       mutant.expect = expect.value;
+    }
+    if (raw.test !== undefined) {
+      const test = readString(raw.test, planPath, `${at}.test`);
+      if (!test.ok) return test.result;
+      mutant.testCommand = test.value;
     }
     const hasReplace = raw.replace !== undefined;
     const hasMatchPair = raw.match !== undefined || raw.with !== undefined;
