@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe --plan`: a mutant may carry its own `test`, which wins over the
+  plan-level `test` (a mutant without one inherits it); the plan-level
+  `test` may be left out when every mutant has its own. Mutants whose
+  commands are the same string once trimmed share one baseline, in the
+  order their commands first appear; every baseline runs before the first
+  mutant, through the same gate the first one goes through (zero-tests
+  guard, `--pass-regex`, `--require-baseline-evidence`, the post-baseline
+  re-hash, extracted from `openRunSetup` as `runBaselineGate`), and
+  `--pre` reruns ahead of each. A failing later baseline marks only its
+  own mutants `not_run` with its reason (plan `inconclusive`,
+  `mutant_inconclusive`); a failing first one refuses the plan as before;
+  a later baseline that rewrote a target ends the plan
+  `target_changed_during_baseline`. The envelope adds `plan.baselines`
+  and each result's `test_command` and `baseline_index`, lists every
+  baseline log in `logs`, and `--summary` gains a `test=` column and one
+  line per baseline when the plan names more than one command. A plan
+  naming one command runs and reports as before, apart from those added
+  fields. `ProbePlanSpec.testCommand` and `ProbePlanOptions.testCommand`
+  are optional now, `PlanMutantSpec` gains `testCommand`, and
+  `PlanBaselineField` is exported. See docs/probe.md, "A test command per
+  mutant".
+
 ### Changed
 
 - The test suite now runs in a sandbox or environment where `ps` cannot be

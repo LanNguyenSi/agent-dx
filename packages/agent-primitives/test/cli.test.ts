@@ -5463,3 +5463,345 @@ describe("cli: probe --plan", () => {
     expect(fs.readdirSync(lockDir)).toEqual([]);
   }, 40000);
 });
+
+describe("cli: probe --plan with a test command per mutant", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  /** One function and a test that exits non-zero for a mutant of it,
+   * printing nothing: an envelope with no run-dependent output. */
+  function initRepo(): { repo: string; logs: string } {
+    const repo = makeTmpDir();
+    const logs = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const { isPositive } = require('./fixture.js');",
+        "if (isPositive(5) !== true) process.exit(1);",
+        "if (isPositive(0) !== false) process.exit(1);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo, logs };
+  }
+
+  function writePlan(logs: string, plan: unknown): string {
+    const planPath = path.join(logs, "plan.json");
+    fs.writeFileSync(planPath, JSON.stringify(plan));
+    return planPath;
+  }
+
+  /** Replaces what differs between two runs of the same plan: the
+   * temporary paths, the log and result-full file names, the durations
+   * and the package version. */
+  function normalized(
+    envelope: unknown,
+    repo: string,
+    logs: string,
+  ): Record<string, unknown> {
+    let text = JSON.stringify(envelope);
+    for (const [dir, token] of [
+      [repo, "<repo>"],
+      [logs, "<logs>"],
+    ]) {
+      text = text
+        .split(fs.realpathSync(dir))
+        .join(token)
+        .split(dir)
+        .join(token);
+    }
+    text = text
+      .replace(/exec-\d+-\w+\.log/g, "exec-<id>.log")
+      .replace(/result-full-[0-9a-f-]+\.json/g, "result-full-<id>.json");
+    const walk = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(walk);
+      if (value === null || typeof value !== "object") return value;
+      return Object.fromEntries(
+        Object.entries(value).map(([key, inner]) => [
+          key,
+          key === "durationMs"
+            ? 0
+            : key === "version"
+              ? "<version>"
+              : walk(inner),
+        ]),
+      );
+    };
+    return walk(JSON.parse(text)) as Record<string, unknown>;
+  }
+
+  const ONE_COMMAND_PLAN = {
+    test: "node fixture.test.js",
+    isolation: "inplace",
+    mutants: [
+      { file: "fixture.js", line: 2, replace: "  return false;" },
+      {
+        file: "fixture.js",
+        line: 4,
+        replace: "module.exports = { isPositive, extra: 1 };",
+      },
+    ],
+  };
+
+  /** The envelope this package printed for `ONE_COMMAND_PLAN` before a
+   * plan could name more than one test command, captured from that
+   * release's own build and normalized the same way as below. */
+  const ONE_COMMAND_ENVELOPE_BEFORE = {
+    tool: "agent-primitives",
+    version: "<version>",
+    command: "probe",
+    status: "survived",
+    durationMs: 0,
+    cwd: "<repo>",
+    truncated: false,
+    logs: ["<logs>/exec-<id>.log", "<logs>/result-full-<id>.json"],
+    warnings: [],
+    expectation: "violated",
+    plan: {
+      baseline: {
+        exitCode: 0,
+        durationMs: 0,
+        logPath: "<logs>/exec-<id>.log",
+        timedOut: false,
+      },
+      results: [
+        {
+          index: 0,
+          file: "<repo>/fixture.js",
+          expect: "fail",
+          status: "killed",
+          warnings: [],
+          mutant: {
+            file: "<repo>/fixture.js",
+            line: 2,
+            before: "  return n > 0;",
+            after: "  return false;",
+            form: "replace",
+          },
+          mutation_probe: {
+            mutant: "<repo>/fixture.js:2:   return n > 0; ->   return false;",
+            verified_applied_via:
+              "<repo>/fixture.js:2\n-   return n > 0;\n+   return false;",
+            result: "killed",
+            restored_verified: true,
+            expectation: "met",
+          },
+          test: {
+            command: "node fixture.test.js",
+            exitCode: 1,
+            durationMs: 0,
+            timedOut: false,
+            stdoutTail: "",
+            stderrTail: "",
+            logPath: "<logs>/exec-<id>.log",
+          },
+          logs: [],
+        },
+        {
+          index: 1,
+          file: "<repo>/fixture.js",
+          expect: "fail",
+          status: "survived",
+          warnings: [],
+          mutant: {
+            file: "<repo>/fixture.js",
+            line: 4,
+            before: "module.exports = { isPositive };",
+            after: "module.exports = { isPositive, extra: 1 };",
+            form: "replace",
+          },
+          mutation_probe: {
+            mutant:
+              "<repo>/fixture.js:4: module.exports = { isPositive }; -> module.exports = { isPositive, extra: 1 };",
+            verified_applied_via:
+              "<repo>/fixture.js:4\n- module.exports = { isPositive };\n+ module.exports = { isPositive, extra: 1 };",
+            result: "survived",
+            restored_verified: true,
+            expectation: "violated",
+          },
+          test: {
+            command: "node fixture.test.js",
+            exitCode: 0,
+            durationMs: 0,
+            timedOut: false,
+            stdoutTail: "",
+            stderrTail: "",
+            logPath: "<logs>/exec-<id>.log",
+          },
+          logs: [],
+        },
+      ],
+      summary: {
+        total: 2,
+        killed: 1,
+        survived: 1,
+        inconclusive: 0,
+        not_run: 0,
+        met: 1,
+        violated: 1,
+      },
+    },
+    isolation: {
+      mode: "inplace",
+      path: null,
+      linked: [],
+      linkedNamedBy: [],
+      syncedTrackedFiles: 0,
+      syncedUntrackedFiles: 0,
+    },
+  };
+
+  it("a plan naming one command prints the envelope it printed before, plus plan.baselines and each result's test_command and baseline_index", async () => {
+    const { repo, logs } = initRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--plan",
+      writePlan(logs, ONE_COMMAND_PLAN),
+    ]);
+    expect(run.code).toBe(1);
+    const raw = JSON.parse(run.stdout);
+    const after = normalized(raw, repo, logs);
+    const plan = after.plan as Record<string, unknown>;
+
+    // The fields a plan naming one command has always carried, unchanged:
+    expect(after.logs).toEqual(ONE_COMMAND_ENVELOPE_BEFORE.logs);
+    expect(raw.logs[0]).toBe(raw.plan.baseline.logPath);
+    expect(plan.baseline).toEqual(ONE_COMMAND_ENVELOPE_BEFORE.plan.baseline);
+    expect(plan.summary).toEqual(ONE_COMMAND_ENVELOPE_BEFORE.plan.summary);
+    // ...every other field too, the additions aside:
+    const { baselines, ...planWithoutBaselines } = plan;
+    expect({
+      ...after,
+      plan: {
+        ...planWithoutBaselines,
+        results: (plan.results as Record<string, unknown>[]).map(
+          ({ test_command: _command, baseline_index: _index, ...rest }) => rest,
+        ),
+      },
+    }).toEqual(ONE_COMMAND_ENVELOPE_BEFORE);
+    // ...and the additions themselves: one baseline, the same one.
+    expect(baselines).toEqual([
+      {
+        index: 0,
+        command: "node fixture.test.js",
+        status: "passed",
+        ...ONE_COMMAND_ENVELOPE_BEFORE.plan.baseline,
+        entries: [0, 1],
+      },
+    ]);
+    expect(raw.plan.baselines[0].logPath).toBe(raw.plan.baseline.logPath);
+    expect(
+      (plan.results as Record<string, unknown>[]).map((r) => [
+        r.test_command,
+        r.baseline_index,
+      ]),
+    ).toEqual([
+      ["node fixture.test.js", 0],
+      ["node fixture.test.js", 0],
+    ]);
+  }, 30000);
+
+  it("a plan naming two commands lists both baseline logs, in group order, before the result-full entry", async () => {
+    const { repo, logs } = initRepo();
+    const second = "node fixture.test.js && true";
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--plan",
+      writePlan(logs, {
+        isolation: "inplace",
+        mutants: [
+          {
+            file: "fixture.js",
+            line: 2,
+            replace: "  return false;",
+            test: "node fixture.test.js",
+          },
+          {
+            file: "fixture.js",
+            line: 2,
+            replace: "  return n >= 0;",
+            test: second,
+          },
+        ],
+      }),
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(
+      parsed.plan.baselines.map((b: { command: string; status: string }) => [
+        b.command,
+        b.status,
+      ]),
+    ).toEqual([
+      ["node fixture.test.js", "passed"],
+      [second, "passed"],
+    ]);
+    expect(parsed.plan.baseline.logPath).toBe(parsed.plan.baselines[0].logPath);
+    expect(parsed.logs).toEqual([
+      parsed.plan.baselines[0].logPath,
+      parsed.plan.baselines[1].logPath,
+      expect.stringMatching(/result-full-.+\.json$/),
+    ]);
+    expect(
+      parsed.plan.results.map((r: { test_command: string }) => r.test_command),
+    ).toEqual(["node fixture.test.js", second]);
+    expect(parsed.plan.results[1].test.command).toBe(second);
+  }, 30000);
+
+  it("a plan file with no test command for one of its mutants is usage_error/plan_invalid naming plan.test, before anything runs", async () => {
+    const { repo, logs } = initRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--plan",
+      writePlan(logs, {
+        mutants: [
+          {
+            file: "fixture.js",
+            line: 2,
+            replace: "  return false;",
+            test: "node fixture.test.js",
+          },
+          { file: "fixture.js", line: 2, replace: "  return n >= 0;" },
+        ],
+      }),
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("plan_invalid");
+    expect(parsed.warnings.join("\n")).toContain(
+      'plan.test must be a non-empty string unless every mutant has its own "test" (plan.mutants[1] has none)',
+    );
+    expect(parsed.plan).toBeUndefined();
+  }, 30000);
+});

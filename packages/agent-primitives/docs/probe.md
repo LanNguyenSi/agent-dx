@@ -29,7 +29,7 @@ every command.
 | `-i, --isolation <mode>` | `worktree` (mutates a detached git worktree) or `inplace` | `worktree` |
 | `--expect <verdict>` | `fail` (the mutant should break the test) or `pass` | `fail` |
 | `--timeout <seconds>` | bound for every `--pre` and `-t` invocation | none |
-| `--plan <path>` | JSON file with one test command and a list of mutants, run against one shared baseline | none |
+| `--plan <path>` | JSON file with a list of mutants and their test command (the plan's, or each mutant's own), run against one baseline per distinct test command | none |
 | `--link <dirs>` | comma-separated extra directories to link into the `-i worktree` copy | none |
 | `--allow-outside` | allow `--file`/`--link` to resolve outside the containment root | off |
 | `--summary` | print one line per mutant and a totals line instead of the JSON envelope; see [Compact views](#compact-views---summary---print-and---report) | off |
@@ -2229,7 +2229,11 @@ test's captured output tails that looks like a failing test (`FAIL`,
 none does or the verdict is not `killed` (a survived mutant passed, so
 error-shaped output it printed is not a failing test); it is a heuristic over free text,
 because the envelope has no structured failing-test field. `log=` is the
-mutant run's log, or the baseline's when no mutant run happened. The cases above say what an early stop prints. `-m` is a character budget for the printed summary, not a line count: when
+mutant run's log, or the baseline's when no mutant run happened (for a
+`--plan` naming more than one test command, its own command's baseline;
+such a plan also ends every mutant line in a `test=<command>` column and
+prints one line per baseline above the `totals:` line, see [A test
+command per mutant](#a-test-command-per-mutant)). The cases above say what an early stop prints. `-m` is a character budget for the printed summary, not a line count: when
 the mutant lines do not fit, the last ones are replaced by a marker line
 naming how many were omitted and, when the run saved one, the path of the
 full result (`result-full-*.json`) if it fits within `-m` beside the totals
@@ -2325,7 +2329,8 @@ file that cannot be read or parsed is not one of these: it reports
 (`plan_not_readable`, `plan_invalid` or `plan_empty`), and the parser's
 message in `warnings`, with no `message` field. A **`--plan`**
 run replaces `mutant`/`mutation_probe`/`test`/`env`/`totalDurationMs` at
-the top level with its own `plan: { baseline, results, summary }`; see
+the top level with its own `plan: { baseline, results, summary,
+baselines }`; see
 [`--plan`](#--plan-several-mutants-one-baseline) below for that shape and
 for where its status/reason semantics differ from the single-mutant form
 (a failing baseline, for one, is never remapped to a literal
@@ -2506,9 +2511,11 @@ every path in this document's examples, is unaffected.
 
 ## `--plan`: several mutants, one baseline
 
-`--plan <path>` takes a JSON file naming one test command and a list of
+`--plan <path>` takes a JSON file naming a test command and a list of
 mutants, and runs them against ONE baseline instead of one baseline per
-mutant. Each mutant is applied (its applied content verified by hash),
+mutant (one baseline per distinct test command, when the mutants name
+their own; see [A test command per mutant](#a-test-command-per-mutant)
+below). Each mutant is applied (its applied content verified by hash),
 tested, and restored (the restore verified by hash) before the next one
 is applied; nothing runs in parallel.
 
@@ -2534,19 +2541,22 @@ is a placeholder, not a real one, and the file is not runnable as-is.
     {
       "file": "src/example-three.ts",
       "patch": "mutants/example-three.patch",
-      "expect": "pass"
+      "expect": "pass",
+      "test": "npm test -- example-three"
     }
   ]
 }
 ```
 
-Every key except `test` and `mutants` is optional; `timeout` is in
+Every key except `test` and `mutants` is optional, and `test` too when
+every mutant carries its own (a mutant's `test`, see below); `timeout` is in
 seconds, the same unit `--timeout` takes; `passWhen: { "regex":
 "<pattern>" }` is the plan-file equivalent of `--pass-regex <regex>` (see
 its own section above), and a command-line `--pass-regex` given
 alongside a plan wins over this key when both are given. Each mutant needs `file` and
 exactly one form: `replace` (with `line`), `match` together with `with`
-(with `line`), or `patch` (whose line comes from the diff, as with `-p`).
+(with `line`), or `patch` (whose line comes from the diff, as with `-p`);
+`expect` and `test` are its optional per-mutant keys.
 Unlike the single-probe `-p`, a plan mutant's `file` is never derived
 from the patch: every path in the plan is known before the run starts, so
 the containment check below can cover all of them up front. Paths in a
@@ -2557,7 +2567,10 @@ against the
 repository root instead, so a plan's own `link` entries
 mean the same thing regardless of which subdirectory `--cwd` names, the
 same way the repository defaults file's entries do. An unknown key, a
-missing `test`, an empty `mutants`, a mutant with two forms or none, a
+missing `test` (no plan-level `test` while at least one mutant has none
+of its own, named as `plan.test` together with that mutant), a mutant
+`test` that is not a non-empty string, an empty `mutants`, a mutant with
+two forms or none, a
 `link` entry that is empty or carries a `$(...)`/backtick, or a
 `replace`/`match` mutant without a `line` is `status: "usage_error"`,
 `reason: "plan_invalid"` (or
@@ -2600,19 +2613,26 @@ command-line `--pass-regex` wins over the plan file's own
 `passWhen.regex` when both are given -- rather than being command-line
 only; see its own paragraph above for what it does once resolved.
 
-Output: the envelope carries `plan: { baseline, results, summary }`
+Output: the envelope carries `plan: { baseline, results, summary,
+baselines }`
 instead of the single probe's top-level `mutant`/`mutation_probe`/`test`,
 plus its own top-level `env` (a sibling of `plan`, not inside it) whenever
 at least one `--env` was given, the same echo the single form carries at
 its own top level (see the `env` row of the result-shape table above),
 and its own top-level `expectation` (`"met"`/`"violated"`, another
 sibling of `plan`), present once the plan has concluded (see the
-`expectation` row of the result-shape table above). `baseline` is the one baseline phase every mutant was measured against.
+`expectation` row of the result-shape table above). `baseline` is the
+first baseline's test phase: the one every mutant was measured against
+when the plan names one test command. `baselines` has one entry per
+distinct test command (one entry for a plan naming one; see [A test
+command per mutant](#a-test-command-per-mutant) below for its fields).
 `results` has one entry per plan mutant, in plan order, carrying `index`,
 `file`, `expect`, `status` (`killed`, `survived`, `inconclusive` or
 `not_run` -- this mutant's own actual, measured outcome, independent of
 `expect`; see the `--expect` paragraph above), `reason` (when there is
-one), that mutant's own `warnings` and `logs`, and -- for a mutant that
+one), that mutant's own `warnings` and `logs`, `test_command` and
+`baseline_index` (the command it ran and its baseline's position in
+`baselines`), and -- for a mutant that
 was actually applied -- `mutant`, `mutation_probe` (the same fields to
 paste into a `mutation_probes` report, `expectation` included) and
 `test`. `summary` counts `total`/`killed`/`survived`/`inconclusive`/
@@ -2647,7 +2667,7 @@ carries no `totalDurationMs` at all (the single-mutant form's own
 
 A plan of more than a handful of mutants does not fit the default
 `-m 8000`: the envelope is reduced to that bound like any other (past
-about eight mutants `truncated` is `true`, entries lose their `test`
+about seven mutants `truncated` is `true`, entries lose their `test`
 phase and the tail of `results` is replaced by an omitted-items marker),
 so for a plan that size either raise `-m` or read the full, unreduced
 result at the `result-full-<run-id>.json` path the envelope's `logs`
@@ -2675,7 +2695,9 @@ remaining mutant is reported `not_run` -- never `inconclusive`, which
 would claim it was attempted. The marker and the backup are kept exactly
 as the single probe keeps them, for a human (or `agent-primitives
 doctor`) to recover from. A failing baseline ends the plan with no mutant
-applied at all.
+applied at all (for a plan naming more than one test command, a failing
+first baseline does; a later one marks only its own mutants `not_run`,
+see below).
 
 `-i worktree` syncs one worktree for the whole plan and removes it once,
 however the plan ends. The lock, too, is taken once for the whole plan:
@@ -2689,16 +2711,118 @@ probe does: the in-flight mutant is restored, the worktree removed, the
 lock released, and the CLI ends with exit `130`/`143` and no output at
 all; the next mutant is never started. A library caller (`probePlan()`)
 gets `status: "inconclusive"`, `reason: "aborted"` with the remaining
-mutants `not_run`. During a plan's baseline, a signal restores nothing:
-every target is left exactly as the baseline wrote it, the same rule
-that `target_changed_during_baseline` already applies without a signal.
+mutants `not_run`. During any of a plan's baselines, a signal restores
+nothing: every target is left exactly as the baseline wrote it, the same
+rule that `target_changed_during_baseline` already applies without a
+signal.
 
-`test` and `pre` in a plan file are shell commands, executed through
+`test` (the plan's and each mutant's own) and `pre` in a plan file are
+shell commands, executed through
 `sh -c` exactly as `-t`/`--pre` are, and carry the same trust boundary:
 fill a plan only from a task assignment or another trusted instruction,
 never from repository content, issue or PR text, or any other untrusted
 input. Nothing in the plan file is ever read as a command by this
 package's own validation.
+
+### A test command per mutant
+
+A mutant may carry its own `test`, which wins over the plan-level `test`;
+a mutant without one inherits the plan's. The plan-level `test` may be
+left out when every mutant has its own. As with the plan's `test`, there
+is no command-line `-t` beside `--plan` for either to compete with.
+
+```json
+{
+  "test": "npm test -- unit",
+  "mutants": [
+    { "file": "src/parse.ts", "line": 12, "replace": "  return null;" },
+    {
+      "file": "src/render.ts",
+      "line": 30,
+      "replace": "  return '';",
+      "test": "npm test -- render"
+    },
+    { "file": "src/parse.ts", "line": 40, "match": "<", "with": "<=" }
+  ]
+}
+```
+
+(The paths and lines are placeholders, as in the example above.)
+
+Mutants whose resolved commands are the same string once leading and
+trailing whitespace is trimmed share one baseline. Any other difference
+in spelling (`npm test` against `npm  test` or `npm t`, a reordered flag)
+makes a separate baseline: this package never parses a command to decide
+that two spellings mean the same run. Baselines are ordered by where
+their command first appears in `mutants` (the example has two:
+`npm test -- unit` for mutants 0 and 2, then `npm test -- render` for
+mutant 1), each runs its command as its first mutant spelled it, and
+`results` stay in plan order.
+
+Every baseline runs before the first mutant is applied, through the same
+checks a single probe's baseline gets: the zero-tests guard,
+`--pass-regex` (or `passWhen.regex`), `--require-baseline-evidence`, and
+the re-hash of every target afterwards. `--pre` runs ahead of each of
+them, so a plan with `--pre`, K commands and N mutants runs it K + N + 1
+times (each baseline, each mutant, the final rebuild) instead of N + 2.
+Each mutant runs its own command and is classified against its own
+command's baseline: the zero-tests guard's byte-identical-output fallback
+compares a mutant's output with that baseline's, never with the first
+one's. The lock, the worktree sync, the backups and the restore slot are
+shared by all of them, as for one command, and the `-i worktree` escape
+check covers every command before anything runs, naming the plan path
+that carries it (`plan.mutants[1].test`).
+
+When a baseline fails:
+
+- The first one (its `--pre` failing, a red or zero-tests baseline, an
+  evidence miss, a target it rewrote): the plan is refused exactly as a
+  plan naming one command is (`status: "inconclusive"` with the same
+  `reason`, every mutant `not_run`), and no further baseline runs. A
+  plan whose every baseline would fail is refused the same way, by its
+  first.
+- A later one (`pre_failed`, `baseline_failed`,
+  `baseline_evidence_not_matched`, `no_tests_executed`,
+  `zero_tests_ambiguous`, `pycache_isolation_failed`): only that
+  command's mutants are `not_run`, each with that reason as its own
+  `reason`; the plan goes on with the other commands and ends
+  `status: "inconclusive"`, `reason: "mutant_inconclusive"` (exit `2`).
+  The failing baseline's warnings carry the prefix
+  `plan.baselines[<i>] (<command>): `, and a failing `--pre`'s log joins
+  the plan's own setup logs.
+- A later one that rewrote a target, whether it passed or failed, ends
+  the plan before any mutant is applied: `reason:
+  "target_changed_during_baseline"`, every mutant `not_run`, the target
+  left as that baseline wrote it and the backups dropped, the handling
+  the first baseline gets. Every later measurement would otherwise rest
+  on a changed tree. A later baseline stopped by a signal ends the plan
+  `reason: "aborted"` in the same way.
+
+`plan.baselines[]` holds `{ index, command, status, reason?, exitCode?,
+durationMs?, logPath?, timedOut?, entries }` per baseline, in that order:
+`status` is `passed` (its mutants were measured against it), `failed` (it
+or its `--pre` ran; `reason` says why) or `not_run` (the plan ended
+before it, a refusal before any baseline included); the four phase fields
+are present once its test phase ran; `entries` lists the `index` of each
+mutant measured against it. `plan.baseline` stays the first baseline's
+test phase. Each `results[i]` carries `test_command` (the command it ran,
+its baseline's first spelling) and `baseline_index` (its position in
+`plan.baselines`); `test` stays the mutant run's own phase object. The
+top-level `logs` lists every baseline log that exists, in order, ahead
+of the setup logs and the result-full path. `--summary` ends every
+mutant line in a `test=<command>` column, takes a mutant's `log=`
+fallback from its own baseline, and prints one `baseline[<i>] |
+<status>[(<reason>)] | entries=<i,j> | log=<path> | test=<command>` line
+per baseline above the `totals:` line; `--print plan.baselines` prints
+the list; the `--report mutation-probes` items keep their eleven fields.
+
+A plan naming one command (every mutant inheriting the plan's `test`, or
+all of them naming the same one) runs exactly as before: one baseline
+through the same setup, with the same warnings, `logs`, `summary` and
+compact views. Its envelope only adds `plan.baselines` (one entry, the
+same baseline as `plan.baseline`) and each result's `test_command` and
+`baseline_index`, which the `-m` reduction reaches one mutant or so
+sooner (see above).
 
 ### Where a plan file lives
 

@@ -40,6 +40,7 @@ import {
   type IsolationField,
   type IsolationMode,
   type MutantRuntime,
+  type PreAndTestCommand,
   type ProbeStatus,
   type RefusalReason,
   type RunController,
@@ -249,6 +250,11 @@ export interface RunSetupRefusal {
    * A plan carries its own mutant fields per result and ignores this
    * field entirely. */
   reportsMutant: boolean;
+  /** Set when this refusal is the baseline gate's (`runBaselineGate`):
+   * the baseline, or the `--pre` ahead of it, ran. Absent on every
+   * refusal made before that point. The single probe ignores it; a plan
+   * reads it to tell a first baseline that failed from one never run. */
+  fromBaselineGate?: true;
 }
 
 /** Everything a run needs before its first mutant may be applied: the
@@ -299,6 +305,13 @@ export interface RunSetupInput {
   timeoutMs?: number;
   gitApplyTimeoutMs: number;
   testCommand: string;
+  /** A plan's further test commands (one per baseline group after the
+   * first), each with the plan path that names it: scanned by the
+   * `-i worktree` escape check beside `testCommand`, before anything
+   * runs. Their baselines are the caller's, run after this setup
+   * returns. Omitted or empty for the single probe and for a plan naming
+   * one command. */
+  extraTestCommands?: { command: string; label: string }[];
   preCommand?: string;
   /** `--env NAME=VALUE` overrides (unmerged), applied to the baseline
    * and every mutant's `--pre`/`-t` alike via the one `rt.execEnv` they
@@ -423,6 +436,7 @@ export async function openRunSetup(
     extra: {
       logPaths?: string[];
       baseline?: ExecPhaseField;
+      fromBaselineGate?: boolean;
     } = {},
   ): RunSetupOutcome => ({
     ok: false,
@@ -432,6 +446,9 @@ export async function openRunSetup(
       warnings: message === undefined ? [...warnings] : [...warnings, message],
       ...(extra.logPaths !== undefined ? { logPaths: extra.logPaths } : {}),
       ...(extra.baseline !== undefined ? { baseline: extra.baseline } : {}),
+      ...(extra.fromBaselineGate === true
+        ? { fromBaselineGate: true as const }
+        : {}),
       // Mechanical, not a per-call flag: every refusal's `reportsMutant`
       // comes from the one shared contract (`REFUSAL_RESULT_SHAPE`,
       // `session.ts`), keyed on `reason` alone, so a new refusal reason
@@ -510,6 +527,20 @@ export async function openRunSetup(
         hint: ISOLATION_ESCAPE_FIX_HINT,
         regions: testRegions,
       });
+    }
+    for (const extra of input.extraTestCommands ?? []) {
+      const extraRegions = escapingRootMentions(
+        extra.command,
+        root,
+        wtScratchRoot,
+      );
+      if (extraRegions.length > 0) {
+        escapes.push({
+          channel: extra.label,
+          hint: ISOLATION_ESCAPE_FIX_HINT,
+          regions: extraRegions,
+        });
+      }
     }
     if (input.preCommand !== undefined) {
       const preRegions = escapingRootMentions(
@@ -913,25 +944,139 @@ export async function openRunSetup(
     controller.setRestoreState(null);
   }
 
-  // (2) baseline: unmutated, must exit 0. Once per run (I1).
+  // A baseline that will not go on to apply a mutant (a failing one, or
+  // one whose own output shows no test actually ran) may still have
+  // rewritten a target (a formatter, a codegen step) before it got
+  // there: see `settleTargetsAfterNonMutatingBaseline` below.
+  const gateTargets = opened.map((entry): BaselineGateTarget => ({
+    subject: entry.named.subject,
+    target: entry.target,
+  }));
+
+  // (2) baseline: unmutated, must exit 0. Once per run (I1). The checks
+  // that decide whether a mutant may be measured against it are
+  // `runBaselineGate` below, the one function a plan's further test
+  // commands run their own baselines through as well.
+  const gate = await runBaselineGate({
+    command: { testCommand: input.testCommand, preCommand: input.preCommand },
+    rt,
+    passRegex: input.passRegex,
+    requireBaselineEvidence: input.requireBaselineEvidence,
+    warnings,
+    targets: gateTargets,
+    settleNonMutating: (rewroteLabel) =>
+      settleTargetsAfterNonMutatingBaseline(
+        gateTargets,
+        warnings,
+        rt.setRestoreState,
+        rewroteLabel,
+      ),
+    discardTargets: discardOpened,
+  });
+  if (!gate.ok) {
+    return refuse("inconclusive", gate.reason, gate.message, {
+      logPaths: [...stepLogPaths, ...gate.logPaths],
+      ...(gate.baseline !== undefined ? { baseline: gate.baseline } : {}),
+      fromBaselineGate: true,
+    });
+  }
+
+  return {
+    ok: true,
+    run: {
+      rt,
+      targets,
+      baseline: gate.baseline,
+      baselineOutput: gate.baselineOutput,
+      logPaths: stepLogPaths,
+    },
+  };
+}
+
+/** One target a baseline could have rewritten, named the way a warning
+ * about it names it (`RunTargetInput.subject`). */
+export interface BaselineGateTarget {
+  subject: string;
+  target: TargetSession;
+}
+
+export interface BaselineGateInput {
+  /** The commands this baseline runs: `--pre`, then the test command. */
+  command: PreAndTestCommand;
+  /** The run's runtime: where and how the commands execute. Only its
+   * exec fields are read; `command` above decides what runs. */
+  rt: MutantRuntime;
+  passRegex?: RegExp;
+  requireBaselineEvidence?: RegExp;
+  /** Every warning the gate produces is pushed here as it happens. */
+  warnings: string[];
+  /** The opened targets, re-hashed once the baseline passed: one the
+   * baseline rewrote refuses `target_changed_during_baseline`. */
+  targets: readonly BaselineGateTarget[];
+  /** Called on every path where the baseline ran but will not go on to
+   * apply a mutant (it failed, it was aborted, or its output shows no
+   * test ran), before the warnings that path pushes: the caller decides
+   * what becomes of each backup. */
+  settleNonMutating: (rewroteLabel: string) => Promise<void>;
+  /** Called on the paths that refuse without that settling (the
+   * isolation directory could not be created, `--pre` failed, a target
+   * changed during a passing baseline, an evidence miss on a passing
+   * baseline). */
+  discardTargets: () => void;
+}
+
+/** What `runBaselineGate` decided: the baseline mutants may be measured
+ * against, or the refusal its own checks reached. A refusal's `message`
+ * is NOT yet in `warnings` (the caller appends it, the way `refuse()`
+ * does), and `logPaths` names only the exec logs this gate produced
+ * beyond the baseline test's own (the failing `--pre`'s). */
+export type BaselineGateOutcome =
+  | { ok: true; baseline: ExecPhaseField; baselineOutput: BaselineOutput }
+  | {
+      ok: false;
+      reason: RefusalReason;
+      message?: string;
+      baseline?: ExecPhaseField;
+      logPaths: string[];
+    };
+
+/**
+ * Runs one baseline (`--pre`, then the test command, unmutated) and
+ * decides whether mutants may be measured against it: the zero-tests
+ * gate, the `--pass-regex` predicate and its 128 + N band warnings, the
+ * `--require-baseline-evidence` gate, and the re-hash of every target the
+ * baseline could have rewritten. `openRunSetup` runs a run's first
+ * baseline through it, and a `--plan` whose mutants name more than one
+ * test command runs each further command's own baseline through the very
+ * same function, so the two cannot drift apart on any of these checks.
+ *
+ * What becomes of the targets' backups on a refusal is the caller's
+ * (`settleNonMutating`, `discardTargets`): `openRunSetup` drops them,
+ * since nothing follows, while a plan with further test commands keeps
+ * them armed for the commands whose baselines did pass.
+ */
+export async function runBaselineGate(
+  input: BaselineGateInput,
+): Promise<BaselineGateOutcome> {
+  const { rt, warnings } = input;
   const baselineStart = Date.now();
   const baselineRun = await runPreThenTest(
-    { testCommand: input.testCommand, preCommand: input.preCommand },
+    input.command,
     rt.execEnv,
-    controller.track,
+    rt.track,
     rt.pyCacheIsolation,
   );
   if (!baselineRun.ok && "isolationError" in baselineRun) {
     // Neither `--pre` nor the test command ran: nothing has mutated any
     // target yet (this fires before any mutant is applied), so there is
     // nothing to restore, only the backups already taken to discard.
-    discardOpened();
-    return refuse(
-      "inconclusive",
-      "pycache_isolation_failed",
-      baselineRun.isolationError,
-      { logPaths: stepLogPaths },
-    );
+    input.discardTargets();
+    return {
+      ok: false,
+      reason: "pycache_isolation_failed",
+      message: baselineRun.isolationError,
+      logPaths: [],
+    };
   }
   if (!baselineRun.ok) {
     noteIncompleteOutput(warnings, "baseline --pre", baselineRun.pre);
@@ -942,9 +1087,9 @@ export async function openRunSetup(
     if (preAborted) {
       // Nothing has mutated any target yet: ordering only, same as the
       // dry-run site in `prepareMutant`.
-      await deferToHandlerIfActive(crashHandlers, exitOnSignal);
+      await deferToHandlerIfActive(rt.crashHandlers, rt.exitOnSignal);
     }
-    discardOpened();
+    input.discardTargets();
     // A `--pre` that never reported an exit code of its own is named as
     // such: the plain form would read `--pre exited null`, as if `null`
     // were a status the command itself chose. The same two shapes the
@@ -959,12 +1104,12 @@ export async function openRunSetup(
           ? `--pre timed out during the baseline run, no exit code was reported; see ${baselineRun.pre.logPath}`
           : `--pre was terminated by a signal during the baseline run, no exit code was reported; see ${baselineRun.pre.logPath}`
         : `--pre exited ${baselineRun.pre.exitCode} during the baseline run; see ${baselineRun.pre.logPath}`;
-    return refuse(
-      "inconclusive",
-      preAborted ? "aborted" : "pre_failed",
-      preMessage,
-      { logPaths: [...stepLogPaths, baselineRun.pre.logPath] },
-    );
+    return {
+      ok: false,
+      reason: preAborted ? "aborted" : "pre_failed",
+      message: preMessage,
+      logPaths: [baselineRun.pre.logPath],
+    };
   }
   const baselineTest = baselineRun.test;
   noteIncompleteOutput(warnings, "baseline", baselineTest);
@@ -977,33 +1122,6 @@ export async function openRunSetup(
   const baselineOutput = {
     stdoutTail: baselineTest.stdoutTail,
     stderrTail: baselineTest.stderrTail,
-  };
-
-  // A baseline that will not go on to apply a mutant (a failing one, or
-  // one whose own output shows no test actually ran) may still have
-  // rewritten a target (a formatter, a codegen step) before it got
-  // there: re-hash before deciding what to do with each backup,
-  // discarding one silently would throw away the only copy of that
-  // target's pre-baseline content, keeping one (and naming it in a
-  // warning) that the baseline itself rewrote, since there is nothing to
-  // restore and that write is not this probe's own. Always clears the
-  // in-flight restore slot: no mutation follows down either path.
-  const settleTargetsAfterNonMutatingBaseline = async (
-    rewroteLabel: string,
-  ): Promise<void> => {
-    for (const entry of opened) {
-      const postHash = await sha256File(entry.target.mutationFilePath).catch(
-        () => undefined,
-      );
-      if (postHash === entry.target.preHash) {
-        entry.target.discardBackup();
-      } else {
-        warnings.push(
-          `${rewroteLabel} also rewrote ${entry.named.subject}; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at ${entry.target.session.backupPath}`,
-        );
-      }
-    }
-    controller.setRestoreState(null);
   };
 
   // The 128 + N band, on the FAIL direction: a kill that lands on the
@@ -1055,7 +1173,7 @@ export async function openRunSetup(
       baselineOutput.stderrTail,
     );
     if (zeroTestsEvidence.detected) {
-      await settleTargetsAfterNonMutatingBaseline("the baseline run");
+      await input.settleNonMutating("the baseline run");
       // `ambiguous` is only ever set on the phpunit branch
       // (`zero-tests.ts`): a phpunit output whose own zero-tests reading
       // is `"ambiguous"` (an unreadable result, or a tally that needs a
@@ -1074,10 +1192,7 @@ export async function openRunSetup(
           ? `the baseline run's own output cannot be read for whether any test executed at all (${zeroTestsEvidence.via}); see ${baselineTest.logPath}`
           : `the baseline run's own output shows no test was actually executed (${zeroTestsEvidence.via}); see ${baselineTest.logPath}`,
       );
-      return refuse("inconclusive", reason, undefined, {
-        logPaths: stepLogPaths,
-        baseline,
-      });
+      return { ok: false, reason, baseline, logPaths: [] };
     }
   }
 
@@ -1124,7 +1239,7 @@ export async function openRunSetup(
       // (a no-op copy of still-original content, since nothing has
       // mutated one at this phase); wait for that before re-hashing
       // below, so the re-hash reads settled content.
-      await deferToHandlerIfActive(crashHandlers, exitOnSignal);
+      await deferToHandlerIfActive(rt.crashHandlers, rt.exitOnSignal);
     }
 
     // The evidence gate is checked ahead of the pass-regex verdict (see
@@ -1148,20 +1263,20 @@ export async function openRunSetup(
       input.requireBaselineEvidence !== undefined &&
       !input.requireBaselineEvidence.test(baselineCombinedOutput)
     ) {
-      await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
+      await input.settleNonMutating("the failing baseline run");
       pushBaselineFailBandWarning("baseline_evidence_not_matched");
       warnings.push(
         `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote("baseline", baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
       );
-      return refuse(
-        "inconclusive",
-        "baseline_evidence_not_matched",
-        undefined,
-        { logPaths: stepLogPaths, baseline },
-      );
+      return {
+        ok: false,
+        reason: "baseline_evidence_not_matched",
+        baseline,
+        logPaths: [],
+      };
     }
 
-    await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
+    await input.settleNonMutating("the failing baseline run");
     pushBaselineFailBandWarning("baseline_failed");
     // A baseline killed by a signal without ever reporting an exit code
     // of its own (a `kill` reaching the run's process-group leader, an
@@ -1204,12 +1319,12 @@ export async function openRunSetup(
         `the baseline run was aborted; see ${baselineTest.logPath}`,
       );
     }
-    return refuse(
-      "inconclusive",
-      baselineTest.aborted ? "aborted" : "baseline_failed",
-      undefined,
-      { logPaths: stepLogPaths, baseline },
-    );
+    return {
+      ok: false,
+      reason: baselineTest.aborted ? "aborted" : "baseline_failed",
+      baseline,
+      logPaths: [],
+    };
   }
 
   // A baseline the regex passed despite a non-zero exit code: named
@@ -1263,19 +1378,16 @@ export async function openRunSetup(
   // baseline left it -- restoring from the backup would instead throw
   // away a legitimate write this run never made, and the backup goes
   // with it, since no mutant will be applied against it at all.
-  for (const entry of opened) {
-    const postBaselineHash = await sha256File(
-      entry.target.mutationFilePath,
-    ).catch(() => undefined);
-    if (postBaselineHash !== entry.target.preHash) {
-      discardOpened();
-      return refuse(
-        "inconclusive",
-        "target_changed_during_baseline",
-        `${entry.named.subject} changed during the baseline run (before any mutation was applied); the target is left as the baseline run wrote it, not restored`,
-        { logPaths: stepLogPaths, baseline },
-      );
-    }
+  const changed = await firstTargetChangedSinceBackup(input.targets);
+  if (changed !== undefined) {
+    input.discardTargets();
+    return {
+      ok: false,
+      reason: "target_changed_during_baseline",
+      message: targetChangedDuringBaselineMessage(changed.subject),
+      baseline,
+      logPaths: [],
+    };
   }
 
   // Opt-in safety net for a test runner neither built-in zero-tests
@@ -1284,7 +1396,7 @@ export async function openRunSetup(
   // apply a mutant, whatever the exit code said.
   if (input.requireBaselineEvidence !== undefined) {
     if (!input.requireBaselineEvidence.test(baselineCombinedOutput)) {
-      discardOpened();
+      input.discardTargets();
       // Both this check and the zero-tests detectors above only ever see
       // the CAPTURED tail (`exec.ts`'s `TAIL_LINES`/`TAIL_CHARS` bound),
       // never the command's full output: a pattern that matched earlier
@@ -1294,30 +1406,78 @@ export async function openRunSetup(
       warnings.push(
         `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote("baseline", baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
       );
-      return refuse(
-        "inconclusive",
-        "baseline_evidence_not_matched",
-        undefined,
-        { logPaths: stepLogPaths, baseline },
-      );
+      return {
+        ok: false,
+        reason: "baseline_evidence_not_matched",
+        baseline,
+        logPaths: [],
+      };
     }
   }
 
   return {
     ok: true,
-    run: {
-      rt,
-      targets,
-      baseline,
-      baselineOutput: {
-        stdoutTail: baselineOutput.stdoutTail,
-        stderrTail: baselineOutput.stderrTail,
-        stdoutTruncated: baselineTest.stdoutTruncated,
-        stderrTruncated: baselineTest.stderrTruncated,
-        requireBaselineEvidenceMatched:
-          input.requireBaselineEvidence !== undefined,
-      },
-      logPaths: stepLogPaths,
+    baseline,
+    baselineOutput: {
+      stdoutTail: baselineOutput.stdoutTail,
+      stderrTail: baselineOutput.stderrTail,
+      stdoutTruncated: baselineTest.stdoutTruncated,
+      stderrTruncated: baselineTest.stderrTruncated,
+      requireBaselineEvidenceMatched:
+        input.requireBaselineEvidence !== undefined,
     },
   };
+}
+
+/** The first target whose content no longer hashes to what its backup
+ * holds, or `undefined` when every target is still at its pre-baseline
+ * content: what the post-baseline re-hash reads. */
+export async function firstTargetChangedSinceBackup(
+  targets: readonly BaselineGateTarget[],
+): Promise<BaselineGateTarget | undefined> {
+  for (const entry of targets) {
+    const postBaselineHash = await sha256File(
+      entry.target.mutationFilePath,
+    ).catch(() => undefined);
+    if (postBaselineHash !== entry.target.preHash) return entry;
+  }
+  return undefined;
+}
+
+/** The warning a `target_changed_during_baseline` refusal carries. */
+export function targetChangedDuringBaselineMessage(subject: string): string {
+  return `${subject} changed during the baseline run (before any mutation was applied); the target is left as the baseline run wrote it, not restored`;
+}
+
+/**
+ * Decides each backup's fate after a baseline that will not go on to
+ * apply a mutant (a failing one, or one whose own output shows no test
+ * actually ran): it may still have rewritten a target (a formatter, a
+ * codegen step) before it got there, so each target is re-hashed before
+ * deciding. Discarding one silently would throw away the only copy of
+ * that target's pre-baseline content, so a backup whose target the
+ * baseline itself rewrote is kept (and named in a warning), since there
+ * is nothing to restore and that write is not this probe's own; every
+ * other backup is dropped. Always clears the in-flight restore slot: no
+ * mutation follows down either path.
+ */
+export async function settleTargetsAfterNonMutatingBaseline(
+  targets: readonly BaselineGateTarget[],
+  warnings: string[],
+  setRestoreState: MutantRuntime["setRestoreState"],
+  rewroteLabel: string,
+): Promise<void> {
+  for (const entry of targets) {
+    const postHash = await sha256File(entry.target.mutationFilePath).catch(
+      () => undefined,
+    );
+    if (postHash === entry.target.preHash) {
+      entry.target.discardBackup();
+    } else {
+      warnings.push(
+        `${rewroteLabel} also rewrote ${entry.subject}; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at ${entry.target.session.backupPath}`,
+      );
+    }
+  }
+  setRestoreState(null);
 }
