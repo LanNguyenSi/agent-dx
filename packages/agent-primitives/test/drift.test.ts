@@ -3,7 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
-import { drift, type DriftResult } from "../src/drift/index.js";
+import {
+  DECLARATION_KEYWORDS,
+  LOCAL_BINDING_COMMENT_PREFIXES,
+  NAME_CONTINUATION_CHARACTER,
+  drift,
+  isLiveHeadDeclaration,
+  type DriftResult,
+} from "../src/drift/index.js";
 import { UsageError } from "../src/envelope.js";
 import { parseRemovedIdentifiers } from "../src/drift/parseDiff.js";
 import {
@@ -2110,6 +2117,244 @@ describe("drift (local-binding rule)", () => {
     );
     expect(regexResult.ignoredIdentifiers).toEqual([]);
   });
+
+  // The head-side filter, enumerated. Every row is one head-side file whose
+  // only occurrence of `err` is `headLine`, against a base that removed an
+  // indented declaration of `err`; `reported` keeps the doc site,
+  // `suppressed` allowlists it as a local binding. Rows are derived from
+  // `isLiveHeadDeclaration` (each comment prefix, each trailing character
+  // class, each declaration keyword, the "no character after the name"
+  // case, the scan past a rejected first occurrence) and from the `-w` of
+  // `grepHeadDeclarations` (the boundary BEFORE the keyword). `rejectedBy:
+  // "grep"` marks a row only the grep flag can reject: the filter alone
+  // would accept its text, so the direct filter table skips it.
+  interface HeadLineRow {
+    label: string;
+    headLine: string;
+    file?: string;
+    keyword?: string;
+    prefix?: string;
+    trailing?: string;
+    rejectedBy?: "grep";
+    expect: "reported" | "suppressed";
+  }
+
+  const HEAD_LINE_ROWS: readonly HeadLineRow[] = [
+    // comment prefixes: the text before the keyword, trimmed
+    {
+      label: "// comment",
+      headLine: "  // const err = 1",
+      prefix: "//",
+      expect: "reported",
+    },
+    {
+      label: "/* comment",
+      headLine: "  /* const err = 1 */",
+      prefix: "/*",
+      expect: "reported",
+    },
+    {
+      label: "* continuation",
+      headLine: " * const err = 1",
+      prefix: "*",
+      expect: "reported",
+    },
+    {
+      label: "# comment (.py)",
+      headLine: "  # const err = 1",
+      file: "src/b.py",
+      prefix: "#",
+      expect: "reported",
+    },
+    {
+      label: "comment with text before the keyword",
+      headLine: "  // note: const err = 1",
+      prefix: "//",
+      expect: "reported",
+    },
+    // trailing character: one per class of the name-continuation character
+    {
+      label: "trailing letter",
+      headLine: "  const errFoo = 1",
+      trailing: "F",
+      expect: "reported",
+    },
+    {
+      label: "trailing $",
+      headLine: "  const err$ = 1",
+      trailing: "$",
+      expect: "reported",
+    },
+    {
+      label: "trailing _",
+      headLine: "  const err_1 = 1",
+      trailing: "_",
+      expect: "reported",
+    },
+    {
+      label: "trailing digit",
+      headLine: "  const err2 = 1",
+      trailing: "2",
+      expect: "reported",
+    },
+    // the boundary BEFORE the keyword is git grep -w's
+    {
+      label: "keyword inside a longer word (string)",
+      headLine: 'export const label = "superclass err";',
+      rejectedBy: "grep",
+      expect: "reported",
+    },
+    {
+      label: "keyword inside a longer word (const)",
+      headLine: '  const x = "myconst err";',
+      rejectedBy: "grep",
+      expect: "reported",
+    },
+    // one per keyword
+    {
+      label: "const",
+      headLine: "  const err = 1",
+      keyword: "const",
+      expect: "suppressed",
+    },
+    {
+      label: "let",
+      headLine: "  let err = 1",
+      keyword: "let",
+      expect: "suppressed",
+    },
+    {
+      label: "var",
+      headLine: "  var err = 1",
+      keyword: "var",
+      expect: "suppressed",
+    },
+    {
+      label: "function",
+      headLine: "  function err() {}",
+      keyword: "function",
+      expect: "suppressed",
+    },
+    {
+      label: "class",
+      headLine: "  class err {}",
+      keyword: "class",
+      expect: "suppressed",
+    },
+    // the character after the name: absent, or outside the continuation class
+    {
+      label: "type annotation after the name",
+      headLine: "  const err: number = 1",
+      expect: "suppressed",
+    },
+    {
+      label: "no space around =",
+      headLine: "  const err=1",
+      expect: "suppressed",
+    },
+    {
+      label: "name ends the line",
+      headLine: "  const err",
+      expect: "suppressed",
+    },
+    // the scan goes past a rejected occurrence to a later live one
+    {
+      label: "longer name first, live declaration later",
+      headLine: "  const errFoo = 1; const err = 2;",
+      expect: "suppressed",
+    },
+    // documented limits: only the line start and the next character count
+    {
+      label: "comment that does not start the line",
+      headLine: "  const x = 1; // const err = 1",
+      expect: "suppressed",
+    },
+    {
+      label: "shape inside a string",
+      headLine: '  const s = "const err";',
+      expect: "suppressed",
+    },
+  ];
+
+  it("pins the table to the prefixes, keywords and trailing characters the source checks", () => {
+    expect(
+      new Set(HEAD_LINE_ROWS.flatMap((r) => (r.prefix ? [r.prefix] : []))),
+    ).toEqual(new Set(LOCAL_BINDING_COMMENT_PREFIXES));
+    expect(
+      new Set(HEAD_LINE_ROWS.flatMap((r) => (r.keyword ? [r.keyword] : []))),
+    ).toEqual(new Set(DECLARATION_KEYWORDS));
+    expect(NAME_CONTINUATION_CHARACTER.source).toBe("[A-Za-z0-9_$]");
+    const classes = new Set(
+      HEAD_LINE_ROWS.flatMap((r) => (r.trailing ? [r.trailing] : [])),
+    );
+    for (const sample of ["F", "$", "_", "2"])
+      expect(classes).toContain(sample);
+    for (const row of HEAD_LINE_ROWS) {
+      if (row.trailing) {
+        expect(NAME_CONTINUATION_CHARACTER.test(row.trailing)).toBe(true);
+      }
+    }
+  });
+
+  it.each(HEAD_LINE_ROWS)(
+    "head line `$headLine` is $expect ($label)",
+    async (row) => {
+      const keyword = row.keyword ?? "const";
+      const baseDecl =
+        keyword === "function"
+          ? "  function err() {}"
+          : keyword === "class"
+            ? "  class err {}"
+            : `  ${keyword} err = new Error("x");`;
+      const repo = initRepo();
+      writeFile(
+        repo,
+        "src/a.ts",
+        ["export function removedHolder() {", baseDecl, "}", ""].join("\n"),
+      );
+      writeFile(
+        repo,
+        "notes.md",
+        "# Notes\n\nerr is the helper this module uses.\n",
+      );
+      // The head-side file exists unchanged on both sides, so its line is
+      // never an added declaration (which would make `err` a moved name).
+      writeFile(repo, row.file ?? "src/b.ts", `${row.headLine}\n`);
+      const base = commit(repo, "base");
+      writeFile(repo, "src/a.ts", "export const placeholder = 1;\n");
+      const head = commit(repo, "head");
+
+      const result = await drift({ cwd: repo, base, head });
+      const localBinding = {
+        name: "err",
+        source: "local-binding",
+      } as const;
+      if (row.expect === "reported") {
+        expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("err");
+        expect(result.ignoredIdentifiers).not.toContainEqual(localBinding);
+        expect(result.allowlisted.filter((s) => s.path === "notes.md")).toEqual(
+          [],
+        );
+      } else {
+        expect(result.sites.filter((s) => s.path === "notes.md")).toEqual([]);
+        expect(findSite(result.allowlisted, "notes.md", 3)).toMatchObject({
+          identifier: "err",
+          allowlisted: true,
+          allowlistReason: 'local binding "err" still declared at head',
+        });
+        expect(result.ignoredIdentifiers).toContainEqual(localBinding);
+      }
+    },
+  );
+
+  it.each(HEAD_LINE_ROWS.filter((r) => r.rejectedBy !== "grep"))(
+    "the head-line filter alone judges `$headLine` $expect ($label)",
+    (row) => {
+      expect(isLiveHeadDeclaration(row.headLine, "err")).toBe(
+        row.expect === "suppressed",
+      );
+    },
+  );
 });
 
 describe("drift (ignored identifiers)", () => {

@@ -120,8 +120,12 @@ are not live declarations and are filtered after the grep: a comment line
 (`// const stamp = old approach`, whose text before the keyword names a
 comment) and a longer name whose next character `-w` reads as a word
 boundary (`let retired$old`, because git treats `$` as a non-word
-character); only a hit with live declaration text around the name counts.
-Limits: indentation is a proxy for
+character). That filter checks only a comment prefix at the start of the
+line (`//`, `/*`, `*`, `#`) and the character after the name; `-w` supplies
+the word boundary on both sides of the shape, so `superclass err` never
+matches. Limits: the shape inside a string, a template literal, JSX text,
+or a comment that does not start the line still counts as a declaration
+and suppresses; indentation is a proxy for
 scope, not a scope analysis, so an indented declaration inside a block
 that still leaves a name unreachable at head is suppressed too, while a
 top-level `let` reassigned by a local of the same name is not; and the

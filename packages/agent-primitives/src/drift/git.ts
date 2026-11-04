@@ -263,6 +263,13 @@ function escapeRegExp(text: string): string {
  * `-w` reads as a word boundary (`let retired$old`, because git treats `$`
  * as a non-word character).
  *
+ * `-w` also supplies the word boundary BEFORE the keyword, so a line like
+ * `export const label = "superclass err";` (`class err` inside a longer
+ * word) never matches. The filter checks only a comment prefix at the
+ * start of the line and the character after the name: the shape inside a
+ * string, a template literal, JSX text, or a comment that does not start
+ * the line still counts as a declaration and suppresses.
+ *
  * Limits, documented in docs/drift.md: a name bound by destructuring
  * (`const { err } = ...`) and a function parameter are not declaration
  * shapes and are not seen, and neither is a Python `def <name>` or a Go

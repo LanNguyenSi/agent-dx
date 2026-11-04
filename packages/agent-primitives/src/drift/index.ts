@@ -161,7 +161,21 @@ function capSiteText(text: string): string {
 
 /** The declaration keywords the head-side binding query greps for (see
  * `grepHeadDeclarations`). */
-const DECLARATION_KEYWORDS = ["const", "let", "var", "function", "class"];
+export const DECLARATION_KEYWORDS = [
+  "const",
+  "let",
+  "var",
+  "function",
+  "class",
+];
+
+/** What a head-side hit's text before the keyword, trimmed, may start with
+ * to count as a comment line (`isLiveHeadDeclaration` rejects it). */
+export const LOCAL_BINDING_COMMENT_PREFIXES = ["//", "/*", "*", "#"];
+
+/** A character that continues an identifier: right after the name it means
+ * the hit is a longer name, not `name`. */
+export const NAME_CONTINUATION_CHARACTER = /[A-Za-z0-9_$]/;
 
 /**
  * Whether one head-side grep hit is a live declaration of `name` rather
@@ -173,9 +187,15 @@ const DECLARATION_KEYWORDS = ["const", "let", "var", "function", "class"];
  * non-word character). A hit counts only when (i) the text before the
  * keyword, trimmed, names no comment (`//`, `*`, `/*` or `#`) and (ii) the
  * character right after `name` is absent or outside `[A-Za-z0-9_$]`; a
- * real declaration satisfies both.
+ * real declaration satisfies both. Only those two facts are checked: the
+ * shape inside a string, a template literal, JSX text, or a comment that
+ * does not start the line still counts as a declaration. The word boundary
+ * BEFORE the keyword is not checked here either; it is `git grep -w`'s
+ * (see `grepHeadDeclarations`). Behind `-w` the letter, digit and `_`
+ * parts of the trailing check are redundant (only `$` reaches it), kept as
+ * a guard that does not depend on the grep flag.
  */
-function isLiveHeadDeclaration(text: string, name: string): boolean {
+export function isLiveHeadDeclaration(text: string, name: string): boolean {
   for (const keyword of DECLARATION_KEYWORDS) {
     const needle = `${keyword} ${name}`;
     for (
@@ -184,17 +204,12 @@ function isLiveHeadDeclaration(text: string, name: string): boolean {
       at = text.indexOf(needle, at + 1)
     ) {
       const before = text.slice(0, at).trim();
-      if (
-        before.startsWith("//") ||
-        before.startsWith("/*") ||
-        before.startsWith("*") ||
-        before.startsWith("#")
-      ) {
+      if (LOCAL_BINDING_COMMENT_PREFIXES.some((p) => before.startsWith(p))) {
         continue;
       }
       const after =
         at + needle.length < text.length ? text[at + needle.length] : "";
-      if (after !== "" && /[A-Za-z0-9_$]/.test(after)) continue;
+      if (after !== "" && NAME_CONTINUATION_CHARACTER.test(after)) continue;
       return true;
     }
   }
