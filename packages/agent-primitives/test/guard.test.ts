@@ -2,9 +2,18 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { guard, type GuardOptions } from "../src/guard/index.js";
 import { isZombie, readProcesses, type ProcInfo } from "../src/guard/ps.js";
+import { skipWithoutPs } from "./helpers/ps-usable.js";
 import { CLI_PATH } from "./helpers/spawn-cli.js";
 
 /**
@@ -128,6 +137,7 @@ async function waitFor(
 }
 
 describe("guard: no limit fires", () => {
+  beforeEach(skipWithoutPs);
   it("passes a command that succeeds, with its output in the log", async () => {
     const r = await run("sh", ["-c", "echo hello; exit 0"]);
     expect(r.status).toBe("pass");
@@ -155,6 +165,7 @@ describe("guard: no limit fires", () => {
 });
 
 describe("guard: wall-clock timeout", () => {
+  beforeEach(skipWithoutPs);
   it("kills a sleeping child at the timeout, exit 124", async () => {
     const s = fx(7101);
     const t0 = Date.now();
@@ -191,6 +202,7 @@ describe("guard: wall-clock timeout", () => {
 });
 
 describe("guard: memory cap", () => {
+  beforeEach(skipWithoutPs);
   const hog = "const a=[];setInterval(()=>{a.push(Buffer.alloc(8<<20,1))},20)";
 
   it("kills a memory-hungry child at the cap, exit 123", async () => {
@@ -230,6 +242,7 @@ describe("guard: memory cap", () => {
 });
 
 describe("guard: leftovers", () => {
+  beforeEach(skipWithoutPs);
   it("finds, kills and reports a background child left in the group, exit 122", async () => {
     const s = fx(7104);
     const r = await run("sh", ["-c", `sleep ${s.arg} & exit 0`]);
@@ -441,6 +454,7 @@ describe("guard: leftovers", () => {
 });
 
 describe("guard: a trampoline killed before it was read", () => {
+  beforeEach(skipWithoutPs);
   it("a process that shows only the trampoline's leading text is reported, not taken for the watcher, whether or not the one poll before the kill read the trampoline's full text", async () => {
     // The command sets up the impostor, then kills the watcher and the
     // trampoline before the second poll (every 1.5 s); only the first poll
@@ -486,7 +500,8 @@ describe("guard: runs that cannot start", () => {
     expect(marked(s.cmd)).toEqual([]);
   });
 
-  it("reports a working directory that does not exist as spawn_failed, exit 2", async () => {
+  it("reports a working directory that does not exist as spawn_failed, exit 2", async (ctx) => {
+    skipWithoutPs(ctx);
     const s = fx(7116);
     const r = await run("sleep", [s.arg], {
       cwd: path.join(tmp(), "no-such-dir"),
@@ -660,6 +675,7 @@ function sleepMs(ms: number): Promise<void> {
 }
 
 describe("guard: a process table that cannot be read", () => {
+  beforeEach(skipWithoutPs);
   /** Runs a shell command that leaves a background `sleep` in its group and
    * exits 0.8 s after starting. The stand-in `ps` is armed once the `sleep`
    * is seen and the first poll (made at the start) is certainly over, so every
@@ -1462,6 +1478,7 @@ describe("guard: a process table that cannot be read", () => {
 });
 
 describe("guard: abort and parent death", () => {
+  beforeEach(skipWithoutPs);
   it("an abort signal kills the group at once", async () => {
     const s = fx(7114);
     const controller = new AbortController();
@@ -1512,6 +1529,7 @@ describe("guard: abort and parent death", () => {
 });
 
 describe("guard CLI", () => {
+  beforeEach(skipWithoutPs);
   function cli(args: string[], env: NodeJS.ProcessEnv = {}) {
     const dir = tmp();
     const r = spawnSync(process.execPath, [CLI_PATH, ...args], {

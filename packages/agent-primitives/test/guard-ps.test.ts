@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { skipWithoutPs } from "./helpers/ps-usable.js";
 import {
   isZombie,
   parsePs,
@@ -61,7 +62,8 @@ describe("parsePs", () => {
     expect(parsePs("garbage\n\n  PID PPID\n")).toEqual([]);
   });
 
-  it("the live process table contains this process, with a start time", () => {
+  it("the live process table contains this process, with a start time", (ctx) => {
+    skipWithoutPs(ctx);
     const rows = readProcesses();
     expect(rows).toBeDefined();
     const me = rows?.find((p) => p.pid === process.pid);
