@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `scripts/spike/` holds a throwaway measurement (branch enumerator over
+  `base..head`, scoring scripts and `REPORT.md`) of whether listing changed
+  branches without a planned mutant would have surfaced the mutants that
+  reviewers later found surviving. It is not shipped and not referenced by
+  `package.json`; the report recommends not building it as specified.
 - The test suite now runs in a sandbox or environment where `ps` cannot be
   started: the helper that lists processes in `worktree-remove-list.test.ts`
   catches the error `execFile` throws synchronously, and the tests whose
