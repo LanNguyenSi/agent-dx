@@ -12,6 +12,7 @@ them from git alone, so it works in any repository without installing a hook.
 agent-primitives hygiene --base <rev>
 agent-primitives hygiene --base <rev> --staged
 agent-primitives hygiene --base <rev> --extend-only docs/log.md --extend-only-file extend-only.txt
+agent-primitives hygiene --base <rev> --intended-deletion test/dropped.test.ts --intended-deletion-file intended.txt
 ```
 
 `--base` is the revision the task started from. Both `--base` and `--head`
@@ -96,9 +97,11 @@ argument or revision is a usage error (exit `2`).
   block comments or heredocs) can offset a real deletion in the same file.
   The count is a text heuristic, not a
   parser: it can miss a case written in an unusual shape, and it cannot
-  tell a deliberately removed case from an accidental one, so a flagged
-  drop is a prompt to explain it, not proof of a mistake. Carries
-  `baseCases` and `headCases`.
+   tell a deliberately removed case from an accidental one, so a flagged
+   drop is a prompt to explain it, not proof of a mistake. Carries
+   `baseCases` and `headCases`. A drop the caller declares with
+   `--intended-deletion` is allowed instead of reported; see "Intended
+   deletions".
 
 ## Options
 
@@ -109,8 +112,61 @@ argument or revision is a usage error (exit `2`).
 | `--staged` | Compare the merge-base of `--base` and `HEAD` with the index. |
 | `--extend-only <path>` | A path the task may only extend; repeatable. |
 | `--extend-only-file <file>` | A file listing extend-only paths. |
+| `--intended-deletion <spec>` | Declare a test file's case drop intended; repeatable. |
+| `--intended-deletion-file <file>` | A file listing intended deletions, one per line. |
 | `--max-delete-percent <n>` | Threshold from `0` to `100`, default `20`. |
 
 The result also carries `counts` (`files`, `backupFiles`,
-`extendOnlyRewrites`, `testCaseDrops`), which is kept whole when the
-envelope is reduced to fit `--max-chars`.
+`extendOnlyRewrites`, `testCaseDrops`, `intendedDeletions`), which is kept
+whole when the envelope is reduced to fit `--max-chars`.
+
+## Intended deletions
+
+A task that really does mean to delete test cases declares them, and the
+declared drops are allowed instead of reported:
+
+```bash
+agent-primitives hygiene --base <rev> \
+  --intended-deletion test/deleted.test.ts \
+  --intended-deletion 'src/trim.test.ts=2' \
+  --intended-deletion-file intended.txt
+```
+
+A declaration is `<path>`, `<path>=<n>` or `<path>=all`. `--intended-deletion`
+is repeatable; `--intended-deletion-file` takes one declaration per line,
+ignoring blank lines and `#` comments, resolves the file itself against the
+`-C` directory like `--extend-only-file`, and keeps the paths inside it
+relative to the repository root. A bare path means `all`. The count is read
+after the LAST `=`, so a path whose own name contains `=` cannot carry a
+numeric count. `=0`, a negative, a non-integer and an empty path are usage
+errors (exit `2`), like an out-of-range `--max-delete-percent`.
+
+The count is an at-most bound in the same units the counter uses: JS/TS
+test-case markers in a JavaScript or TypeScript file, PHPUnit methods in a
+`.php` file. A drop of at most `n` (any drop, with `all`) is allowed: no
+finding, and one entry in `intended_deletions` with `path`, `baseCases`,
+`headCases`, `dropped` and the `declared` bound that covered it. A drop
+above `n` is reported as before, with the declared bound named in `detail`
+(`... (declared 2)`). A renamed test file is matched on the path it has at
+head, the path the finding would name.
+
+Only `test_cases_dropped` can be declared away. `backup_file` and
+`extend_only_rewrite` never consult the declarations, so an extend-only
+file that loses cases is still flagged.
+
+Two declarations of the same path collapse to the one that allows more (the
+larger count, `all` above every number), so the flag and the file can be
+combined in any order and the larger count is what applies.
+
+A declaration that allowed nothing - its path is not in the range, is not a
+test path, or dropped no cases - draws the warning
+`intended deletion not used: <path>` and leaves the status alone; a later
+version may make an unused declaration a finding, so treat the warning as
+a typo to fix. A declaration whose path did drop, but by more than it
+allowed, was consulted and is not reported stale.
+
+The declarations are agent input, so they are always visible: the envelope
+echoes `intended_declarations` (the normalized, deduplicated set the run
+used) and `intended_deletions` (the ones it applied), and
+`intended_deletions` is kept whole when `--max-chars` reduction cuts
+`findings`.

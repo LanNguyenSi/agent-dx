@@ -37,6 +37,14 @@ export const SCAN_PATHSPECS: readonly string[] = [
   "*.php",
 ];
 
+/** The source (non-doc) part of `SCAN_PATHSPECS`: where a declaration of a
+ * name can live, which is what `drift()`'s local-binding rule greps at
+ * head. Derived from `SCAN_PATHSPECS` so the two can never drift apart; a
+ * doc file declares nothing, so its pathspec is dropped here. */
+export const SOURCE_PATHSPECS: readonly string[] = SCAN_PATHSPECS.filter(
+  (spec) => !DOC_EXTENSIONS.has(spec.replace(/^\*\./, "")),
+);
+
 function extOf(filePath: string): string {
   const base = filePath.split("/").pop() ?? filePath;
   const dot = base.lastIndexOf(".");

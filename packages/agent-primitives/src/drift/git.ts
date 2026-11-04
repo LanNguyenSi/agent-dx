@@ -236,3 +236,42 @@ export function grepIdentifier(
     withoutPathspecEnv(),
   );
 }
+
+/** Regex metacharacters, escaped before an identifier is put into an
+ * extended regular expression (a name can legally contain `$`). */
+function escapeRegExp(text: string): string {
+  return text.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
+}
+
+/**
+ * `git grep -n -w -E -e "(const|let|var|function|class) <name>" <rev> --
+ * <pathspecs>`: does `name` still have a declaration-shaped line at `rev`
+ * anywhere in the scanned source files (the head-side binding the
+ * local-binding rule of `drift()` looks for)? One call per name, never one
+ * per file.
+ *
+ * The trailing word boundary the shape needs is `-w`'s own: it requires the
+ * whole match to start and end at a word boundary, so `const errFoo` never
+ * matches the query for `err`. The boundary is deliberately NOT spelled
+ * `\b` in the pattern: git's `-E` uses the platform regex engine, and a BSD
+ * one (the macOS system build) reads `\b` as a literal rather than a word
+ * boundary, which would silently match nothing.
+ *
+ * Limits, documented in docs/drift.md: a name bound by destructuring
+ * (`const { err } = ...`) and a function parameter are not declaration
+ * shapes and are not seen, and neither is a Python `def <name>` or a Go
+ * `func <name>`, whose keyword this shape does not list.
+ */
+export function grepHeadDeclarations(
+  cwd: string,
+  rev: string,
+  name: string,
+  pathspecs: readonly string[],
+): GitRunResult {
+  const pattern = `(const|let|var|function|class) ${escapeRegExp(name)}`;
+  return runGit(
+    cwd,
+    ["grep", "-n", "-w", "-E", "-e", pattern, rev, "--", ...pathspecs],
+    withoutPathspecEnv(),
+  );
+}

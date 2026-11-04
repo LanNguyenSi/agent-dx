@@ -28,6 +28,30 @@ export interface HygieneFinding {
   headCases?: number;
 }
 
+/**
+ * One intended-deletion declaration (`--intended-deletion` /
+ * `--intended-deletion-file`): a root-relative test path and how much of
+ * its test-case drop the task declares as intended. `"all"` (a bare path)
+ * allows a drop of any size; a number allows a drop of at most that many
+ * counter units (JS/TS markers, or PHPUnit methods in a `.php` file).
+ */
+export interface IntendedDeletionDeclaration {
+  path: string;
+  declared: number | "all";
+}
+
+/** An applied allowance: one declaration that matched a real drop and
+ * covered it. */
+export interface IntendedDeletionApplied {
+  path: string;
+  baseCases: number;
+  headCases: number;
+  /** `baseCases - headCases`. */
+  dropped: number;
+  /** What the declaration allowed: a positive integer, or `"all"`. */
+  declared: number | "all";
+}
+
 export interface HygieneOptions {
   cwd: string;
   base: string;
@@ -39,6 +63,10 @@ export interface HygieneOptions {
   staged?: boolean;
   /** Root-relative paths the task only extends. */
   extendOnly?: readonly string[];
+  /** Raw `--intended-deletion` specs (`<path>`, `<path>=<n>` or
+   * `<path>=all`), from the flag and from `--intended-deletion-file`
+   * alike; parsed and validated by `hygiene()`. */
+  intendedDeletions?: readonly string[];
   maxDeletePercent?: number;
 }
 
@@ -57,12 +85,20 @@ export interface HygieneResult {
   mergeBase: string;
   maxDeletePercent: number;
   extendOnly: string[];
+  /** The declarations this run was given, normalised: leading `./`
+   * stripped, duplicate paths collapsed to the one that wins (the larger
+   * count, `"all"` above any number). Always the effective set, so an
+   * agent can see what was asked for even when nothing matched. */
+  intendedDeclarations: IntendedDeletionDeclaration[];
+  /** The declarations that were applied to a real drop. */
+  intendedDeletions: IntendedDeletionApplied[];
   findings: HygieneFinding[];
   counts: {
     files: number;
     backupFiles: number;
     extendOnlyRewrites: number;
     testCaseDrops: number;
+    intendedDeletions: number;
   };
   warnings: string[];
 }
@@ -236,6 +272,57 @@ function normalizePath(p: string): string {
   return p.replace(/^\.\//, "");
 }
 
+/** `true` when `a` allows at least as much of a drop as `b` does (`"all"`
+ * above every number): the rule that decides which of two declarations of
+ * the same path wins. */
+function declaresMore(a: number | "all", b: number | "all"): boolean {
+  if (a === "all") return b !== "all";
+  if (b === "all") return false;
+  return a > b;
+}
+
+/**
+ * Parses one raw intended-deletion spec: `<path>`, `<path>=<n>` (a
+ * positive integer) or `<path>=all`. The count is read after the LAST
+ * `=` (a documented limit: a path whose own name contains `=` can only be
+ * declared with a bare `=all`-free spec). A bare path means `"all"`. An
+ * empty path, `=0`, a negative or a non-integer count is a usage error.
+ */
+export function parseIntendedDeletion(
+  raw: string,
+): IntendedDeletionDeclaration {
+  const spec = raw.trim();
+  const eq = spec.lastIndexOf("=");
+  let path = spec;
+  let declared: number | "all" = "all";
+  if (eq >= 0) {
+    path = spec.slice(0, eq);
+    const value = spec.slice(eq + 1).trim();
+    if (value === "all") {
+      declared = "all";
+    } else if (!/^\d+$/.test(value)) {
+      throw new UsageError(
+        `hygiene: --intended-deletion "${raw}" must be <path>, <path>=<positive integer> or <path>=all`,
+      );
+    } else {
+      const n = Number(value);
+      if (!Number.isSafeInteger(n) || n < 1) {
+        throw new UsageError(
+          `hygiene: --intended-deletion "${raw}" must be <path>, <path>=<positive integer> or <path>=all`,
+        );
+      }
+      declared = n;
+    }
+  }
+  path = normalizePath(path.trim());
+  if (path === "") {
+    throw new UsageError(
+      `hygiene: --intended-deletion "${raw}" has an empty path`,
+    );
+  }
+  return { path, declared };
+}
+
 function parseNameStatus(out: string): ChangedFile[] {
   const parts = out.split("\0").filter((s) => s.length > 0);
   const files: ChangedFile[] = [];
@@ -306,7 +393,10 @@ function lineCount(content: string): number {
  * starts at the merge-base of `base` and the head (`HEAD` with `staged`),
  * so a base that moved after the branch point does not count its own later
  * changes. Throws `UsageError` outside a git work tree or for an
- * unresolvable revision.
+ * unresolvable revision, and for an unusable intended-deletion spec.
+ * A `test_cases_dropped` drop the range declares with `intendedDeletions`
+ * is allowed instead of reported (see `IntendedDeletionDeclaration`); no
+ * other finding kind can be declared away.
  */
 export function hygiene(options: HygieneOptions): HygieneResult {
   const warnings: string[] = [];
@@ -368,6 +458,25 @@ export function hygiene(options: HygieneOptions): HygieneResult {
   const extendOnly = [
     ...new Set((options.extendOnly ?? []).map(normalizePath)),
   ];
+
+  // Declarations in first-seen order; a path declared twice keeps the
+  // declaration that allows more (`all` above any number, then the larger
+  // count), so `--intended-deletion p=3` together with a file line `p=5`
+  // allows 5, and the flag-versus-file order never decides the outcome.
+  const declaredByPath = new Map<string, IntendedDeletionDeclaration>();
+  for (const raw of options.intendedDeletions ?? []) {
+    const declaration = parseIntendedDeletion(raw);
+    const existing = declaredByPath.get(declaration.path);
+    if (
+      existing === undefined ||
+      declaresMore(declaration.declared, existing.declared)
+    ) {
+      declaredByPath.set(declaration.path, declaration);
+    }
+  }
+  /** Declaration paths whose drop was looked at (allowed or not): a
+   * declaration that matched no drop at all is reported stale. */
+  const consultedDeclarations = new Set<string>();
 
   const rangeArgs = staged
     ? ["--cached", diffBase]
@@ -487,6 +596,7 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     }
   }
 
+  const intendedDeletions: IntendedDeletionApplied[] = [];
   for (const file of changed) {
     if (file.status === "A") continue;
     if (!isTestPath(file.oldPath)) continue;
@@ -497,13 +607,39 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     const baseCases = countTestCases(baseContent, file.oldPath);
     const headCases = countTestCases(headContent, file.newPath);
     if (headCases < baseCases) {
+      // Matched on the head-side path: a renamed test file's declaration
+      // names the path the file has at head, the one the finding names.
+      const declaration = declaredByPath.get(normalizePath(file.newPath));
+      const dropped = baseCases - headCases;
+      if (declaration !== undefined) {
+        consultedDeclarations.add(normalizePath(file.newPath));
+      }
+      const covered =
+        declaration !== undefined &&
+        (declaration.declared === "all" || dropped <= declaration.declared);
+      if (covered && declaration !== undefined) {
+        intendedDeletions.push({
+          path: file.newPath,
+          baseCases,
+          headCases,
+          dropped,
+          declared: declaration.declared,
+        });
+        continue;
+      }
       findings.push({
         kind: "test_cases_dropped",
         path: file.newPath,
-        detail: `test-case markers fell from ${String(baseCases)} to ${String(headCases)}${file.status === "D" ? " (file deleted)" : ""}`,
+        detail: `test-case markers fell from ${String(baseCases)} to ${String(headCases)}${file.status === "D" ? " (file deleted)" : ""}${declaration !== undefined ? ` (declared ${String(declaration.declared)})` : ""}`,
         baseCases,
         headCases,
       });
+    }
+  }
+
+  for (const [path] of declaredByPath) {
+    if (!consultedDeclarations.has(path)) {
+      warnings.push(`intended deletion not used: ${path}`);
     }
   }
 
@@ -518,12 +654,15 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     mergeBase: diffBase,
     maxDeletePercent: maxPct,
     extendOnly,
+    intendedDeclarations: [...declaredByPath.values()],
+    intendedDeletions,
     findings,
     counts: {
       files: changed.length,
       backupFiles: count("backup_file"),
       extendOnlyRewrites: count("extend_only_rewrite"),
       testCaseDrops: count("test_cases_dropped"),
+      intendedDeletions: intendedDeletions.length,
     },
     warnings,
   };

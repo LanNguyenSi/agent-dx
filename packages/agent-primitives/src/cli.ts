@@ -58,7 +58,11 @@ import {
   type Harness,
   type InitResult,
 } from "./init/index.js";
-import { drift, type DriftResult } from "./drift/index.js";
+import {
+  drift,
+  type DriftResult,
+  type IgnoredIdentifierInput,
+} from "./drift/index.js";
 import {
   DEFAULT_MAX_DELETE_PERCENT,
   hygiene,
@@ -2251,11 +2255,43 @@ interface DriftCliOptions {
   base: string;
   head: string;
   allow: string[];
+  ignoreIdentifier: string[];
+  ignoreIdentifierFile?: string;
   strict?: boolean;
 }
 
 function collectAllow(value: string, previous: string[]): string[] {
   return [...previous, value];
+}
+
+/**
+ * Reads a `--*-file` option whose entries are one per line: blank lines
+ * and `#` comments ignored, the file itself resolved against the `-C`
+ * directory while the entries inside stay repository-relative. Shared by
+ * `--extend-only-file`, `--intended-deletion-file` and
+ * `--ignore-identifier-file`; an unreadable file is a usage error naming
+ * the command and the option that asked for it.
+ */
+function readListFile(
+  cwd: string,
+  command: string,
+  option: string,
+  file: string,
+): string[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.resolve(cwd, file), "utf8");
+  } catch (err) {
+    throw new UsageError(
+      `${command}: cannot read ${option} ${file}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const entries: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line.length > 0 && !line.startsWith("#")) entries.push(line);
+  }
+  return entries;
 }
 
 function renderDriftText(result: DriftResult): string {
@@ -2303,17 +2339,40 @@ program
     [] as string[],
   )
   .option(
+    "--ignore-identifier <name>",
+    "allowlist every site of this identifier (repeatable)",
+    collectAllow,
+    [] as string[],
+  )
+  .option(
+    "--ignore-identifier-file <file>",
+    "file listing identifiers to ignore, one per line; blank lines and # comments ignored",
+  )
+  .option(
     "--strict",
     "also report allowlisted sites in sites[], flagged with allowlisted/allowlistReason",
   )
   .action(async (opts: DriftCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    const ignoreIdentifiers: IgnoredIdentifierInput[] =
+      opts.ignoreIdentifier.map((name) => ({ name, source: "flag" as const }));
+    if (opts.ignoreIdentifierFile !== undefined) {
+      for (const name of readListFile(
+        global.cwd,
+        "drift",
+        "--ignore-identifier-file",
+        opts.ignoreIdentifierFile,
+      )) {
+        ignoreIdentifiers.push({ name, source: "file" as const });
+      }
+    }
     const result = await drift({
       cwd: global.cwd,
       base: opts.base,
       head: opts.head,
       allow: opts.allow,
+      ignoreIdentifiers,
       strict: Boolean(opts.strict),
     });
     const { envelope, exitCode } = buildEnvelope({
@@ -2331,6 +2390,7 @@ program
         head_sha: result.headSha,
         merge_base: result.mergeBase,
         removed_identifiers: result.removedIdentifiers,
+        ignored_identifiers: result.ignoredIdentifiers,
         sites: result.sites,
         allowlisted: result.allowlisted,
         counts: result.counts,
@@ -2359,6 +2419,8 @@ interface HygieneCliOptions {
   staged?: boolean;
   extendOnly: string[];
   extendOnlyFile?: string;
+  intendedDeletion: string[];
+  intendedDeletionFile?: string;
   maxDeletePercent: string;
 }
 
@@ -2366,6 +2428,11 @@ function renderHygieneText(result: HygieneResult): string {
   const lines: string[] = [`status: ${result.status}`, ""];
   for (const f of result.findings) {
     lines.push(`${f.kind}: ${f.path}: ${f.detail}`);
+  }
+  for (const d of result.intendedDeletions) {
+    lines.push(
+      `intended deletion: ${d.path}: ${String(d.baseCases)} -> ${String(d.headCases)} (${String(d.dropped)} dropped, declared ${String(d.declared)})`,
+    );
   }
   lines.push("");
   lines.push(
@@ -2402,6 +2469,16 @@ program
     "file listing extend-only paths, one per line; blank lines and # comments ignored",
   )
   .option(
+    "--intended-deletion <path>",
+    "declare a test file's case drop intended: <path>, <path>=<n> (at most n dropped) or <path>=all; repeatable",
+    collectAllow,
+    [] as string[],
+  )
+  .option(
+    "--intended-deletion-file <file>",
+    "file listing intended deletions, one declaration per line; blank lines and # comments ignored",
+  )
+  .option(
     "--max-delete-percent <n>",
     "flag an extend-only file that loses more than this percent of its base lines",
     String(DEFAULT_MAX_DELETE_PERCENT),
@@ -2411,21 +2488,25 @@ program
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
     const extendOnly = [...opts.extendOnly];
     if (opts.extendOnlyFile !== undefined) {
-      let text: string;
-      try {
-        text = fs.readFileSync(
-          path.resolve(global.cwd, opts.extendOnlyFile),
-          "utf8",
-        );
-      } catch (err) {
-        throw new UsageError(
-          `hygiene: cannot read --extend-only-file ${opts.extendOnlyFile}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      for (const raw of text.split("\n")) {
-        const line = raw.trim();
-        if (line.length > 0 && !line.startsWith("#")) extendOnly.push(line);
-      }
+      extendOnly.push(
+        ...readListFile(
+          global.cwd,
+          "hygiene",
+          "--extend-only-file",
+          opts.extendOnlyFile,
+        ),
+      );
+    }
+    const intendedDeletions = [...opts.intendedDeletion];
+    if (opts.intendedDeletionFile !== undefined) {
+      intendedDeletions.push(
+        ...readListFile(
+          global.cwd,
+          "hygiene",
+          "--intended-deletion-file",
+          opts.intendedDeletionFile,
+        ),
+      );
     }
     const result = hygiene({
       cwd: global.cwd,
@@ -2433,6 +2514,7 @@ program
       head: opts.head,
       staged: Boolean(opts.staged),
       extendOnly,
+      intendedDeletions,
       maxDeletePercent: Number(opts.maxDeletePercent),
     });
     const { envelope, exitCode } = buildEnvelope({
@@ -2451,10 +2533,17 @@ program
         merge_base: result.mergeBase,
         max_delete_percent: result.maxDeletePercent,
         extend_only: result.extendOnly,
+        intended_declarations: result.intendedDeclarations,
+        intended_deletions: result.intendedDeletions,
         findings: result.findings,
         counts: result.counts,
       },
-      keepWhole: ["counts"],
+      // The applied intended deletions are the record of an allowance the
+      // run granted, so they must survive the cut a tight `--max-chars`
+      // applies to `findings` (the declarations echo and `counts` say how
+      // much of it the reader is still seeing); same idiom as `drift`'s
+      // `keepWhole: ["counts"]`.
+      keepWhole: ["counts", "intended_deletions"],
       maxChars: global.maxChars,
       logDir: global.logDir,
     });

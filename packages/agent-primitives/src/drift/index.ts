@@ -2,6 +2,7 @@ import { UsageError } from "../envelope.js";
 import { findGitRoot } from "../probe/containment.js";
 import {
   diffText,
+  grepHeadDeclarations,
   grepIdentifier,
   isShallowRepository,
   mergeBase,
@@ -19,7 +20,12 @@ import {
   parseHeadings,
   type Heading,
 } from "./allowlist.js";
-import { classifyLine, parseGrepOutput, SCAN_PATHSPECS } from "./scan.js";
+import {
+  classifyLine,
+  parseGrepOutput,
+  SCAN_PATHSPECS,
+  SOURCE_PATHSPECS,
+} from "./scan.js";
 
 export type { RemovedIdentifier, RemovedIdentifierKind } from "./parseDiff.js";
 
@@ -34,6 +40,13 @@ export interface DriftOptions {
   /** `--allow` globs: a site whose path matches one is allowlisted with
    * reason `"matched --allow glob \"<glob>\""`. */
   allow?: readonly string[];
+  /** `--ignore-identifier` / `--ignore-identifier-file` names: every site
+   * of one of these identifiers is allowlisted with reason
+   * `ignored identifier "<name>"`, ahead of the `--allow`, CHANGELOG,
+   * migration and historical-phrase reasons. Each name is echoed back in
+   * `ignoredIdentifiers` whether or not it produced a site. An empty or
+   * whitespace-only name is a usage error. */
+  ignoreIdentifiers?: readonly IgnoredIdentifierInput[];
   /** When true, an allowlisted site is ALSO added to `sites` (flagged
    * with `allowlisted: true` and its `allowlistReason`), so a mention
    * this command would otherwise suppress by default counts toward the
@@ -43,6 +56,28 @@ export interface DriftOptions {
 }
 
 export type DriftKind = "doc" | "comment";
+
+/** Where an ignored identifier came from: one `--ignore-identifier` flag,
+ * one line of an `--ignore-identifier-file`, or this command's own
+ * local-binding rule (see `drift()`). */
+export type IgnoredIdentifierSource = "flag" | "file" | "local-binding";
+
+/** One `--ignore-identifier` / `--ignore-identifier-file` entry as the CLI
+ * hands it over: the name and where it came from, so the envelope can echo
+ * the provenance back. */
+export interface IgnoredIdentifierInput {
+  name: string;
+  source: Exclude<IgnoredIdentifierSource, "local-binding">;
+}
+
+/** One entry of the echoed `ignoredIdentifiers`: an ignored name and its
+ * source. Every name the caller asked to ignore is echoed, including one
+ * that produced no site at all; a `local-binding` entry is a name this
+ * command suppressed by its own default rule. */
+export interface IgnoredIdentifier {
+  name: string;
+  source: IgnoredIdentifierSource;
+}
 
 export interface DriftSite {
   path: string;
@@ -82,6 +117,10 @@ export interface DriftResult {
    * of `head`. */
   mergeBase: string;
   removedIdentifiers: RemovedIdentifier[];
+  /** Every ignored name and where the ignore came from: all of the
+   * `ignoreIdentifiers` input (deduplicated, in the order first given) plus
+   * one `local-binding` entry per name the default rule suppressed. */
+  ignoredIdentifiers: IgnoredIdentifier[];
   sites: DriftSite[];
   allowlisted: DriftSite[];
   counts: DriftCounts;
@@ -265,6 +304,72 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
   }
 
   const uniqueNames = [...new Set(parsed.removed.map((r) => r.name))];
+
+  // Ignored names, in the order first given: a `--ignore-identifier` flag
+  // and an `--ignore-identifier-file` line arrive on equal terms, so a name
+  // given by both forms is echoed once, with the source it arrived on
+  // first (the CLI passes the flags before the file's lines).
+  const explicitIgnore = new Map<string, IgnoredIdentifierInput["source"]>();
+  for (const input of options.ignoreIdentifiers ?? []) {
+    const name = input.name.trim();
+    if (name === "") {
+      throw new UsageError(
+        "drift: --ignore-identifier needs an identifier name, got an empty one",
+      );
+    }
+    if (!explicitIgnore.has(name)) explicitIgnore.set(name, input.source);
+  }
+
+  // The local-binding rule, on by default and never opt-in: a candidate
+  // that was an indented, non-exported declaration was bound inside some
+  // enclosing scope (a function body, a method, a block), so removing that
+  // line says nothing about whether the name is gone. Ask head ONCE per
+  // candidate name whether a declaration shape of that name survives in the
+  // scanned source; where one does, the name is still alive under a local
+  // binding of its own and a doc or comment that mentions it is not drift.
+  // A name whose candidates include an exported, column-0 or non-
+  // declaration one is never touched (the removal was of something public
+  // or structural), and neither is a name an explicit ignore already
+  // covers. Limits, documented in docs/drift.md: indentation is a proxy for
+  // scope, not a scope analysis, and the head-side shape does not see a
+  // destructuring binding or a parameter.
+  const candidatesByName = new Map<string, RemovedIdentifier[]>();
+  for (const candidate of parsed.removed) {
+    const group = candidatesByName.get(candidate.name) ?? [];
+    group.push(candidate);
+    candidatesByName.set(candidate.name, group);
+  }
+  const localBindings = new Set<string>();
+  for (const name of uniqueNames) {
+    if (explicitIgnore.has(name)) continue;
+    const candidates = candidatesByName.get(name) ?? [];
+    const everyCandidateLocal =
+      candidates.length > 0 &&
+      candidates.every(
+        (candidate) =>
+          candidate.kind === "declaration" &&
+          candidate.exported === false &&
+          candidate.indented === true,
+      );
+    if (!everyCandidateLocal) continue;
+    const head = grepHeadDeclarations(gitRoot, headSha, name, SOURCE_PATHSPECS);
+    if (head.error !== undefined || (head.status !== 0 && head.status !== 1)) {
+      warnings.push(
+        `git grep for a head-side declaration of "${name}" at ${headSha} failed: ${head.error ?? `git exited ${String(head.status)}: ${head.stderr.trim()}`}`,
+      );
+      continue;
+    }
+    if (head.status === 0) localBindings.add(name);
+  }
+
+  const ignoredIdentifiers: IgnoredIdentifier[] = [
+    ...[...explicitIgnore].map(([name, source]) => ({ name, source })),
+    ...[...localBindings].map((name): IgnoredIdentifier => ({
+      name,
+      source: "local-binding",
+    })),
+  ];
+
   const sites: DriftSite[] = [];
   const allowlisted: DriftSite[] = [];
   const headingsByPath = new Map<string, Heading[]>();
@@ -279,6 +384,7 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
   };
 
   for (const name of uniqueNames) {
+    const ignored = explicitIgnore.get(name);
     const grep = grepIdentifier(gitRoot, headSha, name, SCAN_PATHSPECS);
     if (grep.error !== undefined || (grep.status !== 0 && grep.status !== 1)) {
       warnings.push(
@@ -293,7 +399,7 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
       if (kind === undefined) continue;
       const needsHeadings =
         isChangelogPath(match.path) || isMarkdownPath(match.path);
-      const decision = classifySite(
+      let decision: SiteAllowDecision = classifySite(
         match.path,
         match.line,
         match.text,
@@ -301,6 +407,22 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
         allowGlobs,
         needsHeadings ? headingsFor(match.path) : [],
       );
+      // An ignored name outranks every path-shaped reason (it is the
+      // caller's own statement about this identifier); the local-binding
+      // rule is the opposite: a default that only speaks up when nothing
+      // else allowlisted the site, so its reason is never a lie about a
+      // glob or a heading that also happened to match.
+      if (ignored !== undefined) {
+        decision = {
+          allowlisted: true,
+          reason: `ignored identifier "${name}"`,
+        };
+      } else if (localBindings.has(name) && !decision.allowlisted) {
+        decision = {
+          allowlisted: true,
+          reason: `local binding "${name}" still declared at head`,
+        };
+      }
       const base: DriftSite = {
         path: match.path,
         line: match.line,
@@ -330,6 +452,7 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
     headSha,
     mergeBase: diffBase,
     removedIdentifiers: parsed.removed,
+    ignoredIdentifiers,
     sites,
     allowlisted,
     counts: {

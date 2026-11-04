@@ -1329,3 +1329,508 @@ describe("hygiene from the merge-base", () => {
     expect(out.head_sha).toBe(git(repo, ["rev-parse", "HEAD"]).trim());
   });
 });
+
+describe("hygiene intended deletions", () => {
+  /** `initRepo()` plus a second test file: test/a.test.ts has 3 cases,
+   * test/b.test.ts has 2, both committed as the base. */
+  function twoTestFilesRepo(): { repo: string; base: string } {
+    const repo = initRepo();
+    write(
+      repo,
+      "test/b.test.ts",
+      'it("one", () => {});\nit("two", () => {});\n',
+    );
+    commitAll(repo, "second test file");
+    return { repo, base: git(repo, ["rev-parse", "HEAD"]).trim() };
+  }
+
+  it("allows a declared drop whose count covers it and records the allowance", () => {
+    const { repo, base } = twoTestFilesRepo();
+    write(repo, "test/a.test.ts", 'it("kept", () => {});\n');
+    commitAll(repo, "drop two cases");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts=2"],
+    });
+    expect(r.status).toBe("ok");
+    expect(r.findings).toEqual([]);
+    expect(r.intendedDeclarations).toEqual([
+      { path: "test/a.test.ts", declared: 2 },
+    ]);
+    expect(r.intendedDeletions).toEqual([
+      {
+        path: "test/a.test.ts",
+        baseCases: 3,
+        headCases: 1,
+        dropped: 2,
+        declared: 2,
+      },
+    ]);
+    expect(r.counts).toMatchObject({ testCaseDrops: 0, intendedDeletions: 1 });
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("reports an undeclared drop exactly as before", () => {
+    const { repo, base } = twoTestFilesRepo();
+    write(repo, "test/a.test.ts", 'it("kept", () => {});\n');
+    commitAll(repo, "drop two cases");
+    const r = hygiene({ cwd: repo, base });
+    expect(r.status).toBe("fail");
+    expect(r.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
+        path: "test/a.test.ts",
+        detail: "test-case markers fell from 3 to 1",
+        baseCases: 3,
+        headCases: 1,
+      }),
+    ]);
+    expect(r.intendedDeletions).toEqual([]);
+    expect(r.counts).toMatchObject({ testCaseDrops: 1, intendedDeletions: 0 });
+  });
+
+  it("applies the allowance to one file and still reports the other drop", () => {
+    const { repo, base } = twoTestFilesRepo();
+    write(repo, "test/a.test.ts", 'it("kept", () => {});\n');
+    write(repo, "test/b.test.ts", 'it("kept", () => {});\n');
+    commitAll(repo, "drop a case in each");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts=all"],
+    });
+    expect(r.status).toBe("fail");
+    expect(r.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
+        path: "test/b.test.ts",
+      }),
+    ]);
+    expect(r.intendedDeletions).toHaveLength(1);
+    expect(r.intendedDeletions[0]?.path).toBe("test/a.test.ts");
+    expect(r.counts).toMatchObject({ testCaseDrops: 1, intendedDeletions: 1 });
+  });
+
+  it("reports a drop above the declared count with that count in the detail", () => {
+    const { repo, base } = twoTestFilesRepo();
+    write(repo, "test/a.test.ts", 'it("kept", () => {});\n');
+    commitAll(repo, "drop two cases");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts=1"],
+    });
+    expect(r.status).toBe("fail");
+    expect(r.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
+        detail: "test-case markers fell from 3 to 1 (declared 1)",
+      }),
+    ]);
+    expect(r.intendedDeletions).toEqual([]);
+    // Consulted, so not stale: the declaration decided this finding.
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("allows every case of a deleted test file with all", () => {
+    const { repo, base } = twoTestFilesRepo();
+    git(repo, ["rm", "-q", "test/a.test.ts"]);
+    commitAll(repo, "delete a test file");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts=all"],
+    });
+    expect(r.status).toBe("ok");
+    expect(r.findings).toEqual([]);
+    expect(r.intendedDeletions).toEqual([
+      {
+        path: "test/a.test.ts",
+        baseCases: 3,
+        headCases: 0,
+        dropped: 3,
+        declared: "all",
+      },
+    ]);
+  });
+
+  it("treats a bare path as all", () => {
+    const { repo, base } = twoTestFilesRepo();
+    write(repo, "test/a.test.ts", 'it("kept", () => {});\n');
+    commitAll(repo, "drop two cases");
+    const declared = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts"],
+    });
+    expect(declared.status).toBe("ok");
+    expect(declared.intendedDeclarations).toEqual([
+      { path: "test/a.test.ts", declared: "all" },
+    ]);
+    expect(declared.intendedDeletions[0]).toMatchObject({ dropped: 2 });
+  });
+
+  it("warns for a declaration that allowed nothing and leaves the status alone", () => {
+    const { repo, base } = twoTestFilesRepo();
+    write(repo, "src/a.ts", "export const a = 2;\n");
+    commitAll(repo, "no test case dropped");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: [
+        "docs/absent.test.ts=1",
+        "./src/a.ts=1",
+        "test/b.test.ts=3",
+      ],
+    });
+    expect(r.status).toBe("ok");
+    expect(r.findings).toEqual([]);
+    expect(r.intendedDeletions).toEqual([]);
+    expect(r.warnings).toEqual([
+      "intended deletion not used: docs/absent.test.ts",
+      "intended deletion not used: src/a.ts",
+      "intended deletion not used: test/b.test.ts",
+    ]);
+  });
+
+  it("matches a renamed test file's declaration on its head-side path", () => {
+    const { repo, base } = twoTestFilesRepo();
+    write(
+      repo,
+      "test/a.test.ts",
+      'it("one", () => {});\nit("two", () => {});\n',
+    );
+    git(repo, ["mv", "test/a.test.ts", "test/renamed.test.ts"]);
+    commitAll(repo, "rename with one case dropped");
+    // The rename has to survive git's own rename detection for the head-
+    // side match this test is about to be exercised; a pure delete-plus-
+    // add would match the old path instead.
+    expect(git(repo, ["diff", "-M", "--name-status", base, "HEAD"])).toContain(
+      "R",
+    );
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["./test/renamed.test.ts"],
+    });
+    expect(r.status).toBe("ok");
+    expect(r.intendedDeletions).toEqual([
+      {
+        path: "test/renamed.test.ts",
+        baseCases: 3,
+        headCases: 2,
+        dropped: 1,
+        declared: "all",
+      },
+    ]);
+    // The old name is not the path the finding (or the allowance) uses.
+    const oldName = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts"],
+    });
+    expect(oldName.status).toBe("fail");
+    expect(oldName.findings[0]?.path).toBe("test/renamed.test.ts");
+    expect(oldName.warnings).toEqual([
+      "intended deletion not used: test/a.test.ts",
+    ]);
+  });
+
+  it("allows a declared drop of PHPUnit test methods", () => {
+    const repo = initRepo();
+    const fixture = (n: number): string =>
+      [
+        "<?php",
+        "final class FooTest extends TestCase {",
+        ...Array.from(
+          { length: n },
+          (_, i) => `  public function test${String(i)}(): void {}`,
+        ),
+        "}",
+        "",
+      ].join("\n");
+    write(repo, "tests/FooTest.php", fixture(4));
+    commitAll(repo, "php tests");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "tests/FooTest.php", fixture(1));
+    commitAll(repo);
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["tests/FooTest.php=3"],
+    });
+    expect(r.status).toBe("ok");
+    expect(r.intendedDeletions).toEqual([
+      {
+        path: "tests/FooTest.php",
+        baseCases: 4,
+        headCases: 1,
+        dropped: 3,
+        declared: 3,
+      },
+    ]);
+    const short = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["tests/FooTest.php=2"],
+    });
+    expect(short.status).toBe("fail");
+    expect(short.findings[0]?.detail).toContain("(declared 2)");
+  });
+
+  it("rejects an at-most count of 0, a negative, a non-integer and an empty path", () => {
+    const repo = initRepo();
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    for (const spec of [
+      "test/a.test.ts=0",
+      "test/a.test.ts=-1",
+      "test/a.test.ts=1.5",
+      "test/a.test.ts=abc",
+      "test/a.test.ts=",
+      "=2",
+      "",
+    ]) {
+      expect(() =>
+        hygiene({ cwd: repo, base, intendedDeletions: [spec] }),
+      ).toThrow(UsageError);
+    }
+    // A bare path and `=all` are the two accepted forms, and `./` is
+    // stripped from the path as it is for `--extend-only`.
+    const ok = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["./test/a.test.ts", "src/a.ts=all"],
+    });
+    expect(ok.intendedDeclarations).toEqual([
+      { path: "test/a.test.ts", declared: "all" },
+      { path: "src/a.ts", declared: "all" },
+    ]);
+  });
+});
+
+describe("hygiene intended deletions CLI", () => {
+  function repoWithDrop(): { repo: string; base: string } {
+    const repo = initRepo();
+    write(
+      repo,
+      "test/b.test.ts",
+      'it("one", () => {});\nit("two", () => {});\n',
+    );
+    commitAll(repo, "second test file");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "test/a.test.ts", 'it("kept", () => {});\n');
+    commitAll(repo, "drop two cases");
+    return { repo, base };
+  }
+
+  it("reads declarations from --intended-deletion-file, blank and # lines ignored", async () => {
+    const { repo, base } = repoWithDrop();
+    write(repo, "intended.txt", "# intended deletions\n\ntest/a.test.ts=2\n");
+    commitAll(repo, "declaration file");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    expect(run.code).toBe(0);
+    const out = JSON.parse(run.stdout) as {
+      intended_declarations: { path: string; declared: number | string }[];
+      intended_deletions: { path: string; dropped: number }[];
+      counts: { intendedDeletions: number };
+    };
+    expect(out.intended_declarations).toEqual([
+      { path: "test/a.test.ts", declared: 2 },
+    ]);
+    expect(out.intended_deletions).toEqual([
+      {
+        path: "test/a.test.ts",
+        baseCases: 3,
+        headCases: 1,
+        dropped: 2,
+        declared: 2,
+      },
+    ]);
+    expect(out.counts.intendedDeletions).toBe(1);
+  });
+
+  it("treats an empty declaration file as no option at all", async () => {
+    const { repo, base } = repoWithDrop();
+    write(repo, "intended.txt", "# nothing here\n\n");
+    const withEmpty = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    const without = await spawnCli(["-C", repo, "hygiene", "--base", base]);
+    expect(withEmpty.code).toBe(1);
+    expect(without.code).toBe(1);
+    const empty = JSON.parse(withEmpty.stdout) as {
+      intended_declarations: unknown[];
+      warnings: string[];
+    };
+    expect(empty.intended_declarations).toEqual([]);
+    expect(empty.warnings).toEqual([]);
+    const missing = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--intended-deletion-file",
+      "no-such-file.txt",
+    ]);
+    expect(missing.code).toBe(2);
+  });
+
+  it("applies both forms, the larger declared count winning for one path", async () => {
+    const { repo, base } = repoWithDrop();
+    write(repo, "test/b.test.ts", 'it("one", () => {});\n');
+    write(repo, "intended.txt", "test/a.test.ts=5\ntest/b.test.ts=all\n");
+    commitAll(repo, "second drop and a declaration file");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--intended-deletion",
+      "test/a.test.ts=1",
+      "--intended-deletion",
+      "test/b.test.ts=1",
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    expect(run.code).toBe(0);
+    const out = JSON.parse(run.stdout) as {
+      intended_declarations: { path: string; declared: number | string }[];
+      intended_deletions: { path: string; declared: number | string }[];
+    };
+    // The file's 5 covers the 2-case drop the flag's 1 would not, and
+    // `all` beats a number; the flag's value is what loses.
+    expect(out.intended_declarations).toEqual([
+      { path: "test/a.test.ts", declared: 5 },
+      { path: "test/b.test.ts", declared: "all" },
+    ]);
+    expect(out.intended_deletions).toEqual([
+      expect.objectContaining({ path: "test/a.test.ts", declared: 5 }),
+      expect.objectContaining({ path: "test/b.test.ts", declared: "all" }),
+    ]);
+  });
+
+  it("resolves a relative --intended-deletion-file against the -C directory", async () => {
+    const { repo, base } = repoWithDrop();
+    write(repo, "intended.txt", "test/a.test.ts\n");
+    commitAll(repo, "declaration file");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.stdout).intended_deletions).toHaveLength(1);
+  });
+
+  it("exits 2 for an unusable --intended-deletion value", async () => {
+    const { repo, base } = repoWithDrop();
+    for (const spec of ["test/a.test.ts=0", "test/a.test.ts=abc"]) {
+      const run = await spawnCli([
+        "-C",
+        repo,
+        "hygiene",
+        "--base",
+        base,
+        "--intended-deletion",
+        spec,
+      ]);
+      expect(run.code).toBe(2);
+      expect(JSON.parse(run.stdout).status).toBe("usage_error");
+    }
+  });
+
+  it("echoes the declarations and keeps the applied allowances whole under a small -m", async () => {
+    const repo = initRepo();
+    for (let i = 0; i < 25; i++) {
+      write(
+        repo,
+        `test/t${String(i)}.test.ts`,
+        'it("one", () => {});\nit("two", () => {});\n',
+      );
+    }
+    commitAll(repo, "many test files");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    for (let i = 0; i < 25; i++) {
+      write(repo, `test/t${String(i)}.test.ts`, 'it("one", () => {});\n');
+    }
+    commitAll(repo, "each drops one case");
+    const declared = "test/t0.test.ts=1";
+    const full = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--intended-deletion",
+      declared,
+    ]);
+    const tight = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--intended-deletion",
+      declared,
+      "-m",
+      "900",
+    ]);
+    const big = JSON.parse(full.stdout) as {
+      counts: { testCaseDrops: number; intendedDeletions: number };
+      intended_declarations: unknown[];
+      intended_deletions: unknown[];
+    };
+    expect(big.counts).toMatchObject({
+      testCaseDrops: 24,
+      intendedDeletions: 1,
+    });
+    expect(big.intended_declarations).toEqual([
+      { path: "test/t0.test.ts", declared: 1 },
+    ]);
+    const cut = JSON.parse(tight.stdout) as {
+      truncated?: boolean;
+      counts: { intendedDeletions: number };
+      intended_declarations?: unknown[];
+      intended_deletions: { path: string; dropped: number }[];
+      findings?: unknown[];
+    };
+    expect(cut.truncated).toBe(true);
+    // The allowance is agent input: unlike `findings` (and the
+    // declaration echo), which the reduction cuts away, it survives
+    // whole, and it still agrees with `counts`.
+    expect(cut.findings).toBeUndefined();
+    expect(cut.intended_declarations).toBeUndefined();
+    expect(cut.intended_deletions).toEqual(big.intended_deletions);
+    expect(cut.intended_deletions).toEqual([
+      {
+        path: "test/t0.test.ts",
+        baseCases: 2,
+        headCases: 1,
+        dropped: 1,
+        declared: 1,
+      },
+    ]);
+    expect(cut.counts.intendedDeletions).toBe(cut.intended_deletions.length);
+  });
+});
