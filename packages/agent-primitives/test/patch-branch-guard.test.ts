@@ -1,0 +1,1442 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { patch, PatchUsageError, type RepoGuard } from "../src/patch/index.js";
+import {
+  branchGuardEnv,
+  protectedNameProblem,
+} from "../src/patch/branch-guard.js";
+import { CLI_PATH, spawnCli } from "./helpers/spawn-cli.js";
+
+/**
+ * The branch guard of `patch` (`src/patch/branch-guard.ts`): a write is
+ * refused while the repository that holds the working directory sits on a
+ * protected branch. The cases are written from the side of someone who
+ * wants the write anyway: another spelling of the branch, a layout that
+ * hides the repository, an environment that points git elsewhere, a git
+ * that cannot be asked.
+ */
+
+const tmpDirs: string[] = [];
+afterEach(() => {
+  for (const dir of tmpDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Every git of this file (the fixtures' and patch's own) ignores the
+// machine's configuration, so `init.defaultBranch` and the like cannot
+// change a branch name.
+const savedEnv: Record<string, string | undefined> = {};
+beforeAll(() => {
+  for (const [k, v] of Object.entries({
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_AUTHOR_NAME: "t",
+    GIT_AUTHOR_EMAIL: "t@example.com",
+    GIT_COMMITTER_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@example.com",
+  })) {
+    savedEnv[k] = process.env[k];
+    process.env[k] = v;
+  }
+  return () => {
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  };
+});
+
+function tmpDir(): string {
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-branch-guard-")),
+  );
+  tmpDirs.push(dir);
+  return dir;
+}
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+/** A work tree on `branch` (no commit yet) holding `a.txt`. */
+function repoOn(branch: string, dir = tmpDir()): string {
+  fs.mkdirSync(dir, { recursive: true });
+  git(dir, "init", "-q");
+  git(dir, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
+  fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+  return dir;
+}
+
+/** Commits `a.txt` (a branch needs a commit before it can be moved). */
+function commitAll(dir: string): void {
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "-m", "init");
+}
+
+/** A clone of a bare origin whose default branch is `trunk`; the clone
+ * sits on `onBranch` (`trunk` itself, or a new branch). */
+function cloneOf(onBranch: string): string {
+  const base = tmpDir();
+  git(base, "init", "-q", "--bare", "origin.git");
+  git(
+    path.join(base, "origin.git"),
+    "symbolic-ref",
+    "HEAD",
+    "refs/heads/trunk",
+  );
+  const seed = repoOn("trunk", path.join(base, "seed"));
+  commitAll(seed);
+  git(seed, "push", "-q", path.join(base, "origin.git"), "trunk");
+  git(base, "clone", "-q", "origin.git", "clone");
+  const clone = path.join(base, "clone");
+  if (onBranch !== "trunk") git(clone, "checkout", "-q", "-b", onBranch);
+  return clone;
+}
+
+const EDIT = [{ file: "a.txt", old: "a", new: "b" }];
+
+/** The one repository entry of a plan that touches one repository. */
+function g(r: ReturnType<typeof patch>): RepoGuard {
+  expect(r.branchGuard.repos).toHaveLength(1);
+  return r.branchGuard.repos[0];
+}
+
+function a(dir: string): string {
+  return fs.readFileSync(path.join(dir, "a.txt"), "utf8");
+}
+
+function tree(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string): void => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === ".git") continue;
+      out.push(path.relative(dir, path.join(d, e.name)));
+      if (e.isDirectory()) walk(path.join(d, e.name));
+    }
+  };
+  walk(dir);
+  return out.sort();
+}
+
+/** A patch that must have been refused by the guard, with nothing
+ * written or left behind. */
+function expectRefused(
+  dir: string,
+  r: ReturnType<typeof patch>,
+  reason = "protected_branch",
+): void {
+  expect(r.status).toBe("usage_error");
+  expect(r.reason).toBe(reason);
+  expect(r.edits.map((e) => e.status)).toEqual(["refused"]);
+  expect(r.edits[0].reason).toBe(reason);
+  expect(r.writtenFiles).toEqual([]);
+  expect(r.counts.files_written).toBe(0);
+  expect(r.branchGuard.status).toBe("refused");
+  expect(r.branchGuard.reason).toBe(reason);
+  expect(r.edits[0].detail).toContain("--allow-protected");
+  expect(r.allowedProtected).toBe(false);
+  expect(a(dir)).toBe("a\n");
+  expect(tree(dir)).toEqual(["a.txt"]);
+}
+
+describe("patch branch guard: which branches are protected", () => {
+  it("writes on a feature branch and reports the guard as allowed", () => {
+    const dir = repoOn("task/feature");
+    const r = patch({ cwd: dir, edits: EDIT });
+    expect(r.status).toBe("written");
+    expect(a(dir)).toBe("b\n");
+    expect(r.branchGuard).toEqual({
+      status: "allowed",
+      repos: [
+        {
+          root: dir,
+          status: "allowed",
+          branch: "task/feature",
+          protected: ["main", "master"],
+          sources: ["builtin"],
+        },
+      ],
+    });
+    expect(r.allowedProtected).toBe(false);
+  });
+
+  it("refuses main and master by their built-in names when origin/HEAD is unset", () => {
+    for (const branch of ["main", "master"]) {
+      const dir = repoOn(branch);
+      const r = patch({ cwd: dir, edits: EDIT });
+      expectRefused(dir, r);
+      expect(g(r).branch).toBe(branch);
+      expect(g(r).sources).toEqual(["builtin"]);
+      expect(r.edits[0].detail).toContain("builtin");
+    }
+  });
+
+  it("compares without regard to letter case: Master, MAIN", () => {
+    for (const branch of ["Master", "MAIN", "mAiN"]) {
+      const dir = repoOn(branch);
+      expectRefused(dir, patch({ cwd: dir, edits: EDIT }));
+    }
+  });
+
+  it("does not treat a branch that merely contains or extends a protected name as protected", () => {
+    for (const branch of ["main2", "domain", "master/fix", "mainline"]) {
+      const dir = repoOn(branch);
+      expect(patch({ cwd: dir, edits: EDIT }).status, branch).toBe("written");
+    }
+  });
+
+  it("refuses the branch origin/HEAD names, whatever it is called", () => {
+    const dir = cloneOf("trunk");
+    const r = patch({ cwd: dir, edits: EDIT });
+    expectRefused(dir, r);
+    expect(g(r).branch).toBe("trunk");
+    expect(g(r).protected).toEqual(["trunk", "main", "master"]);
+    expect(g(r).sources).toEqual(["origin-head", "builtin"]);
+    expect(r.edits[0].detail).toContain("origin-head");
+  });
+
+  it("writes on a feature branch of a clone, and still lists the origin default as protected", () => {
+    const dir = cloneOf("task/x");
+    const r = patch({ cwd: dir, edits: EDIT });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.status).toBe("allowed");
+    expect(g(r).protected).toEqual(["trunk", "main", "master"]);
+  });
+
+  it("takes the origin default with a slash in its name", () => {
+    const dir = cloneOf("task/x");
+    git(
+      dir,
+      "update-ref",
+      "refs/remotes/origin/release/1",
+      git(dir, "rev-parse", "HEAD").trim(),
+    );
+    git(
+      dir,
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/release/1",
+    );
+    git(dir, "checkout", "-q", "-b", "release/1");
+    expectRefused(dir, patch({ cwd: dir, edits: EDIT }), "protected_branch");
+  });
+
+  it("ignores an origin/HEAD that points anywhere but at refs/remotes/origin/<name>", () => {
+    const dir = cloneOf("trunk");
+    git(
+      dir,
+      "update-ref",
+      "refs/remotes/upstream/trunk",
+      git(dir, "rev-parse", "HEAD").trim(),
+    );
+    git(
+      dir,
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/upstream/trunk",
+    );
+    const r = patch({ cwd: dir, edits: EDIT });
+    // trunk is protected by nothing now: no origin/HEAD name, not built in.
+    expect(r.status).toBe("written");
+    expect(g(r).sources).toEqual(["builtin"]);
+    expect(g(r).protected).toEqual(["main", "master"]);
+  });
+
+  it("refuses a name from --protected, and writes on a branch that only starts with it", () => {
+    const on = repoOn("release");
+    const r = patch({
+      cwd: on,
+      edits: EDIT,
+      protectedBranches: ["release"],
+    });
+    expectRefused(on, r);
+    expect(g(r).sources).toEqual(["flag", "builtin"]);
+    expect(g(r).protected).toEqual(["release", "main", "master"]);
+    const near = repoOn("release2");
+    expect(
+      patch({ cwd: near, edits: EDIT, protectedBranches: ["release"] }).status,
+    ).toBe("written");
+    expect(a(near)).toBe("b\n");
+    // Without the flag `release` is an ordinary branch.
+    const plain = repoOn("release");
+    expect(patch({ cwd: plain, edits: EDIT }).status).toBe("written");
+  });
+
+  it("compares a --protected name without regard to letter case, in either direction", () => {
+    const upper = repoOn("release");
+    expectRefused(
+      upper,
+      patch({ cwd: upper, edits: EDIT, protectedBranches: ["Release"] }),
+    );
+    const lower = repoOn("RELEASE");
+    expectRefused(
+      lower,
+      patch({ cwd: lower, edits: EDIT, protectedBranches: ["release"] }),
+    );
+  });
+
+  it("is the union of the flag, origin/HEAD and the built-in names: each alone refuses, and a name from one source is not lost to the others", () => {
+    for (const branch of ["release", "trunk", "main"]) {
+      const dir = cloneOf("task/x");
+      git(dir, "checkout", "-q", "-B", branch);
+      const r = patch({
+        cwd: dir,
+        edits: EDIT,
+        protectedBranches: ["release"],
+      });
+      expectRefused(dir, r);
+      expect(g(r).sources, branch).toEqual(["flag", "origin-head", "builtin"]);
+      expect(g(r).protected, branch).toEqual([
+        "release",
+        "trunk",
+        "main",
+        "master",
+      ]);
+    }
+  });
+
+  it("lists a name two sources agree on once, and keeps all sources", () => {
+    const dir = cloneOf("trunk");
+    const r = patch({
+      cwd: dir,
+      edits: EDIT,
+      protectedBranches: ["TRUNK", "main"],
+    });
+    expectRefused(dir, r);
+    expect(g(r).protected).toEqual(["TRUNK", "main", "master"]);
+    expect(g(r).sources).toEqual(["flag", "origin-head", "builtin"]);
+  });
+
+  it("rejects a --protected name that is empty, padded or holds a control character", () => {
+    const dir = repoOn("task");
+    for (const bad of ["", " main", "main ", "ma\nin", "a\u0000b"]) {
+      let thrown: unknown;
+      try {
+        patch({ cwd: dir, edits: EDIT, protectedBranches: [bad] });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown, JSON.stringify(bad)).toBeInstanceOf(PatchUsageError);
+      expect((thrown as PatchUsageError).reason).toBe("protected_invalid");
+    }
+    expect(a(dir)).toBe("a\n");
+    expect(protectedNameProblem("release/1")).toBeUndefined();
+  });
+});
+
+describe("patch branch guard: how HEAD is read", () => {
+  it("refuses main although a tag called main exists (git --short would say heads/main)", () => {
+    const dir = repoOn("main");
+    commitAll(dir);
+    git(dir, "tag", "main");
+    expect(git(dir, "symbolic-ref", "--short", "HEAD").trim()).toBe(
+      "heads/main",
+    );
+    fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+    const r = patch({ cwd: dir, edits: EDIT });
+    expectRefused(dir, r);
+    expect(g(r).branch).toBe("main");
+  });
+
+  it("refuses on an unborn main, and on a main with commits", () => {
+    const unborn = repoOn("main");
+    expectRefused(unborn, patch({ cwd: unborn, edits: EDIT }));
+    const born = repoOn("main");
+    commitAll(born);
+    expectRefused(born, patch({ cwd: born, edits: EDIT }));
+  });
+
+  it("writes on a detached HEAD and says so", () => {
+    const dir = repoOn("main");
+    commitAll(dir);
+    git(dir, "checkout", "-q", "--detach");
+    const r = patch({ cwd: dir, edits: EDIT });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.status).toBe("detached");
+    expect(g(r)).toMatchObject({ status: "detached", branch: "HEAD" });
+    expect(r.branchGuard.reason).toBeUndefined();
+    expect(r.allowedProtected).toBe(false);
+    expect(a(dir)).toBe("b\n");
+  });
+
+  it("refuses a detached HEAD under protectDetached, as protected_branch on branch HEAD", () => {
+    const dir = repoOn("task");
+    commitAll(dir);
+    git(dir, "checkout", "-q", "--detach");
+    const r = patch({ cwd: dir, edits: EDIT, protectDetached: true });
+    expectRefused(dir, r);
+    expect(g(r).branch).toBe("HEAD");
+    expect(r.edits[0].detail).toContain("detached");
+  });
+
+  it("protectDetached does nothing on a branch", () => {
+    const dir = repoOn("task");
+    const r = patch({ cwd: dir, edits: EDIT, protectDetached: true });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.status).toBe("allowed");
+  });
+
+  it("fails closed when HEAD names something outside refs/heads/", () => {
+    const dir = repoOn("task");
+    git(dir, "symbolic-ref", "HEAD", "refs/odd/place");
+    const r = patch({ cwd: dir, edits: EDIT });
+    expectRefused(dir, r, "protected_branch_unresolved");
+    expect(g(r).branch).toBeUndefined();
+    expect(r.edits[0].detail).toContain("not a branch under refs/heads/");
+  });
+});
+
+describe("patch branch guard: --allow-protected", () => {
+  const cases: [string, () => { dir: string; extra: object }][] = [
+    ["a built-in protected branch", () => ({ dir: repoOn("main"), extra: {} })],
+    ["the origin default", () => ({ dir: cloneOf("trunk"), extra: {} })],
+    [
+      "a --protected name",
+      () => ({
+        dir: repoOn("release"),
+        extra: { protectedBranches: ["release"] },
+      }),
+    ],
+    [
+      "a detached HEAD under protectDetached",
+      () => {
+        const dir = repoOn("task");
+        commitAll(dir);
+        git(dir, "checkout", "-q", "--detach");
+        return { dir, extra: { protectDetached: true } };
+      },
+    ],
+    [
+      "a branch that cannot be resolved",
+      () => {
+        const dir = repoOn("task");
+        git(dir, "symbolic-ref", "HEAD", "refs/odd/place");
+        return { dir, extra: {} };
+      },
+    ],
+  ];
+  for (const [label, make] of cases) {
+    it(`writes on ${label} and records the override twice`, () => {
+      const { dir, extra } = make();
+      const r = patch({
+        cwd: dir,
+        edits: EDIT,
+        allowProtected: true,
+        ...extra,
+      });
+      expect(r.status).toBe("written");
+      expect(a(dir)).toBe("b\n");
+      expect(r.branchGuard.status).toBe("allowed_protected");
+      expect(r.branchGuard.reason).toMatch(/^protected_branch(_unresolved)?$/);
+      expect(r.allowedProtected).toBe(true);
+      expect(r.warnings.join("\n")).toContain("--allow-protected");
+    });
+  }
+
+  it("leaves no trace of an override when nothing needed one", () => {
+    const dir = repoOn("task");
+    const r = patch({ cwd: dir, edits: EDIT, allowProtected: true });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.status).toBe("allowed");
+    expect(r.allowedProtected).toBe(false);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("does not lift a path refusal: a .git file stays refused on a protected branch", () => {
+    const dir = repoOn("main");
+    const r = patch({
+      cwd: dir,
+      edits: [{ file: ".git/config", old: "[core]", new: "[x]" }],
+      allowProtected: true,
+    });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("git_dir");
+    expect(r.branchGuard.status).toBe("allowed_protected");
+  });
+});
+
+describe("patch branch guard: --dry-run", () => {
+  it("reports would_refuse and the dry-run edits as they are, writing nothing", () => {
+    const dir = repoOn("main");
+    const r = patch({ cwd: dir, edits: EDIT, dryRun: true });
+    expect(r.status).toBe("would_write");
+    expect(r.edits[0].status).toBe("would_write");
+    expect(r.files[0].diff).toContain("+b");
+    expect(r.branchGuard.status).toBe("would_refuse");
+    expect(r.branchGuard.reason).toBe("protected_branch");
+    expect(g(r)).toMatchObject({ status: "would_refuse", branch: "main" });
+    expect(r.allowedProtected).toBe(false);
+    expect(r.warnings.join("\n")).toContain("would be refused");
+    expect(a(dir)).toBe("a\n");
+  });
+
+  it("reports would_refuse for an unresolved branch too", () => {
+    const dir = repoOn("task");
+    git(dir, "symbolic-ref", "HEAD", "refs/odd/place");
+    const r = patch({ cwd: dir, edits: EDIT, dryRun: true });
+    expect(r.status).toBe("would_write");
+    expect(r.branchGuard).toMatchObject({
+      status: "would_refuse",
+      reason: "protected_branch_unresolved",
+    });
+  });
+
+  it("still reports every other finding of the plan", () => {
+    const dir = repoOn("main");
+    const r = patch({
+      cwd: dir,
+      edits: [{ file: "a.txt", old: "zzz", new: "b" }],
+      dryRun: true,
+    });
+    expect(r.status).toBe("missing");
+    expect(r.branchGuard.status).toBe("would_refuse");
+  });
+
+  it("with --allow-protected is allowed_protected, not would_refuse", () => {
+    const dir = repoOn("main");
+    const r = patch({
+      cwd: dir,
+      edits: EDIT,
+      dryRun: true,
+      allowProtected: true,
+    });
+    expect(r.status).toBe("would_write");
+    expect(r.branchGuard.status).toBe("allowed_protected");
+    expect(r.allowedProtected).toBe(true);
+  });
+
+  it("is plain allowed on a feature branch", () => {
+    const dir = repoOn("task");
+    const r = patch({ cwd: dir, edits: EDIT, dryRun: true });
+    expect(r.branchGuard.status).toBe("allowed");
+    expect(r.warnings).toEqual([]);
+  });
+});
+
+describe("patch branch guard: nothing is written when it refuses", () => {
+  it("writes none of several files and leaves no temporary file", () => {
+    const dir = repoOn("main");
+    fs.mkdirSync(path.join(dir, "sub"));
+    fs.writeFileSync(path.join(dir, "sub", "b.txt"), "b\n");
+    fs.writeFileSync(path.join(dir, "c.txt"), "c\n");
+    const before = tree(dir);
+    const r = patch({
+      cwd: dir,
+      edits: [
+        { file: "a.txt", old: "a", new: "A" },
+        { file: "sub/b.txt", old: "b", new: "B" },
+        { file: "c.txt", old: "c", new: "C" },
+      ],
+    });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(r.edits.map((e) => e.status)).toEqual([
+      "refused",
+      "refused",
+      "refused",
+    ]);
+    expect(r.files.map((f) => f.status)).toEqual([
+      "refused",
+      "refused",
+      "refused",
+    ]);
+    expect(r.counts).toMatchObject({
+      refused: 3,
+      written: 0,
+      files_written: 0,
+    });
+    expect(r.writtenFiles).toEqual([]);
+    expect(tree(dir)).toEqual(before);
+    expect(a(dir)).toBe("a\n");
+    expect(fs.readFileSync(path.join(dir, "sub", "b.txt"), "utf8")).toBe("b\n");
+    expect(fs.readFileSync(path.join(dir, "c.txt"), "utf8")).toBe("c\n");
+  });
+
+  it("does not let an edit with another problem hide the refusal", () => {
+    const dir = repoOn("main");
+    const r = patch({
+      cwd: dir,
+      edits: [
+        { file: "a.txt", old: "zzz", new: "b" },
+        { file: "gone.txt", old: "a", new: "b" },
+      ],
+    });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(r.edits.map((e) => e.status)).toEqual(["refused", "refused"]);
+  });
+
+  it("keeps the reason of a path refusal that came first, and still writes nothing", () => {
+    const dir = repoOn("main");
+    const r = patch({
+      cwd: dir,
+      edits: [
+        { file: ".git/config", old: "[core]", new: "[x]" },
+        { file: "a.txt", old: "a", new: "b" },
+      ],
+    });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("git_dir");
+    expect(r.edits.map((e) => e.status)).toEqual(["refused", "refused"]);
+    expect(r.edits[1].reason).toBe("protected_branch");
+    expect(r.branchGuard.status).toBe("refused");
+    expect(a(dir)).toBe("a\n");
+  });
+});
+
+describe("patch branch guard: layouts", () => {
+  it("judges the repository root when -C is a subdirectory of a repository on main", () => {
+    const dir = repoOn("main");
+    fs.mkdirSync(path.join(dir, "deep", "er"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "deep", "er", "x.txt"), "x\n");
+    const r = patch({
+      cwd: path.join(dir, "deep", "er"),
+      edits: [{ file: "x.txt", old: "x", new: "y" }],
+    });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(g(r).branch).toBe("main");
+    expect(fs.readFileSync(path.join(dir, "deep", "er", "x.txt"), "utf8")).toBe(
+      "x\n",
+    );
+  });
+
+  it("follows a .git symlink to the git directory it names", () => {
+    const base = tmpDir();
+    const real = repoOn("main", path.join(base, "real"));
+    const link = path.join(base, "link");
+    fs.mkdirSync(link);
+    fs.symlinkSync(path.join(real, ".git"), path.join(link, ".git"));
+    fs.writeFileSync(path.join(link, "a.txt"), "a\n");
+    const r = patch({ cwd: link, edits: EDIT });
+    expectRefused(link, r);
+    expect(g(r).branch).toBe("main");
+  });
+
+  it("follows a .git file naming a separate git directory", () => {
+    const base = tmpDir();
+    const wt = path.join(base, "wt");
+    fs.mkdirSync(wt);
+    git(wt, "init", "-q", "--separate-git-dir", path.join(base, "gd"), ".");
+    git(wt, "symbolic-ref", "HEAD", "refs/heads/main");
+    fs.writeFileSync(path.join(wt, "a.txt"), "a\n");
+    expect(fs.statSync(path.join(wt, ".git")).isFile()).toBe(true);
+    expectRefused(wt, patch({ cwd: wt, edits: EDIT }));
+  });
+
+  it("judges a linked worktree by its own branch: a task branch writes while the main checkout is on master", () => {
+    const main = repoOn("master");
+    commitAll(main);
+    const wt = path.join(tmpDir(), "wt");
+    git(main, "worktree", "add", "-q", "-b", "task/wt", wt);
+    const r = patch({ cwd: wt, edits: EDIT });
+    expect(r.status).toBe("written");
+    expect(g(r).branch).toBe("task/wt");
+    expect(a(wt)).toBe("b\n");
+  });
+
+  it("refuses a linked worktree that sits on main even when the main checkout is on a task branch", () => {
+    const main = repoOn("task/main-checkout");
+    commitAll(main);
+    const wt = path.join(tmpDir(), "wt");
+    git(main, "worktree", "add", "-q", "-b", "main", wt);
+    const r = patch({ cwd: wt, edits: EDIT });
+    expectRefused(wt, r);
+    expect(g(r).branch).toBe("main");
+    // The main checkout is not judged by the worktree's branch.
+    expect(patch({ cwd: main, edits: EDIT }).status).toBe("written");
+  });
+
+  it("is not in a repository: writes, reports not_a_repo", () => {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+    const r = patch({ cwd: dir, edits: EDIT });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard).toEqual({
+      status: "not_a_repo",
+      repos: [{ status: "not_a_repo", protected: [], sources: [] }],
+    });
+    expect(r.allowedProtected).toBe(false);
+  });
+
+  it("treats a bare repository as no work tree: not_a_repo", () => {
+    const base = tmpDir();
+    git(base, "init", "-q", "--bare", "b.git");
+    const bare = path.join(base, "b.git");
+    git(bare, "symbolic-ref", "HEAD", "refs/heads/main");
+    const r = patch({
+      cwd: bare,
+      edits: [{ file: "description", old: "Unnamed", new: "Named" }],
+      dryRun: true,
+    });
+    expect(r.branchGuard.status).toBe("not_a_repo");
+  });
+
+  it("an empty .git directory is no repository: with none around it git cannot be asked and the write is refused", () => {
+    const dir = tmpDir();
+    fs.mkdirSync(path.join(dir, ".git"));
+    fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+    const r = patch({ cwd: dir, edits: EDIT });
+    expectRefused(dir, r, "protected_branch_unresolved");
+  });
+
+  it("an empty .git directory inside a repository on main is judged as that repository", () => {
+    const outer = repoOn("main");
+    const inner = path.join(outer, "inner");
+    fs.mkdirSync(path.join(inner, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(inner, "a.txt"), "a\n");
+    const r = patch({ cwd: inner, edits: EDIT });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(fs.readFileSync(path.join(inner, "a.txt"), "utf8")).toBe("a\n");
+  });
+
+  it("a hand-written .git directory with a valid layout and HEAD on main is the repository it looks like", () => {
+    const dir = tmpDir();
+    fs.mkdirSync(path.join(dir, ".git", "objects"), { recursive: true });
+    fs.mkdirSync(path.join(dir, ".git", "refs"));
+    fs.writeFileSync(path.join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+    expectRefused(dir, patch({ cwd: dir, edits: EDIT }));
+  });
+
+  it("fails closed where git would read a commondir without bound (no git is run)", () => {
+    const dir = repoOn("task");
+    const file = path.join(dir, ".git", "commondir");
+    fs.writeFileSync(file, "");
+    fs.truncateSync(file, 128 * 1024);
+    const r = patch({ cwd: dir, edits: EDIT });
+    expectRefused(dir, r, "protected_branch_unresolved");
+    expect(r.edits[0].detail).toContain("git was not run");
+  });
+});
+
+describe("patch branch guard: every repository that holds a target", () => {
+  /** A directory that is no repository, holding the named repositories. */
+  function workspace(repos: Record<string, string>): {
+    base: string;
+    dirs: Record<string, string>;
+  } {
+    const base = tmpDir();
+    const dirs: Record<string, string> = {};
+    for (const [name, branch] of Object.entries(repos)) {
+      dirs[name] = repoOn(branch, path.join(base, name));
+    }
+    return { base, dirs };
+  }
+
+  const inRepo = (name: string) => ({
+    file: `${name}/a.txt`,
+    old: "a",
+    new: "b",
+  });
+
+  it("refuses a checkout on master reached from a directory that is no repository", () => {
+    const { base, dirs } = workspace({ proj: "master" });
+    const r = patch({ cwd: base, edits: [inRepo("proj")] });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(r.edits[0].status).toBe("refused");
+    expect(r.edits[0].detail).toContain(dirs.proj);
+    expect(r.branchGuard.repos).toHaveLength(1);
+    expect(r.branchGuard.repos[0]).toMatchObject({
+      root: dirs.proj,
+      status: "refused",
+      branch: "master",
+    });
+    expect(a(dirs.proj)).toBe("a\n");
+  });
+
+  it("writes a checkout on a task branch reached from a directory that is no repository", () => {
+    const { base, dirs } = workspace({ proj: "task/x" });
+    const r = patch({ cwd: base, edits: [inRepo("proj")] });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.repos.map((x) => x.root)).toEqual([dirs.proj]);
+    expect(a(dirs.proj)).toBe("b\n");
+  });
+
+  it("refuses an --allow-outside target in a second repository on master, from a repository on a task branch", () => {
+    const { base, dirs } = workspace({ task: "task/a", other: "master" });
+    const r = patch({
+      cwd: dirs.task,
+      edits: [{ file: "../other/a.txt", old: "a", new: "b" }],
+      allowOutside: true,
+    });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(a(dirs.other)).toBe("a\n");
+    expect(r.branchGuard.repos.map((x) => [x.root, x.status])).toEqual([
+      [dirs.task, "allowed"],
+      [dirs.other, "refused"],
+    ]);
+    void base;
+  });
+
+  it("writes an --allow-outside target in a second repository on a feature branch", () => {
+    const { dirs } = workspace({ task: "task/a", other: "task/b" });
+    const r = patch({
+      cwd: dirs.task,
+      edits: [{ file: "../other/a.txt", old: "a", new: "b" }],
+      allowOutside: true,
+    });
+    expect(r.status).toBe("written");
+    expect(a(dirs.other)).toBe("b\n");
+    expect(r.branchGuard.repos).toHaveLength(2);
+  });
+
+  it("judges the repository at -C even when no target lies in it", () => {
+    const { dirs } = workspace({ main: "main", other: "task/b" });
+    const r = patch({
+      cwd: dirs.main,
+      edits: [{ file: "../other/a.txt", old: "a", new: "b" }],
+      allowOutside: true,
+    });
+    expect(r.status).toBe("usage_error");
+    expect(a(dirs.other)).toBe("a\n");
+    expect(r.branchGuard.repos[0]).toMatchObject({
+      root: dirs.main,
+      status: "refused",
+    });
+  });
+
+  it("refuses a submodule on master under a superproject on a task branch", () => {
+    const { base, src } = (() => {
+      const b = tmpDir();
+      const s0 = repoOn("master", path.join(b, "src"));
+      commitAll(s0);
+      return { base: b, src: s0 };
+    })();
+    const sup = repoOn("task/super", path.join(base, "super"));
+    fs.writeFileSync(path.join(sup, "s.txt"), "s\n");
+    commitAll(sup);
+    git(
+      sup,
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "-q",
+      src,
+      "sub",
+    );
+    const sub = path.join(sup, "sub");
+    expect(git(sub, "symbolic-ref", "HEAD").trim()).toBe("refs/heads/master");
+    const r = patch({
+      cwd: sup,
+      edits: [
+        inRepo("sub").file === ""
+          ? EDIT[0]
+          : { file: "sub/a.txt", old: "a", new: "b" },
+      ],
+    });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(r.branchGuard.repos.map((x) => [x.root, x.status])).toEqual([
+      [sup, "allowed"],
+      [fs.realpathSync(sub), "refused"],
+    ]);
+    expect(a(sub)).toBe("a\n");
+    // A file of the superproject itself is still fine.
+    const own = patch({
+      cwd: sup,
+      edits: [{ file: "s.txt", old: "s", new: "t" }],
+    });
+    expect(own.status).toBe("written");
+  });
+
+  it("refuses a plan of two repositories when one is protected, and writes neither", () => {
+    const { base, dirs } = workspace({ one: "task/one", two: "main" });
+    for (const order of [
+      [inRepo("one"), inRepo("two")],
+      [inRepo("two"), inRepo("one")],
+    ]) {
+      const r = patch({ cwd: base, edits: order });
+      expect(r.status).toBe("usage_error");
+      expect(r.reason).toBe("protected_branch");
+      expect(r.edits.map((e) => e.status)).toEqual(["refused", "refused"]);
+      expect(r.writtenFiles).toEqual([]);
+      expect(a(dirs.one)).toBe("a\n");
+      expect(a(dirs.two)).toBe("a\n");
+      const clean = order.find((e) => e.file.startsWith("one"));
+      const i = order.indexOf(clean as (typeof order)[number]);
+      expect(r.edits[i].detail).toContain("refused as a whole");
+      expect(r.edits[1 - i].detail).toContain(dirs.two);
+    }
+  });
+
+  it("names each repository's own root on its own edits when several refuse", () => {
+    const { base, dirs } = workspace({ one: "main", two: "master" });
+    const r = patch({ cwd: base, edits: [inRepo("one"), inRepo("two")] });
+    expect(r.status).toBe("usage_error");
+    expect(r.edits[0].detail).toContain(dirs.one);
+    expect(r.edits[0].detail).not.toContain(dirs.two);
+    expect(r.edits[1].detail).toContain(dirs.two);
+    expect(r.edits[1].detail).not.toContain(dirs.one);
+    expect(
+      r.warnings.filter((w) => w.startsWith("branch guard: refused in")),
+    ).toEqual([
+      "branch guard: refused in 2 repositories (protected_branch); pass --allow-protected to edit anyway",
+    ]);
+    expect(r.branchGuard.repos.map((x) => x.status)).toEqual([
+      "refused",
+      "refused",
+    ]);
+    expect(a(dirs.one)).toBe("a\n");
+    expect(a(dirs.two)).toBe("a\n");
+  });
+
+  it("writes a plan of two unprotected repositories and lists both", () => {
+    const { base, dirs } = workspace({ one: "task/one", two: "task/two" });
+    const r = patch({ cwd: base, edits: [inRepo("one"), inRepo("two")] });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.status).toBe("allowed");
+    expect(r.branchGuard.repos.map((x) => [x.root, x.branch])).toEqual([
+      [dirs.one, "task/one"],
+      [dirs.two, "task/two"],
+    ]);
+    expect(a(dirs.one)).toBe("b\n");
+    expect(a(dirs.two)).toBe("b\n");
+  });
+
+  it("lists a repository once however many targets lie in it", () => {
+    const { base, dirs } = workspace({ one: "task/one" });
+    fs.writeFileSync(path.join(dirs.one, "b.txt"), "b\n");
+    const r = patch({
+      cwd: base,
+      edits: [inRepo("one"), { file: "one/b.txt", old: "b", new: "c" }],
+    });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.repos).toHaveLength(1);
+  });
+
+  it("--allow-protected lifts every refusing repository and lists them all", () => {
+    const { base, dirs } = workspace({
+      one: "main",
+      two: "master",
+      three: "task/three",
+    });
+    const r = patch({
+      cwd: base,
+      edits: [inRepo("one"), inRepo("two"), inRepo("three")],
+      allowProtected: true,
+    });
+    expect(r.status).toBe("written");
+    expect(r.allowedProtected).toBe(true);
+    expect(r.branchGuard.status).toBe("allowed_protected");
+    expect(r.branchGuard.repos.map((x) => [x.root, x.status])).toEqual([
+      [dirs.one, "allowed_protected"],
+      [dirs.two, "allowed_protected"],
+      [dirs.three, "allowed"],
+    ]);
+    const lifted = r.warnings.filter((w) => w.includes("--allow-protected"));
+    expect(lifted).toHaveLength(1);
+    expect(lifted[0]).toContain("2 repositories");
+    expect(a(dirs.one)).toBe("b\n");
+    expect(a(dirs.two)).toBe("b\n");
+  });
+
+  it("reports would_refuse for the protected one of two repositories in a dry run", () => {
+    const { base, dirs } = workspace({ one: "task/one", two: "main" });
+    const r = patch({
+      cwd: base,
+      edits: [inRepo("one"), inRepo("two")],
+      dryRun: true,
+    });
+    expect(r.status).toBe("would_write");
+    expect(r.branchGuard.status).toBe("would_refuse");
+    expect(r.branchGuard.repos.map((x) => x.status)).toEqual([
+      "allowed",
+      "would_refuse",
+    ]);
+    expect(a(dirs.two)).toBe("a\n");
+  });
+
+  it("a repository that cannot be resolved refuses the plan and names its root", () => {
+    const { base, dirs } = workspace({ one: "task/one", two: "task/two" });
+    const file = path.join(dirs.two, ".git", "commondir");
+    fs.writeFileSync(file, "");
+    fs.truncateSync(file, 128 * 1024);
+    const r = patch({ cwd: base, edits: [inRepo("one"), inRepo("two")] });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch_unresolved");
+    expect(r.edits[1].detail).toContain(dirs.two);
+    expect(a(dirs.one)).toBe("a\n");
+  });
+
+  it("lists a target in no repository as not_a_repo beside the judged repository", () => {
+    const { base, dirs } = workspace({ one: "task/one" });
+    fs.mkdirSync(path.join(base, "plain"));
+    fs.writeFileSync(path.join(base, "plain", "x.txt"), "x\n");
+    const r = patch({
+      cwd: base,
+      edits: [{ file: "plain/x.txt", old: "x", new: "y" }, inRepo("one")],
+    });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.status).toBe("allowed");
+    // The repository entries first, the entry for the targets in none last.
+    expect(r.branchGuard.repos).toEqual([
+      {
+        root: dirs.one,
+        status: "allowed",
+        branch: "task/one",
+        protected: ["main", "master"],
+        sources: ["builtin"],
+      },
+      { status: "not_a_repo", protected: [], sources: [] },
+    ]);
+  });
+
+  it("a not_a_repo target does not lift the refusal of a repository beside it", () => {
+    const { base, dirs } = workspace({ one: "main" });
+    fs.mkdirSync(path.join(base, "plain"));
+    fs.writeFileSync(path.join(base, "plain", "x.txt"), "x\n");
+    const r = patch({
+      cwd: base,
+      edits: [{ file: "plain/x.txt", old: "x", new: "y" }, inRepo("one")],
+    });
+    expect(r.status).toBe("usage_error");
+    expect(fs.readFileSync(path.join(base, "plain", "x.txt"), "utf8")).toBe(
+      "x\n",
+    );
+    expect(a(dirs.one)).toBe("a\n");
+  });
+
+  it("judges the repository a symlink leads into, not the one the link lies in", () => {
+    const { dirs } = workspace({ task: "task/a", other: "main" });
+    fs.symlinkSync(
+      path.join(dirs.other, "a.txt"),
+      path.join(dirs.task, "via.txt"),
+    );
+    const r = patch({
+      cwd: dirs.task,
+      edits: [{ file: "via.txt", old: "a", new: "b" }],
+      allowOutside: true,
+    });
+    expect(r.status).toBe("usage_error");
+    expect(a(dirs.other)).toBe("a\n");
+  });
+});
+
+describe("patch branch guard: the environment cannot steer it", () => {
+  function withEnv<T>(vars: Record<string, string>, body: () => T): T {
+    const saved: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(vars)) {
+      saved[k] = process.env[k];
+      process.env[k] = v;
+    }
+    try {
+      return body();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }
+
+  it("a GIT_DIR naming a repository on a feature branch does not hide main", () => {
+    const main = repoOn("main");
+    const other = repoOn("task", tmpDir());
+    const r = withEnv({ GIT_DIR: path.join(other, ".git") }, () =>
+      patch({ cwd: main, edits: EDIT }),
+    );
+    expectRefused(main, r);
+    expect(g(r).branch).toBe("main");
+  });
+
+  it("a GIT_DIR naming a repository on main does not block a feature branch", () => {
+    const task = repoOn("task");
+    const other = repoOn("main", tmpDir());
+    const r = withEnv({ GIT_DIR: path.join(other, ".git") }, () =>
+      patch({ cwd: task, edits: EDIT }),
+    );
+    expect(r.status).toBe("written");
+    expect(g(r).branch).toBe("task");
+  });
+
+  it("a GIT_WORK_TREE, GIT_COMMON_DIR or GIT_CEILING_DIRECTORIES does not change the answer", () => {
+    const main = repoOn("main");
+    const other = repoOn("task", tmpDir());
+    const r = withEnv(
+      {
+        GIT_WORK_TREE: other,
+        GIT_COMMON_DIR: path.join(other, ".git"),
+        GIT_CEILING_DIRECTORIES: path.dirname(main),
+      },
+      () => patch({ cwd: main, edits: EDIT }),
+    );
+    expectRefused(main, r);
+  });
+
+  it("a GIT_NAMESPACE does not change the answer", () => {
+    for (const [branch, status] of [
+      ["main", "usage_error"],
+      ["task", "written"],
+    ] as const) {
+      const dir = repoOn(branch);
+      const r = withEnv({ GIT_NAMESPACE: "elsewhere" }, () =>
+        patch({ cwd: dir, edits: EDIT }),
+      );
+      expect(r.status, branch).toBe(status);
+    }
+    const clone = cloneOf("trunk");
+    const r = withEnv({ GIT_NAMESPACE: "elsewhere" }, () =>
+      patch({ cwd: clone, edits: EDIT }),
+    );
+    expectRefused(clone, r);
+    expect(g(r).sources).toContain("origin-head");
+  });
+
+  it("git's environment loses every variable that selects a repository, a ref store or configuration", () => {
+    const env = branchGuardEnv({
+      PATH: "/bin",
+      HOME: "/h",
+      GIT_DIR: "x",
+      GIT_WORK_TREE: "x",
+      GIT_COMMON_DIR: "x",
+      GIT_INDEX_FILE: "x",
+      GIT_OBJECT_DIRECTORY: "x",
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: "x",
+      GIT_NAMESPACE: "x",
+      GIT_PREFIX: "x",
+      GIT_CEILING_DIRECTORIES: "x",
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
+      GIT_REF_STORAGE_FORMAT: "reftable",
+      GIT_REFERENCE_BACKEND: "reftable",
+      GIT_CONFIG_PARAMETERS: "'a.b=c'",
+      GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_0: "a.b",
+      GIT_CONFIG_VALUE_0: "c",
+      GIT_CONFIG_KEY_17: "a.b",
+      GIT_CONFIG_VALUE_17: "c",
+      GIT_TERMINAL_PROMPT: "1",
+    });
+    expect(env).toEqual({ PATH: "/bin", HOME: "/h", GIT_TERMINAL_PROMPT: "0" });
+  });
+});
+
+describe("patch branch guard: the stand-in for git is not the repository", () => {
+  it("a git that is not on PATH inside a repository refuses (CLI), and --allow-protected writes", () => {
+    const dir = repoOn("task");
+    const noGit = path.join(tmpDir(), "no-git-bin");
+    const env = { PATH: noGit };
+    const refused = spawnSync(
+      process.execPath,
+      [
+        CLI_PATH,
+        "--json",
+        "-C",
+        dir,
+        "patch",
+        "--file",
+        "a.txt",
+        "--old",
+        "a",
+        "--new",
+        "b",
+      ],
+      { env, encoding: "utf8" },
+    );
+    expect(refused.status).toBe(2);
+    const out = JSON.parse(refused.stdout) as {
+      status: string;
+      reason: string;
+      branch_guard: { status: string; reason: string };
+      warnings: string[];
+    };
+    expect(out.status).toBe("usage_error");
+    expect(out.reason).toBe("protected_branch_unresolved");
+    expect(out.branch_guard.status).toBe("refused");
+    // The identity lookup keeps its own warn-only behaviour.
+    expect(out.warnings.join("\n")).toContain("git could not be run");
+    expect(a(dir)).toBe("a\n");
+    const allowed = spawnSync(
+      process.execPath,
+      [
+        CLI_PATH,
+        "--json",
+        "-C",
+        dir,
+        "patch",
+        "--allow-protected",
+        "--file",
+        "a.txt",
+        "--old",
+        "a",
+        "--new",
+        "b",
+      ],
+      { env, encoding: "utf8" },
+    );
+    expect(allowed.status).toBe(0);
+    expect(a(dir)).toBe("b\n");
+  });
+});
+
+interface GuardJson {
+  status: string;
+  reason?: string;
+  message?: string;
+  allowed_protected?: boolean;
+  counts?: { files_written: number; refused: number };
+  written_files?: string[];
+  truncated?: boolean;
+  branch_guard: {
+    status: string;
+    reason?: string;
+    repos: {
+      root?: string;
+      status: string;
+      branch?: string;
+      protected: string[];
+      sources: string[];
+      reason?: string;
+    }[];
+  };
+  warnings: string[];
+  edits: { status: string; reason?: string }[];
+}
+
+async function cli(
+  dir: string,
+  ...args: string[]
+): Promise<{ code: number | null; out: GuardJson; stdout: string }> {
+  const res = await spawnCli(
+    [
+      "--json",
+      "-C",
+      dir,
+      "patch",
+      "--file",
+      "a.txt",
+      "--old",
+      "a",
+      "--new",
+      "b",
+      ...args,
+    ],
+    { env: { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } },
+  );
+  return {
+    code: res.code,
+    out: JSON.parse(res.stdout) as GuardJson,
+    stdout: res.stdout,
+  };
+}
+
+describe("patch branch guard: the CLI", () => {
+  it("refuses on a protected branch: exit 2, usage_error, the guard in the envelope, no override field", async () => {
+    const dir = repoOn("main");
+    const r = await cli(dir);
+    expect(r.code).toBe(2);
+    expect(r.out.status).toBe("usage_error");
+    expect(r.out.reason).toBe("protected_branch");
+    expect(r.out.edits[0]).toMatchObject({
+      status: "refused",
+      reason: "protected_branch",
+    });
+    expect(r.out.branch_guard).toEqual({
+      status: "refused",
+      reason: "protected_branch",
+      repos: [
+        {
+          root: dir,
+          status: "refused",
+          branch: "main",
+          protected: ["main", "master"],
+          sources: ["builtin"],
+          reason: "protected_branch",
+        },
+      ],
+    });
+    expect(r.out.message).toContain("--allow-protected");
+    expect(r.out.allowed_protected).toBeUndefined();
+    expect(a(dir)).toBe("a\n");
+  });
+
+  it("--allow-protected writes and puts allowed_protected: true at the top level", async () => {
+    const dir = repoOn("main");
+    const r = await cli(dir, "--allow-protected");
+    expect(r.code).toBe(0);
+    expect(r.out.status).toBe("written");
+    expect(r.out.allowed_protected).toBe(true);
+    expect(r.out.branch_guard.status).toBe("allowed_protected");
+    expect(a(dir)).toBe("b\n");
+  });
+
+  it("--protected is repeatable and needs a usable name", async () => {
+    const one = repoOn("release");
+    const r = await cli(one, "--protected", "hotfix", "--protected", "release");
+    expect(r.code).toBe(2);
+    expect(r.out.branch_guard.repos[0].protected).toEqual([
+      "hotfix",
+      "release",
+      "main",
+      "master",
+    ]);
+    expect(r.out.branch_guard.repos[0].sources).toEqual(["flag", "builtin"]);
+    const two = repoOn("release2");
+    expect((await cli(two, "--protected", "release")).code).toBe(0);
+    const bad = await cli(two, "--protected", " ");
+    expect(bad.code).toBe(2);
+    expect(bad.out.reason).toBe("protected_invalid");
+    expect(a(two)).toBe("b\n");
+  });
+
+  it("--protect-detached refuses a detached HEAD", async () => {
+    const dir = repoOn("task");
+    commitAll(dir);
+    git(dir, "checkout", "-q", "--detach");
+    const ok = await cli(dir, "--dry-run");
+    expect(ok.out.branch_guard.status).toBe("detached");
+    const r = await cli(dir, "--protect-detached");
+    expect(r.code).toBe(2);
+    expect(r.out.reason).toBe("protected_branch");
+    expect(r.out.branch_guard.repos[0].branch).toBe("HEAD");
+    expect(a(dir)).toBe("a\n");
+  });
+
+  it("--dry-run on a protected branch exits 0 with would_refuse", async () => {
+    const dir = repoOn("main");
+    const r = await cli(dir, "--dry-run");
+    expect(r.code).toBe(0);
+    expect(r.out.status).toBe("would_write");
+    expect(r.out.branch_guard.status).toBe("would_refuse");
+    expect(r.out.branch_guard.reason).toBe("protected_branch");
+    expect(a(dir)).toBe("a\n");
+  });
+
+  describe("under a tight -m budget", () => {
+    /** A 12-file plan in a repository on main, run with `-m <budget>`. */
+    async function tight(
+      budget: string,
+      ...flags: string[]
+    ): Promise<GuardJson> {
+      const dir = repoOn("main");
+      const edits = Array.from({ length: 12 }, (_, n) => ({
+        file: `f${String(n)}.txt`,
+        old: "a",
+        new: "b",
+      }));
+      for (const e of edits) fs.writeFileSync(path.join(dir, e.file), "a\n");
+      fs.writeFileSync(path.join(dir, "plan.json"), JSON.stringify({ edits }));
+      const res = await spawnCli(
+        [
+          "--json",
+          "-m",
+          budget,
+          "-C",
+          dir,
+          "patch",
+          "--plan",
+          "plan.json",
+          ...flags,
+        ],
+        { env: { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } },
+      );
+      return JSON.parse(res.stdout) as GuardJson;
+    }
+
+    it("keeps written_files, counts and allowed_protected when --allow-protected wrote", async () => {
+      const out = await tight("1200", "--allow-protected");
+      // The edits and files were cut down; the audit fields were not.
+      expect(out.truncated).toBe(true);
+      expect(out.written_files).toHaveLength(12);
+      expect(out.counts?.files_written).toBe(12);
+      expect(out.allowed_protected).toBe(true);
+    });
+
+    it("keeps reason, counts and written_files of a refusal", async () => {
+      const out = await tight("1200");
+      expect(out.truncated).toBe(true);
+      expect(out.status).toBe("usage_error");
+      expect(out.reason).toBe("protected_branch");
+      expect(out.counts?.refused).toBe(12);
+      expect(out.counts?.files_written).toBe(0);
+      expect(out.written_files).toEqual([]);
+    });
+
+    // The warnings are fixed fields: `-m` never cuts them, so the outcome
+    // is named even where nothing else of the guard is left.
+    for (const budget of ["1000", "1200"]) {
+      it(`names a refusal in a warning at -m ${budget}`, async () => {
+        const out = await tight(budget);
+        expect(out.status).toBe("usage_error");
+        const named = out.warnings.filter((w) =>
+          w.startsWith("branch guard: refused in"),
+        );
+        expect(named).toEqual([
+          "branch guard: refused in 1 repository (protected_branch); pass --allow-protected to edit anyway",
+        ]);
+      });
+
+      it(`names an override in a warning at -m ${budget}`, async () => {
+        const out = await tight(budget, "--allow-protected");
+        expect(out.status).toBe("written");
+        expect(
+          out.warnings.some((w) => w.startsWith("--allow-protected:")),
+        ).toBe(true);
+      });
+    }
+  });
+
+  it("carries no free text in branch_guard", async () => {
+    const dir = repoOn("main");
+    const r = await cli(dir, "--allow-protected");
+    expect(Object.keys(r.out.branch_guard.repos[0]).sort()).toEqual([
+      "branch",
+      "protected",
+      "reason",
+      "root",
+      "sources",
+      "status",
+    ]);
+    expect(Object.keys(r.out.branch_guard).sort()).toEqual([
+      "reason",
+      "repos",
+      "status",
+    ]);
+  });
+
+  it("writes outside any repository", async () => {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+    const r = await cli(dir);
+    expect(r.code).toBe(0);
+    expect(r.out.branch_guard.status).toBe("not_a_repo");
+  });
+
+  it("lists one entry per repository that holds a target", async () => {
+    const base = tmpDir();
+    const one = repoOn("task/one", path.join(base, "one"));
+    const two = repoOn("task/two", path.join(base, "two"));
+    fs.writeFileSync(
+      path.join(base, "plan.json"),
+      JSON.stringify({
+        edits: [
+          { file: "one/a.txt", old: "a", new: "b" },
+          { file: "two/a.txt", old: "a", new: "b" },
+        ],
+      }),
+    );
+    const run2 = await spawnCli(
+      ["--json", "-C", base, "patch", "--plan", "plan.json"],
+      { env: { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } },
+    );
+    const out = JSON.parse(run2.stdout) as GuardJson;
+    expect(run2.code).toBe(0);
+    expect(out.branch_guard.repos.map((r) => r.root)).toEqual([one, two]);
+    expect(out.branch_guard.repos.map((r) => r.branch)).toEqual([
+      "task/one",
+      "task/two",
+    ]);
+  });
+});

@@ -60,7 +60,9 @@ for teams shipping with AI agents.
   (or one `--file`/`--old`/`--new` edit), resolving every edit first and
   writing nothing when one is missing, ambiguous or overlapping; reports
   the matching tier per edit, keeps line endings, BOM and file mode, and
-  has a `--dry-run` diff preview.
+  has a `--dry-run` diff preview; refuses to write on a protected branch
+  (`main`, `master`, the branch `origin/HEAD` names, any `--protected`
+  name) unless `--allow-protected` says so.
 - `snapshot` / `delta`: save checkout/index/content fingerprints to a full
   external artifact and compare the same checkout later.
 - `worktree create`: makes a linked worktree on a new branch with no upstream,
@@ -148,7 +150,7 @@ file, and reports whether the test caught it (`killed`) or missed it
 - [`hygiene`](docs/hygiene.md): the commit-hygiene guard for backup files,
   extend-only rewrites and dropped test cases.
 - [`patch`](docs/patch.md): all-or-nothing exact-text edits, the matching
-  tiers, refusals and the result shape.
+  tiers, refusals, the branch guard and the result shape.
 - [`guard`](docs/guard.md): bounded runs for repros, hangs and fuzz loops:
   timeout, memory cap, leftovers and the exit codes.
 - [`snapshot`](docs/snapshot.md): read-only checkout fingerprints.
@@ -175,7 +177,7 @@ maps the status to the exit code. Each command lives in its own module:
 | `init` | `src/init/index.ts`, digest ledger in `src/init/ledger.ts`; installs `assets/skill/SKILL.md` |
 | `drift` | `src/drift/` |
 | `hygiene` | `src/hygiene/index.ts`, using `src/drift/git.ts` |
-| `patch` | `src/patch/` (`index.ts` plan and write phase, `engine.ts` matching, `hint.ts`, `diff.ts`) |
+| `patch` | `src/patch/` (`index.ts` plan and write phase, `branch-guard.ts` protected-branch guard, `engine.ts` matching, `hint.ts`, `diff.ts`) |
 | `guard` | `src/guard/` (`index.ts` run, limits and sweeps; `ps.ts` the process table), spawning through `src/bounded-spawn.ts` |
 | `snapshot`, `delta` | `src/snapshot/` |
 | `worktree` | `src/worktree/` (`create.ts`, `remove.ts`, `sweep.ts`, `sync.ts`, `list.ts`; shared git helpers in `git.ts`, the smoke verdict in `readiness.ts`) |
