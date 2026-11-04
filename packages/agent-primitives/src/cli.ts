@@ -21,6 +21,7 @@ import {
 import { execCommand, stdioWatchBoundMs, type ExecResult } from "./exec.js";
 import {
   verify,
+  VerifyUsageError,
   DEFAULT_CHECKS,
   DEFAULT_MAX_FAILURES,
   type ExecLike,
@@ -1130,23 +1131,51 @@ program
   .action(async (opts: VerifyCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
-    const result = await verify({
-      cwd: global.cwd,
-      logDir: global.logDir,
-      runId: currentRunId(),
-      checks: opts.checks,
-      overrides: opts.exec,
-      passRegexes: opts.passRegex,
-      failFast: Boolean(opts.failFast),
-      signal: shutdownController.signal,
-      // Not the default `execCommand`: the tracking wrapper, so the
-      // signal handler can wait for the check it just killed to settle
-      // before this process exits.
-      execFn: trackingExec,
-      timeoutMs:
-        opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
-      maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
-    });
+    // A `VerifyUsageError` is verify's own refusal (an invalid check name,
+    // or a refused `.agent-primitives.json` repo preset:
+    // `defaults_file_invalid`, `empty_preset`, `defaults_file_not_readable`).
+    // It is reported here rather than by the top-level mapper so the
+    // envelope keeps naming `command: "verify"` and carries the specific
+    // reason, the way the `patch` action reports a `PatchUsageError`.
+    let result: VerifyResult;
+    try {
+      result = await verify({
+        cwd: global.cwd,
+        logDir: global.logDir,
+        runId: currentRunId(),
+        checks: opts.checks,
+        overrides: opts.exec,
+        passRegexes: opts.passRegex,
+        failFast: Boolean(opts.failFast),
+        signal: shutdownController.signal,
+        // Not the default `execCommand`: the tracking wrapper, so the
+        // signal handler can wait for the check it just killed to settle
+        // before this process exits.
+        execFn: trackingExec,
+        timeoutMs:
+          opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
+        maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
+      });
+    } catch (err) {
+      if (!(err instanceof VerifyUsageError)) throw err;
+      const { envelope, exitCode } = buildEnvelope({
+        version: VERSION,
+        command: "verify",
+        status: "usage_error",
+        durationMs: Date.now() - start,
+        cwd: global.cwd,
+        warnings: [],
+        logs: [],
+        extra: { reason: err.reason, message: err.message },
+        maxChars: global.maxChars,
+        logDir: global.logDir,
+      });
+      emit(envelope, exitCode, {
+        format: global.format,
+        maxChars: global.maxChars,
+      });
+      return;
+    }
 
     // The log path this writes is appended to `logs` BEFORE buildEnvelope
     // runs, so it lands in the envelope's own `logs` field (buildEnvelope
@@ -1259,7 +1288,7 @@ function renderVerifyText(
   lines.push("checks:");
   for (const check of result.checks) {
     lines.push(
-      `  [${check.status}] ${check.name}${check.command ? ` (${check.command})` : ""} - ${check.durationMs}ms`,
+      `  [${check.status}] ${check.name} [${check.source}]${check.command ? ` (${check.command})` : ""} - ${check.durationMs}ms`,
     );
     for (const failure of check.failures) {
       const where = [failure.file, failure.line].filter(Boolean).join(":");

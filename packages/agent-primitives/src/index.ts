@@ -27,6 +27,7 @@ export {
   verify,
   selectDetector,
   genericDetector,
+  VerifyUsageError,
   DEFAULT_CHECKS,
   DEFAULT_MAX_FAILURES,
 } from "./verify/index.js";

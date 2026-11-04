@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `verify` reads a repo preset from `.agent-primitives.json`:
+  `verify.checks` maps a check name to the `package.json` script that
+  satisfies it and the optional `verify.order` lists which of them run
+  first. With no `-c` the preset's own list replaces the built-in
+  `build,typecheck,lint,test`; with `-c` the names select from the union of
+  the preset and the built-ins; `-x` wins over a preset entry either way. A
+  preset names SCRIPTS, never commands (a key must be a check name, not an
+  integer-like key, not `__proto__`; a value must match the same
+  conservative pattern and start with a letter or a digit, so it can never
+  reach npm as a flag), is read at the git root while `package.json` stays
+  at `-C`, and is validated by `probe`'s own whole-file pass, so an invalid
+  `verify` also refuses `probe` and an invalid `link` also refuses `verify`.
+  A refused file runs nothing: `status: "usage_error"` with reason
+  `defaults_file_invalid`, `empty_preset` (an empty `checks`) or
+  `defaults_file_not_readable`, exit `2`, and every `CheckResult` now
+  carries `source` (`exec`, `preset`, `script` or `none`) saying where its
+  command came from. An older `probe` refuses a file carrying `verify`
+  instead of ignoring it: that is the file's fail-closed unknown-key rule
+  working as designed, so ship the preset with the tool that reads it.
+
 ### Changed
 
 - The test suite now runs in a sandbox or environment where `ps` cannot be

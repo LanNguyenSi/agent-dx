@@ -84,9 +84,24 @@ export interface Detector {
 
 export type CheckStatus = "pass" | "fail" | "skipped" | "error";
 
+/** Where a resolved check's command came from:
+ * - `"exec"`: an `-x name=command` override (explicit, or a `-c` item that
+ *   is not a name and became an implicit `-x`): the caller's own command.
+ * - `"preset"`: the repository `.agent-primitives.json`
+ *   `verify.checks` map named the npm script to run.
+ * - `"script"`: no override and no preset entry, and `package.json`
+ *   `scripts[name]` matched the check's own name (today's fallback).
+ * - `"none"`: nothing could be resolved, so the check is the
+ *   `no_script` skipped result. */
+export type CheckSource = "exec" | "preset" | "script" | "none";
+
 export interface CheckResult {
   name: string;
   command?: string;
+  /** Every check reports where its command came from, so a reader can tell
+   * a repo preset's script from a `-c` name's own script from a `-x`
+   * command out of the envelope alone (see `CheckSource`). */
+  source: CheckSource;
   status: CheckStatus;
   exitCode: number | null;
   durationMs: number;

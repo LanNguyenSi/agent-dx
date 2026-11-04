@@ -139,4 +139,79 @@ describe("readDefaultsFile", () => {
     expect(result.reason).toBe("defaults_file_not_readable");
     expect(result.message).toContain("cap");
   });
+
+  it("names both known keys in the unknown-key message now that verify is one of them", () => {
+    const root = makeTmpDir();
+    writeDefaultsFile(root, JSON.stringify({ typoKey: true }));
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain('only "link" and "verify" are known keys');
+  });
+
+  it("reads a valid verify section into checks and order, keeping a valid link list beside it", () => {
+    const root = makeTmpDir();
+    writeDefaultsFile(
+      root,
+      JSON.stringify({
+        link: ["vendor"],
+        verify: {
+          checks: { build: "compile", "test:ci": "test_ci" },
+          order: ["test:ci"],
+        },
+      }),
+    );
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.links).toEqual(["vendor"]);
+    expect(result.verify).toEqual({
+      checks: { build: "compile", "test:ci": "test_ci" },
+      order: ["test:ci"],
+    });
+    expect(Object.getPrototypeOf(result.verify?.checks)).toBeNull();
+  });
+
+  it("reads a verify section with no order key as an empty order", () => {
+    const root = makeTmpDir();
+    writeDefaultsFile(root, JSON.stringify({ verify: { checks: { a: "a" } } }));
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.verify?.order).toEqual([]);
+  });
+
+  it("an absent file carries no verify key at all", () => {
+    const root = makeTmpDir();
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect("verify" in result).toBe(false);
+  });
+
+  it("refuses an empty checks object with its own empty_preset reason", () => {
+    const root = makeTmpDir();
+    writeDefaultsFile(root, JSON.stringify({ verify: { checks: {} } }));
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("empty_preset");
+    expect(result.message).toContain('"verify.checks" is empty');
+  });
+
+  it("refuses an invalid verify alongside a valid link, so the whole file (and with it every probe link) is refused", () => {
+    const root = makeTmpDir();
+    writeDefaultsFile(
+      root,
+      JSON.stringify({
+        link: ["vendor"],
+        verify: { checks: { build: "npm i" } },
+      }),
+    );
+    const result = readDefaultsFile(root);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("defaults_file_invalid");
+    expect(result.message).toContain('value for "build" must match');
+  });
 });

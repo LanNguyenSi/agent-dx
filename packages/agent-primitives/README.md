@@ -27,7 +27,9 @@ for teams shipping with AI agents.
   lookups) and reports a few environment signals
   (git worktree, `node_modules`, whether a rebuild is likely needed).
 - `verify`: runs named checks (`build`, `typecheck`, `lint`, `test` by
-  default) and reports a compact, bounded summary instead of raw output.
+  default, or the repository `.agent-primitives.json` preset when it has a
+  `verify` section) and reports a compact, bounded summary instead of raw
+  output.
 - `probe`: runs one mutation probe (or a `--plan` of several), confirms the
   baseline passes first, and reports whether the target test caught the
   mutant, restoring the file afterward either way.
@@ -136,7 +138,8 @@ file, and reports whether the test caught it (`killed`) or missed it
 ## Documentation
 
 - [`doctor`](docs/doctor.md): PATH and environment checks.
-- [`verify`](docs/verify.md): run named checks with a bounded summary.
+- [`verify`](docs/verify.md): run named checks with a bounded summary, from
+  the command line or a repository preset.
 - [`probe`](docs/probe.md): the mutation-probe runner, `--plan`, and the
   result shape.
 - [`init`](docs/init.md): install the package's skill into a harness.
@@ -177,7 +180,10 @@ maps the status to the exit code. Each command lives in its own module:
 | `snapshot`, `delta` | `src/snapshot/` |
 | `worktree` | `src/worktree/` (`create.ts`, `remove.ts`, `sweep.ts`, `sync.ts`, `list.ts`; shared git helpers in `git.ts`, the smoke verdict in `readiness.ts`) |
 
-`verify` spawns its checks through `execCommand` in `src/exec.ts`.
+`verify` spawns its checks through `execCommand` in `src/exec.ts`, and reads
+its optional check preset from the same repository `.agent-primitives.json`
+`probe` reads (`src/probe/defaults-file.ts`, with the name vocabulary both
+share in `src/check-names.ts`).
 `probe` is split into a setup phase (`src/probe/setup.ts`: containment,
 lock, stale-marker recovery, worktree preparation, baseline) and a
 per-mutant step (`src/probe/step.ts`: in-flight marker, apply, test,

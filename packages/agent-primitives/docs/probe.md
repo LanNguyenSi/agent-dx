@@ -1479,12 +1479,20 @@ own namespaces relative to itself ahead of the framework's.
 `.agent-primitives.json` at the repository root (the same directory
 `probe` treats as the containment root: the git work-tree root, or the
 invocation cwd outside a repository) is read on every `probe`/`--plan`
-invocation, no flag required. Its schema is `{ "link": [...] }` only,
-paths relative to the repository root: any other key is a usage error
+invocation, no flag required. Its schema is `{ "link": [...], "verify": {...} }`:
+the `link` list below, and the `verify` check preset `verify` runs when `-c`
+says nothing else ([verify.md](verify.md), "Repo preset"). `link` entries
+are paths relative to the repository root. The two keys are
+read by one loader and validated in one whole-file pass for every consumer,
+so an invalid `verify` refuses a `probe` run exactly as an invalid `link`
+refuses a `verify` run; and, because the unknown-key rule is fail-closed, a
+binary older than the `verify` key refuses a file carrying it rather than
+ignoring it. Any other key is a usage error
 naming the file's path and the offending key (`reason:
 "defaults_file_invalid"`, fail-closed, so a typo does not silently do
 nothing), and a present-but-unparsable file (not JSON, not a JSON
-object, `link` not an array of valid link strings) is a usage error
+object, `link` not an array of valid link strings, `verify` not a valid
+preset) is a usage error
 naming the path. A file that is not a regular file, exceeds 64&nbsp;KiB,
 or cannot be read is `reason: "defaults_file_not_readable"`. An absent
 file is not an error: nothing to add. Every
@@ -2430,7 +2438,9 @@ single `--file` for it (`patch_file_ambiguous`), a missing `--file`
 `--link`/`--plan` file's/defaults file's `link` value whose source is
 not an existing directory (`link_source_not_found`, see "Non-JS
 repositories" above), and a repository defaults file
-(`.agent-primitives.json`) that is invalid (`defaults_file_invalid`) or
+(`.agent-primitives.json`) that is invalid (`defaults_file_invalid`),
+whose `verify` preset names no check at all (`empty_preset`, which
+`verify` reports the same way), or that
 cannot be used at all: not a regular file, over its 64&nbsp;KiB cap, or
 unreadable (`defaults_file_not_readable`, see "Repo defaults file"
 above). They
