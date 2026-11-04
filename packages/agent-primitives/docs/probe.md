@@ -814,10 +814,12 @@ spelling of it, or (for a gitignored destination the copy carries under
 no spelling, where two case variants of one source-tree entry would
 elsewhere stay two strings) the source tree's own name of the entry --
 such as the operator's `--link`, the worktree link manifest or an
-outside plan's `link` list for that path. The destination is planned to be linked (a
-later syscall-time refusal is reported on its own), so the warning
-would contradict `isolation.linked`. Such a superseded refusal is not
-dropped either: it appears, with the very text it would have carried,
+outside plan's `link` list for that path. The source-tree spelling match
+assumes the copy and the source tree are on volumes with the same case
+rules, and nothing verifies that assumption. The destination is planned to
+be linked (a later syscall-time refusal is reported on its own), so the
+warning would contradict `isolation.linked`. Such a superseded refusal is
+not dropped either: it appears, with the very text it would have carried,
 in the `isolation.supersededRefusals` array (`string[]`, present only
 when non-empty), next to the `isolation.linked` entry that overrides
 it. Every other refusal keeps its

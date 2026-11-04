@@ -252,6 +252,202 @@ describe("helpers", () => {
     expect(countPhpTestMethods(inString)).toBe(0);
   });
 
+  it("does not open a block comment on a /* inside a string literal", () => {
+    const src = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function setUp(): void {",
+      "    $this->files = glob(__DIR__ . '/fixtures/*.json');",
+      "  }",
+      "  public function testOne(): void {}",
+      "  public function testTwo(): void {}",
+      "  public function testThree(): void {}",
+      "  /** @test */",
+      "  public function four(): void {}",
+      "}",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(4);
+  });
+
+  it("does not open a block comment on an escaped quote before the /*", () => {
+    const src = [
+      "  public function setUp(): void {",
+      "    $s = 'it\\'s /* fine';",
+      "  }",
+      "  public function testOne(): void {}",
+      "  public function testTwo(): void {}",
+      "  /** @test */",
+      "  public function three(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(3);
+  });
+
+  it("does not open a heredoc on a <<< inside a string literal", () => {
+    const conflict = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function setUp(): void {",
+      "    $s = '<<<<<<< HEAD';",
+      "  }",
+      "  public function testOne(): void {}",
+      "  public function testTwo(): void {}",
+      "}",
+    ].join("\n");
+    expect(countPhpTestMethods(conflict)).toBe(2);
+    const opener = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function setUp(): void {",
+      "    $marker = '<<<EOD';",
+      "  }",
+      "  public function testOne(): void {}",
+      "  public function testTwo(): void {}",
+      "  private function body(): string {",
+      "    return <<<EOD",
+      "some text",
+      "EOD;",
+      "  }",
+      "}",
+    ].join("\n");
+    expect(countPhpTestMethods(opener)).toBe(2);
+  });
+
+  it("closes a heredoc on any PHP 7.3 terminator and on nothing that continues the label", () => {
+    const terminated = (terminator: string): string =>
+      [
+        "  public function setUp(): void {",
+        "    $a = <<<EOD",
+        "function testInHeredoc(): void {}",
+        terminator,
+        "  }",
+        "  public function testAfter(): void {}",
+      ].join("\n");
+    for (const terminator of [
+      "EOD;",
+      "EOD,",
+      "EOD)",
+      "EOD .",
+      "EOD]",
+      "EOD->",
+      "EOD",
+    ]) {
+      expect(countPhpTestMethods(terminated(terminator)), terminator).toBe(1);
+    }
+    const inArguments = [
+      "  public function setUp(): void {",
+      "    foo(<<<EOD",
+      "function testInHeredoc(): void {}",
+      "EOD, 1);",
+      "  }",
+      "  public function testAfter(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(inArguments)).toBe(1);
+    const nextLineParen = [
+      "  public function setUp(): void {",
+      "    foo(<<<EOD",
+      "function testInHeredoc(): void {}",
+      "EOD",
+      ");",
+      "  }",
+      "  public function testAfter(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(nextLineParen)).toBe(1);
+    const longerLabel = [
+      "  public function setUp(): void {",
+      "    $a = <<<EOD",
+      "EODX;",
+      "function testInBody(): void {}",
+      "EOD;",
+      "  }",
+      "  public function testAfter(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(longerLabel)).toBe(1);
+    const bodyThatLooksLikeATerminator = [
+      "  public function setUp(): void {",
+      "    $a = <<<EOD",
+      "The example body mentions EOD in prose",
+      "function testInBody(): void {}",
+      "EOD;",
+      "  }",
+      "  public function testAfter(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(bodyThatLooksLikeATerminator)).toBe(1);
+  });
+
+  it("keeps a pending marker across a multi-line attribute", () => {
+    const byAttribute = [
+      "  #[Test]",
+      "  #[DataProviderExternal(",
+      "    Provider::class,",
+      "  )]",
+      "  public function a(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(byAttribute)).toBe(1);
+    const byDoc = [
+      "  /** @test */",
+      "  #[DataProviderExternal(",
+      "    Provider::class,",
+      "  )]",
+      "  public function b(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(byDoc)).toBe(1);
+    const testInContinuation = [
+      "  #[DataProviderExternal(",
+      "    Provider::class,",
+      "  ), Test]",
+      "  public function c(): void {}",
+      "  public function helper(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(testInContinuation)).toBe(1);
+    const noMarkerInContinuation = [
+      "  /** @test */",
+      "  #[DataProviderExternal(",
+      "    Provider::class,",
+      "  )]",
+      "  public function d(): void {}",
+      "  public function helper(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(noMarkerInContinuation)).toBe(1);
+  });
+
+  it("recounts with the state off when a state never closes", () => {
+    const unterminatedHeredoc = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function testOne(): void {}",
+      "  public function body(): string {",
+      "    return <<<EOD",
+      "function testInBody(): void {}",
+      "still in the heredoc, the file ends here",
+    ].join("\n");
+    const stateless = unterminatedHeredoc
+      .split("\n")
+      .filter((l) => !l.includes("<<<EOD"))
+      .join("\n");
+    expect(countPhpTestMethods(unterminatedHeredoc)).toBe(
+      countPhpTestMethods(stateless),
+    );
+    expect(countPhpTestMethods(unterminatedHeredoc)).toBe(2);
+    const unterminatedComment = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function testOne(): void {}",
+      "  /*",
+      "  function testInComment(): void {}",
+      "  the file ends inside the comment",
+    ].join("\n");
+    expect(countPhpTestMethods(unterminatedComment)).toBe(2);
+    const unterminatedAttribute = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function testOne(): void {}",
+      "  #[DataProviderExternal(",
+      "    Provider::class,",
+      "  public function testTwo(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(unterminatedAttribute)).toBe(2);
+  });
+
   it("routes .php paths to the PHP counter only", () => {
     const php = "  public function testOne(): void {}\n@test\n";
     expect(countTestCases(php, "tests/src/Unit/FooTest.php")).toBe(1);
@@ -726,6 +922,47 @@ describe("hygiene CLI", () => {
     expect(JSON.parse(run.stdout).findings[0].kind).toBe("extend_only_rewrite");
     const usage = await spawnCli(["-C", repo, "hygiene", "--base", "zzzz"]);
     expect(usage.code).toBe(2);
+  });
+
+  it("counts PHPUnit methods below a glob string and flags a drop through the CLI", async () => {
+    const repo = initRepo();
+    const fixture = (n: number): string =>
+      [
+        "<?php",
+        "final class FooTest extends TestCase {",
+        "  public function setUp(): void {",
+        "    $this->files = glob(__DIR__ . '/fixtures/*.json');",
+        "  }",
+        ...Array.from(
+          { length: n },
+          (_, i) => `  public function test${String(i)}(): void {}`,
+        ),
+        "  /** @test */",
+        "  public function four(): void {}",
+        "}",
+        "",
+      ].join("\n");
+    write(repo, "tests/FooTest.php", fixture(4));
+    commitAll(repo, "php tests");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "tests/FooTest.php", fixture(3));
+    commitAll(repo);
+    const run = await spawnCli(["-C", repo, "hygiene", "--base", base]);
+    expect(run.code).toBe(1);
+    const out = JSON.parse(run.stdout) as {
+      findings: {
+        kind: string;
+        path: string;
+        baseCases: number;
+        headCases: number;
+      }[];
+    };
+    expect(out.findings[0]).toMatchObject({
+      kind: "test_cases_dropped",
+      path: "tests/FooTest.php",
+      baseCases: 5,
+      headCases: 4,
+    });
   });
 
   it("resolves a relative --extend-only-file against the -C directory", async () => {

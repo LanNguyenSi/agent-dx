@@ -23,9 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inside a `/* */` block comment or a heredoc/nowdoc body are no longer
   counted, `@test` only marks inside a docblock, and a pending marker is
   dropped at the first line that is neither blank nor a docblock, comment
-  or attribute line. Documented limits: attribute arguments containing `]`,
-  heredoc terminators sharing a line with code, and `/*` or `<<<` inside a
-  string literal.
+  or attribute line. A `/*` or `<<<` inside a quoted string literal opens no
+  state, a heredoc body ends at a line that starts with its label followed
+  by a character that cannot continue the label (PHP 7.3's own rule), and an
+  attribute group closing on a later line no longer drops the marker above
+  it. A state still open at the end of the file is taken for a misread and
+  the file is recounted with that state off, keeping the higher count, so a
+  misread can no longer hide every later method and let a deleted test go
+  unreported. Documented limits: attribute arguments containing `]`, and a
+  docblock or attribute after the modifiers on the method line.
 
 ## [0.19.1] - 2026-11-01
 
