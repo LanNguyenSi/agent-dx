@@ -47,7 +47,10 @@ const DIST_PATCH_URL = pathToFileURL(
 const CHILD_PATCH_SCRIPT = [
   "const [url, json] = process.argv.slice(1);",
   "const { patch } = await import(url);",
-  "process.stdout.write(JSON.stringify(patch(JSON.parse(json))));",
+  "const options = JSON.parse(json);",
+  // A variable too big for any exec: git cannot be started, a spawn error.
+  'if (options.hugeEnv) process.env.HUGE = "x".repeat(options.hugeEnv);',
+  "process.stdout.write(JSON.stringify(patch(options)));",
 ].join("\n");
 
 interface ChildPatchRun {
@@ -79,6 +82,7 @@ interface PatchChildOptions {
   dryRun?: boolean;
   allowProtected?: boolean;
   gitTimeoutMs?: number;
+  hugeEnv?: number;
 }
 
 /** The built `patch` module in a child process with a group of its own;
@@ -584,6 +588,21 @@ describe.skipIf(process.platform === "win32")(
         expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a\n");
       }, 60_000);
     }
+
+    it("refuses as unresolved when git cannot be started at all (a spawn error, not an exit status)", async () => {
+      const stand = fakeGit(standIn(GOOD_HEAD, UNSET));
+      const dir = tmpDir();
+      fs.mkdirSync(path.join(dir, ".git"));
+      fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+      const { out } = await runPatchChild(
+        { cwd: dir, edits: EDIT, hugeEnv: 4 * 1024 * 1024 },
+        stand.env,
+      );
+      expect(out.status).toBe("usage_error");
+      expect(out.reason).toBe("protected_branch_unresolved");
+      expect(out.edits?.[0].detail).toContain("git could not be run");
+      expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a\n");
+    }, 60_000);
 
     // `origin/HEAD` that names anything but a plain
     // `refs/remotes/origin/<name>` adds no name: the call is no failure,
