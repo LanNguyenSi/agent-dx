@@ -47,6 +47,23 @@ Every requested check must resolve to a command and pass. A missing
 command passed to `-c` runs as an implicit `-x` check under a derived
 name and carries a warning naming the canonical form; always write the
 canonical `-c <name> -x '<name>=<command>'` form yourself instead.
+A repository may ship a preset in `.agent-primitives.json` (`verify.checks`
+maps a check name to the npm script that satisfies it, `verify.order` lists
+which run first): with no `-c` the preset's list runs instead of the built-in
+`build,typecheck,lint,test`, with `-c` the names select from the union of
+both, `-x` wins either way, and each check's `source` (`exec`, `preset`,
+`script`, `none`) says where its command came from. A refused file (a key
+other than `checks` and `order`, a value that is not a script name, an
+integer-like key) runs nothing: `usage_error`, exit `2`. For a suite that
+fails intermittently, `--repeat <n>` (1 to 100) runs every check n times:
+`status` is `pass` only when every run passed, `flaky` says the runs
+disagreed, `runs`/`passed`/`failed` count them, `failures` is the
+de-duplicated union, each run has its own log `<name>.<k>.log`, and the
+full result file lists every run's exit code. `verify`, `hygiene` and
+`drift` take `--summary` (one line per check, finding or site plus a
+`totals:` line; a repeated check adds `runs=N runs_passed=P runs_failed=F`)
+and `--print <fields>` like `probe`; read those instead of writing a JSON
+reader.
 
 ## 3. Probe
 
@@ -221,7 +238,11 @@ Use the fourth form (`--plan`) when several mutants share one test
 command: the baseline runs once for the whole list instead of once per
 mutant, each mutant is applied and restored (verified by hash) before the
 next is applied, and the result carries one `mutation_probe` per mutant
-plus a `summary`. The plan is JSON, its paths resolved against the
+plus a `summary`. A mutant may carry its own `test`, which wins over the
+plan-level `test` (left out when every mutant has one); mutants whose
+commands are the same string share one baseline, every baseline runs before
+the first mutant through the same gate, and a failing later baseline marks
+only its own mutants `not_run`. The plan is JSON, its paths resolved against the
 invocation cwd:
 
 ```json
@@ -325,6 +346,10 @@ to reuse prior test evidence. See the agent-primitives package's
 docs/snapshot.md and docs/delta.md for unsupported states and best-effort
 observation limits. Use `drift --base <rev> --head <rev>` for identifier
 references in prose; see its docs/drift.md.
+`--ignore-identifier <name>` (or `--ignore-identifier-file <file>`) drops a
+name's sites (shown under `--strict` as allowlisted), and a removed
+indented, non-exported local that is still declared at head is suppressed
+on its own; `ignored_identifiers` lists both with their source.
 
 ## 9. Commit hygiene
 
@@ -334,6 +359,11 @@ flag-as-suffix family `*-e`, `*-E`, `*-n`, `*-r`, `*-s`, plus `*.bak`,
 `*.orig`, `*~`), flags a file you were asked only to extend that loses more
 than `--max-delete-percent` of its lines (default 20%; `--extend-only
 <path>`), and flags a changed test file with fewer test cases than before.
+A drop you intend is declared with `--intended-deletion <path>[=<n>|all]`
+(or `--intended-deletion-file <file>`): an at-most count in the counter's
+units, applied to `test_cases_dropped` only, echoed in the envelope as
+`intended_deletions` and on the `--summary` totals line; a declaration that
+matched nothing warns.
 Exit `0` ok, `1` a finding, `2` it could not conclude. See the
 agent-primitives package's docs/hygiene.md.
 
@@ -400,7 +430,14 @@ only after normalization; a fuzzy match that would also change text
 outside the match is refused as `fuzzy_side_effect` (exit `1`), with the
 exact text to use as `old`. A hard-linked or read-only file is refused as
 `not_editable`. Paths outside the repository root and inside a git
-directory are refused. See the agent-primitives package's
+directory are refused. `patch` refuses to write while any repository
+holding a target has HEAD on a protected branch (`main`, `master`, the
+branch `origin/HEAD` points to, plus `--protected <name>`): `usage_error`
+with reason `protected_branch`, exit `2`, nothing written; `--allow-protected`
+lifts it and is recorded as `allowed_protected`, `--dry-run` reports
+`would_refuse`, and any non-answer from git fails closed as
+`protected_branch_unresolved`. Work on a task branch so the guard never
+fires. See the agent-primitives package's
 docs/patch.md.
 
 ## 12. Bounded runs
