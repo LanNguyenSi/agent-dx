@@ -1311,6 +1311,10 @@ export function patch(options: PatchOptions): PatchResult {
   }
   const firstRefusal = verdicts.find((v) => v.refuse);
   if (firstRefusal !== undefined) {
+    const refusing = verdicts.filter((v) => v.refuse);
+    warnings.push(
+      `branch guard: refused in ${String(refusing.length)} ${refusing.length === 1 ? "repository" : "repositories"} (${[...new Set(refusing.map((v) => v.guard.reason))].join(", ")}); pass --allow-protected to edit anyway`,
+    );
     for (const state of order) {
       if (state.status === "refused") continue;
       const own = stateVerdict.get(state);

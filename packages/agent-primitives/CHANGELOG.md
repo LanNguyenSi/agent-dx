@@ -37,8 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `patch` on a protected branch now refuses (see the branch guard above);
   pass `--allow-protected` to keep the old behaviour. Under a tight `-m`
-  budget `branch_guard` is reduced like any payload object, while `counts`,
-  `written_files`, `allowed_protected`, `status` and `reason` are kept.
+  budget `branch_guard` is reduced like any payload object, and `counts`,
+  `written_files`, `allowed_protected`, `status` and `reason` are kept while
+  the fixed fields leave room for them; below that only the fixed fields
+  remain, and the warnings (never cut) still name a refusal, a would-be
+  refusal or an override.
 - The test suite now runs in a sandbox or environment where `ps` cannot be
   started: the helper that lists processes in `worktree-remove-list.test.ts`
   catches the error `execFile` throws synchronously, and the tests whose

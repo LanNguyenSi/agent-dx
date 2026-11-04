@@ -880,6 +880,11 @@ describe("patch branch guard: every repository that holds a target", () => {
     expect(r.edits[0].detail).not.toContain(dirs.two);
     expect(r.edits[1].detail).toContain(dirs.two);
     expect(r.edits[1].detail).not.toContain(dirs.one);
+    expect(
+      r.warnings.filter((w) => w.startsWith("branch guard: refused in")),
+    ).toEqual([
+      "branch guard: refused in 2 repositories (protected_branch); pass --allow-protected to edit anyway",
+    ]);
     expect(r.branchGuard.repos.map((x) => x.status)).toEqual([
       "refused",
       "refused",
@@ -1310,8 +1315,11 @@ describe("patch branch guard: the CLI", () => {
   });
 
   describe("under a tight -m budget", () => {
-    /** A 12-file plan in a repository on main, run with `-m 1200`. */
-    async function tight(...flags: string[]): Promise<GuardJson> {
+    /** A 12-file plan in a repository on main, run with `-m <budget>`. */
+    async function tight(
+      budget: string,
+      ...flags: string[]
+    ): Promise<GuardJson> {
       const dir = repoOn("main");
       const edits = Array.from({ length: 12 }, (_, n) => ({
         file: `f${String(n)}.txt`,
@@ -1324,7 +1332,7 @@ describe("patch branch guard: the CLI", () => {
         [
           "--json",
           "-m",
-          "1200",
+          budget,
           "-C",
           dir,
           "patch",
@@ -1338,7 +1346,7 @@ describe("patch branch guard: the CLI", () => {
     }
 
     it("keeps written_files, counts and allowed_protected when --allow-protected wrote", async () => {
-      const out = await tight("--allow-protected");
+      const out = await tight("1200", "--allow-protected");
       // The edits and files were cut down; the audit fields were not.
       expect(out.truncated).toBe(true);
       expect(out.written_files).toHaveLength(12);
@@ -1347,7 +1355,7 @@ describe("patch branch guard: the CLI", () => {
     });
 
     it("keeps reason, counts and written_files of a refusal", async () => {
-      const out = await tight();
+      const out = await tight("1200");
       expect(out.truncated).toBe(true);
       expect(out.status).toBe("usage_error");
       expect(out.reason).toBe("protected_branch");
@@ -1355,6 +1363,29 @@ describe("patch branch guard: the CLI", () => {
       expect(out.counts?.files_written).toBe(0);
       expect(out.written_files).toEqual([]);
     });
+
+    // The warnings are fixed fields: `-m` never cuts them, so the outcome
+    // is named even where nothing else of the guard is left.
+    for (const budget of ["1000", "1200"]) {
+      it(`names a refusal in a warning at -m ${budget}`, async () => {
+        const out = await tight(budget);
+        expect(out.status).toBe("usage_error");
+        const named = out.warnings.filter((w) =>
+          w.startsWith("branch guard: refused in"),
+        );
+        expect(named).toEqual([
+          "branch guard: refused in 1 repository (protected_branch); pass --allow-protected to edit anyway",
+        ]);
+      });
+
+      it(`names an override in a warning at -m ${budget}`, async () => {
+        const out = await tight(budget, "--allow-protected");
+        expect(out.status).toBe("written");
+        expect(
+          out.warnings.some((w) => w.startsWith("--allow-protected:")),
+        ).toBe(true);
+      });
+    }
   });
 
   it("carries no free text in branch_guard", async () => {

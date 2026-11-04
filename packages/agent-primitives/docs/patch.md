@@ -411,7 +411,9 @@ first, so the answer is the one for the repository.
 **Outcomes.** `branch_guard.status` is the overall outcome, the first of
 this table's order that any repository has, and `branch_guard.repos` has one
 entry per repository (`root`, `status`, `branch`, `protected`, `sources`,
-`reason` when not `allowed`) with its own status from the same list. The
+`reason` for a `refused`, `would_refuse` or `allowed_protected` entry, not
+for `allowed`, `detached` or `not_a_repo`) with its own status from the
+same list. The
 guard carries no free text: the wording is in `message` and in the edits'
 `detail`, which name the repository's root.
 
@@ -455,8 +457,12 @@ nearest `.git` entry (a stub, see above) is judged as git answers. The
 override flag is available to whoever runs the command, so the guard stops
 a slip, not a caller that passes `--allow-protected`; `allowed_protected`
 in the envelope is the record that it did. Under a tight `-m` budget
-`branch_guard` is reduced like any other payload object; `counts`,
-`written_files`, `allowed_protected`, `status` and `reason` are kept.
+`branch_guard` is reduced like any other payload object, and `counts`,
+`written_files`, `allowed_protected`, `status` and `reason` are kept only
+while the fixed fields leave room for them; below that only the fixed
+fields remain. The warnings are fixed fields: one line each names a refusal
+(`branch guard: refused in N repositories ...`), a dry run that would be
+refused and an override, whatever the budget.
 
 ## Result shape
 
