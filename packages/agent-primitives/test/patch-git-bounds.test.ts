@@ -51,7 +51,12 @@ const CHILD_PATCH_SCRIPT = [
 ].join("\n");
 
 interface ChildPatchRun {
-  out: { status?: string; warnings?: string[] };
+  out: {
+    status?: string;
+    reason?: string;
+    warnings?: string[];
+    branchGuard?: { status?: string; reason?: string; detail?: string };
+  };
   ms: number;
 }
 
@@ -62,6 +67,7 @@ interface PatchChildOptions {
   cwd: string;
   edits: readonly unknown[];
   dryRun?: boolean;
+  allowProtected?: boolean;
   gitTimeoutMs?: number;
 }
 
@@ -345,6 +351,176 @@ describe.skipIf(process.platform === "win32")(
         await expectGone(recorded);
       } finally {
         for (const pid of held.pids()) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Gone.
+          }
+        }
+      }
+    }, 60_000);
+  },
+);
+
+/** The stand-in answers like a git on a feature branch: `rev-parse` (the
+ * identity lookup) has no answer, `symbolic-ref HEAD` names a task branch,
+ * `symbolic-ref refs/remotes/origin/HEAD` is unset. Every `symbolic-ref`
+ * call writes the environment it got to `<dir of PIDS>/<pid>.env`. */
+const ANSWERS_AND_RECORDS_ENV = [
+  'case "$1" in',
+  "  symbolic-ref)",
+  '    /usr/bin/env > "${PIDS%/*}/$$.env"',
+  '    if [ "$3" = HEAD ]; then echo refs/heads/task/x; exit 0; fi',
+  "    exit 1 ;;",
+  "  *) exit 128 ;;",
+  "esac",
+].join("\n");
+
+describe.skipIf(process.platform === "win32")(
+  "patch: the branch guard's git calls (bounded-spawn)",
+  () => {
+    it("runs two symbolic-ref calls and gives them none of the variables that steer git, with prompts off", async () => {
+      const stand = fakeGit(ANSWERS_AND_RECORDS_ENV);
+      const dir = tmpDir();
+      fs.mkdirSync(path.join(dir, ".git"));
+      fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+      const steering = {
+        GIT_DIR: "/nonexistent",
+        GIT_WORK_TREE: "/nonexistent",
+        GIT_COMMON_DIR: "/nonexistent",
+        GIT_INDEX_FILE: "/nonexistent",
+        GIT_OBJECT_DIRECTORY: "/nonexistent",
+        GIT_ALTERNATE_OBJECT_DIRECTORIES: "/nonexistent",
+        GIT_NAMESPACE: "elsewhere",
+        GIT_PREFIX: "sub/",
+        GIT_CEILING_DIRECTORIES: "/",
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
+        GIT_REF_STORAGE_FORMAT: "reftable",
+        GIT_REFERENCE_BACKEND: "reftable",
+        GIT_CONFIG_PARAMETERS: "'core.bare=true'",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.bare",
+        GIT_CONFIG_VALUE_0: "true",
+        GIT_TERMINAL_PROMPT: "1",
+      };
+      const { out } = await runPatchChild(
+        { cwd: dir, edits: EDIT },
+        { ...stand.env, ...steering, KEEP_ME: "yes" },
+      );
+      expect(out.status).toBe("written");
+      expect(out.branchGuard?.status).toBe("allowed");
+      const dumps = fs
+        .readdirSync(path.dirname(stand.pidFile))
+        .filter((f) => f.endsWith(".env"));
+      // HEAD and origin/HEAD.
+      expect(dumps).toHaveLength(2);
+      for (const f of dumps) {
+        const lines = fs
+          .readFileSync(path.join(path.dirname(stand.pidFile), f), "utf8")
+          .split("\n");
+        const names = lines.map((l) => l.split("=")[0]);
+        for (const name of Object.keys(steering)) {
+          if (name === "GIT_TERMINAL_PROMPT") continue;
+          expect(names, `${name} reached git`).not.toContain(name);
+        }
+        expect(lines).toContain("GIT_TERMINAL_PROMPT=0");
+        expect(lines).toContain("KEEP_ME=yes");
+      }
+    }, 60_000);
+
+    for (const [label, hangsOn] of [
+      ["HEAD", "HEAD"],
+      ["origin/HEAD", "refs/remotes/origin/HEAD"],
+    ] as const) {
+      it(`stops a symbolic-ref of ${label} that hangs at the bound, refuses with protected_branch_unresolved and leaves nothing running`, async () => {
+        const hung = fakeGit(
+          [
+            'case "$1" in',
+            "  rev-parse) exit 128 ;;",
+            "esac",
+            `if [ "$3" != '${hangsOn}' ]; then`,
+            '  if [ "$3" = HEAD ]; then echo refs/heads/task/x; exit 0; fi',
+            "  exit 1",
+            "fi",
+            HANGING,
+          ].join("\n"),
+        );
+        const dir = tmpDir();
+        fs.mkdirSync(path.join(dir, ".git"));
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        try {
+          const { out, ms } = await runPatchChild(
+            { cwd: dir, edits: EDIT, gitTimeoutMs: 2000 },
+            hung.env,
+          );
+          expect(out.status).toBe("usage_error");
+          expect(out.reason).toBe("protected_branch_unresolved");
+          expect(out.branchGuard?.status).toBe("refused");
+          expect(out.branchGuard?.detail).toContain(
+            "did not finish within 2000 ms",
+          );
+          expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a\n");
+          expect(ms).toBeGreaterThanOrEqual(1900);
+          expect(ms).toBeLessThan(20_000);
+          const recorded = hung.pids();
+          expect(recorded).toHaveLength(2);
+          await expectGone(recorded);
+        } finally {
+          for (const pid of hung.pids()) {
+            try {
+              process.kill(pid, "SIGKILL");
+            } catch {
+              // Gone.
+            }
+          }
+        }
+      }, 60_000);
+    }
+
+    for (const [label, body] of [
+      ["HEAD", 'case "$1" in\n  rev-parse) exit 128 ;;\nesac\nexit 3'],
+      [
+        "origin/HEAD",
+        'case "$1" in\n  rev-parse) exit 128 ;;\nesac\nif [ "$3" = HEAD ]; then echo refs/heads/task/x; exit 0; fi\nexit 3',
+      ],
+    ] as const) {
+      it(`refuses when the symbolic-ref of ${label} fails with an exit status that is no answer`, async () => {
+        const stand = fakeGit(body);
+        const dir = tmpDir();
+        fs.mkdirSync(path.join(dir, ".git"));
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        const { out } = await runPatchChild(
+          { cwd: dir, edits: EDIT },
+          stand.env,
+        );
+        expect(out.status).toBe("usage_error");
+        expect(out.reason).toBe("protected_branch_unresolved");
+        expect(out.branchGuard?.detail).toContain("exit code 3");
+        expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a\n");
+      }, 60_000);
+    }
+
+    it("--allow-protected writes past a symbolic-ref that hangs, after the bound", async () => {
+      const hung = fakeGit(
+        ['case "$1" in', "  rev-parse) exit 128 ;;", "esac", HANGING].join(
+          "\n",
+        ),
+      );
+      const dir = tmpDir();
+      fs.mkdirSync(path.join(dir, ".git"));
+      fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+      try {
+        const { out } = await runPatchChild(
+          { cwd: dir, edits: EDIT, gitTimeoutMs: 2000, allowProtected: true },
+          hung.env,
+        );
+        expect(out.status).toBe("written");
+        expect(out.branchGuard?.status).toBe("allowed_protected");
+        expect(out.branchGuard?.reason).toBe("protected_branch_unresolved");
+        expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("b\n");
+        await expectGone(hung.pids());
+      } finally {
+        for (const pid of hung.pids()) {
           try {
             process.kill(pid, "SIGKILL");
           } catch {

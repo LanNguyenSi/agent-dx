@@ -7,8 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `patch` branch guard: the command refuses to write while the repository
+  that holds the working directory sits on a protected branch, because the
+  editor-tool hook that protects `main` and `master` never sees a shell
+  call of `agent-primitives patch`. The protected set is the union of every
+  `--protected <name>` (repeatable), the branch `origin/HEAD` points to
+  (when it is a plain `refs/remotes/origin/<name>`) and the built-in names
+  `main` and `master`, compared without regard to letter case. A refusal is
+  `status: "usage_error"`, `reason: "protected_branch"`, exit `2`, with
+  every edit `refused` and nothing written. `--allow-protected` writes
+  anyway and records it (`branch_guard.status: "allowed_protected"` and a
+  top-level `allowed_protected: true`); `--protect-detached` treats a
+  detached HEAD like a protected branch; `--dry-run` still shows the
+  edits and reports `branch_guard.status: "would_refuse"`. A branch that
+  cannot be resolved inside a repository (no git, a hazardous layout, a
+  timeout, an unusual HEAD) is refused too, as
+  `protected_branch_unresolved`. The envelope carries `branch_guard`
+  (`status`, `branch`, `protected`, `sources`, `reason`), held whole under
+  `-m`. See [docs/patch.md](docs/patch.md#branch-guard).
+
 ### Changed
 
+- `patch` on a protected branch now refuses (see the branch guard above);
+  pass `--allow-protected` to keep the old behaviour. The guard judges the
+  repository holding `-C` only: a target in another repository, reached
+  with `--allow-outside` or through a nested repository, is not judged by
+  its own branch.
 - The test suite now runs in a sandbox or environment where `ps` cannot be
   started: the helper that lists processes in `worktree-remove-list.test.ts`
   catches the error `execFile` throws synchronously, and the tests whose

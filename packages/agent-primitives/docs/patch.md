@@ -355,6 +355,86 @@ envelope has the same shape; an edit and a file that would change read
 `would_write` instead of `written`, and the top-level `dry_run` is
 `true`.
 
+## Branch guard
+
+A shell call of `patch` is not seen by a hook that judges only the editor
+tools, so `patch` guards the branch itself: it refuses to write while the
+repository that holds `-C` sits on a protected branch.
+
+```bash
+agent-primitives patch --plan edits.json                       # refused on main
+agent-primitives patch --plan edits.json --allow-protected     # writes anyway, recorded
+agent-primitives patch --plan edits.json --protected release --protected develop
+agent-primitives patch --plan edits.json --protect-detached
+```
+
+**Protected names.** The set is the union of three sources, compared
+without regard to letter case (`Master` is `master`); `branch_guard.sources`
+names the ones that contributed and `branch_guard.protected` the names, each
+once:
+
+| Source | Names |
+| --- | --- |
+| `flag` | every `--protected <name>` (repeatable; empty, padded or control-character names are a usage error, `reason: "protected_invalid"`) |
+| `origin-head` | the branch `refs/remotes/origin/HEAD` points to, when that is a plain `refs/remotes/origin/<name>`; any other target, or an unset one, adds nothing |
+| `builtin` | `main` and `master`, always |
+
+No configuration file is read. A harness that protects a longer list
+passes it as `--protected` flags; nothing else tells `patch` about it.
+
+**What is judged.** `HEAD` is read with `git symbolic-ref --quiet HEAD`
+(it works on an unborn branch, and an exit status of 1 means a detached
+HEAD) and origin's default with `git symbolic-ref --quiet
+refs/remotes/origin/HEAD`, two calls, each bounded like the identity
+lookup (3 s, 64 KiB, a process group of its own, stdin closed, in the
+repository root). The full ref is read and `refs/heads/` is cut off here:
+`--short` answers `heads/main` when a tag `main` exists too, and that
+spelling would match nothing. git's repository-selecting variables
+(`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`, the ref
+storage format variables, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` and
+its key and value pairs, and the ones the identity lookup drops) are removed
+from git's environment first, so the answer is the one for the root.
+
+**Outcomes.** `branch_guard.status` is one of:
+
+| Status | When | Effect |
+| --- | --- | --- |
+| `allowed` | HEAD is on an unprotected branch | writes |
+| `refused` | HEAD is on a protected branch, or under `--protect-detached` on a detached HEAD (`branch: "HEAD"`) | `status: "usage_error"`, `reason: "protected_branch"`, exit `2`; every edit and file `refused`, nothing written |
+| `would_refuse` | the same, under `--dry-run` | the dry run as without the guard (edits `would_write`, the diff), plus a warning; exit `0` |
+| `allowed_protected` | `--allow-protected` overrode a refusal | writes; `allowed_protected: true` at the top level of the envelope too |
+| `detached` | HEAD is detached, without `--protect-detached` | writes |
+| `not_a_repo` | no work tree holds `-C`: no `.git` above it, or `-C` lies in a bare repository or a git directory | writes, as before the guard existed |
+
+`allowed_protected` is set only when an override was needed: `--allow-protected`
+on an unprotected branch leaves `branch_guard.status: "allowed"` and no
+`allowed_protected`. A refusal by the guard outranks the other findings of
+a plan (a `missing` edit, a read-only file), which are reported again once
+the guard is passed; a path refusal found first (`git_dir`,
+`outside_root`) keeps its own reason, and the rest of the plan is still
+refused with `protected_branch`. `--allow-protected` does not lift a
+`git_dir` refusal.
+
+**Fail closed.** Inside a repository, anything but a clear answer is a
+refusal with `reason: "protected_branch_unresolved"` (exit `2`, hint
+`--allow-protected`): git not on `PATH`, a layout the identity lookup must
+not run git on (a `commondir` that is no small regular file), a timeout, a
+signal, an unexpected exit status, HEAD naming something outside
+`refs/heads/`, or an `origin/HEAD` call that fails. A hand-written `.git`
+directory that git does not accept is therefore refused, and one that is
+laid out like a repository is judged as that repository. This is separate
+from the identity lookup, which still only warns when it cannot run.
+Under `--dry-run` the same cases are `would_refuse`.
+
+**Limits.** The guard judges the repository that holds `-C` (the root
+the other checks use), not the repository of each target. A file in
+another repository reached with `--allow-outside`, or in a nested
+repository or submodule below the root, is written whatever its own branch
+is. A linked worktree is judged by its own branch, not by the main
+checkout's. The override flag is available to whoever runs the command, so
+the guard stops a slip, not a caller that passes `--allow-protected`;
+`allowed_protected` in the envelope is the record that it did.
+
 ## Result shape
 
 ```json
@@ -363,6 +443,7 @@ envelope has the same shape; an edit and a file that would change read
   "status": "written",
   "dry_run": false,
   "root": "/abs/repo",
+  "branch_guard": { "status": "allowed", "branch": "task/x", "protected": ["main", "master"], "sources": ["builtin"] },
   "counts": { "edits": 2, "files": 2, "files_written": 2, "written": 2, "would_write": 0, "unchanged": 0, "missing": 0, "ambiguous": 0, "overlap": 0, "fuzzy_side_effect": 0, "not_editable": 0, "refused": 0, "errors": 0 },
   "written_files": ["src/a.ts", "src/b.ts"],
   "edits": [
@@ -394,7 +475,7 @@ preview (three lines of context, endings shown as LF).
 | `overlap` | finding | `1` | Two edits of one file overlap. |
 | `fuzzy_side_effect` | finding | `1` | A fuzzy-tier match would change text outside the matched text. |
 | `not_editable` | finding | `1` | A target has more than one hard link (`hard_link`), is not writable (`read_only`), or sits in a directory that is not writable (`dir_read_only`). |
-| `usage_error` | cannot conclude | `2` | A refused path (`outside_root`, `git_dir`) or a bad invocation or plan. |
+| `usage_error` | cannot conclude | `2` | A refused path (`outside_root`, `git_dir`), a refusal of the branch guard (`protected_branch`, `protected_branch_unresolved`) or a bad invocation or plan. |
 | `error` | cannot conclude | `2` | A file could not be read, decoded or written. |
 
 When several apply, the top-level status is the first of `usage_error`,

@@ -2477,6 +2477,9 @@ interface PatchCliOptions {
   dryRun?: boolean;
   allowOutside?: boolean;
   breakHardLinks?: boolean;
+  allowProtected?: boolean;
+  protected?: string[];
+  protectDetached?: boolean;
 }
 
 /** Reads a `--plan`/`--old-file`/`--new-file` argument verbatim: `-`
@@ -2655,6 +2658,22 @@ program
     "--break-hard-links",
     "edit a file that has more than one hard link (refused otherwise); the edited name gets a new inode and the other names keep the old content",
   )
+  .option(
+    "--allow-protected",
+    "write although the repository sits on a protected branch (main, master, the branch origin/HEAD names, any --protected name) or its branch cannot be resolved; the result records the override as allowed_protected",
+  )
+  .option(
+    "--protected <name>",
+    "protect this branch name as well (repeatable, case-insensitive); pass the harness branch-protection list here when it is wider than main and master",
+    (value: string, previous: string[] | undefined) => [
+      ...(previous ?? []),
+      value,
+    ],
+  )
+  .option(
+    "--protect-detached",
+    "refuse to write while HEAD is detached, like on a protected branch",
+  )
   .action(async (opts: PatchCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
@@ -2666,6 +2685,9 @@ program
         dryRun: Boolean(opts.dryRun),
         allowOutside: Boolean(opts.allowOutside),
         breakHardLinks: Boolean(opts.breakHardLinks),
+        allowProtected: Boolean(opts.allowProtected),
+        protectedBranches: opts.protected ?? [],
+        protectDetached: Boolean(opts.protectDetached),
       });
     } catch (err) {
       // A usage error, or an unexpected failure outside the per-file
@@ -2710,6 +2732,8 @@ program
         ...(result.message !== undefined ? { message: result.message } : {}),
         dry_run: result.dryRun,
         root: result.root,
+        branch_guard: result.branchGuard,
+        ...(result.allowedProtected ? { allowed_protected: true } : {}),
         counts: result.counts,
         written_files: result.writtenFiles,
         edits: result.edits,
@@ -2717,8 +2741,14 @@ program
       },
       // `written_files` is what a caller needs after a failed write phase
       // to know which files already changed; `counts` says how much of
-      // the reduced `edits`/`files` arrays is missing.
-      keepWhole: ["counts", "written_files"],
+      // the reduced `edits`/`files` arrays is missing; `branch_guard` and
+      // `allowed_protected` are the audit trail of the branch guard.
+      keepWhole: [
+        "counts",
+        "written_files",
+        "branch_guard",
+        "allowed_protected",
+      ],
       maxChars: global.maxChars,
       logDir: global.logDir,
     });

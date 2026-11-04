@@ -32,9 +32,20 @@ import {
   type NotFoundHint,
 } from "./hint.js";
 import { unifiedDiff } from "./diff.js";
+import {
+  BRANCH_GUARD_TIMEOUT_MS,
+  evaluateBranchGuard,
+  protectedNameProblem,
+  type BranchGuard,
+} from "./branch-guard.js";
 
 export { MATCH_TIERS, type MatchTier } from "./engine.js";
 export { visualizeWhitespace } from "./hint.js";
+export type {
+  BranchGuard,
+  BranchGuardStatus,
+  ProtectedSource,
+} from "./branch-guard.js";
 
 /** One edit of a plan, as given. */
 export interface PatchEditSpec {
@@ -217,6 +228,11 @@ export interface PatchResult {
   message?: string;
   dryRun: boolean;
   root: string;
+  /** What the branch guard decided; see `./branch-guard.ts`. */
+  branchGuard: BranchGuard;
+  /** True when `allowProtected` overrode a refusal of the branch guard
+   * (a protected branch, or a branch that could not be resolved). */
+  allowedProtected: boolean;
   edits: PatchEditResult[];
   files: PatchFileResult[];
   /** Files actually written, in write order (also after a write error). */
@@ -250,6 +266,14 @@ export interface PatchOptions {
    * writes it gives the edited name a new inode, so the other names keep
    * the old content. Refused (`not_editable`, `hard_link`) otherwise. */
   breakHardLinks?: boolean;
+  /** Write although the branch guard refuses (HEAD on a protected branch,
+   * or a branch that cannot be resolved). */
+  allowProtected?: boolean;
+  /** Branch names to protect besides `main`, `master` and the branch
+   * `origin/HEAD` names. Compared without regard to letter case. */
+  protectedBranches?: readonly string[];
+  /** Treat a detached HEAD like a protected branch. */
+  protectDetached?: boolean;
   /** Test seam: replaces the rename that commits a written file. */
   renameFile?: (from: string, to: string) => void;
   /** Test seam: how long git's identity lookup may run before it is
@@ -1070,6 +1094,39 @@ export function patch(options: PatchOptions): PatchResult {
       );
     }
   }
+  for (const name of options.protectedBranches ?? []) {
+    const problem = protectedNameProblem(name);
+    if (problem !== undefined) {
+      throw new PatchUsageError(
+        `patch: --protected ${JSON.stringify(name)} is not a usable branch name: ${problem}`,
+        "protected_invalid",
+      );
+    }
+  }
+
+  // Decided once, before any file is read for resolving and long before
+  // the first write. A refusal marks every file below, so the engine never
+  // runs and the write phase finds a refused plan.
+  const verdict = evaluateBranchGuard({
+    root,
+    inWorkTree: gitRoot !== undefined,
+    hazard: gitRoot !== undefined ? gitDiscoveryHazard(root) : undefined,
+    timeoutMs: options.gitTimeoutMs ?? BRANCH_GUARD_TIMEOUT_MS,
+    flagNames: options.protectedBranches ?? [],
+    protectDetached: options.protectDetached === true,
+    allowProtected: options.allowProtected === true,
+    dryRun,
+  });
+  const branchGuard = verdict.guard;
+  if (verdict.overridden) {
+    warnings.push(
+      `--allow-protected: editing although the branch guard would refuse (${branchGuard.reason ?? "protected_branch"}${branchGuard.branch !== undefined ? `, branch ${branchGuard.branch}` : ""})`,
+    );
+  } else if (branchGuard.status === "would_refuse") {
+    warnings.push(
+      `branch guard: a real run would be refused (${branchGuard.reason ?? "protected_branch"}${branchGuard.branch !== undefined ? `, branch ${branchGuard.branch}` : ""}); pass --allow-protected to edit anyway`,
+    );
+  }
 
   // Resolve every target path; group edits per file identity (dev:ino),
   // so every spelling of one file shares one state and one write.
@@ -1201,6 +1258,20 @@ export function patch(options: PatchOptions): PatchResult {
       path: state.display,
       status: "not_written",
     });
+  }
+
+  // A refusal of the branch guard marks every file the path checks did not
+  // refuse already, so nothing is resolved or written. A path refusal
+  // (`git_dir`, `outside_root`) keeps its reason: `--allow-protected` does
+  // not lift the first of them, and the caller learns of it now rather
+  // than after switching branches.
+  if (verdict.refuse) {
+    for (const state of order) {
+      if (state.status === "refused") continue;
+      state.status = "refused";
+      state.reason = branchGuard.reason;
+      state.detail = branchGuard.detail;
+    }
   }
 
   // Read and resolve every file that passed the path checks. An exception
@@ -1372,6 +1443,8 @@ export function patch(options: PatchOptions): PatchResult {
     ...(message !== undefined ? { message } : {}),
     dryRun,
     root,
+    branchGuard,
+    allowedProtected: verdict.overridden,
     edits: editResults,
     files: fileResults,
     writtenFiles,
