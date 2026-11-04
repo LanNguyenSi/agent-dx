@@ -393,6 +393,19 @@ describe("init", () => {
     expect(written).toContain("agent-primitives doctor");
   });
 
+  it("names the template-copy opener rule and the only-checks-the-repo-has verify rule", () => {
+    const dir = makeTmpDir();
+    const result = init({ targetDir: dir });
+    expect(result.status).toBe("written");
+    const flat = fs
+      .readFileSync(result.targets[0]!.path, "utf8")
+      .replace(/\s+/g, " ");
+    expect(flat).toContain(
+      "Before the first call run neither `--version` nor `--help`: every envelope already carries `version`, and a template below covers the common calls. Copy one of these, and reach for `--help` only for an option a template does not show:",
+    );
+    expect(flat).toContain("name only the checks the repo has a script for");
+  });
+
   describe("a symlink at the target file path itself", () => {
     function claudeFilePath(dir: string): string {
       return path.join(

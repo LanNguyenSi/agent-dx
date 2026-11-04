@@ -25,6 +25,7 @@ import {
 } from "./mutant.js";
 import type { PlanMutantSpec } from "./plan.js";
 import {
+  type BaselineOutput,
   type ExecPhaseField,
   type ExpectVerdict,
   type FinalRebuildRuntime,
@@ -35,6 +36,7 @@ import {
   finalRebuildOrWarn,
   restoreFailedRebuildClause,
   type MutantField,
+  type MutantRuntime,
   type MutationProbeField,
   type ProbeStatus,
   type TargetSession,
@@ -46,7 +48,14 @@ import {
   type MutantStepSpec,
   type PreparedMutant,
 } from "./step.js";
-import { openRunSetup, type RunSetupContext } from "./setup.js";
+import {
+  firstTargetChangedSinceBackup,
+  openRunSetup,
+  runBaselineGate,
+  settleTargetsAfterNonMutatingBaseline,
+  type BaselineGateTarget,
+  type RunSetupContext,
+} from "./setup.js";
 
 /**
  * The public surface of the probe pipeline: the CLI-facing option/result
@@ -1220,14 +1229,18 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   };
 }
 
-/** Options for one `--plan` run: the mutants, the command they share,
+/** Options for one `--plan` run: the mutants, their test commands,
  * and the run-shaping values already resolved (a plan file's own values
  * and any command-line override are reconciled by the caller, see
  * `cli.ts`). */
 export interface ProbePlanOptions {
   /** At least one; applied in this order, never in parallel. */
   mutants: PlanMutantSpec[];
-  testCommand: string;
+  /** The plan-level test command: what every mutant without its own
+   * (`PlanMutantSpec.testCommand`) is measured with. Required unless
+   * every mutant names its own; a mutant left with no command at all is
+   * refused `plan_invalid` before anything runs. */
+  testCommand?: string;
   preCommand?: string;
   isolation: IsolationMode;
   /** The plan-level default; a mutant's own `expect` wins over it. */
@@ -1264,19 +1277,20 @@ export interface ProbePlanOptions {
    * environment as `process.env`. */
   env?: Record<string, string>;
   /** Opt-in `--require-baseline-evidence <regex>`, the same as
-   * `ProbeOptions.requireBaselineEvidence`: this checks the plan's own
-   * ONE shared baseline before the first mutant is applied -- there is
-   * only one baseline for the whole plan, so there is no second source
-   * for this value to conflict with. A miss reports the plan's own
-   * top-level `status: "inconclusive"`, `reason:
-   * "baseline_evidence_not_matched"`, the same unremapped pair
-   * `baseline_failed` reports for a plan (see docs/probe.md's `--plan`
-   * section). */
+   * `ProbeOptions.requireBaselineEvidence`: this checks each of the
+   * plan's baselines (one per distinct test command) before the first
+   * mutant is applied -- a command-line value applied to every baseline
+   * alike, so there is no second source for it to conflict with. A miss
+   * on the first baseline reports the plan's own top-level `status:
+   * "inconclusive"`, `reason: "baseline_evidence_not_matched"`, the same
+   * unremapped pair `baseline_failed` reports for a plan; a miss on a
+   * later one marks only that command's mutants `not_run` with that
+   * reason (see docs/probe.md's `--plan` section). */
   requireBaselineEvidence?: RegExp;
   /** Opt-in success predicate, the same as `ProbeOptions.passRegex`:
    * unlike `requireBaselineEvidence` above, this one DOES have a plan-file
    * key (`passWhen.regex`) as well as a CLI flag, since it also decides
-   * every mutant's own verdict, not only the plan's shared baseline --
+   * every mutant's own verdict, not only the plan's baselines --
    * `cli.ts` reconciles the two the same way it reconciles `isolation`/
    * `expect`/`timeout` (a command-line `--pass-regex` wins when given,
    * else the plan file's own `passWhen.regex`), and hands the single
@@ -1312,6 +1326,39 @@ export interface PlanMutantResult {
   line_content?: string;
   /** Exec log paths this mutant produced (its dry run, its real apply). */
   logs: string[];
+  /** The test command this mutant is measured with: its own, else the
+   * plan's, as its baseline group runs it (the group's first spelling,
+   * see `PlanBaselineField`). A string, unlike `test`, which is the
+   * mutant run's own phase object. */
+  test_command: string;
+  /** Position in `ProbePlanResult.baselines` of the baseline this mutant
+   * is measured against. */
+  baseline_index: number;
+}
+
+/** One baseline of a plan: one per distinct test command (compared once
+ * trimmed, so `npm test` and `npm test ` are one), in the order the
+ * commands first appear in the plan's own `mutants`. */
+export interface PlanBaselineField {
+  /** Its own position in `ProbePlanResult.baselines`. */
+  index: number;
+  /** The command this baseline and its mutants run, as first spelled. */
+  command: string;
+  /** `passed`: its mutants were measured against it. `failed`: it (or
+   * the `--pre` ahead of it) ran, and its mutants are `not_run` with
+   * `reason` as theirs. `not_run`: the plan ended before it (no
+   * `reason`), or it could not be started at all (`reason:
+   * "pycache_isolation_failed"`, carried by its mutants too). */
+  status: "passed" | "failed" | "not_run";
+  reason?: string;
+  /** The baseline test phase's own fields, once that phase ran. */
+  exitCode?: number | null;
+  durationMs?: number;
+  logPath?: string;
+  timedOut?: boolean;
+  /** The `index` of every plan mutant measured against it, in plan
+   * order. */
+  entries: number[];
 }
 
 export interface PlanSummaryField {
@@ -1347,9 +1394,13 @@ export interface ProbePlanResult {
    * sees the overrides it asked for even on a run whose baseline never
    * got far enough to apply a mutant at all. */
   env?: Record<string, string>;
-  /** The one baseline every mutant of this plan was measured against;
-   * absent when the plan never reached it. */
+  /** The plan's first baseline (`baselines[0]`'s test phase): the one
+   * every mutant was measured against when the plan names one test
+   * command; absent when the plan never reached it. */
   baseline?: ExecPhaseField;
+  /** One per distinct test command, always present (one entry for a plan
+   * naming a single command); see `PlanBaselineField`. */
+  baselines: PlanBaselineField[];
   results: PlanMutantResult[];
   summary: PlanSummaryField;
   /** The plan's own verdict as an expectation aggregate, in the same
@@ -1392,17 +1443,23 @@ function summarize(results: PlanMutantResult[]): PlanSummaryField {
 }
 
 /**
- * Runs a list of mutants that share one test command against ONE
- * baseline, in order, each applied and then restored before the next is
- * applied. The pipeline is the single probe's, not a copy of it: the
- * setup through the baseline is `openRunSetup`, the very function
- * `probe()` calls, and the mutate -> pre+test -> restore -> verify ->
- * classify step is `prepareMutant`/`runMutantAttempt`, likewise shared,
- * run once per mutant between that setup and one shared teardown.
+ * Runs a list of mutants against one baseline per distinct test command
+ * (a mutant's own, else the plan's; compared once trimmed), in order,
+ * each applied and then restored before the next is applied. The
+ * pipeline is the single probe's, not a copy of it: the setup through
+ * the first command's baseline is `openRunSetup`, the very function
+ * `probe()` calls; every further command's baseline runs through the
+ * same `runBaselineGate` that one did; and the mutate -> pre+test ->
+ * restore -> verify -> classify step is `prepareMutant`/
+ * `runMutantAttempt`, likewise shared, run once per mutant between that
+ * setup and one shared teardown, under its own command's runtime and
+ * against its own command's baseline output.
  *
  * The invariants this split holds to:
  *
- * - I1 exactly one baseline per plan, run before any mutant is applied.
+ * - I1 exactly one baseline per distinct test command (so exactly one for
+ *   a plan naming one command, whose run is unchanged by this), every one
+ *   of them run before any mutant is applied.
  * - I2 the target is restored, and that restore verified by hash, before
  *   the next mutant is applied; the loop re-hashes the target itself
  *   before every apply, so a restore that silently did not happen stops
@@ -1441,6 +1498,48 @@ async function runProbePlanPipeline(
   const gitApplyTimeoutMs = opts.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS;
   const wtScratchRoot = logDir;
 
+  // Every mutant's test command, resolved: its own, else the plan's. A
+  // mutant left with neither has nothing to be measured with; the plan
+  // file's own validation (`plan.ts`) refuses that before this point, so
+  // only a library caller can reach this refusal, which names no results
+  // (there is no baseline for any of them to belong to).
+  const resolvedCommands: string[] = [];
+  for (const [index, mutant] of opts.mutants.entries()) {
+    const command = mutant.testCommand ?? opts.testCommand;
+    if (command === undefined) {
+      return {
+        status: "usage_error",
+        reason: "plan_invalid",
+        warnings: [
+          ...warnings,
+          `plan.test must be a non-empty string unless every mutant has its own "test" (plan.mutants[${String(index)}] has none)`,
+        ],
+        baselines: [],
+        results: [],
+        summary: summarize([]),
+        isolation: isolationField,
+      };
+    }
+    resolvedCommands.push(command);
+  }
+
+  /** One baseline group: the mutants whose resolved test commands are
+   * the same string once trimmed, in the order their commands first
+   * appear. The first group's baseline is the setup's own (`openRunSetup`,
+   * unchanged from a plan naming one command); every further group's
+   * runs through the same gate before the first mutant is applied. */
+  interface PlanGroup {
+    index: number;
+    /** As the group's first mutant spelled it: what its baseline and
+     * every one of its mutants run. */
+    command: string;
+    /** The plan path that names `command`, for a refusal about it. */
+    source: string;
+    entries: number[];
+  }
+  const groups: PlanGroup[] = [];
+  const groupByKey = new Map<string, PlanGroup>();
+
   /** One entry of the plan, resolved: every path in a plan file (`file`,
    * `patch`) is resolved against the invocation cwd, so one plan means
    * the same thing from wherever it is run with the same `--cwd`. */
@@ -1448,14 +1547,34 @@ async function runProbePlanPipeline(
     index: number;
     displayFile: string;
     absFile: string;
+    /** `groups[group]` is the baseline this mutant is measured against. */
+    group: number;
     spec: MutantStepSpec;
   }
   const planned: PlannedMutant[] = opts.mutants.map((mutant, index) => {
     const displayFile = path.resolve(cwd, mutant.file);
+    const command = resolvedCommands[index];
+    const key = command.trim();
+    let group = groupByKey.get(key);
+    if (group === undefined) {
+      group = {
+        index: groups.length,
+        command,
+        source:
+          mutant.testCommand !== undefined
+            ? `plan.mutants[${String(index)}].test`
+            : "plan.test",
+        entries: [],
+      };
+      groups.push(group);
+      groupByKey.set(key, group);
+    }
+    group.entries.push(index);
     return {
       index,
       displayFile,
       absFile: resolveDeepestExisting(displayFile),
+      group: group.index,
       spec: {
         form: mutant.form,
         line: mutant.line,
@@ -1474,14 +1593,66 @@ async function runProbePlanPipeline(
   // return from here on so a refusal after the sync still names the logs
   // it produced. Declared ahead of `refuse` below, which reads it.
   let setupLogPaths: string[] = [];
-  const notRunResult = (item: PlannedMutant): PlanMutantResult => ({
+  /** The two fields every result carries about its baseline group. */
+  const groupFields = (
+    item: PlannedMutant,
+  ): Pick<PlanMutantResult, "test_command" | "baseline_index"> => ({
+    test_command: groups[item.group].command,
+    baseline_index: item.group,
+  });
+  /** `reason` only for a mutant whose own group's baseline failed: a
+   * mutant a terminal failure stopped the plan before reaching carries
+   * none, the plan's own `reason` says what stopped it. */
+  const notRunResult = (
+    item: PlannedMutant,
+    reason?: string,
+  ): PlanMutantResult => ({
     index: item.index,
     file: item.displayFile,
     expect: item.spec.expect,
     status: "not_run",
+    ...(reason !== undefined ? { reason } : {}),
     warnings: [],
     logs: [],
+    ...groupFields(item),
   });
+  /** Every group's baseline as it stands: `not_run` until it is run,
+   * then what it found. Snapshotted by `baselinesSoFar` for each return,
+   * so a returned array is never mutated afterwards. */
+  const baselineRecords: PlanBaselineField[] = groups.map((group) => ({
+    index: group.index,
+    command: group.command,
+    status: "not_run",
+    entries: [...group.entries],
+  }));
+  const recordBaseline = (
+    groupIndex: number,
+    status: PlanBaselineField["status"],
+    reason: string | undefined,
+    exec: ExecPhaseField | undefined,
+  ): void => {
+    const group = groups[groupIndex];
+    baselineRecords[groupIndex] = {
+      index: group.index,
+      command: group.command,
+      status,
+      ...(reason !== undefined ? { reason } : {}),
+      ...(exec !== undefined
+        ? {
+            exitCode: exec.exitCode,
+            durationMs: exec.durationMs,
+            logPath: exec.logPath,
+            timedOut: exec.timedOut,
+          }
+        : {}),
+      entries: [...group.entries],
+    };
+  };
+  const baselinesSoFar = (): PlanBaselineField[] =>
+    baselineRecords.map((record) => ({
+      ...record,
+      entries: [...record.entries],
+    }));
   /** Every verdict this plan has collected, in `planned` order: hoisted
    * out of the mutant loop so every exit path -- the loop's own returns,
    * a refusal before it, and the emergency-restore path in `finally` --
@@ -1512,7 +1683,10 @@ async function runProbePlanPipeline(
       ...results,
       ...(inFlightEntry === undefined ? [] : [inFlightEntry]),
     ];
-    return [...reached, ...planned.slice(reached.length).map(notRunResult)];
+    return [
+      ...reached,
+      ...planned.slice(reached.length).map((item) => notRunResult(item)),
+    ];
   };
   const refuse = (
     status: ProbeStatus,
@@ -1524,6 +1698,7 @@ async function runProbePlanPipeline(
       status,
       reason,
       warnings: message === undefined ? warnings : [...warnings, message],
+      baselines: baselinesSoFar(),
       results: entries,
       summary: summarize(entries),
       isolation: isolationField,
@@ -1709,7 +1884,18 @@ async function runProbePlanPipeline(
       links,
       timeoutMs: opts.timeoutMs,
       gitApplyTimeoutMs,
-      testCommand: opts.testCommand,
+      // The first group's command: a plan naming one test command runs
+      // exactly the setup and baseline it always did. A command that
+      // came from a mutant's own `test` is named by that plan path in an
+      // escape refusal; the plan-level one keeps the label it always had.
+      testCommand: groups[0].command,
+      ...(groups[0].source !== "plan.test"
+        ? { testCommandLabel: groups[0].source }
+        : {}),
+      extraTestCommands: groups.slice(1).map((group) => ({
+        command: group.command,
+        label: group.source,
+      })),
       preCommand: opts.preCommand,
       env: opts.env,
       requireBaselineEvidence: opts.requireBaselineEvidence,
@@ -1742,6 +1928,19 @@ async function runProbePlanPipeline(
     if (!setup.ok) {
       const { refusal } = setup;
       if (refusal.logPaths !== undefined) setupLogPaths = refusal.logPaths;
+      // The first group's own baseline gate refused: recorded as that
+      // group's failure once its `--pre` or test command ran, and as
+      // `not_run` with the reason when neither could be started. Any
+      // other refusal came before a baseline existed, and every group
+      // stays `not_run`.
+      if (refusal.fromBaselineGate === true) {
+        recordBaseline(
+          0,
+          refusal.baselineNotStarted === true ? "not_run" : "failed",
+          refusal.reason,
+          refusal.baseline,
+        );
+      }
       // Nothing was collected yet, so these are all `not_run` -- the
       // same helper the loop's own returns and the emergency path use,
       // rather than a second way of saying it.
@@ -1753,6 +1952,7 @@ async function runProbePlanPipeline(
         ...(refusal.baseline !== undefined
           ? { baseline: refusal.baseline }
           : {}),
+        baselines: baselinesSoFar(),
         results: entries,
         summary: summarize(entries),
         isolation: isolationField,
@@ -1762,31 +1962,144 @@ async function runProbePlanPipeline(
     const { rt } = setup.run;
     capturedRt = rt;
     baseline = setup.run.baseline;
-    const baselineOutput = setup.run.baselineOutput;
     setupLogPaths = setup.run.logPaths;
+    recordBaseline(0, "passed", undefined, baseline);
     // Keyed by the resolved path every planned mutant carries, so the
     // mutants that share a file share one backup and one restore.
     const targets = new Map<string, TargetSession>(
       setup.run.targets.map((target) => [target.absFile, target]),
     );
+    // Per group: the runtime its mutants run under (the run's own, with
+    // the group's test command) and the baseline output their classify
+    // step compares against. Only groups whose baseline passed are here;
+    // `failedGroups` holds the reason for the rest.
+    const runnable = new Map<
+      number,
+      { rt: MutantRuntime; baselineOutput: BaselineOutput }
+    >([[0, { rt, baselineOutput: setup.run.baselineOutput }]]);
+    const failedGroups = new Map<number, string>();
+    const gateTargets: BaselineGateTarget[] = setup.run.targets.map(
+      (target) => ({ subject: target.displayFile, target }),
+    );
+
+    let terminal: string | undefined;
+    // Every further group's baseline, before the first mutant is applied:
+    // through the gate the first baseline went through, with the group's
+    // own command. The backups and the (cleared) restore slot stay as the
+    // setup left them across groups. A group whose baseline fails marks
+    // only its own mutants `not_run`; a target any baseline rewrote, or a
+    // stopped run, ends the plan, since every later measurement would
+    // rest on a changed tree.
+    for (const group of groups.slice(1)) {
+      const groupRt: MutantRuntime = { ...rt, testCommand: group.command };
+      const groupWarnings: string[] = [];
+      const gate = await runBaselineGate({
+        command: { testCommand: group.command, preCommand: rt.preCommand },
+        rt: groupRt,
+        passRegex: opts.passRegex,
+        requireBaselineEvidence: opts.requireBaselineEvidence,
+        warnings: groupWarnings,
+        targets: gateTargets,
+        // Nothing is settled or discarded here, whatever the gate found:
+        // the plan goes on with its other groups, and the re-hash below
+        // decides whether it may.
+        settleNonMutating: () => Promise.resolve(),
+        discardTargets: () => undefined,
+      });
+      const prefix = `plan.baselines[${String(group.index)}] (${group.command}): `;
+      warnings.push(...groupWarnings.map((warning) => prefix + warning));
+      if (gate.ok) {
+        recordBaseline(group.index, "passed", undefined, gate.baseline);
+        runnable.set(group.index, {
+          rt: groupRt,
+          baselineOutput: gate.baselineOutput,
+        });
+        continue;
+      }
+      if (gate.message !== undefined) warnings.push(prefix + gate.message);
+      // A failing `--pre`'s own log, the same place the first group's
+      // lands (the setup's logs).
+      setupLogPaths.push(...gate.logPaths);
+      // `started` is false only when neither `--pre` nor the test command
+      // could be started at all (`pycache_isolation_failed`): recorded as
+      // `not_run`, with that reason, rather than as a baseline that ran.
+      recordBaseline(
+        group.index,
+        gate.started ? "failed" : "not_run",
+        gate.reason,
+        gate.baseline,
+      );
+      if (gate.reason === "aborted" || rt.crashHandlers.isHandling()) {
+        terminal = "aborted";
+        await settleTargetsAfterNonMutatingBaseline(
+          gateTargets,
+          warnings,
+          rt.setRestoreState,
+          `${prefix}the failing baseline run`,
+        );
+        break;
+      }
+      // A failing baseline is re-hashed here too (the gate re-hashes only
+      // a passing one): the plan goes on, so a target it rewrote would
+      // be what every later mutant is measured against.
+      let targetChanged = gate.reason === "target_changed_during_baseline";
+      let rewroteOnFailure = false;
+      if (!targetChanged) {
+        const changed = await firstTargetChangedSinceBackup(gateTargets);
+        if (changed !== undefined) {
+          targetChanged = true;
+          rewroteOnFailure = true;
+        }
+      }
+      if (targetChanged) {
+        // Either way the plan ends here, every target left as the
+        // baseline wrote it, and each backup goes the way the first
+        // group's own baseline sends it in the same case.
+        terminal = "target_changed_during_baseline";
+        if (rewroteOnFailure) {
+          // A failing baseline that rewrote a target: what a failing
+          // first baseline gets, the rewritten target's backup kept
+          // (named in a warning) and every other backup dropped.
+          await settleTargetsAfterNonMutatingBaseline(
+            gateTargets,
+            warnings,
+            rt.setRestoreState,
+            `${prefix}the failing baseline run`,
+          );
+        } else {
+          // A passing baseline that rewrote a target: what the first
+          // baseline's own `target_changed_during_baseline` refusal
+          // does, every backup dropped.
+          for (const entry of gateTargets) entry.target.discardBackup();
+        }
+        break;
+      }
+      failedGroups.set(group.index, gate.reason);
+    }
 
     // One mutant at a time, never in parallel: each is applied against a
     // target proven to be back at its pre-mutation content, tested, and
     // restored before the next one is even computed.
-    let terminal: string | undefined;
     for (const item of planned) {
       if (terminal !== undefined) {
         results.push(notRunResult(item));
         continue;
       }
+      const groupFailure = failedGroups.get(item.group);
+      if (groupFailure !== undefined) {
+        results.push(notRunResult(item, groupFailure));
+        continue;
+      }
+      const groupRun = runnable.get(item.group);
       const target = targets.get(item.absFile);
       // Unreachable in practice: every planned mutant's file was opened
       // by the `openRunSetup` call above (`setup.ts`'s own target-opening
-      // loop), and this map is keyed by the same resolved path. Kept as
-      // a typed narrowing that reports `not_run` rather than throwing,
-      // so a future caller that plans a target it never opened cannot
-      // turn that into an unhandled exception mid-plan.
-      if (target === undefined) {
+      // loop), and this map is keyed by the same resolved path; every
+      // group is either runnable or failed by now. Kept as a typed
+      // narrowing that reports `not_run` rather than throwing, so a
+      // future caller that plans a target it never opened cannot turn
+      // that into an unhandled exception mid-plan.
+      if (target === undefined || groupRun === undefined) {
         results.push(notRunResult(item));
         continue;
       }
@@ -1818,12 +2131,13 @@ async function runProbePlanPipeline(
               restoreFailedRebuildClause(rt),
           ],
           logs: [],
+          ...groupFields(item),
         });
         inFlight = undefined;
         continue;
       }
       const prepared = await prepareMutant(
-        rt,
+        groupRun.rt,
         target,
         item.spec,
         mutantWarnings,
@@ -1845,6 +2159,7 @@ async function runProbePlanPipeline(
             ? { line_content: prepared.lineContent }
             : {}),
           logs: prepared.logPaths,
+          ...groupFields(item),
         });
         inFlight = undefined;
         continue;
@@ -1859,8 +2174,11 @@ async function runProbePlanPipeline(
         mutantSummary: prepared.mutantSummary,
         verifiedAppliedVia: prepared.verifiedAppliedVia,
       };
+      // The group's own runtime (its test command) and its own baseline
+      // output: a mutant is classified against the baseline of the
+      // command it actually ran.
       const outcome = await runMutantAttempt(
-        rt,
+        groupRun.rt,
         target,
         item.spec,
         {
@@ -1871,7 +2189,7 @@ async function runProbePlanPipeline(
           logPaths: prepared.logPaths,
         },
         mutantWarnings,
-        baselineOutput,
+        groupRun.baselineOutput,
       );
       results.push({
         index: item.index,
@@ -1886,6 +2204,7 @@ async function runProbePlanPipeline(
           : {}),
         ...(outcome.test !== undefined ? { test: outcome.test } : {}),
         logs: outcome.logPaths,
+        ...groupFields(item),
       });
       inFlight = undefined;
       if (outcome.applied !== false) anyMutantApplied = true;
@@ -1943,6 +2262,7 @@ async function runProbePlanPipeline(
       ...(expectation !== undefined ? { expectation } : {}),
       warnings,
       baseline,
+      baselines: baselinesSoFar(),
       results,
       summary,
       isolation: isolationField,
@@ -2029,6 +2349,7 @@ async function runProbePlanPipeline(
                     }
                   : {}),
                 logs: inFlight.logs,
+                ...groupFields(inFlight.item),
               },
         );
         emergencyResult = {
@@ -2050,6 +2371,7 @@ async function runProbePlanPipeline(
               ),
           ],
           ...(baseline ? { baseline } : {}),
+          baselines: baselinesSoFar(),
           results: entries,
           summary: summarize(entries),
           isolation: isolationField,

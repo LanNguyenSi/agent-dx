@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `probe --plan`: a mutant may carry its own `test`, which wins over the
+  plan-level `test` (a mutant without one inherits it); the plan-level
+  `test` may be left out when every mutant has its own. Mutants whose
+  commands are the same string once trimmed share one baseline, in the
+  order their commands first appear; every baseline runs before the first
+  mutant, through the same gate the first one goes through (zero-tests
+  guard, `--pass-regex`, `--require-baseline-evidence`, the post-baseline
+  re-hash, extracted from `openRunSetup` as `runBaselineGate`), and
+  `--pre` reruns ahead of each. A failing later baseline marks only its
+  own mutants `not_run` with its reason (plan `inconclusive`,
+  `mutant_inconclusive`); a failing first one refuses the plan as before;
+  a later baseline that rewrote a target ends the plan
+  `target_changed_during_baseline`, and one stopped by a signal ends it
+  `aborted`, each settling the backups the way the first baseline does in
+  the same case. The envelope adds `plan.baselines`
+  and each result's `test_command` and `baseline_index`, lists every
+  baseline log in `logs`, and `--summary` gains a `test=` column and one
+  line per baseline when the plan names more than one command. A plan
+  naming one command runs and reports as before, apart from those added
+  fields. `ProbePlanSpec.testCommand` and `ProbePlanOptions.testCommand`
+  are optional now, `PlanMutantSpec` gains `testCommand`, and
+  `PlanBaselineField` is exported. See docs/probe.md, "A test command per
+  mutant".
 - `hygiene`, `drift` and `verify` take `--summary` and `--print <fields>`,
   the compact views `probe` already had: `--summary` prints one line per
   finding, site or check plus a totals line (status, counts and the saved
@@ -36,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starts. A `--plan` run prints none, as before.
 - `verify`: the `no_script` warning now ends with `; pass -c with the
   checks this repo has`.
+- `scripts/spike/` holds a throwaway measurement (branch enumerator over
+  `base..head`, scoring scripts and `REPORT.md`) of whether listing changed
+  branches without a planned mutant would have surfaced the mutants that
+  reviewers later found surviving. It is not shipped and not referenced by
+  `package.json`; the report recommends not building it as specified.
 - The test suite now runs in a sandbox or environment where `ps` cannot be
   started: the helper that lists processes in `worktree-remove-list.test.ts`
   catches the error `execFile` throws synchronously, and the tests whose
@@ -44,6 +72,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and zombie cases) are skipped with the note `ps cannot run in this
   environment` through a shared probe in `test/helpers/ps-usable.ts`.
   Where `ps` runs nothing is skipped.
+- The skill's invocation-templates section now opens by telling the reader to
+  run neither `--version` nor `--help` before the first call and to copy a
+  template instead, and the `verify` template names only the checks the
+  repository has a script for.
 
 ### Fixed
 

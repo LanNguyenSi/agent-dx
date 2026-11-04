@@ -193,14 +193,17 @@ automatically either way).
 
 ## 6. Invocation templates
 
-Copy one of these rather than reading `--help` first:
+Before the first call run neither `--version` nor `--help`: every envelope
+already carries `version`, and a template below covers the common calls. Copy
+one of these, and reach for `--help` only for an option a template does not
+show:
 
 ```bash
 agent-primitives probe --file <path> -n <line> -r '<replacement>' -t '<test command>'
 agent-primitives probe --file <path> -n <line> -M '<substring>' -w '<replacement>' -t '<test command>'
 agent-primitives probe -p <patch> -t '<test command>'
 agent-primitives probe --plan <plan.json>
-agent-primitives verify -c build,typecheck,lint,test
+agent-primitives verify -c build,typecheck,lint,test   # name only the checks the repo has a script for
 agent-primitives doctor
 agent-primitives guard <timeout-s> <max-rss-MiB> -- <command...>
 ```
