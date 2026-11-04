@@ -507,6 +507,13 @@ describe.skipIf(process.platform === "win32")(
       ["exit status 127 (not found)", "exit 127", "no runnable git"],
       ["a status above 128 (ended by a signal)", "exit 137", "ended by"],
       ["a kill of its own process", "kill -KILL $$", "ended by"],
+      // Killing the whole process group takes the trampoline shell with
+      // it, so spawnSync reports the signal itself (not an exit status).
+      [
+        "a kill of its own process group",
+        "kill -KILL 0",
+        "was ended by SIGKILL",
+      ],
       [
         "output over the 64 KiB bound",
         "/usr/bin/head -c 70000 /dev/zero; exit 0",
