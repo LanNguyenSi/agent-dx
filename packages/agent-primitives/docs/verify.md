@@ -36,6 +36,10 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
 - `--max-failures <n>`: caps each check's own `failures` list, a positive
   integer, default `20`; a cut sets `truncated: true` and writes the full,
   uncapped result to the log directory.
+- `--repeat <n>`: runs each check `n` times, sequentially, instead of once:
+  an integer from `1` (the default) to `100`, and given twice is a usage
+  error. See [Repeating checks](#repeating-checks) below for what one check
+  then reports.
 - `--pass-regex <name=regex>`: opt-in per-check success predicate
   (repeatable, parsed the same way as `-x name=command`: split on the
   first `=` only, so a pattern containing `=` is preserved intact; a
@@ -411,6 +415,77 @@ warning, and the result carries `reason: "aborted"`. The CLI prints none
 of that on a signal (see the "Signals, locks and recovery" section of
 [probe.md](probe.md)).
 
+## Repeating checks
+
+`--repeat <n>` (API `repeat`) runs each check `n` times, sequentially, in
+place of the single run taken without `--repeat`: one resolution per check
+(so `-c`/`-x` resolution, name validation and the `package.json` lookup
+all happen once) and `n` executions, each through its own command. `n` is
+an integer from 1 to 100 written in plain decimal digits; `0`, a negative
+number, a fraction, an exponent or hexadecimal spelling, anything above
+100, or the flag given twice, is `status: "usage_error"`, exit `2`.
+`--repeat 1` is the default and leaves the envelope exactly as it was:
+none of the fields below appear, and the log file keeps its plain
+`<name>.log` name.
+
+A repeated check reports its runs merged into one row:
+
+- `status` is `pass` only when every run passed. Otherwise it is the worst
+  status seen across the runs, and `error` beats `fail` there exactly as it
+  does across checks: a run that timed out, exited `126`/`127`, or never
+  concluded makes the check an `error` whatever the other runs did. No new
+  status string is introduced, and the overall status rule above is
+  unchanged: it reads these merged per-check statuses like any other.
+- `runs`, `passed` and `failed` count the runs actually performed and how
+  they ended; `failed` counts every run that did not pass, an errored run
+  included. `runs` is below the requested `n` when something stopped the
+  loop early (`--fail-fast`, an abort, a check whose exec layer could not
+  even start).
+- `flaky` is true when the runs disagreed: at least one passed and at least
+  one did not. It is the reader's cue that the check's own output is one
+  sample rather than the story. A check that failed every run, and a check
+  whose runs were bad in two different ways, are both not flaky: nothing
+  passed.
+- `failures` is the union of the runs' failures, de-duplicated by
+  file+line+message (a detector that locates nothing de-duplicates on the
+  message alone), in first-seen order. `summary`, `exitCode` and `timedOut`
+  are the LAST run's, and `durationMs` sums every run's.
+- `failures` is capped by `--max-failures` once, on that merged list: the
+  cap is a limit on what the envelope reports about a check, not something
+  a repeat multiplies. A cut sets `truncated: true` and writes the full,
+  uncapped result to the log directory as always. Whatever the cap did, a
+  run with `--repeat` above 1 always writes that file too, because it is
+  where the per-run detail lives: `verify-full-<runId>.json` lists every
+  run's own log path and exit code (`runLogs`), which the compact `checks`
+  row does not carry.
+
+Each run writes its own log file, `<name>.<k>.log` from `k = 1`, because
+exec.ts opens a log file in append mode and two runs writing one name would
+interleave their output. The envelope's protected `logs` key carries the
+first run's log plus every failing run's: a run that passed adds nothing a
+reader needs, while the first run's log is what a `flaky` check's pass looks
+like. On every repeated run the path of that `verify-full-<runId>.json` file
+is appended to the envelope's `logs` too, the way it is when `--max-failures`
+cuts a list, while `--summary`'s `fullResult=` still names
+`result-full-<runId>.json`, the envelope's own full result.
+
+`--fail-fast` stops the repeat loop at the first run that did not pass,
+and then skips the later checks exactly as it does without `--repeat`: the
+check reports the runs it got (`runs` below `n`), and the checks behind it
+are never started. `--timeout` applies to each run on its own (a 30-second
+timeout with `--repeat 3` is three 30-second budgets, not one shared one),
+and `--max-failures` caps the merged list as above. An abort is looked at
+between runs as well as between checks: a run that had already started is
+reported as an aborted `error` naming the abort, a run that had not
+started yet is not started, and the checks behind this one are named in
+the run-level warning with `reason: "aborted"`, as without `--repeat` (a
+run stopped after the last check, with none left behind to name, says so
+in the warning instead).
+
+`--repeat` measures; it does not raise a limit for you. To bound a repeated
+run by wall-clock time or memory (a repeat multiplies both), wrap it in
+`guard`, which caps the whole `verify` invocation rather than any one run.
+
 ## Compact views: --summary and --print
 
 `--summary` and `--print <field,...>` print a second rendering of the same
@@ -420,14 +495,18 @@ result; they work like the views of [probe](probe.md#compact-views---summary---p
 and a final totals line:
 
 ```text
-<name> | <pass|fail|skipped|error> | exit=<code|-> | <N>ms | passed=N failed=N skipped=N errors=N[ | reason=<reason>][ | first failure: <file:line: message>]
+<name> | <pass|fail|skipped|error> | exit=<code|-> | <N>ms | passed=N failed=N skipped=N errors=N[ | reason=<reason>][ | first failure: <file:line: message>][ | runs=N runs_passed=P runs_failed=F][ | flaky]
 totals: status=<pass|fail|error> [reason=<reason>] checks=N pass=N fail=N skipped=N error=N totalDurationMs=N warnings=N fullResult=<path>
 ```
 
-`fullResult=` names the saved `result-full-*.json`; `verify` writes it on
-every run. `-m` is a character budget: rows that do not fit are replaced
-by one marker line naming how many were omitted, and the totals line is
-always printed.
+A repeated check (one whose `--repeat` ran more than once) appends its run
+counts, so a reader can see the line describes a merge, and a bare `flaky`
+when its runs disagreed. They are named `runs_passed` and `runs_failed`
+because the `passed=` and `failed=` before them are the LAST run's test
+tallies, which count something else. `fullResult=` names the saved
+`result-full-*.json`; `verify` writes it on every run. `-m` is a character
+budget: rows that do not fit are replaced by one marker line naming how
+many were omitted, and the totals line is always printed.
 
 `--print` prints one JSON object on one line, one key per requested field
 in the order given. A name is a top-level envelope field (`status`,

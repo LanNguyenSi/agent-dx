@@ -95,6 +95,15 @@ export type CheckStatus = "pass" | "fail" | "skipped" | "error";
  *   `no_script` skipped result. */
 export type CheckSource = "exec" | "preset" | "script" | "none";
 
+/** One run of a repeated check, as listed by `CheckResult.runLogs`: where
+ * that run's own log is and how it ended. `logPath` is absent exactly when
+ * that run's own `CheckResult` carries none (a run killed by the caller's
+ * abort whose log could not be written either). */
+export interface CheckRunLog {
+  logPath?: string;
+  exitCode: number | null;
+}
+
 export interface CheckResult {
   name: string;
   command?: string;
@@ -121,6 +130,24 @@ export interface CheckResult {
    * source, so a reader can tell an opt-in pass/fail from a plain
    * exit-code one apart from the `warnings` entry that names it. */
   passRegex?: string;
+  /** The four fields below appear only when `VerifyOptions.repeat` is
+   * above 1 (never at the default of 1, which leaves this result exactly
+   * as it was), and always together. A repeated check ran `runs` times --
+   * fewer than asked for once `--fail-fast` or an abort ended the loop
+   * early -- of which `passed` passed and `failed` did not (an errored run
+   * counts as not passed). */
+  runs?: number;
+  passed?: number;
+  failed?: number;
+  /** True when the runs disagreed: at least one passed and at least one
+   * did not, which is what a reader of a `fail`/`error` status needs to
+   * know before treating the check's own output as the story. */
+  flaky?: boolean;
+  /** Present only in a `fullChecks` entry of a repeated check: one entry
+   * per run in run order, so the full result file names every run's log
+   * and exit code (the envelope's own `logs` carries the first run's plus
+   * every failing run's). */
+  runLogs?: CheckRunLog[];
 }
 
 export type VerifyStatus = "pass" | "fail" | "error";
@@ -136,8 +163,11 @@ export interface VerifyResult {
    * log directory and marking the envelope `truncated: true` when this is
    * set; verify() itself never touches the envelope. */
   truncatedByMaxFailures: boolean;
-  /** Present only when `truncatedByMaxFailures` is true: the same checks,
-   * with every failures list left uncapped. */
+  /** Present when `truncatedByMaxFailures` is true, or when `repeat` was
+   * above 1: the same checks, with every failures list left uncapped, and
+   * (for a repeated check) each run's own log and exit code in `runLogs`.
+   * The CLI persists this list to `verify-full-<runId>.json` in both
+   * cases. */
   fullChecks?: CheckResult[];
   /** Present only for a status that needs a machine-readable cause beyond
    * `status` itself: `nothing_verified` when every requested check
@@ -188,6 +218,24 @@ export interface VerifyOptions {
   timeoutMs?: number;
   /** Caps each check's own `failures` list. Defaults to 20. */
   maxFailures?: number;
+  /** How many times each check is run, sequentially, in place of the
+   * single run of today: `--repeat <n>` on the CLI, an integer from 1
+   * (`DEFAULT_REPEAT`, the default: one run, and a result shape byte-
+   * identical to before this option existed) to 100 (`MAX_REPEAT`);
+   * anything else is a usage error. Resolution happens once per check, so
+   * a repeat costs `n` executions of the same command, never `n`
+   * resolutions. Every run keeps its own log file (`<name>.<k>.log`), and
+   * the check's reported result is the runs merged: `status` is `pass` only
+   * when every run passed, otherwise the worst status seen (`error` beats
+   * `fail`), with `flaky` naming a check whose runs disagreed; `failures`
+   * is the de-duplicated union across the runs (capped by `maxFailures`
+   * once, on the merged list); `summary`, `exitCode` and `timedOut` are the
+   * last run's and `durationMs` sums them all. `--timeout` is a per-run
+   * budget (n runs get n of them), while `--fail-fast` stops the repeat loop
+   * at the first run that did not pass and an abort between runs ends it.
+   * Only ever a fixed integer from the trusted caller: like `-c`/`-x`,
+   * never filled from untrusted text. */
+  repeat?: number;
   env?: NodeJS.ProcessEnv;
   /** Candidate detectors only, in priority order; the fallback is never
    * part of this list (see `fallbackDetector`). Defaults to
