@@ -2741,14 +2741,12 @@ program
       },
       // `written_files` is what a caller needs after a failed write phase
       // to know which files already changed; `counts` says how much of
-      // the reduced `edits`/`files` arrays is missing; `branch_guard` and
-      // `allowed_protected` are the audit trail of the branch guard.
-      keepWhole: [
-        "counts",
-        "written_files",
-        "branch_guard",
-        "allowed_protected",
-      ],
+      // the reduced `edits`/`files` arrays is missing; `allowed_protected`
+      // is the audit trail of an override. `branch_guard` is not held
+      // whole: its repository paths would push these three out under a
+      // tight budget, and the refusal is in `status`, `reason`, the edits
+      // and the warnings as well.
+      keepWhole: ["counts", "written_files", "allowed_protected"],
       maxChars: global.maxChars,
       logDir: global.logDir,
     });

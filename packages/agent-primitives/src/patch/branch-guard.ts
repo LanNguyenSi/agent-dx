@@ -11,10 +11,12 @@ import {
 import { REF_FORMAT_ENV_VARS, REPO_SELECTION_ENV_VARS } from "../git-env.js";
 
 /**
- * The branch guard of `patch`: the command refuses to write while the
- * repository that contains the working directory sits on a protected
- * branch, because a shell call of `agent-primitives patch` is not seen by
- * a hook that judges only the editor tools.
+ * The branch guard of `patch`: the command refuses to write while a
+ * repository that holds a target sits on a protected branch, because a
+ * shell call of `agent-primitives patch` is not seen by a hook that judges
+ * only the editor tools. `evaluateBranchGuard` judges one repository;
+ * `patch()` calls it once for each distinct repository (the one at `-C`
+ * and the one of each target) and refuses the plan when any of them does.
  *
  * The protected set is the union of three sources, compared without regard
  * to letter case (as the harness hook does):
@@ -51,8 +53,12 @@ export type BranchGuardStatus =
   | "detached"
   | "allowed_protected";
 
-/** What the envelope reports as `branch_guard`. */
-export interface BranchGuard {
+/** What the envelope reports for one repository (or for the targets that
+ * lie in none): no free text, the refusal's wording is in the edits. */
+export interface RepoGuard {
+  /** The real path of the repository's work tree; absent for
+   * `not_a_repo`. */
+  root?: string;
   status: BranchGuardStatus;
   /** The branch HEAD names (`HEAD` when detached); absent when it could
    * not be resolved or there is no repository. */
@@ -64,15 +70,21 @@ export interface BranchGuard {
   /** Why the guard refused, would refuse or was overridden:
    * `protected_branch` or `protected_branch_unresolved`. */
   reason?: string;
-  detail?: string;
+}
+
+/** What the envelope reports as `branch_guard`: the overall status (the
+ * first of refused, would_refuse, allowed_protected, detached, allowed,
+ * not_a_repo that any repository has), its reason, and one entry per
+ * distinct repository that holds a target. */
+export interface BranchGuard {
+  status: BranchGuardStatus;
+  reason?: string;
+  repos: RepoGuard[];
 }
 
 export interface BranchGuardInput {
-  /** The real path of the root (the repository containing the cwd, or the
-   * cwd itself when there is none). */
+  /** The real path of the work tree to judge. */
   root: string;
-  /** False when no work tree was found: nothing to judge. */
-  inWorkTree: boolean;
   /** Why git must not be run in `root` (`gitDiscoveryHazard`), if so. */
   hazard: string | undefined;
   timeoutMs: number;
@@ -83,11 +95,44 @@ export interface BranchGuardInput {
 }
 
 export interface BranchGuardVerdict {
-  guard: BranchGuard;
+  guard: RepoGuard;
+  /** The sentence that says what was refused and how to go on; carried
+   * by the edits of a refused plan, not by the envelope's guard. */
+  detail?: string;
   /** True when the plan must be refused (nothing written). */
   refuse: boolean;
   /** True when `--allow-protected` overrode a refusal. */
   overridden: boolean;
+}
+
+const STATUS_ORDER: BranchGuardStatus[] = [
+  "refused",
+  "would_refuse",
+  "allowed_protected",
+  "detached",
+  "allowed",
+  "not_a_repo",
+];
+
+/** The entry for targets that lie in no repository. */
+export function notARepoGuard(): RepoGuard {
+  return { status: "not_a_repo", protected: [], sources: [] };
+}
+
+/** The overall guard of a plan from its per-repository entries. */
+export function combineGuards(repos: RepoGuard[]): BranchGuard {
+  if (repos.length === 0) return { status: "not_a_repo", repos: [] };
+  let best = repos[0];
+  for (const r of repos) {
+    if (STATUS_ORDER.indexOf(r.status) < STATUS_ORDER.indexOf(best.status)) {
+      best = r;
+    }
+  }
+  return {
+    status: best.status,
+    ...(best.reason !== undefined ? { reason: best.reason } : {}),
+    repos,
+  };
 }
 
 /** The names `--protected` may carry: a branch name as git spells it, so
@@ -234,23 +279,16 @@ interface Named {
 export function evaluateBranchGuard(
   input: BranchGuardInput,
 ): BranchGuardVerdict {
-  const empty = (status: BranchGuardStatus): BranchGuardVerdict => ({
-    guard: { status, protected: [], sources: [] },
-    refuse: false,
-    overridden: false,
-  });
-  if (!input.inWorkTree) return empty("not_a_repo");
-
   // The outcome when HEAD or origin/HEAD cannot be read: fail closed.
   const unresolved = (why: string, names: Named[]): BranchGuardVerdict => {
     const detail = `patch could not tell which branch ${input.root} is on (${why}). Check the branch by hand and pass --allow-protected to edit anyway`;
-    const guard: BranchGuard = {
+    const guard: RepoGuard = {
+      root: input.root,
       ...summarise(names),
       status: "refused",
       reason: "protected_branch_unresolved",
-      detail,
     };
-    return settle(guard, input);
+    return settle(guard, detail, input);
   };
 
   const names: Named[] = input.flagNames.map((name) => ({
@@ -307,7 +345,8 @@ export function evaluateBranchGuard(
   const all = withBuiltin(names);
 
   if (detached) {
-    const guard: BranchGuard = {
+    const guard: RepoGuard = {
+      root: input.root,
       ...summarise(all),
       status: "detached",
       branch: "HEAD",
@@ -315,28 +354,25 @@ export function evaluateBranchGuard(
     if (!input.protectDetached)
       return { guard, refuse: false, overridden: false };
     return settle(
-      {
-        ...guard,
-        status: "refused",
-        reason: "protected_branch",
-        detail: `patch refuses to edit on a detached HEAD (--protect-detached); check out a task branch, or pass --allow-protected to edit here anyway`,
-      },
+      { ...guard, status: "refused", reason: "protected_branch" },
+      `patch refuses to edit on a detached HEAD of ${input.root} (--protect-detached); check out a task branch, or pass --allow-protected to edit here anyway`,
       input,
     );
   }
 
   const folded = (branch as string).toLowerCase();
   const hit = all.filter((n) => n.name.toLowerCase() === folded);
-  const guard: BranchGuard = { ...summarise(all), status: "allowed", branch };
+  const guard: RepoGuard = {
+    root: input.root,
+    ...summarise(all),
+    status: "allowed",
+    branch,
+  };
   if (hit.length === 0) return { guard, refuse: false, overridden: false };
   const via = [...new Set(hit.map((n) => n.source))].join(", ");
   return settle(
-    {
-      ...guard,
-      status: "refused",
-      reason: "protected_branch",
-      detail: `patch refuses to edit on the protected branch ${JSON.stringify(branch)} (protected by: ${via}); switch to a task branch, or pass --allow-protected to edit here anyway`,
-    },
+    { ...guard, status: "refused", reason: "protected_branch" },
+    `patch refuses to edit on the protected branch ${JSON.stringify(branch)} of ${input.root} (protected by: ${via}); switch to a task branch, or pass --allow-protected to edit here anyway`,
     input,
   );
 }
@@ -353,7 +389,7 @@ function withBuiltin(names: Named[]): Named[] {
 
 /** The `protected` and `sources` fields: names deduplicated without regard
  * to case (first spelling kept), sources in the order they contributed. */
-function summarise(names: Named[]): Pick<BranchGuard, "protected" | "sources"> {
+function summarise(names: Named[]): Pick<RepoGuard, "protected" | "sources"> {
   const seen = new Set<string>();
   const out: string[] = [];
   const sources: ProtectedSource[] = [];
@@ -370,30 +406,25 @@ function summarise(names: Named[]): Pick<BranchGuard, "protected" | "sources"> {
 /** Turns a would-be refusal into the final verdict: overridden by
  * `--allow-protected`, only reported in a dry run, or enforced. */
 function settle(
-  guard: BranchGuard,
+  guard: RepoGuard,
+  detail: string,
   input: BranchGuardInput,
 ): BranchGuardVerdict {
   if (input.allowProtected) {
     return {
-      guard: {
-        ...guard,
-        status: "allowed_protected",
-        detail: `overridden by --allow-protected: ${guard.detail ?? ""}`,
-      },
+      guard: { ...guard, status: "allowed_protected" },
+      detail: `overridden by --allow-protected: ${detail}`,
       refuse: false,
       overridden: true,
     };
   }
   if (input.dryRun) {
     return {
-      guard: {
-        ...guard,
-        status: "would_refuse",
-        detail: `a real run would be refused: ${guard.detail ?? ""}`,
-      },
+      guard: { ...guard, status: "would_refuse" },
+      detail: `a real run would be refused: ${detail}`,
       refuse: false,
       overridden: false,
     };
   }
-  return { guard, refuse: true, overridden: false };
+  return { guard, detail, refuse: true, overridden: false };
 }

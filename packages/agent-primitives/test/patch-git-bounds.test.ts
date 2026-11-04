@@ -55,7 +55,8 @@ interface ChildPatchRun {
     status?: string;
     reason?: string;
     warnings?: string[];
-    branchGuard?: { status?: string; reason?: string; detail?: string };
+    branchGuard?: { status?: string; reason?: string };
+    edits?: { status?: string; detail?: string }[];
   };
   ms: number;
 }
@@ -456,7 +457,7 @@ describe.skipIf(process.platform === "win32")(
           expect(out.status).toBe("usage_error");
           expect(out.reason).toBe("protected_branch_unresolved");
           expect(out.branchGuard?.status).toBe("refused");
-          expect(out.branchGuard?.detail).toContain(
+          expect(out.edits?.[0].detail).toContain(
             "did not finish within 2000 ms",
           );
           expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a\n");
@@ -477,15 +478,31 @@ describe.skipIf(process.platform === "win32")(
       }, 60_000);
     }
 
-    for (const [label, body] of [
+    for (const [label, body, detail] of [
       [
         "HEAD",
         // origin/HEAD reads as unset, so only the HEAD call can refuse.
         'case "$1" in\n  rev-parse) exit 128 ;;\nesac\nif [ "$3" = HEAD ]; then exit 3; fi\nexit 1',
+        "exit code 3",
       ],
       [
         "origin/HEAD",
         'case "$1" in\n  rev-parse) exit 128 ;;\nesac\nif [ "$3" = HEAD ]; then echo refs/heads/task/x; exit 0; fi\nexit 3',
+        "exit code 3",
+      ],
+      [
+        // `--quiet` prints nothing for a detached HEAD; an exit 1 that
+        // prints something is no such answer.
+        "HEAD (exit 1 that prints something)",
+        'case "$1" in\n  rev-parse) exit 128 ;;\nesac\nif [ "$3" = HEAD ]; then echo junk; exit 1; fi\nexit 1',
+        "exit code 1",
+      ],
+      [
+        // Two lines: read as one name it would be `task\nrefs/heads/main`,
+        // which matches no protected name.
+        "HEAD (two lines)",
+        'case "$1" in\n  rev-parse) exit 128 ;;\nesac\nif [ "$3" = HEAD ]; then printf "refs/heads/task\\nrefs/heads/main\\n"; exit 0; fi\nexit 1',
+        "not a branch under refs/heads/",
       ],
     ] as const) {
       it(`refuses when the symbolic-ref of ${label} fails with an exit status that is no answer`, async () => {
@@ -499,7 +516,7 @@ describe.skipIf(process.platform === "win32")(
         );
         expect(out.status).toBe("usage_error");
         expect(out.reason).toBe("protected_branch_unresolved");
-        expect(out.branchGuard?.detail).toContain("exit code 3");
+        expect(out.edits?.[0].detail).toContain(detail);
         expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a\n");
       }, 60_000);
     }

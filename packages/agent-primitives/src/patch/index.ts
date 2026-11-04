@@ -34,9 +34,13 @@ import {
 import { unifiedDiff } from "./diff.js";
 import {
   BRANCH_GUARD_TIMEOUT_MS,
+  combineGuards,
   evaluateBranchGuard,
+  notARepoGuard,
   protectedNameProblem,
   type BranchGuard,
+  type BranchGuardVerdict,
+  type RepoGuard,
 } from "./branch-guard.js";
 
 export { MATCH_TIERS, type MatchTier } from "./engine.js";
@@ -45,6 +49,7 @@ export type {
   BranchGuard,
   BranchGuardStatus,
   ProtectedSource,
+  RepoGuard,
 } from "./branch-guard.js";
 
 /** One edit of a plan, as given. */
@@ -1042,6 +1047,18 @@ function signalName(signo: number): string {
   return `signal ${String(signo)}`;
 }
 
+/** The real path of the work tree whose `.git` entry is the nearest one
+ * at or above `dir`, or undefined when there is none. */
+function repoHolding(dir: string): string | undefined {
+  const found = findGitRoot(dir);
+  if (found === undefined) return undefined;
+  try {
+    return fs.realpathSync.native(found);
+  } catch {
+    return found;
+  }
+}
+
 /**
  * Applies a plan of exact-text edits. Every edit is resolved against the
  * current content of every file before anything is written: a missing,
@@ -1102,30 +1119,6 @@ export function patch(options: PatchOptions): PatchResult {
         "protected_invalid",
       );
     }
-  }
-
-  // Decided once, before any file is read for resolving and long before
-  // the first write. A refusal marks every file below, so the engine never
-  // runs and the write phase finds a refused plan.
-  const verdict = evaluateBranchGuard({
-    root,
-    inWorkTree: gitRoot !== undefined,
-    hazard: gitRoot !== undefined ? gitDiscoveryHazard(root) : undefined,
-    timeoutMs: options.gitTimeoutMs ?? BRANCH_GUARD_TIMEOUT_MS,
-    flagNames: options.protectedBranches ?? [],
-    protectDetached: options.protectDetached === true,
-    allowProtected: options.allowProtected === true,
-    dryRun,
-  });
-  const branchGuard = verdict.guard;
-  if (verdict.overridden) {
-    warnings.push(
-      `--allow-protected: editing although the branch guard would refuse (${branchGuard.reason ?? "protected_branch"}${branchGuard.branch !== undefined ? `, branch ${branchGuard.branch}` : ""})`,
-    );
-  } else if (branchGuard.status === "would_refuse") {
-    warnings.push(
-      `branch guard: a real run would be refused (${branchGuard.reason ?? "protected_branch"}${branchGuard.branch !== undefined ? `, branch ${branchGuard.branch}` : ""}); pass --allow-protected to edit anyway`,
-    );
   }
 
   // Resolve every target path; group edits per file identity (dev:ino),
@@ -1260,17 +1253,74 @@ export function patch(options: PatchOptions): PatchResult {
     });
   }
 
-  // A refusal of the branch guard marks every file the path checks did not
-  // refuse already, so nothing is resolved or written. A path refusal
-  // (`git_dir`, `outside_root`) keeps its reason: `--allow-protected` does
-  // not lift the first of them, and the caller learns of it now rather
-  // than after switching branches.
-  if (verdict.refuse) {
+  // The branch guard judges every distinct repository that holds a target
+  // (and the one at -C), once each, before any file is read for resolving
+  // and long before the first write. A refusal by any of them marks every
+  // file the path checks did not refuse already, so nothing is resolved or
+  // written. A path refusal (`git_dir`, `outside_root`) keeps its reason:
+  // `--allow-protected` does not lift the first of them, and the caller
+  // learns of it now rather than after switching branches.
+  const judged = new Map<string, BranchGuardVerdict>();
+  const repos: RepoGuard[] = [];
+  const stateVerdict = new Map<FileState, BranchGuardVerdict | undefined>();
+  const judge = (repoRoot: string): BranchGuardVerdict => {
+    let v = judged.get(repoRoot);
+    if (v === undefined) {
+      v = evaluateBranchGuard({
+        root: repoRoot,
+        hazard: gitDiscoveryHazard(repoRoot),
+        timeoutMs: options.gitTimeoutMs ?? BRANCH_GUARD_TIMEOUT_MS,
+        flagNames: options.protectedBranches ?? [],
+        protectDetached: options.protectDetached === true,
+        allowProtected: options.allowProtected === true,
+        dryRun,
+      });
+      judged.set(repoRoot, v);
+      repos.push(v.guard);
+    }
+    return v;
+  };
+  if (gitRoot !== undefined) judge(root);
+  let outsideAnyRepo = false;
+  for (const state of order) {
+    const holder = repoHolding(path.dirname(state.real));
+    if (holder === undefined) {
+      outsideAnyRepo = true;
+      stateVerdict.set(state, undefined);
+    } else {
+      stateVerdict.set(state, judge(holder));
+    }
+  }
+  if (outsideAnyRepo || repos.length === 0) repos.push(notARepoGuard());
+  const branchGuard: BranchGuard = combineGuards(repos);
+  const verdicts = [...judged.values()];
+  const allowedProtected = verdicts.some((v) => v.overridden);
+  // One line per outcome, short: warnings are never cut by `-m`, and the
+  // per-repository detail is in `branch_guard.repos`.
+  const lifted = verdicts.filter((v) => v.overridden);
+  if (lifted.length > 0) {
+    warnings.push(
+      `--allow-protected: the branch guard would have refused ${String(lifted.length)} ${lifted.length === 1 ? "repository" : "repositories"} (${[...new Set(lifted.map((v) => v.guard.reason))].join(", ")}); see branch_guard.repos`,
+    );
+  }
+  const wouldRefuse = verdicts.filter((v) => v.guard.status === "would_refuse");
+  if (wouldRefuse.length > 0) {
+    warnings.push(
+      `branch guard: a real run would be refused in ${String(wouldRefuse.length)} ${wouldRefuse.length === 1 ? "repository" : "repositories"} (${[...new Set(wouldRefuse.map((v) => v.guard.reason))].join(", ")}); pass --allow-protected to edit anyway`,
+    );
+  }
+  const firstRefusal = verdicts.find((v) => v.refuse);
+  if (firstRefusal !== undefined) {
     for (const state of order) {
       if (state.status === "refused") continue;
+      const own = stateVerdict.get(state);
+      const cause = own !== undefined && own.refuse ? own : firstRefusal;
       state.status = "refused";
-      state.reason = branchGuard.reason;
-      state.detail = branchGuard.detail;
+      state.reason = cause.guard.reason;
+      state.detail =
+        cause === own
+          ? cause.detail
+          : `the plan is refused as a whole, nothing is written: ${cause.detail ?? ""}`;
     }
   }
 
@@ -1444,7 +1494,7 @@ export function patch(options: PatchOptions): PatchResult {
     dryRun,
     root,
     branchGuard,
-    allowedProtected: verdict.overridden,
+    allowedProtected,
     edits: editResults,
     files: fileResults,
     writtenFiles,
