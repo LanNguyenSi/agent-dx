@@ -22,6 +22,21 @@ import {
 import { statusClass } from "../src/envelope.js";
 import { buildSpawnEnv, CLI_PATH, spawnCli } from "./helpers/spawn-cli.js";
 
+/** The branch every fixture repository sits on: not a protected one, so
+ * the branch guard lets the fixtures be edited whatever the machine's
+ * `init.defaultBranch` is. Every `git init` of this file (bare
+ * repositories, separate git directories, nested ones) starts on it:
+ * the environment carries the setting for git as a command-scope
+ * configuration entry. */
+const FEATURE_BRANCH = "ap-fixture-feature";
+{
+  const n = Number(process.env.GIT_CONFIG_COUNT ?? "0");
+  const count = Number.isInteger(n) && n >= 0 ? n : 0;
+  process.env[`GIT_CONFIG_KEY_${String(count)}`] = "init.defaultBranch";
+  process.env[`GIT_CONFIG_VALUE_${String(count)}`] = FEATURE_BRANCH;
+  process.env.GIT_CONFIG_COUNT = String(count + 1);
+}
+
 const tmpDirs: string[] = [];
 afterEach(() => {
   for (const dir of tmpDirs.splice(0)) {
@@ -35,10 +50,18 @@ function tmpDir(prefix = "agent-primitives-patch-test-"): string {
   return dir;
 }
 
-/** A git work tree (only `.git` matters: it marks the root). */
+/** A git work tree (only `.git` matters: it marks the root), on a feature
+ * branch that has no commit yet. */
 function repo(files: Record<string, string | Buffer> = {}): string {
   const dir = tmpDir();
   execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync(
+    "git",
+    ["symbolic-ref", "HEAD", `refs/heads/${FEATURE_BRANCH}`],
+    {
+      cwd: dir,
+    },
+  );
   for (const [rel, content] of Object.entries(files)) {
     const full = path.join(dir, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -1979,7 +2002,8 @@ function workTreeInsideBare(): { bare: string; main: string } {
   const { base, src } = committedSource();
   gitIn(base, "clone", "-q", "--bare", src, "inbare.git");
   const bare = path.join(base, "inbare.git");
-  gitIn(bare, "worktree", "add", "-q", "main");
+  // The directory is named `main`; its branch must not be.
+  gitIn(bare, "worktree", "add", "-q", "-b", `${FEATURE_BRANCH}-wt`, "main");
   addHook(bare);
   return { bare, main: path.join(bare, "main") };
 }
@@ -2018,6 +2042,9 @@ function superWithSubmodule(): { sup: string; sub: string } {
     src,
     "sub",
   );
+  // The clone's branch is the default branch of its origin, which the
+  // branch guard protects; edit on another one.
+  gitIn(path.join(sup, "sub"), "checkout", "-q", "-b", `${FEATURE_BRANCH}-sub`);
   return { sup, sub: path.join(sup, "sub") };
 }
 

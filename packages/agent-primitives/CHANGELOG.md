@@ -48,6 +48,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`mutant_not_applicable`) and the exit code (`2`) are unchanged.
 - `verify`: `-x` given without `-c` adds a `hint:` warning saying that the
   default check list still runs and that `-c <names>` chooses the run set.
+- `patch` branch guard: the command refuses to write while any repository
+  that holds a target sits on a protected branch, because the editor-tool
+  hook that protects `main` and `master` never sees a shell call of
+  `agent-primitives patch`. Every distinct repository that holds a target
+  is judged (a nested checkout reached from a directory that is no
+  repository, an `--allow-outside` target in a second repository, a
+  submodule, the repository a symlink leads into), besides the one at
+  `-C`, and any one of them refuses the whole plan. The protected set is the
+  union of every `--protected <name>` (repeatable), the branch `origin/HEAD`
+  points to (when it is a plain `refs/remotes/origin/<name>`) and the
+  built-in names `main` and `master`, compared without regard to letter
+  case. A refusal is `status: "usage_error"`, `reason: "protected_branch"`,
+  exit `2`, with every edit `refused` and nothing written. `--allow-protected`
+  writes anyway, lifts every refusing repository at once and records it
+  (`branch_guard.repos[].status: "allowed_protected"` and a top-level
+  `allowed_protected: true`); `--protect-detached` treats a detached HEAD
+  like a protected branch; `--dry-run` still shows the edits and reports
+  `branch_guard.status: "would_refuse"`. A branch that cannot be resolved
+  inside a repository (no git, a hazardous layout, a timeout, an unusual
+  HEAD) is refused too, as `protected_branch_unresolved`. The envelope
+  carries `branch_guard` (`status`, `reason`, and `repos`: one entry per
+  repository with `root`, `status`, `branch`, `protected`, `sources`,
+  `reason`), without free text. See [docs/patch.md](docs/patch.md#branch-guard).
 - `verify --repeat <n>` (API `repeat`): runs every check n times,
   sequentially, for a check whose suite fails intermittently. One resolution
   per check and n executions of it, each with its own log file
@@ -83,6 +106,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   branches without a planned mutant would have surfaced the mutants that
   reviewers later found surviving. It is not shipped and not referenced by
   `package.json`; the report recommends not building it as specified.
+
+- `patch` on a protected branch now refuses (see the branch guard above);
+  pass `--allow-protected` to keep the old behaviour. Under a tight `-m`
+  budget `branch_guard` is reduced like any payload object, and `counts`,
+  `written_files`, `allowed_protected`, `status` and `reason` are kept while
+  the fixed fields leave room for them; below that only the fixed fields
+  remain, and the warnings (never cut) still name a refusal, a would-be
+  refusal or an override.
 - The test suite now runs in a sandbox or environment where `ps` cannot be
   started: the helper that lists processes in `worktree-remove-list.test.ts`
   catches the error `execFile` throws synchronously, and the tests whose
