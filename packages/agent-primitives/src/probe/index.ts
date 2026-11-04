@@ -179,6 +179,10 @@ export interface ProbeResult {
   warnings: string[];
   mutant?: MutantField;
   mutation_probe?: MutationProbeField;
+  /** The line the `-M/--match` text was not found on, set only on the
+   * `mutant_not_applicable` refusal for that cause (see
+   * `MutantNotApplicable.lineContent`). */
+  line_content?: string;
   /** The `--env NAME=VALUE` overrides this run was given (redacted by
    * `redactEnvOverrides`), present whenever at least one was given --
    * on every status, including one (`baseline_failed`,
@@ -854,6 +858,8 @@ async function runProbePipeline(
   let mutantSummary: string | undefined;
   let verifiedAppliedVia: string | undefined;
   let prepared: Extract<PreparedMutant, { ok: true }> | undefined;
+  // Set by the dry run when the `-M` text is not on the named line.
+  let refusedLineContent: string | undefined;
   let baseline: ExecPhaseField | undefined;
   // The locks and the run controller, handed over by `openRunSetup` the
   // moment they exist: from then on this function's own `finally` owns
@@ -945,6 +951,7 @@ async function runProbePipeline(
       beforeBaseline: async ({ targets, rt }) => {
         const computed = await prepareMutant(rt, targets[0], spec, warnings);
         if (!computed.ok) {
+          refusedLineContent = computed.lineContent;
           return {
             ok: false,
             reason: computed.reason,
@@ -999,6 +1006,10 @@ async function runProbePipeline(
           : {}),
         ...(refusal.baseline !== undefined
           ? { baseline: refusal.baseline }
+          : {}),
+        // Only the dry run sets it, and only for `mutant_not_applicable`.
+        ...(refusedLineContent !== undefined
+          ? { line_content: refusedLineContent }
           : {}),
         isolation: isolationField,
         ...(refusal.logPaths !== undefined
@@ -1311,6 +1322,8 @@ export interface PlanMutantResult {
   mutant?: MutantField;
   mutation_probe?: MutationProbeField;
   test?: TestPhaseField;
+  /** See `ProbeResult.line_content`. */
+  line_content?: string;
   /** Exec log paths this mutant produced (its dry run, its real apply). */
   logs: string[];
   /** The test command this mutant is measured with: its own, else the
@@ -2142,6 +2155,9 @@ async function runProbePlanPipeline(
           status: "inconclusive",
           reason: prepared.reason,
           warnings: mutantWarnings,
+          ...(prepared.lineContent !== undefined
+            ? { line_content: prepared.lineContent }
+            : {}),
           logs: prepared.logPaths,
           ...groupFields(item),
         });

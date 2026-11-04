@@ -349,6 +349,32 @@ describe("probe --print (CLI)", { timeout: 60000 }, () => {
     expect(printed.map(kind)).toEqual(jsonLogs.map(kind));
   });
 
+  it("--print truncated agrees with the emitted envelope: true when -m reduced it, false when it fit", async () => {
+    const { repo, logs } = makeRepo();
+    const run = (max: string, extra: string[] = []) =>
+      spawnCli([
+        "-C",
+        repo,
+        "-l",
+        logs,
+        "-m",
+        max,
+        "probe",
+        ...SURVIVED_ARGS,
+        ...extra,
+      ]);
+    // Bound derived from this run's own envelope size, so it reduces on any
+    // platform whatever the length of the temp paths: half of it.
+    const whole = await run("100000");
+    const bound = String(Math.max(1, Math.floor(whole.stdout.length / 2)));
+    const reduced = await run(bound);
+    expect(JSON.parse(reduced.stdout).truncated).toBe(true);
+    const printed = await run(bound, ["--print", "truncated"]);
+    expect(JSON.parse(printed.stdout)).toEqual({ truncated: true });
+    const fits = await run("100000", ["--print", "truncated"]);
+    expect(JSON.parse(fits.stdout)).toEqual({ truncated: false });
+  });
+
   it("every top-level field of the envelope and of the saved full result is printable", async () => {
     const { repo, logs } = makeRepo();
     const run = await spawnCli([

@@ -36,12 +36,18 @@ export const PRINTABLE_FIELDS: readonly string[] = [
   "isolation",
   "fullResult",
   "totalDurationMs",
+  "line_content",
 ];
 
 /** Validates a comma-separated `--print` value; returns the trimmed,
  * non-empty field paths (`a.b` descends into an object), or throws a
- * message naming the unknown top-level field and the accepted ones. */
-export function parsePrintFields(value: string): string[] {
+ * message naming the unknown top-level field and the accepted ones.
+ * `allowed` is the command's own field list; it defaults to probe's, so
+ * probe's output and messages are unchanged. */
+export function parsePrintFields(
+  value: string,
+  allowed: readonly string[] = PRINTABLE_FIELDS,
+): string[] {
   const fields = value
     .split(",")
     .map((f) => f.trim())
@@ -51,9 +57,9 @@ export function parsePrintFields(value: string): string[] {
   }
   for (const field of fields) {
     const top = field.split(".")[0];
-    if (!PRINTABLE_FIELDS.includes(top)) {
+    if (!allowed.includes(top)) {
       throw new Error(
-        `--print: unknown field "${top}" (in "${field}"); known fields: ${PRINTABLE_FIELDS.join(", ")}`,
+        `--print: unknown field "${top}" (in "${field}"); known fields: ${allowed.join(", ")}`,
       );
     }
   }

@@ -32,9 +32,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are optional now, `PlanMutantSpec` gains `testCommand`, and
   `PlanBaselineField` is exported. See docs/probe.md, "A test command per
   mutant".
+- `hygiene`, `drift` and `verify` take `--summary` and `--print <fields>`,
+  the compact views `probe` already had: `--summary` prints one line per
+  finding, site or check plus a totals line (status, counts and the saved
+  full result path when there is one), `--print` prints the named top-level
+  envelope fields as one JSON line from the unreduced result. Both take
+  precedence over `-f`, are bounded by `-m`, are mutually exclusive, and
+  leave the exit code and the envelope unchanged. `--print` field names
+  come from a per-command list; `probe`'s list and output are unchanged
+  apart from the new `line_content` field.
+- `probe`: a `-M/--match` text that is not on the named line now reports
+  `line_content`, the line as the file has it (trimmed, at most 300
+  characters with a `...` marker), on the single-probe result and on the
+  `plan.results[]` item. The status (`inconclusive`), the reason
+  (`mutant_not_applicable`) and the exit code (`2`) are unchanged.
+- `verify`: `-x` given without `-c` adds a `hint:` warning saying that the
+  default check list still runs and that `-c <names>` chooses the run set.
 
 ### Changed
 
+- `probe`: the full-suite hint for a command such as `npm test` without
+  `--timeout` is now a warning in the JSON envelope instead of a stderr
+  line, appended after the probe's own warnings, so `2>&1 | <json parser>`
+  reads one valid document. With `-f text` and with `--summary`, `--print`
+  or `--report` it is still the stderr line printed before the baseline
+  starts. A `--plan` run prints none, as before.
+- `verify`: the `no_script` warning now ends with `; pass -c with the
+  checks this repo has`.
 - `scripts/spike/` holds a throwaway measurement (branch enumerator over
   `base..head`, scoring scripts and `REPORT.md`) of whether listing changed
   branches without a planned mutant would have surfaced the mutants that
