@@ -478,7 +478,11 @@ describe.skipIf(process.platform === "win32")(
     }
 
     for (const [label, body] of [
-      ["HEAD", 'case "$1" in\n  rev-parse) exit 128 ;;\nesac\nexit 3'],
+      [
+        "HEAD",
+        // origin/HEAD reads as unset, so only the HEAD call can refuse.
+        'case "$1" in\n  rev-parse) exit 128 ;;\nesac\nif [ "$3" = HEAD ]; then exit 3; fi\nexit 1',
+      ],
       [
         "origin/HEAD",
         'case "$1" in\n  rev-parse) exit 128 ;;\nesac\nif [ "$3" = HEAD ]; then echo refs/heads/task/x; exit 0; fi\nexit 3',

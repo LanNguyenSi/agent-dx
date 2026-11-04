@@ -1019,7 +1019,7 @@ describe("patch branch guard: the CLI", () => {
       [
         "--json",
         "-m",
-        "2600",
+        "1800",
         "-C",
         dir,
         "patch",
@@ -1032,8 +1032,15 @@ describe("patch branch guard: the CLI", () => {
     const out = JSON.parse(res.stdout) as GuardJson & { truncated: boolean };
     // The edits and files were cut down; the guard and its audit field were not.
     expect(out.truncated).toBe(true);
-    expect(out.branch_guard.status).toBe("allowed_protected");
-    expect(out.branch_guard.protected).toEqual(["main", "master"]);
+    // Whole: a reduced object would name only some of its keys.
+    expect(out.branch_guard).toEqual({
+      status: "allowed_protected",
+      branch: "main",
+      protected: ["main", "master"],
+      sources: ["builtin"],
+      reason: "protected_branch",
+      detail: expect.stringContaining("--allow-protected") as string,
+    });
     expect(out.allowed_protected).toBe(true);
   });
 
