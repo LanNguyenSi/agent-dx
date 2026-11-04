@@ -192,6 +192,14 @@ function checkLine(check: CheckResult): string {
       `first failure: ${cap(`${where ? `${where}: ` : ""}${first.message}`, 160)}`,
     );
   }
+  // A repeated check says so: the merged status beside the LAST run's
+  // exit code and tallies would otherwise read as one run's own verdict.
+  if (check.runs !== undefined) {
+    parts.push(
+      `runs=${check.runs} passed=${check.passed} failed=${check.failed}`,
+    );
+    if (check.flaky === true) parts.push("flaky");
+  }
   return parts.join(" | ");
 }
 

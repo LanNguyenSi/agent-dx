@@ -57,13 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count the runs actually performed; `failures` is the de-duplicated union
   across the runs, capped once by `--max-failures`; `summary` and `exitCode`
   come from the last run and `durationMs` sums them all. The envelope's
-  `logs` carry the first run's log plus every failing run's, and the full
-  result file lists every run's log and exit code. `--fail-fast` stops at the
-  first run that did not pass, `--timeout` applies to each run on its own,
-  and an abort between runs ends the loop. n is an integer from 1 (the
-  default, which leaves the envelope exactly as it was) to 100; 0, a
-  fraction, a negative number, above 100, or the flag given twice is a usage
-  error.
+  `logs` carry the first run's log plus every failing run's, and above 1
+  the run always writes the full result file `verify-full-<runId>.json`,
+  whether or not `--max-failures` cut anything, listing every run's own log
+  and exit code. `--fail-fast` stops at the first run that did not pass,
+  `--timeout` applies to each run on its own, and an abort between runs
+  ends the loop (naming the stop after the last check when no check is
+  left behind). n is an integer from 1 (the default, which leaves the
+  envelope exactly as it was) to 100 written in plain decimal digits; 0, a
+  fraction, a negative number, an exponent or hexadecimal spelling, above
+  100, or the flag given twice is a usage error.
 
 ### Changed
 

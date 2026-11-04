@@ -1501,11 +1501,130 @@ describe("cli verify", () => {
     expect(logs.some((l: string) => l.endsWith("/mycheck.3.log"))).toBe(false);
   });
 
+  it("--repeat 3 with nothing capped still persists every run's log and exit code in the full-result file", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // `exit 1` fails identically every run: the generic detector adds its
+    // single synthetic entry per check, the union de-duplicates to one
+    // failure, so nothing is capped and `truncatedByMaxFailures` stays
+    // false: exactly the common case where the per-run detail must still
+    // reach a persisted file.
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "3",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    expect(parsed.truncated).not.toBe(true);
+    const fullResultPath = (parsed.logs as string[]).find((l) =>
+      path.basename(l).startsWith("verify-full-"),
+    );
+    expect(fullResultPath).toBeDefined();
+    const written = JSON.parse(
+      fs.readFileSync(fullResultPath as string, "utf8"),
+    ) as {
+      checks: {
+        name: string;
+        runLogs?: { logPath?: string; exitCode: number | null }[];
+      }[];
+    };
+    const persisted = written.checks.find((c) => c.name === "mycheck");
+    expect(persisted?.runLogs).toHaveLength(3);
+    expect(persisted?.runLogs?.map((r) => r.exitCode)).toEqual([1, 1, 1]);
+    expect(
+      persisted?.runLogs?.map((r) => path.basename(r.logPath as string)),
+    ).toEqual(["mycheck.1.log", "mycheck.2.log", "mycheck.3.log"]);
+    // The compact envelope row keeps carrying the merge, not the per-run
+    // list.
+    const row = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(row).not.toHaveProperty("runLogs");
+  });
+
+  it("--repeat 3 with a cap cut: the full-result file carries the uncapped union and the run logs, and the envelope is marked truncated", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // tsc-shaped lines: the tsc detector reports one failure per line, so
+    // --max-failures 2 really caps the merged union of five.
+    const noisy = `node -e "for (let i=0;i<5;i++) console.log('src/a.ts('+(i+1)+',1): error TS2322: bad '+i); process.exit(1)"`;
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "--repeat",
+      "3",
+      "--max-failures",
+      "2",
+      "-x",
+      `mycheck=${noisy}`,
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.truncated).toBe(true);
+    const fullResultPath = (parsed.logs as string[]).find((l) =>
+      path.basename(l).startsWith("verify-full-"),
+    );
+    expect(fullResultPath).toBeDefined();
+    const written = JSON.parse(
+      fs.readFileSync(fullResultPath as string, "utf8"),
+    ) as {
+      checks: {
+        name: string;
+        failures: unknown[];
+        runLogs?: { exitCode: number | null }[];
+      }[];
+    };
+    const persisted = written.checks.find((c) => c.name === "mycheck");
+    // Uncapped union of five, plus every run's exit code.
+    expect(persisted?.failures).toHaveLength(5);
+    expect(persisted?.runLogs?.map((r) => r.exitCode)).toEqual([1, 1, 1]);
+  });
+
+  it("without --repeat and nothing capped, no verify-full file is written", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(
+      (parsed.logs as string[]).some((l) =>
+        path.basename(l).startsWith("verify-full-"),
+      ),
+    ).toBe(false);
+  });
+
   it.each([
     ["0", "zero"],
     ["101", "above the bound"],
     ["2.5", "not an integer"],
     ["abc", "not a number"],
+    ["1e1", "an exponent spelling of 10"],
+    ["0x3", "a hexadecimal spelling of 3"],
   ])("--repeat %s (%s) is a usage_error, exit 2", async (value) => {
     const cwd = makeTmpDir();
     const logDir = makeTmpDir();

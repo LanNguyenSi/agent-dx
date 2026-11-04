@@ -2693,6 +2693,52 @@ describe("verify: --repeat", () => {
       ),
     ).toBe(true);
   });
+
+  it("an abort between runs of the last (or only) check is still reported as an aborted run", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "t" });
+    const logDir = makeTmpDir();
+    const controller = new AbortController();
+    const calls: string[] = [];
+    // The abort lands while the first run finishes, and this is the only
+    // check: the between-runs break ends the repeat loop, and the caller's
+    // own between-checks check has no next iteration to fire in, so the
+    // abort reaches the result only if the stopped loop itself reports it.
+    const fn: ExecLike = async (cmd, options) => {
+      calls.push(cmd);
+      if (calls.length === 1) controller.abort();
+      return {
+        exitCode: 0,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(options.logDir, options.logFileName ?? "stub.log"),
+        timedOut: false,
+        aborted: false,
+        logWriteFailed: false,
+        outputMayBeIncomplete: false,
+        stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    };
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      repeat: 3,
+      signal: controller.signal,
+    });
+    expect(calls).toEqual(["npm run test --silent"]);
+    expect(result.checks).toHaveLength(1);
+    expect(result.checks[0]).toMatchObject({ status: "pass", runs: 1 });
+    expect(result.status).toBe("error");
+    expect(result.reason).toBe("aborted");
+    expect(result.warnings).toContain(
+      "aborted: the run was stopped after the last check",
+    );
+  });
 });
 
 describe("vitestDetector: captured real output", () => {

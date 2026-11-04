@@ -543,13 +543,21 @@ async function runCheck(
 ): Promise<CheckOutcome> {
   const { options, maxFailures, repeat } = ctx;
   const runs: RunOutcome[] = [];
+  // Set when the between-runs check below ends the loop: the run that
+  // finished had already concluded, so the merge cannot read this abort
+  // back out of the runs, and when this is the last (or only) check the
+  // caller's own between-checks check has no next iteration to fire in.
+  let stoppedBetweenRuns = false;
 
   for (let run = 1; run <= repeat; run++) {
     // Checked between runs, not only before the first: once the caller
     // has asked to stop, one more spawn of this check's own command is
     // work nobody asked for. The check behind this one is left unstarted
     // and named by the caller's own check of the same signal.
-    if (run > 1 && options.signal?.aborted) break;
+    if (run > 1 && options.signal?.aborted) {
+      stoppedBetweenRuns = true;
+      break;
+    }
     const outcome = await runOnce(
       name,
       command,
@@ -599,13 +607,18 @@ async function runCheck(
   }
 
   const merged = mergeRuns(runs, maxFailures);
+  // A between-runs abort stopped the loop just as surely as a run killed
+  // mid-flight did, and the caller must hear about it even when this was
+  // the last check (its own loop having no next iteration for the abort
+  // to be noticed in).
+  const aborted = merged.aborted || stoppedBetweenRuns;
   return {
     ...merged,
+    aborted,
     // The merged status is `pass` only when every run passed, so this is
     // the repeat-aware form of the single run's rule above.
     stopRun:
-      merged.aborted ||
-      (Boolean(options.failFast) && merged.result.status !== "pass"),
+      aborted || (Boolean(options.failFast) && merged.result.status !== "pass"),
   };
 }
 
@@ -1265,7 +1278,11 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     warnings,
     logs,
     truncatedByMaxFailures,
-    ...(truncatedByMaxFailures ? { fullChecks } : {}),
+    // The uncapped rows are persisted by the caller, and a repeated run
+    // needs them on every run: they are the only rows that carry each
+    // run's own log and exit code (`runLogs`), and the CLI writes them to
+    // the full-result file whether or not `maxFailures` cut anything.
+    ...(truncatedByMaxFailures || repeat > 1 ? { fullChecks } : {}),
     ...(reason ? { reason } : {}),
   };
 }

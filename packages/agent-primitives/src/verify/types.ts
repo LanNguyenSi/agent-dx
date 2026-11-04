@@ -148,8 +148,11 @@ export interface VerifyResult {
    * log directory and marking the envelope `truncated: true` when this is
    * set; verify() itself never touches the envelope. */
   truncatedByMaxFailures: boolean;
-  /** Present only when `truncatedByMaxFailures` is true: the same checks,
-   * with every failures list left uncapped. */
+  /** Present when `truncatedByMaxFailures` is true, or when `repeat` was
+   * above 1: the same checks, with every failures list left uncapped, and
+   * (for a repeated check) each run's own log and exit code in `runLogs`.
+   * The CLI persists this list to `verify-full-<runId>.json` in both
+   * cases. */
   fullChecks?: CheckResult[];
   /** Present only for a status that needs a machine-readable cause beyond
    * `status` itself: `nothing_verified` when every requested check
