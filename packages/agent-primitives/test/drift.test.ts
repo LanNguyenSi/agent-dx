@@ -3,7 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
-import { drift, type DriftResult } from "../src/drift/index.js";
+import {
+  DECLARATION_KEYWORDS,
+  LOCAL_BINDING_COMMENT_PREFIXES,
+  NAME_CONTINUATION_CHARACTER,
+  drift,
+  isLiveHeadDeclaration,
+  type DriftResult,
+} from "../src/drift/index.js";
 import { UsageError } from "../src/envelope.js";
 import { parseRemovedIdentifiers } from "../src/drift/parseDiff.js";
 import {
@@ -94,7 +101,14 @@ describe("parseRemovedIdentifiers", () => {
     ].join("\n");
     const result = parseRemovedIdentifiers(diff);
     expect(result.removed).toEqual([
-      { name: "RuntimeError", kind: "declaration", file: "src/a.ts", line: 1 },
+      {
+        name: "RuntimeError",
+        kind: "declaration",
+        file: "src/a.ts",
+        line: 1,
+        exported: true,
+        indented: false,
+      },
     ]);
     expect(result.movedNames).toEqual([]);
   });
@@ -138,12 +152,17 @@ describe("parseRemovedIdentifiers", () => {
       kind: "declaration",
       file: "src/oldModule.ts",
       line: 1,
+      exported: true,
+      indented: false,
     });
+    // A deleted file has no declaration line, so neither shape fact is set.
     expect(result.removed).toContainEqual({
       name: "oldModule",
       kind: "file",
       file: "src/oldModule.ts",
       line: 1,
+      exported: false,
+      indented: false,
     });
     expect(result.removed).toHaveLength(2);
   });
@@ -184,7 +203,16 @@ describe("parseRemovedIdentifiers", () => {
     ].join("\n");
     const result = parseRemovedIdentifiers(diff);
     expect(result.removed).toEqual([
-      { name: "featureFlag", kind: "config_key", file: "config.json", line: 2 },
+      {
+        name: "featureFlag",
+        kind: "config_key",
+        file: "config.json",
+        line: 2,
+        // A config key's format has no `export`, and the indentation of a
+        // JSON top-level key is nesting, not scope.
+        exported: false,
+        indented: true,
+      },
     ]);
   });
 
@@ -201,7 +229,14 @@ describe("parseRemovedIdentifiers", () => {
     ].join("\n");
     const result = parseRemovedIdentifiers(diff);
     expect(result.removed).toEqual([
-      { name: "timeout", kind: "config_key", file: "config.yml", line: 1 },
+      {
+        name: "timeout",
+        kind: "config_key",
+        file: "config.yml",
+        line: 1,
+        exported: false,
+        indented: false,
+      },
     ]);
   });
 
@@ -220,10 +255,38 @@ describe("parseRemovedIdentifiers", () => {
     ].join("\n");
     const result = parseRemovedIdentifiers(diff);
     expect(result.removed).toEqual([
-      { name: "loadThing", kind: "declaration", file: "src/b.ts", line: 1 },
-      { name: "BaseThing", kind: "declaration", file: "src/b.ts", line: 2 },
-      { name: "genThing", kind: "declaration", file: "src/b.ts", line: 3 },
-      { name: "streamThing", kind: "declaration", file: "src/b.ts", line: 4 },
+      {
+        name: "loadThing",
+        kind: "declaration",
+        file: "src/b.ts",
+        line: 1,
+        exported: true,
+        indented: false,
+      },
+      {
+        name: "BaseThing",
+        kind: "declaration",
+        file: "src/b.ts",
+        line: 2,
+        exported: true,
+        indented: false,
+      },
+      {
+        name: "genThing",
+        kind: "declaration",
+        file: "src/b.ts",
+        line: 3,
+        exported: false,
+        indented: false,
+      },
+      {
+        name: "streamThing",
+        kind: "declaration",
+        file: "src/b.ts",
+        line: 4,
+        exported: true,
+        indented: false,
+      },
     ]);
   });
 
@@ -276,6 +339,8 @@ describe("parseRemovedIdentifiers", () => {
       kind: "file",
       file: "src/OldModule.ts",
       line: 1,
+      exported: false,
+      indented: false,
     });
     expect(result.skippedFileBasenames).toEqual([]);
   });
@@ -293,7 +358,14 @@ describe("parseRemovedIdentifiers", () => {
     ].join("\n");
     const result = parseRemovedIdentifiers(diff);
     expect(result.removed).toEqual([
-      { name: "OldThing", kind: "declaration", file: "src/thing.ts", line: 2 },
+      {
+        name: "OldThing",
+        kind: "declaration",
+        file: "src/thing.ts",
+        line: 2,
+        exported: true,
+        indented: false,
+      },
     ]);
   });
 
@@ -665,18 +737,24 @@ describe("drift (synthetic repo)", () => {
       kind: "declaration",
       file: "src/runError.ts",
       line: 4,
+      exported: true,
+      indented: false,
     });
     expect(result.removedIdentifiers).toContainEqual({
       name: "oldModuleValue",
       kind: "declaration",
       file: "src/oldModule.ts",
       line: 1,
+      exported: true,
+      indented: false,
     });
     expect(result.removedIdentifiers).toContainEqual({
       name: "oldModule",
       kind: "file",
       file: "src/oldModule.ts",
       line: 1,
+      exported: false,
+      indented: false,
     });
     expect(result.removedIdentifiers.some((r) => r.name === "MovedThing")).toBe(
       false,
@@ -991,6 +1069,8 @@ describe("drift (.php comment sites)", () => {
       kind: "declaration",
       file: "src/legacy.ts",
       line: 1,
+      exported: true,
+      indented: false,
     });
 
     const slashSlash = findSite(result.sites, "src/Helper.php", 3);
@@ -1550,5 +1630,908 @@ describe("mergeBase: failure causes", () => {
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------
+// drift(): the local-binding rule (a removed indented, non-exported
+// declaration whose name is still declared locally at head is not drift)
+// and the `--ignore-identifier` / `--ignore-identifier-file` ignore.
+// ---------------------------------------------------------------------
+
+/** `[base, head]` content of `src/a.ts`: an indented, non-exported `const
+ * <name>` inside `removedHolder`, and (when `headDeclares`) a second
+ * function that keeps declaring the same name as a plain local. Head
+ * removes the first function and leaves the rest untouched, so the name is
+ * a removed identifier whose binding may well still exist. */
+function localDeclPair(name: string, headDeclares: boolean): [string, string] {
+  const keep = [
+    "export function keep() {",
+    `  const ${name} = new Error("kept");`,
+    `  return ${name};`,
+    "}",
+  ];
+  const base = [
+    "export function removedHolder() {",
+    `  const ${name} = new Error("x");`,
+    `  return ${name};`,
+    "}",
+    ...(headDeclares ? keep : []),
+    "",
+  ].join("\n");
+  const head = headDeclares
+    ? `${keep.join("\n")}\n`
+    : "export const placeholder = 1;\n";
+  return [base, head];
+}
+
+/** A repo whose `src/a.ts` goes from `baseSource` to `headSource` and whose
+ * `notes.md` names `identifier` as though it were still current (line 3). */
+function buildRemovalRepo(
+  identifier: string,
+  baseSource: string,
+  headSource: string,
+): { repo: string; base: string; head: string } {
+  const repo = initRepo();
+  writeFile(repo, "src/a.ts", baseSource);
+  writeFile(
+    repo,
+    "notes.md",
+    `# Notes\n\n${identifier} is the helper this module uses.\n`,
+  );
+  const base = commit(repo, "base");
+  writeFile(repo, "src/a.ts", headSource);
+  const head = commit(repo, "head");
+  return { repo, base, head };
+}
+
+describe("drift (local-binding rule)", () => {
+  it("suppresses a removed indented local whose name is still declared locally at head, and shows it under --strict", async () => {
+    for (const name of ["err", "now", "result", "event"]) {
+      const [baseSource, headSource] = localDeclPair(name, true);
+      const { repo, base, head } = buildRemovalRepo(
+        name,
+        baseSource,
+        headSource,
+      );
+
+      const result = await drift({ cwd: repo, base, head });
+      expect(result.sites).toEqual([]);
+      expect(result.status).toBe("ok");
+      expect(result.allowlisted).toEqual([
+        {
+          path: "notes.md",
+          line: 3,
+          identifier: name,
+          kind: "doc",
+          text: `${name} is the helper this module uses.`,
+          allowlisted: true,
+          allowlistReason: `local binding "${name}" still declared at head`,
+        },
+      ]);
+      expect(result.counts).toEqual({ removed: 2, sites: 0, allowlisted: 1 });
+      expect(result.ignoredIdentifiers).toContainEqual({
+        name,
+        source: "local-binding",
+      });
+
+      const strict = await drift({ cwd: repo, base, head, strict: true });
+      expect(strict.sites).toHaveLength(1);
+      expect(strict.sites[0]).toMatchObject({
+        path: "notes.md",
+        identifier: name,
+        allowlisted: true,
+        allowlistReason: `local binding "${name}" still declared at head`,
+      });
+      expect(strict.status).toBe("fail");
+      expect(strict.ignoredIdentifiers).toContainEqual({
+        name,
+        source: "local-binding",
+      });
+    }
+  });
+
+  it("reports the same removed local when nothing declares the name at head", async () => {
+    const [baseSource, headSource] = localDeclPair("err", false);
+    const { repo, base, head } = buildRemovalRepo(
+      "err",
+      baseSource,
+      headSource,
+    );
+    const result = await drift({ cwd: repo, base, head });
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("err");
+    expect(result.status).toBe("fail");
+    expect(result.allowlisted).toEqual([]);
+    expect(result.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("never lets the local-binding reason overwrite a glob or released-section reason, and still echoes the local binding", async () => {
+    // The documented precedence: the local-binding rule is a default that
+    // only speaks up when nothing else allowlisted the site, so its reason
+    // never overwrites a CHANGELOG or glob reason on an ignored-shaped
+    // name, while the name is echoed with source `local-binding` all the
+    // same.
+    const [baseSource, headSource] = localDeclPair("err", true);
+    const { repo, base } = buildRemovalRepo("err", baseSource, headSource);
+    writeFile(
+      repo,
+      "CHANGELOG.md",
+      "# Changelog\n\n## 1.2.0\n\n- err is documented as the error type.\n",
+    );
+    const head = commit(repo, "released changelog entry");
+    const strict = await drift({
+      cwd: repo,
+      base,
+      head,
+      allow: ["notes.md"],
+      strict: true,
+    });
+    const globSite = findSite(strict.sites, "notes.md", 3);
+    expect(globSite?.allowlistReason).toMatch(
+      /matched --allow glob "notes\.md"/,
+    );
+    const sectionSite = findSite(strict.sites, "CHANGELOG.md", 5);
+    expect(sectionSite?.allowlistReason).toMatch(
+      /released changelog section "1\.2\.0"/,
+    );
+    expect(strict.ignoredIdentifiers).toContainEqual({
+      name: "err",
+      source: "local-binding",
+    });
+  });
+
+  it("does not see a head-side declaration of a longer name sharing the prefix (the -w boundary)", async () => {
+    // The word boundary `git grep -w` promises: a head-side `const errFoo`
+    // is never a declaration of `err`, so the local-binding rule stays off
+    // a name whose only head-side "declaration" is a longer identifier.
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function removedHolder() {",
+        '  const err = new Error("x");',
+        "  return err;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nerr is the helper this module uses.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function keep() {",
+        '  const errFoo = new Error("kept");',
+        "  return errFoo;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("err");
+    expect(result.status).toBe("fail");
+    expect(result.allowlisted).toEqual([]);
+    expect(result.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("does not count a comment-shaped head-side grep hit as a live declaration", async () => {
+    // `git grep -w -E` matches any line CARRYING the declaration shape, so
+    // a comment `// const stamp = old approach` greps as a hit; the
+    // consumer filters it out, and the site is reported as usual.
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function removedHolder() {",
+        "  const stamp = pick();",
+        "  return stamp;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nstamp is the helper this module uses.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(
+      repo,
+      "src/a.ts",
+      "// const stamp = old approach\nexport const placeholder = 1;\n",
+    );
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("stamp");
+    expect(result.allowlisted).toEqual([]);
+    expect(result.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("does not count a head-side hit whose name is followed by a $ as a live declaration", async () => {
+    // git's `-w` reads `$` as a non-word character, so `let retired$old`
+    // greps as a `(let) retired` hit; the consumer's own trailing-character
+    // check filters it out, and the site is reported as usual.
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function removedHolder() {",
+        "  const retired = pick();",
+        "  return retired;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nretired is the helper this module uses.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(
+      repo,
+      "src/a.ts",
+      "let retired$old = 1;\nexport const placeholder = 1;\n",
+    );
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("retired");
+    expect(result.allowlisted).toEqual([]);
+    expect(result.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("still counts a real head-side declaration as a live one (positive control)", async () => {
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function removedHolder() {",
+        "  const retired = pick();",
+        "  return retired;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    // Untouched by the range (a re-added declaration in the range would
+    // read as moved, not removed, and keep the rule off the name).
+    writeFile(repo, "src/keep.ts", "const retired = 1;\n");
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nretired is the helper this module uses.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(repo, "src/a.ts", "export const placeholder = 1;\n");
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(findSite(result.sites, "notes.md", 3)).toBeUndefined();
+    expect(findSite(result.allowlisted, "notes.md", 3)?.allowlistReason).toBe(
+      'local binding "retired" still declared at head',
+    );
+    expect(result.ignoredIdentifiers).toContainEqual({
+      name: "retired",
+      source: "local-binding",
+    });
+  });
+
+  it("does not touch an exported removed declaration even with a local of the name at head", async () => {
+    const { repo, base, head } = buildRemovalRepo(
+      "now",
+      [
+        "export const now = new Date();",
+        "export function keep() {",
+        "  const now = new Date();",
+        "  return now;",
+        "}",
+        "",
+      ].join("\n"),
+      [
+        "export function keep() {",
+        "  const now = new Date();",
+        "  return now;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.removedIdentifiers).toContainEqual(
+      expect.objectContaining({ name: "now", exported: true, indented: false }),
+    );
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("now");
+    expect(result.status).toBe("fail");
+    expect(result.ignoredIdentifiers).toEqual([]);
+
+    // An indented `export` (a declaration inside a module block) is still an
+    // export: it is the exported fact, not the indentation, that keeps the
+    // local-binding rule away, so this removal is reported too even though
+    // the name survives as a plain local at head.
+    const block = buildRemovalRepo(
+      "now",
+      [
+        'declare module "legacy" {',
+        "  export const now: () => Date;",
+        "}",
+        "export function keep() {",
+        "  const now = new Date();",
+        "  return now;",
+        "}",
+        "",
+      ].join("\n"),
+      [
+        'declare module "legacy" {',
+        "}",
+        "export function keep() {",
+        "  const now = new Date();",
+        "  return now;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const blocked = await drift({
+      cwd: block.repo,
+      base: block.base,
+      head: block.head,
+    });
+    expect(blocked.removedIdentifiers).toContainEqual(
+      expect.objectContaining({ name: "now", exported: true, indented: true }),
+    );
+    expect(findSite(blocked.sites, "notes.md", 3)?.identifier).toBe("now");
+    expect(blocked.status).toBe("fail");
+    expect(blocked.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("does not touch a column-0 non-exported declaration", async () => {
+    const { repo, base, head } = buildRemovalRepo(
+      "result",
+      [
+        "const result = compute();",
+        "export function keep() {",
+        "  const result = compute();",
+        "  return result;",
+        "}",
+        "",
+      ].join("\n"),
+      [
+        "export function keep() {",
+        "  const result = compute();",
+        "  return result;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.removedIdentifiers).toContainEqual(
+      expect.objectContaining({
+        name: "result",
+        exported: false,
+        indented: false,
+      }),
+    );
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("result");
+    expect(result.status).toBe("fail");
+    expect(result.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("leaves a removed config key alone", async () => {
+    const repo = initRepo();
+    writeFile(repo, "config.json", '{\n  "featureFlag": true\n}\n');
+    // Untouched by the range, and a head-side declaration shape of the very
+    // name: only the candidate's kind keeps the local-binding rule off this
+    // removal, so a config key whose key file simply changed is still drift.
+    writeFile(repo, "src/keep.ts", "export const featureFlag = 1;\n");
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nfeatureFlag controls the beta UI.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(repo, "config.json", '{\n  "otherFlag": true\n}\n');
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.removedIdentifiers).toContainEqual(
+      expect.objectContaining({
+        name: "featureFlag",
+        kind: "config_key",
+        indented: true,
+      }),
+    );
+    expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe(
+      "featureFlag",
+    );
+    expect(result.status).toBe("fail");
+    expect(result.ignoredIdentifiers).toEqual([]);
+  });
+
+  it("still reports the three true-positive shapes over a local-binding-shaped removal", async () => {
+    // A dated log entry that describes a removed name as current.
+    const log = buildRemovalRepo(
+      "OldParser",
+      "export const OldParser = 1;\n",
+      "export const NewParser = 1;\n",
+    );
+    writeFile(
+      log.repo,
+      "CHANGELOG.md",
+      "# Changelog\n\n## [Unreleased]\n\n- 2024-05-01: OldParser handles the front matter\n",
+    );
+    const amended = commit(log.repo, "log entry");
+    const logResult = await drift({
+      cwd: log.repo,
+      base: log.base,
+      head: amended,
+    });
+    expect(findSite(logResult.sites, "CHANGELOG.md", 5)?.identifier).toBe(
+      "OldParser",
+    );
+
+    // A relocated exported helper whose old comment still names the old name.
+    const relocated = buildRemovalRepo(
+      "formatThing",
+      "export function formatThing() {}\n",
+      "export function formatThingV2() {}\n",
+    );
+    writeFile(
+      relocated.repo,
+      "src/caller.ts",
+      "// calls formatThing with the raw value\nexport const x = 1;\n",
+    );
+    const relocatedHead = commit(relocated.repo, "caller comment");
+    const relocatedResult = await drift({
+      cwd: relocated.repo,
+      base: relocated.base,
+      head: relocatedHead,
+    });
+    expect(
+      findSite(relocatedResult.sites, "src/caller.ts", 1)?.identifier,
+    ).toBe("formatThing");
+
+    // A comment naming a removed regex constant.
+    const regex = buildRemovalRepo(
+      "DATE_RE",
+      "const DATE_RE = /\\d{4}/;\n",
+      "export const placeholder = 1;\n",
+    );
+    writeFile(
+      regex.repo,
+      "src/match.ts",
+      "// DATE_RE matches the header date\nexport const y = 1;\n",
+    );
+    const regexHead = commit(regex.repo, "matcher comment");
+    const regexResult = await drift({
+      cwd: regex.repo,
+      base: regex.base,
+      head: regexHead,
+    });
+    expect(findSite(regexResult.sites, "src/match.ts", 1)?.identifier).toBe(
+      "DATE_RE",
+    );
+    expect(regexResult.ignoredIdentifiers).toEqual([]);
+  });
+
+  // The head-side filter, enumerated. Every row is one head-side file whose
+  // only occurrence of `err` is `headLine`, against a base that removed an
+  // indented declaration of `err`; `reported` keeps the doc site,
+  // `suppressed` allowlists it as a local binding. Rows are derived from
+  // `isLiveHeadDeclaration` (each comment prefix, each trailing character
+  // class, each declaration keyword, the "no character after the name"
+  // case, the scan past a rejected first occurrence) and from the `-w` of
+  // `grepHeadDeclarations` (the boundary BEFORE the keyword). `rejectedBy:
+  // "grep"` marks a row only the grep flag can reject: the filter alone
+  // would accept its text, so the direct filter table skips it.
+  interface HeadLineRow {
+    label: string;
+    headLine: string;
+    file?: string;
+    keyword?: string;
+    prefix?: string;
+    trailing?: string;
+    rejectedBy?: "grep";
+    expect: "reported" | "suppressed";
+  }
+
+  const HEAD_LINE_ROWS: readonly HeadLineRow[] = [
+    // comment prefixes: the text before the keyword, trimmed
+    {
+      label: "// comment",
+      headLine: "  // const err = 1",
+      prefix: "//",
+      expect: "reported",
+    },
+    {
+      label: "/* comment",
+      headLine: "  /* const err = 1 */",
+      prefix: "/*",
+      expect: "reported",
+    },
+    {
+      label: "* continuation",
+      headLine: " * const err = 1",
+      prefix: "*",
+      expect: "reported",
+    },
+    {
+      label: "# comment (.py)",
+      headLine: "  # const err = 1",
+      file: "src/b.py",
+      prefix: "#",
+      expect: "reported",
+    },
+    {
+      label: "comment with text before the keyword",
+      headLine: "  // note: const err = 1",
+      prefix: "//",
+      expect: "reported",
+    },
+    // trailing character: one per class of the name-continuation character
+    {
+      label: "trailing letter",
+      headLine: "  const errFoo = 1",
+      trailing: "F",
+      expect: "reported",
+    },
+    {
+      label: "trailing $",
+      headLine: "  const err$ = 1",
+      trailing: "$",
+      expect: "reported",
+    },
+    {
+      label: "trailing _",
+      headLine: "  const err_1 = 1",
+      trailing: "_",
+      expect: "reported",
+    },
+    {
+      label: "trailing digit",
+      headLine: "  const err2 = 1",
+      trailing: "2",
+      expect: "reported",
+    },
+    // the boundary BEFORE the keyword is git grep -w's
+    {
+      label: "keyword inside a longer word (string)",
+      headLine: 'export const label = "superclass err";',
+      rejectedBy: "grep",
+      expect: "reported",
+    },
+    {
+      label: "keyword inside a longer word (const)",
+      headLine: '  const x = "myconst err";',
+      rejectedBy: "grep",
+      expect: "reported",
+    },
+    // one per keyword
+    {
+      label: "const",
+      headLine: "  const err = 1",
+      keyword: "const",
+      expect: "suppressed",
+    },
+    {
+      label: "let",
+      headLine: "  let err = 1",
+      keyword: "let",
+      expect: "suppressed",
+    },
+    {
+      label: "var",
+      headLine: "  var err = 1",
+      keyword: "var",
+      expect: "suppressed",
+    },
+    {
+      label: "function",
+      headLine: "  function err() {}",
+      keyword: "function",
+      expect: "suppressed",
+    },
+    {
+      label: "class",
+      headLine: "  class err {}",
+      keyword: "class",
+      expect: "suppressed",
+    },
+    // the character after the name: absent, or outside the continuation class
+    {
+      label: "type annotation after the name",
+      headLine: "  const err: number = 1",
+      expect: "suppressed",
+    },
+    {
+      label: "no space around =",
+      headLine: "  const err=1",
+      expect: "suppressed",
+    },
+    {
+      label: "name ends the line",
+      headLine: "  const err",
+      expect: "suppressed",
+    },
+    // the scan goes past a rejected occurrence to a later live one
+    {
+      label: "longer name first, live declaration later",
+      headLine: "  const errFoo = 1; const err = 2;",
+      expect: "suppressed",
+    },
+    // documented limits: only the line start and the next character count
+    {
+      label: "comment that does not start the line",
+      headLine: "  const x = 1; // const err = 1",
+      expect: "suppressed",
+    },
+    {
+      label: "shape inside a string",
+      headLine: '  const s = "const err";',
+      expect: "suppressed",
+    },
+  ];
+
+  it("pins the table to the prefixes, keywords and trailing characters the source checks", () => {
+    expect(
+      new Set(HEAD_LINE_ROWS.flatMap((r) => (r.prefix ? [r.prefix] : []))),
+    ).toEqual(new Set(LOCAL_BINDING_COMMENT_PREFIXES));
+    expect(
+      new Set(HEAD_LINE_ROWS.flatMap((r) => (r.keyword ? [r.keyword] : []))),
+    ).toEqual(new Set(DECLARATION_KEYWORDS));
+    expect(NAME_CONTINUATION_CHARACTER.source).toBe("[A-Za-z0-9_$]");
+    const classes = new Set(
+      HEAD_LINE_ROWS.flatMap((r) => (r.trailing ? [r.trailing] : [])),
+    );
+    for (const sample of ["F", "$", "_", "2"])
+      expect(classes).toContain(sample);
+    for (const row of HEAD_LINE_ROWS) {
+      if (row.trailing) {
+        expect(NAME_CONTINUATION_CHARACTER.test(row.trailing)).toBe(true);
+      }
+    }
+  });
+
+  it.each(HEAD_LINE_ROWS)(
+    "head line `$headLine` is $expect ($label)",
+    async (row) => {
+      const keyword = row.keyword ?? "const";
+      const baseDecl =
+        keyword === "function"
+          ? "  function err() {}"
+          : keyword === "class"
+            ? "  class err {}"
+            : `  ${keyword} err = new Error("x");`;
+      const repo = initRepo();
+      writeFile(
+        repo,
+        "src/a.ts",
+        ["export function removedHolder() {", baseDecl, "}", ""].join("\n"),
+      );
+      writeFile(
+        repo,
+        "notes.md",
+        "# Notes\n\nerr is the helper this module uses.\n",
+      );
+      // The head-side file exists unchanged on both sides, so its line is
+      // never an added declaration (which would make `err` a moved name).
+      writeFile(repo, row.file ?? "src/b.ts", `${row.headLine}\n`);
+      const base = commit(repo, "base");
+      writeFile(repo, "src/a.ts", "export const placeholder = 1;\n");
+      const head = commit(repo, "head");
+
+      const result = await drift({ cwd: repo, base, head });
+      const localBinding = {
+        name: "err",
+        source: "local-binding",
+      } as const;
+      if (row.expect === "reported") {
+        expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe("err");
+        expect(result.ignoredIdentifiers).not.toContainEqual(localBinding);
+        expect(result.allowlisted.filter((s) => s.path === "notes.md")).toEqual(
+          [],
+        );
+      } else {
+        expect(result.sites.filter((s) => s.path === "notes.md")).toEqual([]);
+        expect(findSite(result.allowlisted, "notes.md", 3)).toMatchObject({
+          identifier: "err",
+          allowlisted: true,
+          allowlistReason: 'local binding "err" still declared at head',
+        });
+        expect(result.ignoredIdentifiers).toContainEqual(localBinding);
+      }
+    },
+  );
+
+  it.each(HEAD_LINE_ROWS.filter((r) => r.rejectedBy !== "grep"))(
+    "the head-line filter alone judges `$headLine` $expect ($label)",
+    (row) => {
+      expect(isLiveHeadDeclaration(row.headLine, "err")).toBe(
+        row.expect === "suppressed",
+      );
+    },
+  );
+});
+
+describe("drift (ignored identifiers)", () => {
+  function oldThingRepo(): { repo: string; base: string; head: string } {
+    return buildRemovalRepo(
+      "OldThing",
+      "export const OldThing = 1;\n",
+      "export const NewThing = 1;\n",
+    );
+  }
+
+  it("allowlists an ignored identifier's sites by default and shows them under --strict", async () => {
+    const { repo, base, head } = oldThingRepo();
+    const result = await drift({
+      cwd: repo,
+      base,
+      head,
+      ignoreIdentifiers: [{ name: "OldThing", source: "flag" }],
+    });
+    expect(result.sites).toEqual([]);
+    expect(result.status).toBe("ok");
+    expect(result.allowlisted).toEqual([
+      {
+        path: "notes.md",
+        line: 3,
+        identifier: "OldThing",
+        kind: "doc",
+        text: "OldThing is the helper this module uses.",
+        allowlisted: true,
+        allowlistReason: 'ignored identifier "OldThing"',
+      },
+    ]);
+    expect(result.counts).toEqual({ removed: 1, sites: 0, allowlisted: 1 });
+    expect(result.ignoredIdentifiers).toEqual([
+      { name: "OldThing", source: "flag" },
+    ]);
+
+    const strict = await drift({
+      cwd: repo,
+      base,
+      head,
+      strict: true,
+      ignoreIdentifiers: [{ name: "OldThing", source: "flag" }],
+    });
+    expect(strict.sites).toHaveLength(1);
+    expect(strict.sites[0]).toMatchObject({
+      allowlisted: true,
+      allowlistReason: 'ignored identifier "OldThing"',
+    });
+    expect(strict.status).toBe("fail");
+  });
+
+  it("echoes an ignored name that produced no site, and keeps the reported ones", async () => {
+    const { repo, base, head } = oldThingRepo();
+    const result = await drift({
+      cwd: repo,
+      base,
+      head,
+      ignoreIdentifiers: [
+        { name: "nothing-like-this", source: "file" },
+        { name: "OldThing", source: "file" },
+      ],
+    });
+    expect(result.ignoredIdentifiers).toEqual([
+      { name: "nothing-like-this", source: "file" },
+      { name: "OldThing", source: "file" },
+    ]);
+    expect(result.sites).toEqual([]);
+    expect(result.status).toBe("ok");
+  });
+
+  it("outranks the path-shaped reasons for an ignored name", async () => {
+    const { repo, base, head } = oldThingRepo();
+    const result = await drift({
+      cwd: repo,
+      base,
+      head,
+      allow: ["notes.md"],
+      ignoreIdentifiers: [{ name: "OldThing", source: "flag" }],
+    });
+    expect(result.allowlisted[0]?.allowlistReason).toBe(
+      'ignored identifier "OldThing"',
+    );
+  });
+
+  it("rejects an empty identifier name", async () => {
+    const { repo, base, head } = oldThingRepo();
+    await expect(
+      drift({
+        cwd: repo,
+        base,
+        head,
+        ignoreIdentifiers: [{ name: "   ", source: "flag" }],
+      }),
+    ).rejects.toThrow(/--ignore-identifier needs an identifier name/);
+  });
+});
+
+describe("drift ignored identifiers CLI", () => {
+  function oldThingRepo(): { repo: string; base: string; head: string } {
+    return buildRemovalRepo(
+      "OldThing",
+      "export const OldThing = 1;\n",
+      "export const NewThing = 1;\n",
+    );
+  }
+
+  it("reads --ignore-identifier-file, blank and # lines ignored, resolved against -C", async () => {
+    const { repo, base, head } = oldThingRepo();
+    writeFile(repo, "ignore.txt", "# names this task keeps\n\nOldThing\n");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+      "--ignore-identifier-file",
+      "ignore.txt",
+    ]);
+    expect(run.code).toBe(0);
+    const out = JSON.parse(run.stdout) as {
+      ignored_identifiers: { name: string; source: string }[];
+      allowlisted: { allowlistReason: string }[];
+      counts: { allowlisted: number };
+    };
+    expect(out.ignored_identifiers).toEqual([
+      { name: "OldThing", source: "file" },
+    ]);
+    expect(out.allowlisted[0]?.allowlistReason).toBe(
+      'ignored identifier "OldThing"',
+    );
+    expect(out.counts.allowlisted).toBe(1);
+  });
+
+  it("takes both forms, echoes each name once, and a missing file is a usage error", async () => {
+    const { repo, base, head } = oldThingRepo();
+    writeFile(repo, "ignore.txt", "OldThing\nlegacyName\n");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+      "--ignore-identifier",
+      "OldThing",
+      "--ignore-identifier",
+      "flagOnly",
+      "--ignore-identifier-file",
+      "ignore.txt",
+    ]);
+    expect(run.code).toBe(0);
+    const out = JSON.parse(run.stdout) as {
+      ignored_identifiers: { name: string; source: string }[];
+    };
+    // A name given by both forms is echoed once, with the source it
+    // arrived on first: the flags, which the CLI passes before the file.
+    expect(out.ignored_identifiers).toEqual([
+      { name: "OldThing", source: "flag" },
+      { name: "flagOnly", source: "flag" },
+      { name: "legacyName", source: "file" },
+    ]);
+    const missing = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+      "--ignore-identifier-file",
+      "no-such-file.txt",
+    ]);
+    expect(missing.code).toBe(2);
+    expect(JSON.parse(missing.stdout).status).toBe("usage_error");
   });
 });

@@ -10,6 +10,7 @@ built from; see this package's own `CHANGELOG.md` for the detail.
 ```bash
 agent-primitives drift --base <rev> --head <rev>
 agent-primitives drift --base <rev> --head <rev> --allow 'docs/legacy/**' --strict
+agent-primitives drift --base <rev> --head <rev> --ignore-identifier legacyHelper --ignore-identifier-file ignore.txt
 ```
 
 Given a git range, collects the identifiers whose declaration the range
@@ -59,7 +60,13 @@ file whose basename does not clear that bar (`docs/setup.md`,
 `logo.png`, `src/index.ts`) contributes nothing and is named instead in
 a warning, so an all-lowercase, no-separator basename like `index` or
 `setup` never floods the report with every ordinary prose mention of
-that word. An identifier declared on both a removed and an added line
+that word. Every extracted identifier also carries the two facts the
+same line shows: `exported` (the line had an `export` keyword after any
+indentation) and `indented` (the line began with whitespace, so the
+binding was inside an enclosing scope rather than at column 0). A config
+key is never `exported`, and a kind `file` candidate has no line to read
+either fact from, so both are `false` for it. An identifier declared on
+both a removed and an added line
 anywhere in the same diff is treated as MOVED, never as removed, on the
 reading that the same declaration reappearing means it moved rather
 than disappeared; a deleted file whose basename reappears as a newly
@@ -69,13 +76,19 @@ name added elsewhere in the diff is forgiven too.
 
 A site is allowlisted by default (reported separately, in
 `allowlisted`, and excluded from `sites` and from the exit code) when
-any of: it matches an `--allow <glob>` (repeatable; `**` crosses path
+any of: the site's identifier was named with `--ignore-identifier`
+(repeatable) or `--ignore-identifier-file` (one name per line, blank
+lines and `#` comments ignored, the file resolved against the `-C`
+directory) - the reason is `ignored identifier "<name>"` and it outranks
+the reasons below, because it is the caller's own statement about that
+identifier (an empty name is a usage error, exit `2`, since an empty
+pattern would match everything); it matches an `--allow <glob>` (repeatable; `**` crosses path
 segments, `*` stays within one); it sits in a released CHANGELOG
 section (a `## [x.y.z]` or `## x.y.z` heading; `## [Unreleased]` is
 never a released section, so a site under it is still reported); its
 path is under `docs/**/migration*` or it sits under a Markdown heading
 whose text contains "migration" (a heading inside a fenced ``` or ~~~
-code block is never counted as document structure); or a small,
+code block is never counted as document structure); a small,
 documented historical-phrase word list (`former`, `formerly`, `used
 to`, `no longer`, `removed`, `renamed`, `replaced`, `dropped`,
 `deleted`, `previously`, `was `) has a match within a bounded span
@@ -83,14 +96,58 @@ around the identifier's own mention on the line - up to about 60
 characters before it (cut short at the nearest preceding `. `/`; `
 sentence boundary) and about 20 characters after - rather than anywhere
 on the whole line, so an unrelated historical phrase far away on a long
-line never suppresses a present-tense mention. `--strict` also adds
+line never suppresses a present-tense mention; or the local-binding rule
+below allows it.
+
+The local-binding rule is on by default and needs no option. A removed
+candidate that was `!exported && indented && kind == "declaration"` was
+bound inside some enclosing scope (a function body, a method, a block),
+so its removal says nothing about whether the name is gone. For every
+such candidate name (and only those: an exported, column-0 or
+non-declaration candidate is never touched, and neither is a name an
+explicit `--ignore-identifier` already covers) the command runs ONE
+`git grep -n -w -E` at `--head` over the scanned source pathspecs for the
+declaration shape `(const|let|var|function|class) <name>`. Where at least
+one such head-side declaration exists, the name is still alive under a
+binding of its own, and its sites are allowlisted with reason
+`local binding "<name>" still declared at head` (visible under
+`--strict`); the name is echoed in `ignored_identifiers` with source
+`local-binding`. Where none exists, behaviour is exactly as before: the
+sites are reported as usual. The trailing word boundary that shape needs
+is `-w`'s own (git's `-E` on a BSD regex build reads `\b` as a literal,
+which would silently match nothing). Two shapes the grep itself matches
+are not live declarations and are filtered after the grep: a comment line
+(`// const stamp = old approach`, whose text before the keyword names a
+comment) and a longer name whose next character `-w` reads as a word
+boundary (`let retired$old`, because git treats `$` as a non-word
+character). That filter checks only a comment prefix at the start of the
+line (`//`, `/*`, `*`, `#`) and the character after the name; `-w` supplies
+the word boundary on both sides of the shape, so `superclass err` never
+matches. Limits: the shape inside a string, a template literal, JSX text,
+or a comment that does not start the line still counts as a declaration
+and suppresses; indentation is a proxy for
+scope, not a scope analysis, so an indented declaration inside a block
+that still leaves a name unreachable at head is suppressed too, while a
+top-level `let` reassigned by a local of the same name is not; and the
+head-side shape does not see a destructuring binding
+(`const { err } = ...`), a function parameter, a Python `def <name>` or a
+Go `func <name>`, so a local binding written that way does not suppress
+anything.
+
+`--strict` also adds
 every allowlisted site into `sites` (flagged with `allowlisted: true`
 and its `allowlistReason`), so a site this command would otherwise
 suppress by default counts toward the exit code too; `allowlisted`
-itself always carries every allowlisted site regardless of `--strict`.
+itself always carries every allowlisted site regardless of `--strict`,
+including the ignored and locally-bound ones, which is what
+`counts.allowlisted` counts.
 
 Envelope fields: `removed_identifiers` (`name`, `kind`
-`declaration`/`config_key`/`file`, `file`, `line`), `sites` and
+`declaration`/`config_key`/`file`, `file`, `line`, `exported`,
+`indented`), `ignored_identifiers` (`name`, `source`
+`flag`/`file`/`local-binding`: every name the caller asked to ignore,
+whether or not it produced a site, plus one `local-binding` entry per
+name the default rule suppressed), `sites` and
 `allowlisted` (`path`, `line`, `identifier`, `kind` `doc`/`comment`,
 `text` - the matched line, trimmed, capped at 300 characters with a
 trailing `...` marker when longer - and on an allowlisted entry
@@ -127,7 +184,7 @@ totals line:
 
 ```text
 <path>:<line> | <identifier> | <doc|comment>[ | allowlisted] | <text, at most 140 characters>
-totals: status=<ok|fail> removed=N sites=N allowlisted=N warnings=N [fullResult=<path>]
+totals: status=<ok|fail> removed=N sites=N allowlisted=N warnings=N ignored=N [fullResult=<path>]
 ```
 
 `fullResult=` appears when the envelope was reduced to fit `-m` and the

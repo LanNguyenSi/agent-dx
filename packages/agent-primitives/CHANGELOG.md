@@ -90,6 +90,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   envelope exactly as it was) to 100 written in plain decimal digits; 0, a
   fraction, a negative number, an exponent or hexadecimal spelling, above
   100, or the flag given twice is a usage error.
+- `hygiene` intended deletions: `--intended-deletion <path>[=<n>|all]`
+  (repeatable) and `--intended-deletion-file <file>` declare a test file's
+  case drop as intended, so a drop of at most `n` counter units (any drop
+  with `all`, or with a bare path) is allowed instead of reported, and a
+  drop above `n` keeps its finding with `(declared n)` in `detail`. Only
+  `test_cases_dropped` is affected, never `extend_only_rewrite`; a
+  declaration that allowed nothing draws the warning
+  `intended deletion not used: <path>` without changing the status, two
+  declarations of one path collapse to the larger count, and the envelope
+  echoes `intended_declarations` and keeps `intended_deletions` whole under
+  `--max-chars` reduction, and the `--summary` totals line gains an
+  `intended_deletions=N` counter. `=0`, a negative, a non-integer and an
+  empty path are usage errors.
+- `drift` identifier ignore and local-binding rule: `--ignore-identifier
+  <name>` (repeatable) and `--ignore-identifier-file <file>` allowlist every
+  site of a name with the reason `ignored identifier "<name>"`, echoing each
+  name in `ignored_identifiers` with its `source` even when it produced no
+  site. On by default, a removed declaration that was non-exported and
+  indented (a binding inside some enclosing scope) has its sites suppressed
+  with the reason `local binding "<name>" still declared at head` when one
+  `git grep` at head still finds a `(const|let|var|function|class) <name>`
+  declaration of that name, and the name is echoed with source
+  `local-binding`; `--strict` shows everything either suppressed, the
+  extracted identifiers now carry the `exported` and `indented` facts the
+  rule keys off, and the `--summary` totals line gains an `ignored=N`
+  counter.
 
 ### Changed
 
