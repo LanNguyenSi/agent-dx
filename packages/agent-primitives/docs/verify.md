@@ -46,7 +46,7 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
   the buffer's first/last character) `probe`'s own `--pass-regex`/
   `passWhen.regex` already use. Once a check's name has an entry here, a
   match against that check's combined stdout+stderr decides `status:
-"pass"`/`"fail"` in place of its exit code, whatever that exit code is
+  "pass"`/`"fail"` in place of its exit code, whatever that exit code is
   -- for a test runner whose exit code alone is not trustworthy (PHPUnit
   9.6 exiting non-zero on a green suite purely over deprecation notices
   is the motivating case): a match on a non-zero exit is a `pass`, with a
