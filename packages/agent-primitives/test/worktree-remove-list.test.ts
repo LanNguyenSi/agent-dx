@@ -7,7 +7,7 @@ import {
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ignoredSymlinks, parseWorktreeList } from "../src/worktree/index.js";
 import {
   alteredCommitGraph,
@@ -21,6 +21,7 @@ import {
   privateStackRemoteRefs,
   untrustedReftableStore,
 } from "../src/worktree/git.js";
+import { skipWithoutPs } from "./helpers/ps-usable.js";
 import {
   buildSpawnEnv,
   CLI_PATH,
@@ -2754,14 +2755,21 @@ function treeOf(
  * macOS and Linux). Empty when `ps` cannot answer. */
 async function listProcesses(): Promise<string> {
   return await new Promise<string>((resolve) => {
-    execFile(
-      "ps",
-      ["-axo", "pid=,ppid=,pgid=,rss="],
-      { encoding: "utf8" },
-      (err, stdout) => {
-        resolve(err === null ? stdout : "");
-      },
-    );
+    // `execFile` throws synchronously when `ps` cannot be started at all (a
+    // sandbox or environment that forbids running it), which the callback
+    // below never sees; both ways end in the same empty listing.
+    try {
+      execFile(
+        "ps",
+        ["-axo", "pid=,ppid=,pgid=,rss="],
+        { encoding: "utf8" },
+        (err, stdout) => {
+          resolve(err === null ? stdout : "");
+        },
+      );
+    } catch {
+      resolve("");
+    }
   });
 }
 
@@ -5946,7 +5954,8 @@ describe("the guards every adversarial graph fixture runs under", () => {
     expect(await processGone(pid)).toBe(true);
   });
 
-  it("kills what a finished command left behind in its group", async () => {
+  it("kills what a finished command left behind in its group", async (ctx) => {
+    skipWithoutPs(ctx);
     const r = await spawnBounded(
       "sh",
       ["-c", "sleep 60 </dev/null >/dev/null 2>&1 & echo $!"],
@@ -5959,7 +5968,8 @@ describe("the guards every adversarial graph fixture runs under", () => {
     expect(await processGone(pid)).toBe(true);
   });
 
-  it("kills the group once its resident memory passes the limit, well before the time limit", async () => {
+  it("kills the group once its resident memory passes the limit, well before the time limit", async (ctx) => {
+    skipWithoutPs(ctx);
     const started = Date.now();
     const r = await spawnBounded(
       process.execPath,
@@ -5977,7 +5987,8 @@ describe("the guards every adversarial graph fixture runs under", () => {
     expect(Date.now() - started).toBeLessThan(25_000);
   });
 
-  it("counts the memory of a descendant that sits in a process group of its own", async () => {
+  it("counts the memory of a descendant that sits in a process group of its own", async (ctx) => {
+    skipWithoutPs(ctx);
     // The CLI starts each git in a group of its own: its memory is not the
     // group's. The parent stays small; its detached child holds 300 MiB.
     const started = Date.now();
@@ -6026,6 +6037,7 @@ setTimeout(() => {}, 60000);`,
   });
 
   describe("ending a run signals only a process that is still the one that was seen", () => {
+    beforeEach(skipWithoutPs);
     const sleepers: ChildProcess[] = [];
     afterEach(() => {
       vi.restoreAllMocks();

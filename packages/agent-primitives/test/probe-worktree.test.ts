@@ -36,6 +36,7 @@ import {
 import { runArgv } from "../src/probe/run.js";
 import { caseInsensitiveVolume } from "./helpers/case-fs.js";
 import { withPathPrepended, writeGitShim } from "./helpers/git-shim.js";
+import { skipWithoutPs } from "./helpers/ps-usable.js";
 
 // Call-through mock, the same shape as the one below for
 // "../src/probe/run.js": lets a test pin the run id `beginWorktree`
@@ -6334,7 +6335,8 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     );
   }, 40000);
 
-  it("a crash while git worktree add is running leaves the marker written before the add, which doctor reports and the next probe recovers", async () => {
+  it("a crash while git worktree add is running leaves the marker written before the add, which doctor reports and the next probe recovers", async (ctx) => {
+    skipWithoutPs(ctx);
     const lockDir = useLockDir();
     const repo = makeSlowAddRepo();
     const logDir = makeTmpDir();
@@ -6394,7 +6396,8 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     ).toHaveLength(1);
   }, 40000);
 
-  it("a crash while git worktree add is running, with the marker then deleted by hand: doctor still reports the registration and the next probe still recovers", async () => {
+  it("a crash while git worktree add is running, with the marker then deleted by hand: doctor still reports the registration and the next probe still recovers", async (ctx) => {
+    skipWithoutPs(ctx);
     const lockDir = useLockDir();
     const repo = makeSlowAddRepo();
     const logDir = makeTmpDir();

@@ -29,6 +29,7 @@ import {
   unpushedCommits,
 } from "../src/worktree/git.js";
 import { removeWorktree } from "../src/worktree/remove.js";
+import { skipWithoutPs } from "./helpers/ps-usable.js";
 import { buildSpawnEnv, CLI_PATH, FIXED_BIN_DIR } from "./helpers/spawn-cli.js";
 
 /**
@@ -1249,7 +1250,8 @@ function processState(pid: number): string | undefined {
 }
 
 describe("a CLI that is killed and never reaped while its git hangs", () => {
-  it("does not leave git behind", async () => {
+  it("does not leave git behind", async (ctx) => {
+    skipWithoutPs(ctx);
     const f = makeFixture();
     const hung = hangingGit({ match: "gc.auto=0 worktree list" });
     const pidFile = path.join(scratchDir("cli-pid"), "pid");
@@ -2034,7 +2036,8 @@ describe("the trampoline", () => {
     await expectGone([Number(fs.readFileSync(pidFile, "utf8").trim())]);
   });
 
-  it("leaves alone what a git that exited 128 by itself left behind", async () => {
+  it("leaves alone what a git that exited 128 by itself left behind", async (ctx) => {
+    skipWithoutPs(ctx);
     // 128 is git's own status for a fatal error; only a status above it is
     // how the shell reports a command that a signal ended.
     const dir = scratchDir("fatal-git");

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The test suite now runs in a sandbox or environment where `ps` cannot be
+  started: the helper that lists processes in `worktree-remove-list.test.ts`
+  catches the error `execFile` throws synchronously, and the tests whose
+  assertions need a real process table (`guard`, the `ps` reader, the
+  resource-limit and process-group cases of the worktree tests, the crash
+  and zombie cases) are skipped with the note `ps cannot run in this
+  environment` through a shared probe in `test/helpers/ps-usable.ts`.
+  Where `ps` runs nothing is skipped.
+
 ### Fixed
 
 - `probe` link policy: a provenance refusal is now superseded when an
