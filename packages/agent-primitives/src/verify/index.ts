@@ -1208,8 +1208,9 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
 
   const repeat = options.repeat ?? DEFAULT_REPEAT;
   if (!Number.isInteger(repeat) || repeat < 1 || repeat > MAX_REPEAT) {
-    throw new UsageError(
+    throw new VerifyUsageError(
       `verify: repeat must be an integer between 1 and ${MAX_REPEAT} (got ${repeat})`,
+      "usage_error",
     );
   }
 

@@ -1152,11 +1152,11 @@ interface VerifyCliOptions {
 program
   .command("verify")
   .description(
-    "Run project verify checks (build, typecheck, lint, test by default)",
+    "Run project verify checks (build, typecheck, lint, test by default, or the repo preset)",
   )
   .option(
     "-c, --checks <list>",
-    `comma-separated check names, in run order (default: ${DEFAULT_CHECKS.join(",")})`,
+    `comma-separated check names, in run order (default: ${DEFAULT_CHECKS.join(",")}, or the repo preset's list)`,
     parseList,
   )
   .option(
@@ -1195,6 +1195,7 @@ program
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
     requireExclusiveViews(opts, "verify");
     let result: VerifyResult;
+    const repeat = Number(opts.repeat ?? DEFAULT_REPEAT);
     // A `VerifyUsageError` is verify's own refusal (an invalid check name,
     // a refused `--pass-regex`/`--max-failures`, or a refused
     // `.agent-primitives.json` repo preset: `defaults_file_invalid`,
@@ -1205,7 +1206,6 @@ program
     // above is deliberately outside and before this `try`: a `UsageError`
     // from it is not verify's own refusal and must reach the top-level
     // mapper, ahead of any preset error the run would otherwise report.
-    const repeat = Number(opts.repeat ?? DEFAULT_REPEAT);
     try {
       result = await verify({
         cwd: global.cwd,

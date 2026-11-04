@@ -2272,6 +2272,26 @@ describe("verify: --repeat", () => {
     },
   );
 
+  it.each([[0], [101]])(
+    "repeat %p is refused as a VerifyUsageError with reason usage_error",
+    async (repeat) => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, { test: "te" });
+      const logDir = makeTmpDir();
+      const { fn, calls } = makeStubExec();
+      const error = await verify({
+        cwd,
+        logDir,
+        checks: ["test"],
+        execFn: fn,
+        repeat,
+      }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(VerifyUsageError);
+      expect((error as VerifyUsageError).reason).toBe("usage_error");
+      expect(calls).toEqual([]);
+    },
+  );
+
   it("repeat 1 (the default) reports no per-run field at all: the check row is exactly the shape a single run always had", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, { test: "te" });
@@ -6561,6 +6581,46 @@ describe("verify: repo preset (.agent-primitives.json verify.checks)", () => {
     });
     expect(calls).toEqual(["npm run compile --silent", "echo overridden"]);
     expect(result.checks.map((c) => c.source)).toEqual(["preset", "exec"]);
+  });
+
+  it("--repeat keeps each check's own source on the merged row and on the full row, and the preset hint is reported once", async () => {
+    // `mergeRuns` builds the merged row from the last run's result, which is
+    // what carries `source` through; a merge that rebuilt the row without it
+    // (or stamped one value on every check) would report `none` or a single
+    // origin for a preset script and a `-x` command alike. The hint comes
+    // from the run list, not from a run, so three runs must not repeat it.
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b", "test:ci": "te" });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { build: "compile", test: "test:ci" } },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      overrides: { test: "echo overridden" },
+      execFn: fn,
+      repeat: 3,
+    });
+    expect(calls).toEqual([
+      "npm run compile --silent",
+      "npm run compile --silent",
+      "npm run compile --silent",
+      "echo overridden",
+      "echo overridden",
+      "echo overridden",
+    ]);
+    expect(result.checks.map((c) => c.runs)).toEqual([3, 3]);
+    expect(result.checks.map((c) => c.source)).toEqual(["preset", "exec"]);
+    expect(result.fullChecks?.map((c) => c.source)).toEqual(["preset", "exec"]);
+    expect(
+      result.warnings.filter((w) =>
+        w.startsWith(
+          "hint: -x given without -c: the repo preset check list (build,test)",
+        ),
+      ),
+    ).toHaveLength(1);
   });
 
   it("file + -x with no -c: the hint names the PRESET list in the preset's own run order, and the built-in wording is gone", async () => {

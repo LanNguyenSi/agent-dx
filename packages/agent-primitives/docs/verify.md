@@ -210,6 +210,8 @@ Every `CheckResult` carries `source` saying where its command came from:
 envelope carries it per check, so a reader can tell a preset's script from
 a `-x` command without recomputing the precedence.
 
+## Check resolution
+
 `-x` alone does not replace the run list: `verify -x name=cmd` runs
 `build`, `typecheck`, `lint` and `test` as well as `name`, and each default
 check without a script or `-x` override is a `no_script` non-pass. With a
