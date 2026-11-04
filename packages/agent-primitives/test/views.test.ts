@@ -113,10 +113,11 @@ async function halfBound(base: string[], args: string[]): Promise<string> {
   return String(Math.max(1, Math.floor((await wholeLength(base, args)) / 2)));
 }
 
-/** One character under the unreduced envelope: reduced on any platform,
- * and still roomy enough for a short `--print` line. */
-async function justUnderBound(base: string[], args: string[]): Promise<string> {
-  return String(Math.max(1, (await wholeLength(base, args)) - 1));
+/** Ten characters under the unreduced envelope (a later run's `durationMs`
+ * can differ by a digit or two): reduced on any platform, and still roomy
+ * enough for a short `--print` line. */
+async function tenUnderBound(base: string[], args: string[]): Promise<string> {
+  return String(Math.max(1, (await wholeLength(base, args)) - 10));
 }
 
 type Case = {
@@ -430,7 +431,7 @@ describe("a reduced run (small -m)", () => {
 
   it("drift --print truncated,warnings takes both from the emitted envelope: truncated: true and the same warnings as the JSON run at that bound", async () => {
     const repo = driftRepo();
-    const bound = await justUnderBound(["-C", repo], DRIFT_ARGS);
+    const bound = await tenUnderBound(["-C", repo], DRIFT_ARGS);
     const json = await spawnCli(["-C", repo, "-m", bound, ...DRIFT_ARGS]);
     const emitted = JSON.parse(json.stdout);
     // Precondition: this bound really reduces the envelope.
