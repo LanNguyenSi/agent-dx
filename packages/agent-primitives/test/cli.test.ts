@@ -871,6 +871,11 @@ describe("cli verify", () => {
     expect(run.code).toBe(2);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("usage_error");
+    // verify's own refusal: the envelope names the command (a plain
+    // `UsageError` here would have reached the top-level mapper as
+    // `command: "unknown"`).
+    expect(parsed.command).toBe("verify");
+    expect(parsed.reason).toBe("usage_error");
   });
 
   it("--pass-regex with an unparseable pattern is a usage_error naming the check and the pattern", async () => {
@@ -1305,6 +1310,11 @@ describe("cli verify", () => {
     expect(run.code).toBe(2);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("usage_error");
+    // This refusal is the OPTION PARSER's (`--max-failures` is validated
+    // while the options are parsed), so it stays a top-level parser error
+    // with `command: "unknown"`; verify()'s own `maxFailures` refusal is
+    // only reachable from the library API and is pinned there.
+    expect(parsed.command).toBe("unknown");
   });
 
   it("--timeout 1 -x a busy-looping check times out: check status error, one synthetic failure naming timedOut, summary.errors 1, exit 2", async () => {
@@ -1803,6 +1813,287 @@ describe("cli verify", () => {
       fs.chmodSync(parentDir, 0o700);
     }
   });
+
+  it("a repo preset with no -c runs its own list (not the built-in one), every check source preset, exit 0", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: {
+          compile: 'node -e "process.exit(0)"',
+          "test:ci": 'node -e "process.exit(0)"',
+        },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(cwd, ".agent-primitives.json"),
+      JSON.stringify({
+        verify: { checks: { build: "compile", test: "test:ci" } },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", cwd, "-l", logDir, "verify"]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    expect(parsed.checks.map((c: { name: string }) => c.name)).toEqual([
+      "build",
+      "test",
+    ]);
+    expect(
+      parsed.checks.map(
+        (c: { command: string; source: string }) => `${c.source} ${c.command}`,
+      ),
+    ).toEqual([
+      "preset npm run compile --silent",
+      "preset npm run test:ci --silent",
+    ]);
+  });
+
+  it("a repo preset plus -c selects in -c order, and -x still wins over the preset", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: {
+          compile: 'node -e "process.exit(0)"',
+          "test:ci": 'node -e "process.exit(0)"',
+        },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(cwd, ".agent-primitives.json"),
+      JSON.stringify({
+        verify: { checks: { build: "compile", test: "test:ci" } },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "test,build",
+      "-x",
+      'build=node -e "process.exit(0)"',
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(
+      parsed.checks.map(
+        (c: { name: string; source: string }) => `${c.name} ${c.source}`,
+      ),
+    ).toEqual(["test preset", "build exec"]);
+  });
+
+  it("a preset whose checks object is empty is usage_error with reason empty_preset, command verify, exit 2, nothing run", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { build: 'node -e "process.exit(0)"' },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(cwd, ".agent-primitives.json"),
+      JSON.stringify({ verify: { checks: {} } }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", cwd, "-l", logDir, "verify"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.command).toBe("verify");
+    expect(parsed.reason).toBe("empty_preset");
+    expect(parsed.message).toContain('"verify.checks" is empty');
+  });
+
+  it("a preset value that is not a plain script name is usage_error defaults_file_invalid naming the key, exit 2", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { build: 'node -e "process.exit(0)"' },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(cwd, ".agent-primitives.json"),
+      JSON.stringify({ verify: { checks: { build: "npm ci --workspaces" } } }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", cwd, "-l", logDir, "verify"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.command).toBe("verify");
+    expect(parsed.reason).toBe("defaults_file_invalid");
+    expect(parsed.message).toContain('value for "build" must match');
+  });
+
+  it("an unknown key inside the verify section is usage_error defaults_file_invalid naming verify.<key>, command verify, exit 2, nothing run", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { build: 'node -e "process.exit(0)"' },
+      }),
+    );
+    // `oder` is a typo for `order`: silently dropping it would run the
+    // preset in the file's key order and report success, so it is a usage
+    // error naming the full path.
+    fs.writeFileSync(
+      path.join(cwd, ".agent-primitives.json"),
+      JSON.stringify({
+        verify: { checks: { build: "build" }, oder: ["build"] },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", cwd, "-l", logDir, "verify"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.command).toBe("verify");
+    expect(parsed.reason).toBe("defaults_file_invalid");
+    expect(parsed.message).toContain(
+      'unknown key "verify.oder" (only "checks" and "order" are known)',
+    );
+    // Nothing ran: a usage error from the preset carries no per-check
+    // result at all, so no check was resolved or spawned.
+    expect(parsed.checks).toBeUndefined();
+  });
+
+  it("the view-exclusivity check runs before the preset is read: an invalid preset file with --summary and --print reports the exclusivity error, not the preset error", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { build: 'node -e "process.exit(0)"' },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(cwd, ".agent-primitives.json"),
+      JSON.stringify({
+        verify: { checks: { build: "build" }, oder: ["build"] },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--summary",
+      "--print",
+      "status",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("usage_error");
+    expect(parsed.message).toBe(
+      "verify: --summary and --print are mutually exclusive",
+    );
+    expect(parsed.message).not.toContain("verify.oder");
+    expect(parsed.checks).toBeUndefined();
+  });
+
+  it("the preset is read at the git root while package.json stays at -C: a root file with a package in sub/ runs sub's scripts", async () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, ".git"));
+    const sub = path.join(root, "sub");
+    fs.mkdirSync(sub);
+    fs.writeFileSync(
+      path.join(root, ".agent-primitives.json"),
+      JSON.stringify({ verify: { checks: { build: "compile" } } }),
+    );
+    fs.writeFileSync(
+      path.join(sub, "package.json"),
+      JSON.stringify({
+        name: "sub",
+        version: "0.0.0",
+        scripts: { compile: 'node -e "process.exit(0)"', build: "false" },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", sub, "-l", logDir, "verify"]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    // The root file's preset applied (only `build` runs, `compile` is the
+    // script it names) even though the run was pointed at sub/, whose own
+    // package.json also has a `build` script the preset overrides.
+    expect(parsed.checks).toHaveLength(1);
+    expect(parsed.checks[0]).toMatchObject({
+      name: "build",
+      source: "preset",
+      command: "npm run compile --silent",
+    });
+  });
+
+  it("the text renderer shows each check's source", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { compile: 'node -e "process.exit(0)"' },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(cwd, ".agent-primitives.json"),
+      JSON.stringify({ verify: { checks: { build: "compile" } } }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "-f",
+      "text",
+      "verify",
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain("[pass] build [preset] (npm run compile");
+  });
+
+  it("an invalid -x check name stays a usage_error and now names command verify (not the top-level unknown)", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "",
+      "-x",
+      "bad name=exit 0",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.command).toBe("verify");
+    expect(parsed.reason).toBe("usage_error");
+    expect(parsed.message).toContain("invalid check name");
+  });
 });
 
 // One live integration test per tool: the real binary, from this
@@ -2157,6 +2448,7 @@ describe("writeFullVerifyResult", () => {
     const fullChecks: CheckResult[] = [
       {
         name: "test",
+        source: "script",
         status: "fail",
         exitCode: 1,
         durationMs: 1,
@@ -2233,6 +2525,7 @@ describe("writeFullVerifyResult", () => {
       fullChecks: [
         {
           name: "lint",
+          source: "script",
           status: "fail",
           exitCode: 1,
           durationMs: 1,
@@ -5571,6 +5864,34 @@ describe("cli: probe --plan", () => {
         (w: string) =>
           w.includes(path.join(repo, ".agent-primitives.json")) &&
           w.includes("typoKey"),
+      ),
+    ).toBe(true);
+  }, 30000);
+
+  it("repo defaults file: an unknown key INSIDE the verify section refuses the --plan run too (one loader, whole-file validation), naming verify.<key>, fail-closed", async () => {
+    const { repo } = initPlanRepo();
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({
+        link: ["vendor"],
+        verify: { checks: { build: "build" }, oder: ["build"] },
+      }),
+    );
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    const envelope = JSON.parse(run.stdout);
+    expect(envelope.status).toBe("usage_error");
+    expect(envelope.reason).toBe("defaults_file_invalid");
+    expect(
+      envelope.warnings.some(
+        (w: string) =>
+          w.includes(path.join(repo, ".agent-primitives.json")) &&
+          w.includes('unknown key "verify.oder"'),
       ),
     ).toBe(true);
   }, 30000);

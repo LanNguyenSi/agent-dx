@@ -732,6 +732,7 @@ describe("view renderers: -m bound", () => {
       checks: Array.from({ length: 4 }, (_, i) => ({
         name: `c${i}`,
         status: "fail" as const,
+        source: "script" as const,
         exitCode: 1,
         durationMs: 1,
         timedOut: false,
@@ -756,6 +757,7 @@ describe("verify --summary of a repeated check", () => {
     extra: Partial<CheckResult> = {},
   ): CheckResult => ({
     name,
+    source: "script",
     status: "pass",
     exitCode: 0,
     durationMs: 10,

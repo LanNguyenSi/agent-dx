@@ -14,9 +14,14 @@ import {
   phpcsDetector,
   DEFAULT_CHECKS,
   DEFAULT_DETECTORS,
+  VerifyUsageError,
   deriveCheckName,
   XOVERRIDE_WITHOUT_CHECKS_HINT,
 } from "../src/verify/index.js";
+import {
+  DEFAULTS_FILE_MAX_BYTES,
+  DEFAULTS_FILE_NAME,
+} from "../src/probe/defaults-file.js";
 import {
   phpunitZeroTestsVerdict,
   PROGRESS_COUNTER_LINE,
@@ -596,9 +601,18 @@ describe("verify: --max-failures", () => {
     writePackageJson(cwd, { test: "te" });
     const logDir = makeTmpDir();
     const { fn, calls } = makeStubExec();
-    await expect(
-      verify({ cwd, logDir, checks: ["test"], execFn: fn, maxFailures: 0 }),
-    ).rejects.toThrow(UsageError);
+    const err = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      maxFailures: 0,
+    }).catch((e: unknown) => e);
+    // verify's own refusal, carrying the reason the `verify` action puts in
+    // the envelope, not a bare UsageError that would report
+    // `command: "unknown"`.
+    expect(err).toBeInstanceOf(VerifyUsageError);
+    expect((err as VerifyUsageError).reason).toBe("usage_error");
     expect(calls).toEqual([]);
   });
 
@@ -1462,15 +1476,20 @@ describe("verify: --pass-regex opt-in success predicate", () => {
     writePackageJson(cwd, { test: "te" });
     const logDir = makeTmpDir();
     const { fn, calls } = makeStubExec();
-    await expect(
-      verify({
-        cwd,
-        logDir,
-        checks: ["test"],
-        execFn: fn,
-        passRegexes: { lint: compilePassRegex("^OK \\(") },
-      }),
-    ).rejects.toThrow(UsageError);
+    const err = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { lint: compilePassRegex("^OK \\(") },
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VerifyUsageError);
+    expect((err as VerifyUsageError).reason).toBe("usage_error");
+    // The message names every source of a run list, the repo preset
+    // included.
+    expect((err as Error).message).toContain(
+      "not requested (via -c/the repo preset/the default list)",
+    );
     expect(calls).toEqual([]);
   });
 
@@ -2249,6 +2268,26 @@ describe("verify: --repeat", () => {
       await expect(
         verify({ cwd, logDir, checks: ["test"], execFn: fn, repeat }),
       ).rejects.toThrow(UsageError);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it.each([[0], [101]])(
+    "repeat %p is refused as a VerifyUsageError with reason usage_error",
+    async (repeat) => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, { test: "te" });
+      const logDir = makeTmpDir();
+      const { fn, calls } = makeStubExec();
+      const error = await verify({
+        cwd,
+        logDir,
+        checks: ["test"],
+        execFn: fn,
+        repeat,
+      }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(VerifyUsageError);
+      expect((error as VerifyUsageError).reason).toBe("usage_error");
       expect(calls).toEqual([]);
     },
   );
@@ -6394,5 +6433,523 @@ describe("phpcsDetector: captured real output", () => {
       exitCode: 2,
     });
     expect(selection.detector.name).toBe("phpcs");
+  });
+});
+
+/** Writes a repo defaults file (`.agent-primitives.json`) into `dir`.
+ * `value` is a string when the exact JSON text matters (a `__proto__` key,
+ * which an object literal never produces as an own key) and an object
+ * otherwise. */
+function writeDefaultsFile(dir: string, value: unknown): void {
+  fs.writeFileSync(
+    path.join(dir, DEFAULTS_FILE_NAME),
+    typeof value === "string" ? value : JSON.stringify(value),
+  );
+}
+
+describe("verify: repo preset (.agent-primitives.json verify.checks)", () => {
+  it("with no -c, the preset list runs in the file's own order, every check resolved from its preset script (the built-in list does NOT run)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b", "test:ci": "te" });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { build: "compile", test: "test:ci" } },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({ cwd, logDir, execFn: fn });
+    expect(result.checks.map((c) => c.name)).toEqual(["build", "test"]);
+    expect(calls).toEqual([
+      "npm run compile --silent",
+      "npm run test:ci --silent",
+    ]);
+    expect(result.checks.map((c) => c.source)).toEqual(["preset", "preset"]);
+  });
+
+  it("with no -c and no preset at all, the built-in list still runs and reports source script/none", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { build: "b" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec();
+    const result = await verify({ cwd, logDir, execFn: fn });
+    expect(result.checks.map((c) => c.name)).toEqual(DEFAULT_CHECKS);
+    expect(result.checks.map((c) => c.source)).toEqual([
+      "script",
+      "none",
+      "none",
+      "none",
+    ]);
+  });
+
+  it("a defaults file that carries link but no verify key leaves the built-in list untouched", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {
+      build: "b",
+      typecheck: "t",
+      lint: "l",
+      test: "te",
+    });
+    writeDefaultsFile(cwd, { link: ["vendor"] });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({ cwd, logDir, execFn: fn });
+    expect(result.checks.map((c) => c.name)).toEqual(DEFAULT_CHECKS);
+    expect(result.checks.map((c) => c.source)).toEqual([
+      "script",
+      "script",
+      "script",
+      "script",
+    ]);
+    expect(calls).toEqual([
+      "npm run build --silent",
+      "npm run typecheck --silent",
+      "npm run lint --silent",
+      "npm run test --silent",
+    ]);
+  });
+
+  it("-c alone is unchanged: source script for a package.json script, exec for an -x command", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "vitest run" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const byScript = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+    });
+    expect(byScript.checks[0].source).toBe("script");
+    const byExec = await verify({
+      cwd,
+      logDir,
+      checks: ["extra"],
+      overrides: { extra: "echo hi" },
+      execFn: fn,
+    });
+    expect(byExec.checks[0].source).toBe("exec");
+    expect(calls).toEqual(["npm run test --silent", "echo hi"]);
+  });
+
+  it("file + -c: the -c order selects from the union of the preset names and the built-ins (preset script, preset script, then the built-in's own script)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {
+      compile: "b",
+      "test:ci": "te",
+      typecheck: "t",
+    });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { build: "compile", test: "test:ci" } },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test", "build", "typecheck"],
+      execFn: fn,
+    });
+    expect(result.checks.map((c) => c.name)).toEqual([
+      "test",
+      "build",
+      "typecheck",
+    ]);
+    expect(calls).toEqual([
+      "npm run test:ci --silent",
+      "npm run compile --silent",
+      "npm run typecheck --silent",
+    ]);
+    expect(result.checks.map((c) => c.source)).toEqual([
+      "preset",
+      "preset",
+      "script",
+    ]);
+  });
+
+  it("file + -x: the -x command wins over the preset for that check, the other preset entries still run", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b", "test:ci": "te" });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { build: "compile", test: "test:ci" } },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      overrides: { test: "echo overridden" },
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm run compile --silent", "echo overridden"]);
+    expect(result.checks.map((c) => c.source)).toEqual(["preset", "exec"]);
+  });
+
+  it("--repeat keeps each check's own source on the merged row and on the full row, and the preset hint is reported once", async () => {
+    // `mergeRuns` builds the merged row from the last run's result, which is
+    // what carries `source` through; a merge that rebuilt the row without it
+    // (or stamped one value on every check) would report `none` or a single
+    // origin for a preset script and a `-x` command alike. The hint comes
+    // from the run list, not from a run, so three runs must not repeat it.
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b", "test:ci": "te" });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { build: "compile", test: "test:ci" } },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      overrides: { test: "echo overridden" },
+      execFn: fn,
+      repeat: 3,
+    });
+    expect(calls).toEqual([
+      "npm run compile --silent",
+      "npm run compile --silent",
+      "npm run compile --silent",
+      "echo overridden",
+      "echo overridden",
+      "echo overridden",
+    ]);
+    expect(result.checks.map((c) => c.runs)).toEqual([3, 3]);
+    expect(result.checks.map((c) => c.source)).toEqual(["preset", "exec"]);
+    expect(result.fullChecks?.map((c) => c.source)).toEqual(["preset", "exec"]);
+    expect(
+      result.warnings.filter((w) =>
+        w.startsWith(
+          "hint: -x given without -c: the repo preset check list (build,test)",
+        ),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("file + -x with no -c: the hint names the PRESET list in the preset's own run order, and the built-in wording is gone", async () => {
+    // The preset counterpart of "-x without -c hint > fires when -x is
+    // given and no -c is: that case (no file) pins the built-in wording
+    // byte-for-byte, this one pins the preset wording and proves the
+    // built-in list is not what ran. `order: ["test"]` makes the run order
+    // disagree with the file's key order, so a hint built from the keys
+    // rather than the run list is caught too.
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b", t: "te" });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { build: "compile", test: "t" }, order: ["test"] },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      overrides: { lint: "echo L" },
+      execFn: fn,
+    });
+    expect(result.warnings).toContain(
+      "hint: -x given without -c: the repo preset check list (test,build) still runs; pass -c <names> to choose the run set",
+    );
+    expect(result.warnings).not.toContain(XOVERRIDE_WITHOUT_CHECKS_HINT);
+    expect(result.checks.map((c) => c.name)).toEqual(["test", "build", "lint"]);
+    expect(calls).toEqual([
+      "npm run t --silent",
+      "npm run compile --silent",
+      "echo L",
+    ]);
+  });
+
+  it("file + -c + -x: -c gives the order, the preset gives the script, -x still wins where it speaks", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b", "test:ci": "te" });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { build: "compile", test: "test:ci" } },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test", "build"],
+      overrides: { build: "echo explicit" },
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm run test:ci --silent", "echo explicit"]);
+    expect(result.checks.map((c) => c.source)).toEqual(["preset", "exec"]);
+  });
+
+  it("an implicit -x from a command -c item reports source exec even when a preset exists", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b" });
+    writeDefaultsFile(cwd, { verify: { checks: { build: "compile" } } });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["build", "npm run lint"],
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm run compile --silent", "npm run lint"]);
+    expect(result.checks.map((c) => c.source)).toEqual(["preset", "exec"]);
+  });
+
+  it("a preset entry whose script package.json has no is no_script, and the warning names the preset entry", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { lint: "eslint:strict", test: "test" } },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["lint", "test"],
+      execFn: fn,
+    });
+    expect(calls).toEqual(["npm run test --silent"]);
+    expect(result.checks[0]).toMatchObject({
+      name: "lint",
+      source: "preset",
+      status: "skipped",
+      reason: "no_script",
+    });
+    expect(result.warnings).toContain(
+      'lint: no_script: the repo preset maps this check to the npm script "eslint:strict", which package.json does not define, and no -x override was given',
+    );
+  });
+
+  it("a preset entry in a directory with no package.json at all is no_script too, naming the preset entry", async () => {
+    const cwd = makeTmpDir();
+    writeDefaultsFile(cwd, { verify: { checks: { build: "compile" } } });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({ cwd, logDir, execFn: fn });
+    expect(calls).toEqual([]);
+    expect(result.checks[0].source).toBe("preset");
+    expect(result.reason).toBe("nothing_verified");
+    expect(
+      result.warnings.some((w) => w.includes('npm script "compile"')),
+    ).toBe(true);
+  });
+
+  it("a preset entry never falls back to the script of the check's own name: its own script missing is no_script", async () => {
+    const cwd = makeTmpDir();
+    // `build` exists as a script, but the preset sends the check to
+    // `compile`, which does not: the preset's claim on the name stands.
+    writePackageJson(cwd, { build: "b" });
+    writeDefaultsFile(cwd, { verify: { checks: { build: "compile" } } });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({ cwd, logDir, execFn: fn });
+    expect(calls).toEqual([]);
+    expect(result.checks[0]).toMatchObject({
+      name: "build",
+      source: "preset",
+      status: "skipped",
+      reason: "no_script",
+    });
+    expect(
+      result.warnings.some((w) => w.includes('npm script "compile"')),
+    ).toBe(true);
+  });
+
+  it("order lists its names first and the remaining preset keys follow in the file's own order", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { a: "1", b: "2", c: "3", d: "4" });
+    writeDefaultsFile(cwd, {
+      verify: {
+        checks: { a: "a", b: "b", c: "c", d: "d" },
+        order: ["c", "a"],
+      },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({ cwd, logDir, execFn: fn });
+    expect(result.checks.map((c) => c.name)).toEqual(["c", "a", "b", "d"]);
+    expect(calls).toEqual([
+      "npm run c --silent",
+      "npm run a --silent",
+      "npm run b --silent",
+      "npm run d --silent",
+    ]);
+  });
+
+  it("an empty checks object is refused as empty_preset before anything runs", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { build: "b" });
+    writeDefaultsFile(cwd, { verify: { checks: {} } });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const err = await verify({ cwd, logDir, execFn: fn }).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(VerifyUsageError);
+    expect((err as VerifyUsageError).reason).toBe("empty_preset");
+    expect((err as Error).message).toContain('"verify.checks" is empty');
+    expect(calls).toEqual([]);
+  });
+
+  const refusedPresets: [string, string, string][] = [
+    [
+      "a value carrying a shell metacharacter",
+      '{"verify":{"checks":{"build":"npm run build; rm -rf /"}}}',
+      'value for "build" must match',
+    ],
+    [
+      "a value that starts with a dash",
+      '{"verify":{"checks":{"build":"--workspaces"}}}',
+      "must start with a letter or a digit",
+    ],
+    [
+      "an integer-like key",
+      '{"verify":{"checks":{"1":"build"}}}',
+      'key "1" looks like an integer',
+    ],
+    [
+      "a __proto__ key",
+      '{"verify":{"checks":{"__proto__":"build"}}}',
+      'key "__proto__" is refused',
+    ],
+    ["a non-object verify", '{"verify":"build"}', '"verify" must be an object'],
+    [
+      "a non-string value",
+      '{"verify":{"checks":{"build":3}}}',
+      'value for "build" must be a string',
+    ],
+    [
+      "an order that is not an array",
+      '{"verify":{"checks":{"build":"b"},"order":"build"}}',
+      '"verify.order" must be an array',
+    ],
+    [
+      "an order entry naming no preset check",
+      '{"verify":{"checks":{"build":"b"},"order":["nope"]}}',
+      'entry "nope" is not one of',
+    ],
+    [
+      "an order entry listed twice",
+      '{"verify":{"checks":{"build":"b"},"order":["build","build"]}}',
+      'lists "build" more than once',
+    ],
+    [
+      "a link invalid alongside a valid verify",
+      '{"link":"vendor","verify":{"checks":{"build":"b"}}}',
+      '"link" must be an array of strings',
+    ],
+  ];
+
+  it.each(refusedPresets)(
+    "refuses %s as defaults_file_invalid naming the key, before any check runs",
+    async (_label, json, messagePart) => {
+      const cwd = makeTmpDir();
+      writePackageJson(cwd, { build: "b" });
+      writeDefaultsFile(cwd, json);
+      const logDir = makeTmpDir();
+      const { fn, calls } = makeStubExec();
+      const err = await verify({ cwd, logDir, execFn: fn }).catch(
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(VerifyUsageError);
+      expect((err as VerifyUsageError).reason).toBe("defaults_file_invalid");
+      expect((err as Error).message).toContain(messagePart);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it("refuses a defaults file over the size cap as defaults_file_not_readable (the loader's own cap, shared with probe)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { build: "b" });
+    writeDefaultsFile(cwd, {
+      link: ["x".repeat(DEFAULTS_FILE_MAX_BYTES + 1)],
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const err = await verify({ cwd, logDir, execFn: fn }).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(VerifyUsageError);
+    expect((err as VerifyUsageError).reason).toBe("defaults_file_not_readable");
+    expect((err as Error).message).toContain("cap");
+    expect(calls).toEqual([]);
+  });
+
+  it("an invalid check name is a VerifyUsageError whose reason is usage_error", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec();
+    const err = await verify({
+      cwd,
+      logDir,
+      checks: [],
+      overrides: { "bad name": "echo hi" },
+      execFn: fn,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VerifyUsageError);
+    expect((err as VerifyUsageError).reason).toBe("usage_error");
+  });
+
+  it("a valid verify alongside a valid link reads both: the link list stays probe's and the preset still runs", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b" });
+    writeDefaultsFile(cwd, {
+      link: ["vendor"],
+      verify: { checks: { build: "compile" } },
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({ cwd, logDir, execFn: fn });
+    expect(calls).toEqual(["npm run compile --silent"]);
+    expect(result.status).toBe("pass");
+  });
+
+  it("an exec failure on a preset check still reports that check's source", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b" });
+    writeDefaultsFile(cwd, { verify: { checks: { build: "compile" } } });
+    const logDir = makeTmpDir();
+    const failingExec: ExecLike = async () => {
+      throw new Error("simulated exec failure");
+    };
+    const result = await verify({ cwd, logDir, execFn: failingExec });
+    expect(result.checks[0]).toMatchObject({
+      name: "build",
+      source: "preset",
+      status: "error",
+    });
+  });
+
+  it("an aborted run reports the aborted preset check with its source, and stops there", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { compile: "b", "test:ci": "te" });
+    writeDefaultsFile(cwd, {
+      verify: { checks: { build: "compile", test: "test:ci" } },
+    });
+    const logDir = makeTmpDir();
+    const calls: string[] = [];
+    const execFn: ExecLike = async (cmd, options) => {
+      calls.push(cmd);
+      const aborted = calls.length === 1;
+      return {
+        exitCode: aborted ? null : 0,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(options.logDir, "stub.log"),
+        timedOut: false,
+        aborted,
+        logWriteFailed: false,
+        outputMayBeIncomplete: false,
+        stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    };
+    const result = await verify({ cwd, logDir, execFn });
+    expect(result.checks).toHaveLength(1);
+    expect(result.checks[0]).toMatchObject({
+      name: "build",
+      source: "preset",
+      status: "error",
+    });
+    expect(result.reason).toBe("aborted");
   });
 });

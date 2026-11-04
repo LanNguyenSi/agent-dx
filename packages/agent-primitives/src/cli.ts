@@ -21,6 +21,7 @@ import {
 import { execCommand, stdioWatchBoundMs, type ExecResult } from "./exec.js";
 import {
   verify,
+  VerifyUsageError,
   DEFAULT_CHECKS,
   DEFAULT_MAX_FAILURES,
   DEFAULT_REPEAT,
@@ -1151,11 +1152,11 @@ interface VerifyCliOptions {
 program
   .command("verify")
   .description(
-    "Run project verify checks (build, typecheck, lint, test by default)",
+    "Run project verify checks (build, typecheck, lint, test by default, or the repo preset)",
   )
   .option(
     "-c, --checks <list>",
-    `comma-separated check names, in run order (default: ${DEFAULT_CHECKS.join(",")})`,
+    `comma-separated check names, in run order (default: ${DEFAULT_CHECKS.join(",")}, or the repo preset's list)`,
     parseList,
   )
   .option(
@@ -1193,25 +1194,57 @@ program
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
     requireExclusiveViews(opts, "verify");
+    let result: VerifyResult;
     const repeat = Number(opts.repeat ?? DEFAULT_REPEAT);
-    const result = await verify({
-      cwd: global.cwd,
-      logDir: global.logDir,
-      runId: currentRunId(),
-      checks: opts.checks,
-      overrides: opts.exec,
-      passRegexes: opts.passRegex,
-      failFast: Boolean(opts.failFast),
-      signal: shutdownController.signal,
-      // Not the default `execCommand`: the tracking wrapper, so the
-      // signal handler can wait for the check it just killed to settle
-      // before this process exits.
-      execFn: trackingExec,
-      timeoutMs:
-        opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
-      maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
-      repeat,
-    });
+    // A `VerifyUsageError` is verify's own refusal (an invalid check name,
+    // a refused `--pass-regex`/`--max-failures`, or a refused
+    // `.agent-primitives.json` repo preset: `defaults_file_invalid`,
+    // `empty_preset`, `defaults_file_not_readable`). It is reported here
+    // rather than by the top-level mapper so the envelope keeps naming
+    // `command: "verify"` and carries the specific reason, the way the
+    // `patch` action reports a `PatchUsageError`. The view-exclusivity check
+    // above is deliberately outside and before this `try`: a `UsageError`
+    // from it is not verify's own refusal and must reach the top-level
+    // mapper, ahead of any preset error the run would otherwise report.
+    try {
+      result = await verify({
+        cwd: global.cwd,
+        logDir: global.logDir,
+        runId: currentRunId(),
+        checks: opts.checks,
+        overrides: opts.exec,
+        passRegexes: opts.passRegex,
+        failFast: Boolean(opts.failFast),
+        signal: shutdownController.signal,
+        // Not the default `execCommand`: the tracking wrapper, so the
+        // signal handler can wait for the check it just killed to settle
+        // before this process exits.
+        execFn: trackingExec,
+        timeoutMs:
+          opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
+        maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
+        repeat,
+      });
+    } catch (err) {
+      if (!(err instanceof VerifyUsageError)) throw err;
+      const { envelope, exitCode } = buildEnvelope({
+        version: VERSION,
+        command: "verify",
+        status: "usage_error",
+        durationMs: Date.now() - start,
+        cwd: global.cwd,
+        warnings: [],
+        logs: [],
+        extra: { reason: err.reason, message: err.message },
+        maxChars: global.maxChars,
+        logDir: global.logDir,
+      });
+      emit(envelope, exitCode, {
+        format: global.format,
+        maxChars: global.maxChars,
+      });
+      return;
+    }
 
     // The log path this writes is appended to `logs` BEFORE buildEnvelope
     // runs, so it lands in the envelope's own `logs` field (buildEnvelope
@@ -1344,7 +1377,7 @@ function renderVerifyText(
   lines.push("checks:");
   for (const check of result.checks) {
     lines.push(
-      `  [${check.status}] ${check.name}${check.command ? ` (${check.command})` : ""} - ${check.durationMs}ms`,
+      `  [${check.status}] ${check.name} [${check.source}]${check.command ? ` (${check.command})` : ""} - ${check.durationMs}ms`,
     );
     for (const failure of check.failures) {
       const where = [failure.file, failure.line].filter(Boolean).join(":");

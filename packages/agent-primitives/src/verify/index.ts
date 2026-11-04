@@ -5,6 +5,10 @@ import { combinedOutput, execCommand } from "../exec.js";
 import type { ExecResult } from "../exec.js";
 import { truncationNote, nonZeroPassWarning } from "../pass-regex.js";
 import { UsageError } from "../envelope.js";
+import { CHECK_NAME_PATTERN } from "../check-names.js";
+import { containmentRoot } from "../probe/containment.js";
+import type { DefaultsFileVerify } from "../probe/defaults-file.js";
+import { readDefaultsFile } from "../probe/defaults-file.js";
 import { genericDetector } from "./detectors/generic.js";
 import { vitestDetector } from "./detectors/vitest.js";
 import { tscDetector } from "./detectors/tsc.js";
@@ -17,6 +21,7 @@ import { phpstanDetector } from "./detectors/phpstan.js";
 import { phpcsDetector } from "./detectors/phpcs.js";
 import type {
   CheckResult,
+  CheckSource,
   CheckStatus,
   Detector,
   DetectorInput,
@@ -30,6 +35,7 @@ import type {
 
 export type {
   CheckResult,
+  CheckSource,
   CheckStatus,
   Detector,
   DetectorInput,
@@ -48,6 +54,26 @@ export { eslintDetector } from "./detectors/eslint.js";
 export { phpunitDetector } from "./detectors/phpunit.js";
 export { phpstanDetector } from "./detectors/phpstan.js";
 export { phpcsDetector } from "./detectors/phpcs.js";
+
+/**
+ * A `UsageError` carrying a machine-readable `reason` for the envelope
+ * (mirrors `PatchUsageError`/`InitFsUsageError`): `usage_error` for a bad
+ * check name (as the plain `UsageError` this class replaced reported
+ * through the top-level mapper), `defaults_file_invalid` /
+ * `empty_preset` / `defaults_file_not_readable` for a refused
+ * `.agent-primitives.json` repo preset. `verify()` throws it before
+ * anything runs; the `verify` action catches it and emits its own
+ * `status: "usage_error"` envelope naming `command: "verify"` and the
+ * reason, exit `2`.
+ */
+export class VerifyUsageError extends UsageError {
+  constructor(
+    message: string,
+    public readonly reason: string,
+  ) {
+    super(message);
+  }
+}
 
 /** Default check order, matching the CI convention: build before
  * typecheck (a suite that executes built output needs the build first). */
@@ -88,13 +114,9 @@ export const DEFAULT_MAX_FAILURES = 20;
 export const DEFAULT_REPEAT = 1;
 export const MAX_REPEAT = 100;
 
-/** A check name reaches `npm run <name> --silent` (and a log file name)
- * unquoted; this is the conservative allowlist every resolved name (plain
- * `-c` names, the derived names of implicit `-x` checks, and `-x` keys)
- * must match before any command is built. An `-x` key outside it is a usage
- * error; a `-c` item outside it is not a name at all and becomes an
- * implicit `-x` under a derived name (it executes as a shell command). */
-const CHECK_NAME_PATTERN = /^[A-Za-z0-9_.:-]+$/;
+// `CHECK_NAME_PATTERN`, the allowlist every resolved check name must match,
+// is imported above from `src/check-names.ts`, the module that keeps it
+// shared with the `.agent-primitives.json` preset loader.
 
 /** Derives a valid check name from an arbitrary raw string (the implicit
  * `-x` check a command `-c` item is converted into, and the canonical
@@ -324,23 +346,64 @@ function readScripts(cwd: string): Record<string, string> | undefined {
 interface Resolution {
   command: string | undefined;
   skipped: boolean;
+  source: CheckSource;
+  /** The npm script a repo preset entry asked for that `package.json` does
+   * not have; named in the `no_script` warning so a reader can tell a
+   * preset entry from a plain `-c` name that simply has no script. */
+  presetScript?: string;
 }
 
-/** Resolution per name: `-x` (overrides) wins; else `package.json`
- * `scripts[name]` runs as `npm run <name> --silent`; a name with neither
- * resolves to a `no_script` skipped result. */
+/** Resolution per name: `-x` (overrides) wins; else a repo preset entry
+ * runs the SCRIPT that entry names as `npm run <script> --silent` (its own
+ * script missing from `package.json` is `no_script`: a preset never falls
+ * back to the script of the check's own name, and never supplies a
+ * command); else `package.json` `scripts[name]` runs as
+ * `npm run <name> --silent`; a name with none of these resolves to a
+ * `no_script` skipped result. */
 function resolveCommand(
   name: string,
   overrides: Record<string, string>,
   scripts: Record<string, string> | undefined,
+  preset?: DefaultsFileVerify,
 ): Resolution {
   if (Object.prototype.hasOwnProperty.call(overrides, name)) {
-    return { command: overrides[name], skipped: false };
+    return { command: overrides[name], skipped: false, source: "exec" };
+  }
+  if (preset && Object.prototype.hasOwnProperty.call(preset.checks, name)) {
+    const script = preset.checks[name];
+    if (scripts && Object.prototype.hasOwnProperty.call(scripts, script)) {
+      return {
+        command: `npm run ${script} --silent`,
+        skipped: false,
+        source: "preset",
+      };
+    }
+    return {
+      command: undefined,
+      skipped: true,
+      source: "preset",
+      presetScript: script,
+    };
   }
   if (scripts && Object.prototype.hasOwnProperty.call(scripts, name)) {
-    return { command: `npm run ${name} --silent`, skipped: false };
+    return {
+      command: `npm run ${name} --silent`,
+      skipped: false,
+      source: "script",
+    };
   }
-  return { command: undefined, skipped: true };
+  return { command: undefined, skipped: true, source: "none" };
+}
+
+/** The run list a repo preset states on its own (no `-c`): `order` first,
+ * then every `checks` key it left out in the file's own object order. */
+function presetRunList(preset: DefaultsFileVerify): string[] {
+  return [
+    ...preset.order,
+    ...Object.keys(preset.checks).filter(
+      (name) => !preset.order.includes(name),
+    ),
+  ];
 }
 
 /** Looks up a check's `--pass-regex` in the map built from `-x`-style
@@ -539,6 +602,7 @@ function mergeRuns(
 async function runCheck(
   name: string,
   command: string,
+  source: CheckSource,
   ctx: CheckRunContext,
 ): Promise<CheckOutcome> {
   const { options, maxFailures, repeat } = ctx;
@@ -561,6 +625,7 @@ async function runCheck(
     const outcome = await runOnce(
       name,
       command,
+      source,
       ctx,
       // One log file per run once a check repeats (exec.ts opens a log
       // file in append mode, so two runs writing one name would
@@ -628,6 +693,7 @@ async function runCheck(
 async function runOnce(
   name: string,
   command: string,
+  source: CheckSource,
   ctx: CheckRunContext,
   logFileName: string,
 ): Promise<RunOutcome> {
@@ -657,6 +723,7 @@ async function runOnce(
     const errorResult: CheckResult = {
       name,
       command,
+      source,
       status: "error",
       exitCode: null,
       durationMs: 0,
@@ -704,6 +771,7 @@ async function runOnce(
     const abortedResult: CheckResult = {
       name,
       command,
+      source,
       status: "error",
       exitCode: execResult.exitCode,
       durationMs: execResult.durationMs,
@@ -962,6 +1030,7 @@ async function runOnce(
   const fullResult: CheckResult = {
     name,
     command,
+    source,
     status,
     exitCode: execResult.exitCode,
     durationMs: execResult.durationMs,
@@ -987,6 +1056,15 @@ async function runOnce(
  * `hint:` prefix lets a caller tell it from a result warning. */
 export const XOVERRIDE_WITHOUT_CHECKS_HINT = `hint: -x given without -c: the default check list (${DEFAULT_CHECKS.join(",")}) still runs; pass -c <names> to choose the run set`;
 
+/** The same hint when a repo preset supplied the run list: the built-in
+ * names would be false there (it is the preset's list that runs), so the
+ * preset's own names in the preset's own run order are named instead. The
+ * suffix is shared with the built-in wording so a reader who knows one
+ * recognises the other. */
+function presetXOverrideWithoutChecksHint(names: string[]): string {
+  return `hint: -x given without -c: the repo preset check list (${names.join(",")}) still runs; pass -c <names> to choose the run set`;
+}
+
 /**
  * Runs the configured checks in order (build, typecheck, lint, test by
  * default) through exec.ts, one at a time, selecting a detector per check
@@ -1006,7 +1084,24 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const start = Date.now();
   const explicitOverrides = options.overrides ?? {};
   const passRegexes = options.passRegexes ?? {};
-  const requestedItems = options.checks ?? DEFAULT_CHECKS;
+  // The repo preset (`.agent-primitives.json`'s `verify` section) is read at
+  // the repository root -- the git work-tree root, or `cwd` outside a
+  // repository, exactly probe's own containment root -- while `package.json`
+  // keeps being read at `cwd`: in a monorepo the file therefore lives once
+  // at the root and its script names are looked up in the package the run
+  // was pointed at. A refused file stops the run before anything is
+  // resolved or spawned.
+  const defaultsFile = readDefaultsFile(containmentRoot(options.cwd));
+  if (!defaultsFile.ok) {
+    throw new VerifyUsageError(defaultsFile.message, defaultsFile.reason);
+  }
+  const preset = defaultsFile.verify;
+  // Without `-c` the preset's own list is the run list (its keys, in its
+  // order), not the built-in one; with `-c` the preset only supplies
+  // commands, and each `-c` name resolves against preset and package.json
+  // alike.
+  const requestedItems =
+    options.checks ?? (preset ? presetRunList(preset) : DEFAULT_CHECKS);
 
   // A `-c` item that is not a valid check name is accepted as an implicit
   // `-x`: the item itself becomes that check's command (merged into
@@ -1040,8 +1135,9 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     // stays a usage error, never an implicit check that runs nothing and
     // passes (the CLI already drops such items; API callers do not).
     if (item.trim() === "") {
-      throw new UsageError(
+      throw new VerifyUsageError(
         `verify: invalid check name "${item}" (must match ${CHECK_NAME_PATTERN})`,
+        "usage_error",
       );
     }
     if (seenImplicitItems.has(item)) continue;
@@ -1079,8 +1175,9 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   // matches.
   for (const name of requestedAndOverrideNames) {
     if (!CHECK_NAME_PATTERN.test(name)) {
-      throw new UsageError(
+      throw new VerifyUsageError(
         `verify: invalid check name "${name}" (must match ${CHECK_NAME_PATTERN})`,
+        "usage_error",
       );
     }
   }
@@ -1092,8 +1189,9 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   // any command is built, exactly like an invalid check name above.
   for (const name of Object.keys(passRegexes)) {
     if (!requestedAndOverrideNames.includes(name)) {
-      throw new UsageError(
-        `verify: --pass-regex names check "${name}", which is not requested (via -c/the default list) and not overridden via -x, so it would never run`,
+      throw new VerifyUsageError(
+        `verify: --pass-regex names check "${name}", which is not requested (via -c/the repo preset/the default list) and not overridden via -x, so it would never run`,
+        "usage_error",
       );
     }
   }
@@ -1102,15 +1200,17 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
 
   const maxFailures = options.maxFailures ?? DEFAULT_MAX_FAILURES;
   if (!Number.isInteger(maxFailures) || maxFailures < 1) {
-    throw new UsageError(
+    throw new VerifyUsageError(
       `verify: maxFailures must be a positive integer (got ${maxFailures})`,
+      "usage_error",
     );
   }
 
   const repeat = options.repeat ?? DEFAULT_REPEAT;
   if (!Number.isInteger(repeat) || repeat < 1 || repeat > MAX_REPEAT) {
-    throw new UsageError(
+    throw new VerifyUsageError(
       `verify: repeat must be an integer between 1 and ${MAX_REPEAT} (got ${repeat})`,
+      "usage_error",
     );
   }
 
@@ -1127,16 +1227,22 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const scripts = readScripts(options.cwd);
   const warnings: string[] = [];
   warnings.push(...implicitWarnings);
-  // `-x` alone adds its check to the default list instead of replacing it:
-  // a caller who wrote `-x name=cmd` to run just that command otherwise
-  // finds build, typecheck, lint and test running (and skipped as
-  // `no_script`) beside it. Said once, in the warnings, when the default
-  // list is in effect and at least one `-x` was given.
+  // `-x` alone adds its check to the run list instead of replacing it: a
+  // caller who wrote `-x name=cmd` to run just that command otherwise finds
+  // the whole default list (or, with a repo preset, the whole preset list)
+  // running (and skipped as `no_script`) beside it. Said once, in the
+  // warnings, when no `-c` was given and at least one `-x` was; the list it
+  // names is the one that actually runs, so the preset's own names go into
+  // the preset wording.
   if (
     options.checks === undefined &&
     Object.keys(explicitOverrides).length > 0
   ) {
-    warnings.push(XOVERRIDE_WITHOUT_CHECKS_HINT);
+    warnings.push(
+      preset
+        ? presetXOverrideWithoutChecksHint(presetRunList(preset))
+        : XOVERRIDE_WITHOUT_CHECKS_HINT,
+    );
   }
   const namesNeedingScripts = names.some(
     (name) => !Object.prototype.hasOwnProperty.call(overrides, name),
@@ -1181,11 +1287,12 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       notStarted = names.slice(index);
       break;
     }
-    const resolved = resolveCommand(name, overrides, scripts);
+    const resolved = resolveCommand(name, overrides, scripts, preset);
 
     if (resolved.skipped || resolved.command === undefined) {
       const skippedResult: CheckResult = {
         name,
+        source: resolved.source,
         status: "skipped",
         reason: "no_script",
         exitCode: null,
@@ -1211,7 +1318,9 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
         );
       }
       warnings.push(
-        `${name}: no_script: no -x override or matching package.json script; pass -c with the checks this repo has`,
+        resolved.presetScript !== undefined
+          ? `${name}: no_script: the repo preset maps this check to the npm script "${resolved.presetScript}", which package.json does not define, and no -x override was given`
+          : `${name}: no_script: no -x override or matching package.json script; pass -c with the checks this repo has`,
       );
       // Keep resolving later names: the omission is a non-pass, but
       // --fail-fast does not make other requested checks disappear from the
@@ -1219,7 +1328,12 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       continue;
     }
 
-    const outcome = await runCheck(name, resolved.command, ctx);
+    const outcome = await runCheck(
+      name,
+      resolved.command,
+      resolved.source,
+      ctx,
+    );
     checks.push(outcome.result);
     fullChecks.push(outcome.fullResult);
     logs.push(...outcome.logs);

@@ -1,7 +1,8 @@
 # `verify`
 
 Runs a fixed set of named checks (`build`, `typecheck`, `lint`, `test` by
-default) and reports a compact, bounded summary instead of raw tool output.
+default, or a repository `.agent-primitives.json` preset when there is one)
+and reports a compact, bounded summary instead of raw tool output.
 Part of the [agent-primitives](../README.md) CLI.
 
 ```bash
@@ -13,7 +14,9 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
 - `-c, --checks <list>`: comma-separated check names, in run order
   (default `build,typecheck,lint,test`, deduplicated preserving the first
   occurrence; build before typecheck, matching the CI convention of
-  building before typechecking against built output). An item that is
+  building before typechecking against built output). When the repository
+  carries a `verify` preset and `-c` is absent, the preset's own list is
+  the default instead (see "Repo preset" below). An item that is
   not a valid check name is accepted as an implicit `-x`: the item runs
   as the check's command under a derived name, with a warning naming the
   canonical `-c <name> -x '<name>=<command>'` form (see below). Such an
@@ -86,7 +89,9 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
   trailing `=` in `--pass-regex name=`) is rejected as a usage error too,
   since `new RegExp("", "m")` matches any output and would silently turn
   the check into an unconditional pass. No config-file
-  (`.agent-primitives.json`) home for this predicate yet.
+  (`.agent-primitives.json`) home for this predicate yet: the file's
+  `verify` section presets which checks run and which script each one
+  names (see "Repo preset" below), never a predicate.
 
 Every resolved check name, from `-c` and from `-x` alike, is validated
 against a conservative pattern (letters, digits, `_`, `.`, `:`, `-`) before
@@ -127,18 +132,105 @@ How a `-c` item resolves:
 - Identical command items collapse to one check, the same way a
   duplicated `-c` name does.
 
-`-x` alone does not replace the default list: `verify -x name=cmd` runs
+## Repo preset
+
+`.agent-primitives.json` may carry a `verify` section that says which
+checks this repository runs and which npm script satisfies each one, so a
+clone needs no `-c`/`-x` incantation. It is the same file `probe` reads for
+its `link` list (see [probe.md](probe.md), "Repo defaults file"), and it is
+read the same way and by the same loader: **the whole file is validated
+once, for every consumer**. An invalid `verify` therefore also refuses a
+`probe` run in that repository, and an invalid `link` (or an unknown key,
+or an unreadable file) also refuses `verify`. And because that validation
+is fail-closed on unknown keys, an older `probe` refuses a file carrying
+`verify` outright instead of ignoring the key: that is the design, not a
+bug.
+
+```json
+{
+  "verify": {
+    "checks": { "build": "compile", "lint": "lint:ci", "test": "test:ci" },
+    "order": ["build"]
+  }
+}
+```
+
+`checks` maps a check name to the npm SCRIPT that satisfies it, `order`
+(optionally) lists the subset of those names to run first; the rest follow
+in the file's own key order. A preset never adds a command, only a script
+name, and that is its trust story: a script name is exactly as trusted as
+the `package.json` `scripts` entry it points at, and it is checked against
+the same conservative allowlist, so it cannot carry a shell metacharacter,
+and it cannot start with `-`, so it can never reach npm as a flag
+(`--workspaces` would silently change what every script in the run means).
+Commands stay where they always were: in `-x`, given by the caller who runs
+the command, not in a file inside the repository.
+
+The file is read at the repository root -- the git work-tree root, or the
+invocation cwd outside a repository, exactly `probe`'s own containment root
+-- while `package.json` is still read at the invocation cwd. In a monorepo
+that means one file at the root whose script names are looked up in the
+package `-C` pointed at.
+
+Precedence, and what runs:
+
+| Input                | What runs                                                                                                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| file alone (no `-c`) | the preset's own list (`order`, then the remaining keys in file order), NOT the built-in list; every check resolves to its preset script                                                                                               |
+| `-c` alone (no file) | unchanged: the `-c` names, each resolved against `package.json`                                                                                                                                                                        |
+| file + `-c`          | the `-c` order selects from the union of the preset names and the built-ins; a selected preset name still runs its preset script                                                                                                       |
+| file + `-x`          | the run list is the preset list; `-x` wins for the check it names, the other preset entries resolve as usual                                                                                                                           |
+| file + `-c` + `-x`   | `-c` gives the order, the preset gives the script, `-x` wins wherever it speaks (an implicit `-x` from a command `-c` item counts as `-x`)                                                                                             |
+| `verify` key absent  | the built-in list, exactly as before this option existed                                                                                                                                                                               |
+| `checks` empty       | nothing runs: `status: "usage_error"`, `reason: "empty_preset"`, exit `2`                                                                                                                                                              |
+| file absent          | unchanged: the built-in list                                                                                                                                                                                                           |
+| invalid file         | nothing runs: `status: "usage_error"`, `reason: "defaults_file_invalid"` (or `defaults_file_not_readable` for a directory, an unreadable file or one over the 64 KiB cap), exit `2`, the message naming the path and the offending key |
+
+A preset key must be a check name, must not look like an integer (a JSON
+object reorders such keys, so the file's own order could not be honoured)
+and must not be `__proto__`; a preset value must be a non-empty string
+naming a script; `order`, when present, must be an array of distinct names
+taken from `checks`; and `checks` and `order` are the only keys the section
+takes, so a key beside them (an `oder`, a typo for `order`) is refused the
+way an unknown top-level key is, its message naming the full path
+(`verify.oder`) rather than being read as a key that was not given. Any of
+those refused is `defaults_file_invalid` naming the key, before anything is
+spawned. A preset entry whose script `package.json` does not define is that
+check's ordinary `no_script` non-pass, and its warning names the preset
+entry (`<name>: no_script: the repo preset maps this check to the npm
+script "<script>", which package.json does not define, and no -x override
+was given`); a preset never falls back to the script of the check's own
+name.
+
+Every `CheckResult` carries `source` saying where its command came from:
+`exec` (an explicit or implicit `-x`), `preset` (the repo preset's script),
+`script` (the `package.json` fallback on the check's own name) or `none`
+(the `no_script` skip). The text renderer shows it on each per-check line
+(`  [pass] build [preset] (npm run compile --silent) - 120ms`) and the JSON
+envelope carries it per check, so a reader can tell a preset's script from
+a `-x` command without recomputing the precedence.
+
+## Check resolution
+
+`-x` alone does not replace the run list: `verify -x name=cmd` runs
 `build`, `typecheck`, `lint` and `test` as well as `name`, and each default
-check without a script or `-x` override is a `no_script` non-pass. When at least one `-x` is
-given and `-c` is not, the `warnings` carry
-`hint: -x given without -c: the default check list (build,typecheck,lint,test) still runs; pass -c <names> to choose the run set`.
+check without a script or `-x` override is a `no_script` non-pass. With a
+repo preset and no `-c` the same is true of the preset's own list: it runs
+beside `name` (the `file + -x` row above), not the built-in list. When at
+least one `-x` is given and `-c` is not, the `warnings` carry a hint naming
+the list that still runs: without a preset
+`hint: -x given without -c: the default check list (build,typecheck,lint,test) still runs; pass -c <names> to choose the run set`,
+with one
+`hint: -x given without -c: the repo preset check list (<names in run order>) still runs; pass -c <names> to choose the run set`.
 Giving `-c` (even an empty list) or giving no `-x` leaves it out.
 
-Check resolution, per name: an `-x` override wins; otherwise a matching
-`package.json` `scripts[name]` runs as `npm run <name> --silent`; a requested
-name with neither is recorded as `status: "skipped", reason: "no_script"`,
-with a warning naming the missing script and the remedy (`pass -c with the
-checks this repo has`). It is an explicit non-pass: the
+Check resolution, per name: an `-x` override wins; then a repo preset entry
+runs the script it names; otherwise a matching `package.json`
+`scripts[name]` runs as `npm run <name> --silent`; a requested name with
+none of these is recorded as `status: "skipped", reason: "no_script"`,
+with a warning naming the missing script and, when no preset entry
+named it, the remedy (`pass -c with the checks this repo has`). It is an
+explicit non-pass: the
 overall result is `status: "error"`, exit `2`, even when other requested
 checks pass. Supply the command deliberately with `-x name=command` when
 that is intended. When the resolved check list is empty (e.g. `-c ''`), or
