@@ -5,6 +5,22 @@ export interface RemovedIdentifier {
   kind: RemovedIdentifierKind;
   file: string;
   line: number;
+  /**
+   * The removed line carried an `export` keyword (after any indentation).
+   * `false` for a config key, whose file format has no such keyword, and
+   * for a kind `"file"` candidate (a deleted file's basename), which has no
+   * declaration line to read it from.
+   */
+  exported: boolean;
+  /**
+   * The removed line was indented (leading whitespace). In a source file a
+   * top-level declaration sits at column 0, so an indented one is bound
+   * inside an enclosing scope: a function body, a method, a block. Read
+   * literally for a config key too, where indentation is nesting rather
+   * than scope (a top-level JSON key is indented), and `false` for a kind
+   * `"file"` candidate, which has no line to measure.
+   */
+  indented: boolean;
 }
 
 export interface ParsedDiff {
@@ -36,9 +52,14 @@ export interface ParsedDiff {
  * name bound to it by destructuring). `abstract` and `async` are accepted
  * ahead of any keyword (not only their usual `class`/`function` pairing)
  * since this is a permissive line-shape match, not a grammar check.
+ *
+ * Two facts about the line's shape are captured, not just the name: the
+ * indentation (empty for a top-level declaration) and the `export`
+ * keyword. They are what `drift()`'s local-binding rule keys off, and they
+ * are reported on every declaration candidate (see `RemovedIdentifier`).
  */
 const DECL_RE =
-  /^\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:type|interface|class|function\*?|enum|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/;
+  /^(?<indent>\s*)(?<exported>export\s+)?(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:type|interface|class|function\*?|enum|const|let|var)\s+(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\b/;
 
 /** A JSON object's top-level key: `"name":` indented by at most two
  * spaces. Cheap and documented as such: it has no notion of nesting
@@ -85,25 +106,54 @@ function looksLikeIdentifier(basename: string): boolean {
  * file it belongs to: a TS/JS declaration for a source extension, a
  * top-level config key for `.json`/`.yml`/`.yaml`. Every other extension
  * (Markdown, plain text, ...) never contributes a removed identifier -
- * only a declaration's own file can remove one. */
+ * only a declaration's own file can remove one. The line's shape (exported,
+ * indented) travels with the name; see `RemovedIdentifier`. */
 function extractIdentifier(
   line: string,
   filePath: string,
-): { name: string; kind: RemovedIdentifierKind } | undefined {
+):
+  | {
+      name: string;
+      kind: RemovedIdentifierKind;
+      exported: boolean;
+      indented: boolean;
+    }
+  | undefined {
   const ext = extOf(filePath);
   if (SOURCE_EXTENSIONS.has(ext)) {
     const m = DECL_RE.exec(line);
-    return m ? { name: m[1], kind: "declaration" } : undefined;
+    if (m === null) return undefined;
+    const groups = m.groups ?? {};
+    return {
+      name: groups["name"] ?? "",
+      kind: "declaration",
+      exported: groups["exported"] !== undefined,
+      indented: (groups["indent"] ?? "").length > 0,
+    };
   }
   if (ext === "json") {
     const m = JSON_TOP_KEY_RE.exec(line);
-    return m ? { name: m[1], kind: "config_key" } : undefined;
+    return m
+      ? {
+          name: m[1] ?? "",
+          kind: "config_key",
+          exported: false,
+          indented: /^\s/.test(line),
+        }
+      : undefined;
   }
   if (ext === "yml" || ext === "yaml") {
     const trimmed = line.trimStart();
     if (trimmed.startsWith("-") || trimmed.startsWith("#")) return undefined;
     const m = YAML_TOP_KEY_RE.exec(line);
-    return m ? { name: m[1], kind: "config_key" } : undefined;
+    return m
+      ? {
+          name: m[1] ?? "",
+          kind: "config_key",
+          exported: false,
+          indented: /^\s/.test(line),
+        }
+      : undefined;
   }
   return undefined;
 }
@@ -234,6 +284,8 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
             kind: found.kind,
             file: filePath,
             line: oldLine,
+            exported: found.exported,
+            indented: found.indented,
           });
         }
       }
@@ -258,7 +310,17 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
     const base = basenameNoExt(path);
     if (addedFileBasenames.has(base)) continue;
     if (SOURCE_EXTENSIONS.has(extOf(path)) && looksLikeIdentifier(base)) {
-      removedCandidates.push({ name: base, kind: "file", file: path, line: 1 });
+      // A deleted file has no declaration line, so neither shape fact can
+      // be read: both are false, which keeps the local-binding rule (an
+      // indented, non-exported declaration only) away from it.
+      removedCandidates.push({
+        name: base,
+        kind: "file",
+        file: path,
+        line: 1,
+        exported: false,
+        indented: false,
+      });
     } else {
       skippedFileBasenames.push({ path, basename: base });
     }
