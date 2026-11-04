@@ -1681,6 +1681,37 @@ async function signalAfterExecCall(
 }
 
 describe("probePlan(): a stopped run never starts the next mutant (I5)", () => {
+  it("ends the plan aborted when the signal handler is already handling a signal by the time a mutant turns out not to be applicable", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(target, "utf8");
+    vi.mocked(computeMutant).mockClear();
+
+    // Call 1 is the baseline: it passes, and the signal lands right after
+    // it. The first mutant replaces line 2 with itself, so it is refused
+    // before anything is applied, for a reason that is not `aborted`.
+    const { result, calls } = await signalAfterExecCall(1, () =>
+      probePlan(
+        planOptions(repo, [
+          replaceMutant(2, "  return n > 0;"),
+          replaceMutant(5, "  return true;"),
+        ]),
+      ),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    expect(result.results.map((r) => [r.status, r.reason])).toEqual([
+      ["inconclusive", "mutant_not_applicable"],
+      ["not_run", undefined],
+    ]);
+    expect(vi.mocked(computeMutant)).toHaveBeenCalledTimes(1);
+    expect(calls).toBe(1);
+    expect(fs.readFileSync(target, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+  }, 30000);
+
   it("ends the plan aborted when the signal handler is already handling a signal after a mutant whose own outcome was not aborted", async () => {
     useLockDir();
     const { repo } = initRepo();
