@@ -23,27 +23,75 @@
 // tildes counts as a fence indented too far.
 
 // Within text, what markdown-it reads before a comment can start: backslash
-// escapes and code spans (a run of backticks closed by a run of the same
-// length), then the comment itself. Used to remove comments from text that
-// markdown-it keeps as raw source: the heading text the permalink label is
-// built from, link titles, container titles, and comment lines.
-const OUTSIDE_CODE = /\\[!-\/:-@[-`{-~]|(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)|`+|<!--/g
+// escapes and code spans (a run of backticks closed by a later run of exactly
+// the same length), then the comment itself. Used to remove comments from text
+// that markdown-it keeps as raw source: the heading text the permalink label
+// is built from, link titles, container titles, and comment lines.
+//
+// One expression finds the things a scan steps over: an escape, a run of
+// backticks (taken whole, from where the scan stands), or an opener. Whether a
+// run opens a code span is not asked of the expression. The runs of the text
+// are listed once, each by the length it has in the text, and a run of length
+// n closes the first run of length n that starts at or after the opener's end
+// (a run always ends before a character that is not a backtick, so a closer
+// is a whole run, never a part of a longer one). A run with no closer is bare
+// backticks. Looking a closer up in the list takes a binary search, so the
+// scan costs the same whatever the number of runs that never close.
+const STEPS = /\\[!-\/:-@[-`{-~]|`+|<!--/g
+
+// The backtick runs of `text`, by length: for each length, the start of every
+// run of that length in source order.
+function backtickRuns(text) {
+  const runs = new Map()
+  for (let i = 0; i < text.length; ) {
+    if (text.charCodeAt(i) !== 96) {
+      i++
+      continue
+    }
+    const start = i
+    while (text.charCodeAt(i) === 96) i++
+    const starts = runs.get(i - start)
+    if (starts) starts.push(start)
+    else runs.set(i - start, [start])
+  }
+  return runs
+}
+
+// The start of the first run in `starts` (ascending) at or after `from`, or -1.
+function runAtOrAfter(starts, from) {
+  let lo = 0
+  let hi = starts.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (starts[mid] < from) lo = mid + 1
+    else hi = mid
+  }
+  return lo < starts.length ? starts[lo] : -1
+}
 
 // A comment runs from its opener to the first "-->" after the opener's four
-// characters. The opener is matched on its own and its closer looked up with
-// indexOf, so an opener with no closer ends the search at once instead of
-// being scanned to the end of the text again for each one that follows.
+// characters. The closer is looked up with indexOf, so an opener with no
+// closer ends the search at once instead of being scanned to the end of the
+// text again for each one that follows.
 export function stripComments(text) {
   if (!text.includes('<!--')) return text
-  const re = new RegExp(OUTSIDE_CODE.source, 'g')
+  const re = new RegExp(STEPS.source, 'g')
+  let runs = null
   let out = ''
   let from = 0
   for (let m = re.exec(text); m; m = re.exec(text)) {
-    if (m[0] !== '<!--') continue
-    const close = text.indexOf('-->', m.index + 4)
-    if (close === -1) break
-    out += text.slice(from, m.index)
-    from = re.lastIndex = close + 3
+    if (m[0] === '<!--') {
+      const close = text.indexOf('-->', m.index + 4)
+      if (close === -1) break
+      out += text.slice(from, m.index)
+      from = re.lastIndex = close + 3
+    } else if (m[0][0] === '`') {
+      runs ??= backtickRuns(text)
+      const starts = runs.get(m[0].length)
+      const end = m.index + m[0].length
+      const closer = starts ? runAtOrAfter(starts, end) : -1
+      if (closer !== -1) re.lastIndex = closer + m[0].length
+    }
   }
   return out + text.slice(from)
 }

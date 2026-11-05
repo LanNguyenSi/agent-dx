@@ -479,6 +479,192 @@ test('the closer search of a paragraph of unclosed openers runs once, not once p
   assert.ok(searches <= 10, `the render searched ${searches} times for -->`)
 })
 
+// Counts the work a function does on strings instead of timing it, so a check
+// does not depend on how busy the machine is. Every method the scan could use
+// to read a string is wrapped for the length of the call, and a call is
+// charged what it can read: one for charAt, charCodeAt and codePointAt; the
+// returned length plus one for slice, substring and substr; the span from the
+// position argument to the end of the match, or to the end of the text when
+// nothing matches, plus one, for indexOf, lastIndexOf, includes, startsWith,
+// endsWith, and for exec and test on a global or sticky expression; and the
+// length of the receiver for search, match, matchAll, split, replace,
+// replaceAll and the other calls. A method that another one calls inside
+// (test calls exec, replace calls exec) is charged once, by the outer call.
+function countWork(fn) {
+  let work = 0
+  let busy = false
+  const saved = []
+  const charge = (n) => {
+    work += n
+  }
+  const wrap = (proto, name, cost) => {
+    const original = proto[name]
+    saved.push([proto, name, original])
+    proto[name] = function (...args) {
+      if (busy) return original.apply(this, args)
+      busy = true
+      try {
+        const result = original.apply(this, args)
+        charge(cost(this, args, result))
+        return result
+      } finally {
+        busy = false
+      }
+    }
+  }
+  const whole = (self) => String(self).length
+  const span = (self, args, result, matchLength) => {
+    const text = String(self)
+    const from = Math.min(Math.max(Number(args[1]) || 0, 0), text.length)
+    const end = result === -1 || result === false ? text.length : result + matchLength
+    return Math.max(end - from, 0) + 1
+  }
+  try {
+    // exec and test start at lastIndex, which the call moves, so the start is
+    // read before the call.
+    for (const name of ['exec', 'test']) {
+      const original = RegExp.prototype[name]
+      saved.push([RegExp.prototype, name, original])
+      RegExp.prototype[name] = function (subject) {
+        if (busy) return original.call(this, subject)
+        busy = true
+        const text = String(subject)
+        const start = this.global || this.sticky ? this.lastIndex : 0
+        try {
+          const result = original.call(this, subject)
+          const end = this.global || this.sticky ? (result ? this.lastIndex : text.length) : text.length
+          charge(Math.max(end - start, 0) + 1)
+          return result
+        } finally {
+          busy = false
+        }
+      }
+    }
+    for (const name of ['indexOf', 'includes']) wrap(String.prototype, name, (self, args, result) => span(self, args, result, String(args[0]).length))
+    wrap(String.prototype, 'lastIndexOf', (self, args, result) => {
+      const text = String(self)
+      const from = args[1] === undefined ? text.length : Math.min(Math.max(Number(args[1]) || 0, 0), text.length)
+      return Math.max(from - (result === -1 ? 0 : result), 0) + 1
+    })
+    wrap(String.prototype, 'startsWith', (self, args) => String(args[0]).length + 1)
+    wrap(String.prototype, 'endsWith', (self, args) => String(args[0]).length + 1)
+    for (const name of ['slice', 'substring', 'substr']) wrap(String.prototype, name, (self, args, result) => result.length + 1)
+    for (const name of ['search', 'match', 'matchAll', 'split', 'replace', 'replaceAll']) wrap(String.prototype, name, whole)
+    for (const name of ['charAt', 'charCodeAt', 'codePointAt']) wrap(String.prototype, name, () => 1)
+    fn()
+  } finally {
+    for (const [proto, name, original] of saved.reverse()) proto[name] = original
+  }
+  return work
+}
+
+test('countWork charges what a scan reads, whichever method it reads with', () => {
+  const text = 'abc --> def'
+  const cases = [
+    [() => text.indexOf('-->', 1), 7],
+    [() => text.indexOf('zzz'), 12],
+    [() => text.includes('zzz'), 12],
+    [() => text.lastIndexOf('a'), 12],
+    [() => text.startsWith('abc'), 4],
+    [() => text.endsWith('def'), 4],
+    [() => text.slice(4), 8],
+    [() => text.substring(2, 5), 4],
+    [() => text.substr(2, 5), 6],
+    [() => text.search(/-->/), 11],
+    [() => text.match(/-->/), 11],
+    // The iterator is charged at the call, and each step it takes is an exec.
+    [() => [...text.matchAll(/-->/g)], 24],
+    [() => text.split('-->'), 11],
+    [() => text.replace(/-->/, ''), 11],
+    [() => text.replaceAll('-->', ''), 11],
+    [() => /-->/g.exec(text), 8],
+    [() => /zzz/g.test(text), 12],
+    [() => text.charCodeAt(2), 1],
+    [() => text.charAt(2), 1],
+    [() => text.codePointAt(2), 1]
+  ]
+  for (const [fn, expected] of cases) assert.equal(countWork(fn), expected, String(fn))
+  // The prototypes are whole again, also after a throw.
+  assert.throws(() => countWork(() => { throw new Error('boom') }), /boom/)
+  assert.equal(String.prototype.indexOf.name, 'indexOf')
+  assert.equal(RegExp.prototype.exec.name, 'exec')
+})
+
+// The expression that stripComments used before it kept a list of the
+// backtick runs: an escape, a code span (a run of backticks closed by a later
+// run of the same length, found lazily), bare backticks, or an opener.
+const OLD_OUTSIDE_CODE = /\\[!-\/:-@[-`{-~]|(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)|`+|<!--/g
+const oldStripComments = (text) => {
+  if (!text.includes('<!--')) return text
+  const re = new RegExp(OLD_OUTSIDE_CODE.source, 'g')
+  let out = ''
+  let from = 0
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m[0] !== '<!--') continue
+    const close = text.indexOf('-->', m.index + 4)
+    if (close === -1) break
+    out += text.slice(from, m.index)
+    from = re.lastIndex = close + 3
+  }
+  return out + text.slice(from)
+}
+
+// A fixed pseudo-random generator (mulberry32), so the generated inputs are the
+// same on every run.
+const seeded = (seed) => () => {
+  seed = (seed + 0x6d2b79f5) | 0
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+}
+
+test('stripComments gives the output of the expression it replaced, on fixed and generated text', () => {
+  const fixed = [
+    'a <!-- x --> b <!-- y --> c', 'a <!-- x --> b <!-- y', '<!--> x -->', '<!---->z', '<!---> x', '<!---> x --> y',
+    '`<!-- x -->` <!-- y -->', '\\<!-- x --> y', '<!-- a <!-- b --> c --> d', '`<!-- x` --> <!-- y',
+    'text line\n<!-- o\n'.repeat(5), '<!-- o `-->`\n'.repeat(5), 'a <!-- x --> b <!-- y --> c\n'.repeat(5),
+    '`<!-- x --> `` <!-- y\n'.repeat(5), '``<!-- a -->` b `` <!-- c -->', '\\`<!-- a --> ` <!-- b -->', '\\``<!-- a -->` x',
+    '```<!-- a -->`` <!-- b --> ```', '`` ` <!-- a --> `` <!-- b -->', '\\\\`<!-- a -->` <!-- b -->', '`a`<!-- b -->`c`',
+    '<!-- a ``` --> ```x <!-- b --> ``` y', '`', '``', '\\', '\\`', '', '<!--', '-->'
+  ]
+  for (const text of fixed) assert.equal(stripComments(text), oldStripComments(text), JSON.stringify(text))
+  // 3000 inputs of up to 64 characters from seed 0x5eed1234, from the
+  // alphabet backtick (three of eight pieces, so runs and spans are common),
+  // backslash, "<!--", "-->", "<", "-", ">", letters, space and newline.
+  const pieces = ['`', '`', '`', '\\', '<!--', '-->', '<', '-', '>', 'a', 'b', ' ', '\n']
+  const next = seeded(0x5eed1234)
+  let changed = 0
+  for (let n = 0; n < 3000; n++) {
+    let text = ''
+    const length = Math.floor(next() * 65)
+    while (text.length < length) text += pieces[Math.floor(next() * pieces.length)]
+    text = text.slice(0, length)
+    const expected = oldStripComments(text)
+    if (expected !== text) changed++
+    assert.equal(stripComments(text), expected, JSON.stringify(text))
+  }
+  assert.ok(changed > 300, `the generated text holds comments to remove: ${changed} of 3000`)
+})
+
+test('the work of stripComments on a paragraph of unclosed backtick runs grows with its length', () => {
+  // Runs of the lengths 1 to n with no later run of the same length, then one
+  // opener with its closer. Each run is the start of a code span that never
+  // closes, so a closer search that reads to the end of the text for each run
+  // makes the work per character grow with n. The count sees the calls on
+  // strings, not the steps inside one regular expression, so this pins the
+  // scan around the expression; the differential test above pins its result.
+  // The work per character measured here is about 3.1 at 60 runs and at 120
+  // runs, a ratio of 0.99; a bound of 1.5 leaves room for a constant change
+  // and fails a search that doubles the work per character when n doubles.
+  const text = (n) => Array.from({ length: n }, (_, i) => '`'.repeat(i + 1)).join(' ') + ' <!-- x -->'
+  const small = text(60)
+  const large = text(120)
+  assert.equal(stripComments(small), small.slice(0, -'<!-- x -->'.length))
+  const perChar = (src) => countWork(() => stripComments(src)) / src.length
+  const ratio = perChar(large) / perChar(small)
+  assert.ok(ratio < 1.5, `twice the runs took ${ratio.toFixed(2)} times the work per character`)
+})
+
 test('stripComments never rescans the text through exec or indexOf', (t) => {
   // The work of a scan is the span it reads, so linear total work means the
   // spans do not overlap: each search starts at or after where the previous
