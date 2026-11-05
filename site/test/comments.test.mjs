@@ -1141,75 +1141,110 @@ test('text rendered inline with blank lines finds the line of a closer relative 
 // block structure is not the subject here and is the same as without the
 // change under test; the fence lines are, because a refused opener leaves their
 // backticks in the text of the paragraph.
-test('a refused opener does not move the code spans around the fence lines it leaves in the text', () => {
+//
+// The paragraph's text is not rewritten, so markdown-it pairs those backticks
+// as it does without the comment rules, and every rendering below is the one
+// that the renderer without the change produced for the same page (the
+// expected HTML was computed from the code the change started from). Some of
+// them show the open case: the backtick on a fence line pairs with a later
+// backtick and the code span hides text, as in the first. Text written to
+// steer that pairing changed the output in autolinks, linkified URLs and
+// reference labels (see the test after the next one), so a rewrite of the
+// paragraph's text is the thing these pins catch.
+test('a refused opener leaves the backticks around the fence lines to markdown-it, as without the change', () => {
   const head = '1. <!-- a\nb --> z\n<!-- typo\n'
   const fence = (inner) => `    ~~~\n    ${inner}\n    ~~~\n`
+  const ol = '<ol>\n<li>z</li>\n</ol>\n'
   const deleted = '1. z\n<!-- typo\n10. item\n' + fence('` x --> y') + '`<!-- q` K -->\n'
   // The page as it would be without the closed comment shows the code span and
   // the text after it.
   assert.match(renderPlain(deleted), /<code>&lt;!-- q<\/code> K --&gt;/)
   const replay = head + '10. item\n' + fence('` x --> y') + '`<!-- q` K -->\n'
-  const out = render(replay)
-  // The code span, the text after it, the refused opener and the fence lines
-  // all stay; the backtick on the fence line pairs with nothing.
-  assert.equal(out, '<ol>\n<li>z</li>\n</ol>\n<p>&lt;!-- typo\n10. item\n~~~\n` x --&gt; y\n~~~\n<code>&lt;!-- q</code> K --&gt;</p>\n')
+  // The open case: the fence-line backtick pairs with the one after the fence,
+  // and the opener of the hidden comment `<!-- q` K -->` is in no code span, so
+  // the text after the pair is cut off at its first "-->".
+  assert.equal(render(replay), ol + '<p>&lt;!-- typo\n10. item\n~~~\n<code>x --&gt; y     ~~~</code></p>\n')
   assert.deepEqual(htmlTokens(replay), [])
   // The same when the code span that holds an opener starts on a later line
   // than the refused one and runs over a line break.
   assert.equal(
     render(head + fence('` x --> y') + '`<!-- q\nr` K -->\n'),
-    '<ol>\n<li>z</li>\n</ol>\n<p>&lt;!-- typo\n~~~\n` x --&gt; y\n~~~\n<code>&lt;!-- q r</code> K --&gt;</p>\n'
+    ol + '<p>&lt;!-- typo\n~~~\n<code>x --&gt; y     ~~~</code></p>\n'
   )
-  // A backtick that is escaped on the fence line stays the one character it
-  // was, and the lines around it are shown the same.
-  assert.equal(render(head + fence('\\` x --> y') + '`<!-- q` K -->\n'), render(head + fence('` x --> y') + '`<!-- q` K -->\n'))
-  // A fence line holding a run of backticks keeps the whole run as text.
+  // A backtick that is escaped on the fence line is text and pairs with
+  // nothing, so the code span after the fence is the one that stays.
+  assert.equal(
+    render(head + fence('\\` x --> y') + '`<!-- q` K -->\n'),
+    ol + '<p>&lt;!-- typo\n~~~\n` x --&gt; y\n~~~\n<code>&lt;!-- q</code> K --&gt;</p>\n'
+  )
+  // A fence line holding a run of three backticks, which no later run closes.
   assert.equal(
     render(head + fence('``` x --> y') + '`<!-- q` K -->\n'),
-    '<ol>\n<li>z</li>\n</ol>\n<p>&lt;!-- typo\n~~~\n``` x --&gt; y\n~~~\n<code>&lt;!-- q</code> K --&gt;</p>\n'
+    ol + '<p>&lt;!-- typo\n~~~\n``` x --&gt; y\n~~~\n<code>&lt;!-- q</code> K --&gt;</p>\n'
   )
 })
 
-test('a code span that crosses fence lines is the one markdown-it forms, and no backslash shows', () => {
-  // The span opens and closes on lines that are no fence lines, and holds fence
-  // lines with backtick runs of a length other than its own. They stay as they
-  // are in the span: a backslash there would show, and a run split into runs of
-  // one could close a span of one.
+test('a code span that crosses fence lines, or opens with no closer, is paired as without the change', () => {
   const head = '1. <!-- a\nb --> z\n<!-- typo '
+  const ol = '<ol>\n<li>z</li>\n</ol>\n'
+  // The span opens and closes on lines that are no fence lines, and holds fence
+  // lines with backtick runs of a length other than its own.
   const cases = [
     [head + '`` a\n    ~~~\n    x --> y ` w\n    ~~~\nb `` tail\n', 'a     ~~~     x --&gt; y ` w     ~~~ b'],
     [head + '`a\n    ~~~\n    x --> y `` w\n    ~~~\nb` tail\n', 'a     ~~~     x --&gt; y `` w     ~~~ b']
   ]
   for (const [src, code] of cases) {
     const out = render(src)
-    assert.equal(out, `<ol>\n<li>z</li>\n</ol>\n<p>&lt;!-- typo <code>${code}</code> tail</p>\n`, src)
+    assert.equal(out, `${ol}<p>&lt;!-- typo <code>${code}</code> tail</p>\n`, src)
     assert.ok(!out.includes('\\'), out)
   }
-  // An opener with no closer outside the fence lines, then a fence-line
-  // backtick of its own length: the opener is text, and so is the backtick. An
-  // escaped backtick would still close the span in markdown-it, so the opener
-  // is written escaped too, and no backslash shows.
-  const bare = head + '`a\n    ~~~\n    x --> ` y\n    ~~~\nb tail\n'
-  assert.equal(render(bare), '<ol>\n<li>z</li>\n</ol>\n<p>&lt;!-- typo `a\n~~~\nx --&gt; ` y\n~~~\nb tail</p>\n')
-  assert.deepEqual(htmlTokens(bare), [])
-  // The same when the opener is a run of two and the fence line holds two runs
-  // of one.
+  // An opener with no closer outside the fence lines: the fence-line backtick
+  // of its own length closes it, as markdown-it pairs them (the open case).
+  assert.equal(
+    render(head + '`a\n    ~~~\n    x --> ` y\n    ~~~\nb tail\n'),
+    ol + '<p>&lt;!-- typo <code>a     ~~~     x --&gt; </code> y\n~~~\nb tail</p>\n'
+  )
+  // A run of two and a fence line with two runs of one: nothing pairs.
   assert.equal(
     render(head + '``a\n    ~~~\n    x --> ` y `\n    ~~~\nb tail\n'),
-    '<ol>\n<li>z</li>\n</ol>\n<p>&lt;!-- typo ``a\n~~~\nx --&gt; ` y `\n~~~\nb tail</p>\n'
+    ol + '<p>&lt;!-- typo ``a\n~~~\nx --&gt; <code>y</code>\n~~~\nb tail</p>\n'
+  )
+})
+
+test('a backtick in an autolink, a linkified URL or a reference label is left as it is in a paragraph with a refused opener', () => {
+  // markdown-it does not read escapes inside these, so a backslash put in front
+  // of such a backtick would show in the link target and its text, and a
+  // reference label with one would no longer match its definition. The
+  // renderings are those without the change.
+  const head = '1. <!-- a\nb --> z\n'
+  const fence = '    ~~~\n    x --> y\n    ~~~\n'
+  const ol = '<ol>\n<li>z</li>\n</ol>\n'
+  const link = (href, text) => `<a href="${href}" target="_blank" rel="noreferrer">${text}</a>`
+  assert.equal(
+    render(head + '<!-- typo <http://x.com/a`b>\n' + fence),
+    ol + '<p>&lt;!-- typo ' + link('http://x.com/a%60b', 'http://x.com/a`b') + '\n~~~\nx --&gt; y\n~~~</p>\n'
+  )
+  assert.equal(
+    render(head + '<!-- typo see http://x.com/a`b c\n' + fence),
+    ol + '<p>&lt;!-- typo see ' + link('http://x.com/a%60b', 'http://x.com/a`b') + ' c\n~~~\nx --&gt; y\n~~~</p>\n'
+  )
+  assert.equal(
+    render('[a`b]: http://ex.com/r\n\n' + head + '<!-- typo see [a`b] here\n' + fence),
+    ol + '<p>&lt;!-- typo see ' + link('http://ex.com/r', 'a`b') + ' here\n~~~\nx --&gt; y\n~~~</p>\n'
   )
 })
 
 test('the work of a render with a refused opener and many fence lines stays within a constant per character', () => {
   // The opener's closer lies in the fence, and the fence lines reach the
-  // paragraph as text. A pass over the paragraph for each fence line that
-  // looks for a backtick, which finds none, reads the rest of the paragraph
+  // paragraph as text. A pass over the paragraph for each fence line, such as
+  // a search for a backtick that finds none, reads the rest of the paragraph
   // each time, so the work per character grows with the number of lines.
   // The count sees the string methods wrapped by countWork, which is where
   // that search reads. The count includes the rest of the render, which costs
-  // about 29.5 units per character here, at 1000 lines and at 2000. The bound
-  // of 45 leaves room for a constant change; a search for each fence line
-  // costs about 530 at 1000 lines and 1030 at 2000.
+  // about 26.5 units per character here, at 1000 lines and at 2000. The bound
+  // of 40 leaves room for a constant change; a search for a backtick from the
+  // start of each line, added to the rule as a probe, brings it to about 530
+  // at 1000 lines and 1030 at 2000.
   const page = (lines) => '1. <!-- a\nb --> z\n<!-- typo\n    ~~~\n' + '    plain line\n'.repeat(lines) + '    x --> y\n    ~~~\n'
   const perChar = (lines) => {
     const src = page(lines)
@@ -1223,14 +1258,14 @@ test('the work of a render with a refused opener and many fence lines stays with
   }
   const small = perChar(1000)
   const large = perChar(2000)
-  assert.ok(small <= 45 && large <= 45, `${small.toFixed(1)} and ${large.toFixed(1)} units of work per character`)
+  assert.ok(small <= 40 && large <= 40, `${small.toFixed(1)} and ${large.toFixed(1)} units of work per character`)
 })
 
 test('the work of a render with a refused opener and many openers that never close stays within a constant per character', () => {
   // The openers after the fence have no "-->" after them, so a search for each
   // one reads to the end of the paragraph. The count includes the rest of the
-  // render: about 48.6 units per character at 1000 lines and at 2000, and the
-  // bound is 75.
+  // render: about 44.5 units per character at 1000 lines and at 2000, and the
+  // bound is 67.
   const page = (lines) => '1. <!-- a\nb --> z\n<!-- typo\n    ~~~\n    x --> y\n    ~~~\n' + 'text <!-- o\n'.repeat(lines)
   const perChar = (lines) => {
     const src = page(lines)
@@ -1243,20 +1278,20 @@ test('the work of a render with a refused opener and many openers that never clo
   }
   const small = perChar(1000)
   const large = perChar(2000)
-  assert.ok(small <= 75 && large <= 75, `${small.toFixed(1)} and ${large.toFixed(1)} units of work per character`)
+  assert.ok(small <= 67 && large <= 67, `${small.toFixed(1)} and ${large.toFixed(1)} units of work per character`)
 })
 
-test('a backtick inside a comment that is hidden pairs with no backtick around the fence lines', () => {
+test('a backtick inside a comment that is hidden pairs with no backtick of the text, as without the change', () => {
   // The comment before the refused opener is hidden, so its backtick opens
-  // nothing: the fence-line backtick and the one after the fence stay text.
-  // Were the comment read as text, the two would be a code span.
+  // nothing. The fence-line backtick and the one after the fence are paired by
+  // markdown-it, which is the open case.
   const src = '1. <!-- a\nb --> z\n<!-- c ` --> d <!-- typo\n    ~~~\n    ` x --> y\n    ~~~\n` e\n'
-  assert.equal(render(src), '<ol>\n<li>z</li>\n</ol>\n<p>d &lt;!-- typo\n~~~\n` x --&gt; y\n~~~\n` e</p>\n')
+  assert.equal(render(src), '<ol>\n<li>z</li>\n</ol>\n<p>d &lt;!-- typo\n~~~\n<code>x --&gt; y     ~~~</code> e</p>\n')
 })
 
-test('a refused opener after an escaped fence-line backtick is still the one that is refused', () => {
-  // The backtick on the first fence is written escaped, which moves the offset
-  // of the opener behind it in the text the inline rule reads.
+test('a refused opener after a fence-line backtick is still the one that is refused', () => {
+  // The backtick on the first fence is text with no partner, and the opener
+  // behind it is refused by its own closer.
   const src = '1. <!-- a\nb --> z\nq\n    ~~~\n    ` k\n    ~~~\n10. item <!-- typo\n    ~~~\n    x --> y\n    ~~~\n'
   assert.equal(render(src), '<ol>\n<li>z</li>\n</ol>\n<p>q\n~~~\n` k\n~~~\n10. item &lt;!-- typo\n~~~\nx --&gt; y\n~~~</p>\n')
 })
@@ -1299,20 +1334,19 @@ test('a heading built from lines with a refused opener shows the same text in it
   }
 })
 
-test('a heading with a code span after the fence lines shows it in its text and in its label', () => {
-  // The replay of the refused-opener case as a setext heading. The label is
-  // built from the text the parser saw, with the same backticks paired, so it
-  // keeps the code span that holds an opener and the text after it.
+test('a heading with fence-line backticks and a refused opener has the same text in its label', () => {
+  // The replay of the refused-opener case as a setext heading. The text is
+  // paired as markdown-it pairs it, and the label is made from the same text
+  // with the same openers kept, so they agree even where both hide the comment
+  // at the end (the open case). Code tags are backticks in the label, and the
+  // code span trims the white space next to them.
   const head = '1. <!-- a\nb --> z\n<!-- typo\n    ~~~\n'
+  const plain = (s) => s.replace(/<\/?code>|`|\s/g, '')
   for (const bar of ['===', '---']) {
     const src = head + '    ` x --> y\n    ~~~\n`<!-- q` K -->\n' + bar + '\n'
-    const out = render(src)
-    const { text, label } = headingParts(out)
-    assert.match(text, /<code>&lt;!-- q<\/code> K --&gt;$/, bar)
-    assert.match(label, /`&lt;!-- q` K --&gt;$/, bar)
-    // The text with the code tags as backticks is the label.
-    assert.equal(text.replace(/<\/?code>/g, '`'), label, bar)
-    assert.ok(!out.includes('\\'), out)
+    const { text, label } = headingParts(render(src))
+    assert.match(text, /^&lt;!-- typo ~~~ /, bar)
+    assert.equal(plain(label), plain(text), bar)
   }
 })
 

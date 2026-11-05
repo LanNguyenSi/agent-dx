@@ -20,15 +20,14 @@
 // into a paragraph, such as a hidden comment earlier on the page. Which
 // openers a paragraph refuses is decided once, before it is parsed, so the
 // inline rule, the heading text and the permalink label built from the same
-// text all keep the same openers. In such a paragraph the code spans are the
-// ones that the backticks off the fence lines form, and the other backticks
-// outside those spans are written as escaped backticks, so that backticks on
-// fence lines, which reached the paragraph as text, open no span and close
-// none that opens before them. A fence line backtick inside a span stays as it
-// is, and closes the span only when it is as long as the span's opener, as in
-// markdown-it. Fences are found as markdown-it finds them in the page without
-// the comment rules, and an indented code block that holds a line starting
-// with three backticks or tildes counts as a fence indented too far.
+// text all keep the same openers. The text of the paragraph is not changed
+// for that, so markdown-it and the removal of comments from the raw text pair
+// backticks the same way. Open: when the fence lines of a refused opener
+// reached the paragraph as text, markdown-it's own backtick rule can pair a
+// backtick on one of them with a backtick of another line and hide text. Fences
+// are found as markdown-it finds them in the page without the comment rules,
+// and an indented code block that holds a line starting with three backticks
+// or tildes counts as a fence indented too far.
 
 // Within text, what markdown-it reads before a comment can start: backslash
 // escapes and code spans (a run of backticks closed by a later run of exactly
@@ -48,9 +47,8 @@
 export const STEPS = /\\[!-\/:-@[-`{-~]|`+|<!--/g
 
 // The backtick runs of `text`, by length: for each length, the start of every
-// run of that length in source order, leaving out the runs that start where
-// `skip` says so.
-function backtickRuns(text, skip) {
+// run of that length in source order.
+function backtickRuns(text) {
   const runs = new Map()
   for (let i = 0; i < text.length; ) {
     if (text.charCodeAt(i) !== 96) {
@@ -59,7 +57,6 @@ function backtickRuns(text, skip) {
     }
     const start = i
     while (text.charCodeAt(i) === 96) i++
-    if (skip?.(start)) continue
     const starts = runs.get(i - start)
     if (starts) starts.push(start)
     else runs.set(i - start, [start])
@@ -84,21 +81,9 @@ function runAtOrAfter(starts, from) {
 // closer ends the search at once instead of being scanned to the end of the
 // text again for each one that follows. `refused` holds the offsets of the
 // openers that stay text (see commentRefusals); the scan passes over those.
-// `inserted` holds the ascending offsets of the backslashes that were put into
-// the text for parsing (see commentRefusals); they are left out of the result.
-export function stripComments(text, refused, inserted) {
-  if (!text.includes('<!--') && !inserted?.length) return text
+export function stripComments(text, refused) {
+  if (!text.includes('<!--')) return text
   const re = new RegExp(STEPS.source, 'g')
-  const kept = (from, to) => {
-    let at = countBefore(inserted ?? [], from)
-    const end = countBefore(inserted ?? [], to)
-    let piece = ''
-    for (; at < end; at++) {
-      piece += text.slice(from, inserted[at])
-      from = inserted[at] + 1
-    }
-    return piece + text.slice(from, to)
-  }
   let runs = null
   let out = ''
   let from = 0
@@ -107,7 +92,7 @@ export function stripComments(text, refused, inserted) {
       if (refused?.has(m.index)) continue
       const close = text.indexOf('-->', m.index + 4)
       if (close === -1) break
-      out += kept(from, m.index)
+      out += text.slice(from, m.index)
       from = re.lastIndex = close + 3
     } else if (m[0][0] === '`') {
       runs ??= backtickRuns(text)
@@ -117,7 +102,7 @@ export function stripComments(text, refused, inserted) {
       if (closer !== -1) re.lastIndex = closer + m[0].length
     }
   }
-  return out + kept(from, text.length)
+  return out + text.slice(from)
 }
 
 export function htmlComments(md) {
@@ -264,22 +249,14 @@ function commentLines(state) {
 // so the inline rule, which meets the openers that are not inside a code span,
 // and the removal of comments from the raw text (commentText), which must keep
 // the same openers, both read it from here and neither works it out again.
+// Only the offsets are recorded; the text of the paragraph stays as it is, so
+// the offsets are the same for the parser and for the removal.
 //
-// A refused opener is text, and the lines that make the fence reach the
-// paragraph as text too, when a hidden comment earlier on the page ended the
-// list or quote they belong to. A backtick on such a line is then no part of
-// a code span: markdown-it would pair it with a backtick of another line and
-// move the code spans around it. In a paragraph with a refused opener the code
-// spans are therefore worked out from the backticks that are not on fence
-// lines (see inertBackticks), and every other backtick outside those spans,
-// fence lines included, is written as an escaped backtick, which reads as the
-// same character, opens nothing, and is never the closer of a span that opens
-// before it. One left alone inside a span closes the span only as in
-// markdown-it, by being as long as the span's opener. The text with the
-// escapes is what the paragraph is parsed from, so commentText strips the
-// comments from that text, with the offsets of the refused openers in it, and
-// takes the inserted backslashes out of the result. The raw text is kept for
-// the case that nothing is stripped.
+// Not handled (open): the lines that make the fence reach the paragraph as
+// text when a hidden comment earlier on the page ended the list or quote they
+// belong to. A backtick on such a line is no part of a code span for the
+// reader, but markdown-it pairs it with a backtick of another line, which can
+// move the code spans around it and hide text.
 const refusals = new WeakMap()
 function commentRefusals(state) {
   for (const tok of state.tokens) {
@@ -289,7 +266,7 @@ function commentRefusals(state) {
     const raw = tok.content
     const starts = lineStartsOf(raw)
     const cut = text.lines - starts.length
-    const offsets = []
+    const offsets = new Set()
     let closer = null
     for (let at = raw.indexOf('<!--'); at !== -1; at = raw.indexOf('<!--', at + 1)) {
       // Openers go from the start, so one answer of the search for "-->" serves
@@ -298,58 +275,10 @@ function commentRefusals(state) {
       if (closer.at === -1) break
       const line = lineAt(starts, at)
       const closeLine = lineAt(starts, closer.at)
-      if (closeLine !== line && inFence(fenceSpans(state.md, state.env, text.src), text.line + cut + closeLine)) offsets.push(at)
+      if (closeLine !== line && inFence(fenceSpans(state.md, state.env, text.src), text.line + cut + closeLine)) offsets.add(at)
     }
-    if (!offsets.length) continue
-    const spans = fenceSpans(state.md, state.env, text.src)
-    const onFenceLine = (at) => inFence(spans, text.line + cut + lineAt(starts, at))
-    // The offsets in the raw text of the backticks that get a backslash.
-    const shift = inertBackticks(raw, onFenceLine, new Set(offsets))
-    let content = ''
-    let from = 0
-    for (const at of shift) {
-      content += raw.slice(from, at) + '\\'
-      from = at
-    }
-    content += raw.slice(from)
-    tok.content = content
-    refusals.set(tok.children, {
-      raw,
-      content,
-      inserted: shift.map((at, i) => at + i),
-      inline: new Set(offsets.map((at) => at + countBefore(shift, at)))
-    })
+    if (offsets.size) refusals.set(tok.children, { inline: offsets })
   }
-}
-
-// The offsets of the backticks that get a backslash: those outside every code
-// span that are on fence lines (`onFenceLine` tells by the offset of a run) or
-// open no span. The scan steps over escapes, backtick runs and comments as
-// stripComments does, passing over the openers in `refused`. The runs on fence
-// lines are no part of the pairing: they open nothing and close nothing, so
-// the spans are those of the other backticks. A run that opens a span is
-// passed over with the span, and a run that opens none, or sits on a fence
-// line, is reached outside any span.
-function inertBackticks(raw, onFenceLine, refused) {
-  const runs = backtickRuns(raw, onFenceLine)
-  const re = new RegExp(STEPS.source, 'g')
-  const found = []
-  let unclosed = false
-  for (let m = re.exec(raw); m; m = re.exec(raw)) {
-    if (m[0] === '<!--') {
-      if (refused.has(m.index) || unclosed) continue
-      const close = raw.indexOf('-->', m.index + 4)
-      if (close === -1) unclosed = true
-      else re.lastIndex = close + 3
-      continue
-    }
-    if (m[0][0] !== '`') continue
-    const starts = onFenceLine(m.index) ? null : runs.get(m[0].length)
-    const closer = starts ? runAtOrAfter(starts, m.index + m[0].length) : -1
-    if (closer !== -1) re.lastIndex = closer + m[0].length
-    else for (let k = 0; k < m[0].length; k++) found.push(m.index + k)
-  }
-  return found
 }
 
 // How many of the ascending offsets in `list` lie before `at`.
@@ -381,9 +310,7 @@ function lineStartsOf(text) {
 // removed. Where text held a comment, the whitespace the comment leaves at the
 // start or end of the text or of a line is trimmed as for any other text, and
 // the raw text the heading permalink label is built from loses the comment,
-// except for the openers that were refused, which the heading text shows. A
-// paragraph whose text was rewritten for parsing is stripped as the parser saw
-// it, and the backslashes put in for parsing are left out of the result.
+// except for the openers that were refused, which the heading text shows.
 // No paragraph is left empty here: the block rule leaves a paragraph that
 // starts with a comment to the inline rule only when text follows the comment
 // on its line, the comment does not close inside its quote or container, or
@@ -395,10 +322,8 @@ function commentText(state) {
     for (const child of tok.children) {
       if (child.type === 'link_open' || child.type === 'image') stripTitle(child)
     }
-    const refused = refusals.get(tok.children)
-    const raw = refused ? refused.raw : tok.content
-    tok.content = raw
-    const content = refused ? stripComments(refused.content, refused.inline, refused.inserted) : stripComments(raw)
+    const raw = tok.content
+    const content = stripComments(raw, refusals.get(tok.children)?.inline)
     if (content === raw) continue
     tok.content = content.trim()
     tok.children = trimText(tok.children)
