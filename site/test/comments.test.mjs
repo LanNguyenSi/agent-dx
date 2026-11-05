@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
-import { stripComments } from '../.vitepress/html-comments.mjs'
+import { stripComments, STEPS } from '../.vitepress/html-comments.mjs'
 
 let md
 before(async () => {
@@ -20,6 +20,7 @@ const render = (src, env = {}) => md.render(src, { relativePath: 'fixture.md', .
 const RULES = [
   [(m) => m.block.ruler, 'agent-dx-comment-block'],
   [(m) => m.inline.ruler, 'agent-dx-comment'],
+  [(m) => m.core.ruler, 'agent-dx-comment-refusals'],
   [(m) => m.core.ruler, 'agent-dx-comment-text']
 ]
 const renderPlain = (src) => {
@@ -479,52 +480,243 @@ test('the closer search of a paragraph of unclosed openers runs once, not once p
   assert.ok(searches <= 10, `the render searched ${searches} times for -->`)
 })
 
-test('stripComments never rescans the text through exec or indexOf', (t) => {
-  // The work of a scan is the span it reads, so linear total work means the
-  // spans do not overlap: each search starts at or after where the previous
-  // one ended. The spies see regex searches of the full text (exec, and the
-  // test, match, replace and search calls that go through it) and indexOf
-  // searches of the text or a tail of it. A rescan through a slice and another
-  // primitive (search, match, split, includes) is not seen, so this pins the
-  // current implementation's routes rather than its complexity in general. A
-  // search that finds nothing has read to the end of the text. Restarting a
-  // lazy search at each opener that has no closer fails this, though its
-  // result is the same.
-  const spans = []
-  const exec = RegExp.prototype.exec
-  t.mock.method(RegExp.prototype, 'exec', function (subject) {
-    const start = this.global || this.sticky ? this.lastIndex : 0
-    const m = exec.call(this, subject)
-    if (subject === current) spans.push({ start, end: m ? m.index + m[0].length : current.length })
-    return m
-  })
-  const indexOf = String.prototype.indexOf
-  t.mock.method(String.prototype, 'indexOf', function (needle, from = 0) {
-    const at = indexOf.call(this, needle, from)
-    // A search of a tail of the text, such as a slice, is a search of the text
-    // from where the tail starts.
-    const str = String(this)
-    if (needle === '-->' && current.endsWith(str)) {
-      const base = current.length - str.length
-      spans.push({ start: base + from, end: at === -1 ? current.length : base + at + 3 })
+// Counts the work a function does on strings instead of timing it, so a check
+// does not depend on how busy the machine is. The string methods a scan is
+// likely to read with are wrapped for the length of the call, and a call is
+// charged what it can read: one for charAt, at, charCodeAt and codePointAt; the
+// returned length plus one for slice, substring and substr; the span from the
+// position argument to the end of the match, or to the end of the text when
+// nothing matches, plus one, for indexOf, lastIndexOf, includes, startsWith,
+// endsWith, and for exec and test on a global or sticky expression; and the
+// length of the receiver for search, match, matchAll, split, replace,
+// replaceAll and the other calls. A method that another one calls inside
+// (test calls exec, replace calls exec) is charged once, by the outer call.
+//
+// What it does not see: reading a string by index (`text[j]`), iterating it
+// (for..of, spread, Array.from), the Array methods on arrays built from it,
+// the string methods that are not wrapped (concat, trim, normalize,
+// localeCompare, padStart and others), the RegExp Symbol methods called
+// directly, and the steps taken inside one regular expression match. A scan
+// that rereads the text by one of these costs nothing here.
+function countWork(fn) {
+  let work = 0
+  let busy = false
+  const saved = []
+  const charge = (n) => {
+    work += n
+  }
+  const wrap = (proto, name, cost) => {
+    const original = proto[name]
+    saved.push([proto, name, original])
+    proto[name] = function (...args) {
+      if (busy) return original.apply(this, args)
+      busy = true
+      try {
+        const result = original.apply(this, args)
+        charge(cost(this, args, result))
+        return result
+      } finally {
+        busy = false
+      }
     }
-    return at
-  })
-  let current = ''
+  }
+  const whole = (self) => String(self).length
+  const span = (self, args, result, matchLength) => {
+    const text = String(self)
+    const from = Math.min(Math.max(Number(args[1]) || 0, 0), text.length)
+    const end = result === -1 || result === false ? text.length : result + matchLength
+    return Math.max(end - from, 0) + 1
+  }
+  try {
+    // exec and test start at lastIndex, which the call moves, so the start is
+    // read before the call.
+    for (const name of ['exec', 'test']) {
+      const original = RegExp.prototype[name]
+      saved.push([RegExp.prototype, name, original])
+      RegExp.prototype[name] = function (subject) {
+        if (busy) return original.call(this, subject)
+        busy = true
+        const text = String(subject)
+        const start = this.global || this.sticky ? this.lastIndex : 0
+        try {
+          const result = original.call(this, subject)
+          const end = this.global || this.sticky ? (result ? this.lastIndex : text.length) : text.length
+          charge(Math.max(end - start, 0) + 1)
+          return result
+        } finally {
+          busy = false
+        }
+      }
+    }
+    for (const name of ['indexOf', 'includes']) wrap(String.prototype, name, (self, args, result) => span(self, args, result, String(args[0]).length))
+    wrap(String.prototype, 'lastIndexOf', (self, args, result) => {
+      const text = String(self)
+      const from = args[1] === undefined ? text.length : Math.min(Math.max(Number(args[1]) || 0, 0), text.length)
+      return Math.max(from - (result === -1 ? 0 : result), 0) + 1
+    })
+    wrap(String.prototype, 'startsWith', (self, args) => String(args[0]).length + 1)
+    wrap(String.prototype, 'endsWith', (self, args) => String(args[0]).length + 1)
+    for (const name of ['slice', 'substring', 'substr']) wrap(String.prototype, name, (self, args, result) => result.length + 1)
+    for (const name of ['search', 'match', 'matchAll', 'split', 'replace', 'replaceAll']) wrap(String.prototype, name, whole)
+    for (const name of ['charAt', 'at', 'charCodeAt', 'codePointAt']) wrap(String.prototype, name, () => 1)
+    fn()
+  } finally {
+    for (const [proto, name, original] of saved.reverse()) proto[name] = original
+  }
+  return work
+}
+
+test('countWork charges what a scan reads with the string methods it wraps', () => {
+  const text = 'abc --> def'
+  const cases = [
+    [() => text.indexOf('-->', 1), 7],
+    [() => text.indexOf('zzz'), 12],
+    [() => text.includes('zzz'), 12],
+    [() => text.lastIndexOf('a'), 12],
+    [() => text.startsWith('abc'), 4],
+    [() => text.endsWith('def'), 4],
+    [() => text.slice(4), 8],
+    [() => text.substring(2, 5), 4],
+    [() => text.substr(2, 5), 6],
+    [() => text.search(/-->/), 11],
+    [() => text.match(/-->/), 11],
+    // The iterator is charged at the call, and each step it takes is an exec.
+    [() => [...text.matchAll(/-->/g)], 24],
+    [() => text.split('-->'), 11],
+    [() => text.replace(/-->/, ''), 11],
+    [() => text.replaceAll('-->', ''), 11],
+    [() => /-->/g.exec(text), 8],
+    [() => /zzz/g.test(text), 12],
+    [() => text.charCodeAt(2), 1],
+    [() => text.charAt(2), 1],
+    [() => text.at(-2), 1],
+    [() => text.codePointAt(2), 1]
+  ]
+  for (const [fn, expected] of cases) assert.equal(countWork(fn), expected, String(fn))
+  // The prototypes are whole again, also after a throw.
+  assert.throws(() => countWork(() => { throw new Error('boom') }), /boom/)
+  assert.equal(String.prototype.indexOf.name, 'indexOf')
+  assert.equal(RegExp.prototype.exec.name, 'exec')
+})
+
+// The expression that stripComments used before it kept a list of the
+// backtick runs: an escape, a code span (a run of backticks closed by a later
+// run of the same length, found lazily), bare backticks, or an opener.
+const OLD_OUTSIDE_CODE = /\\[!-\/:-@[-`{-~]|(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)|`+|<!--/g
+const oldStripComments = (text) => {
+  if (!text.includes('<!--')) return text
+  const re = new RegExp(OLD_OUTSIDE_CODE.source, 'g')
+  let out = ''
+  let from = 0
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m[0] !== '<!--') continue
+    const close = text.indexOf('-->', m.index + 4)
+    if (close === -1) break
+    out += text.slice(from, m.index)
+    from = re.lastIndex = close + 3
+  }
+  return out + text.slice(from)
+}
+
+// A fixed pseudo-random generator (mulberry32), so the generated inputs are the
+// same on every run.
+const seeded = (seed) => () => {
+  seed = (seed + 0x6d2b79f5) | 0
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+}
+
+test('stripComments gives the output of the expression it replaced, on fixed and generated text', () => {
+  const fixed = [
+    'a <!-- x --> b <!-- y --> c', 'a <!-- x --> b <!-- y', '<!--> x -->', '<!---->z', '<!---> x', '<!---> x --> y',
+    '`<!-- x -->` <!-- y -->', '\\<!-- x --> y', '<!-- a <!-- b --> c --> d', '`<!-- x` --> <!-- y',
+    'text line\n<!-- o\n'.repeat(5), '<!-- o `-->`\n'.repeat(5), 'a <!-- x --> b <!-- y --> c\n'.repeat(5),
+    '`<!-- x --> `` <!-- y\n'.repeat(5), '``<!-- a -->` b `` <!-- c -->', '\\`<!-- a --> ` <!-- b -->', '\\``<!-- a -->` x',
+    '```<!-- a -->`` <!-- b --> ```', '`` ` <!-- a --> `` <!-- b -->', '\\\\`<!-- a -->` <!-- b -->', '`a`<!-- b -->`c`',
+    '<!-- a ``` --> ```x <!-- b --> ``` y', '`', '``', '\\', '\\`', '', '<!--', '-->'
+  ]
+  for (const text of fixed) assert.equal(stripComments(text), oldStripComments(text), JSON.stringify(text))
+  // 3000 inputs of up to 64 characters from seed 0x5eed1234, from the
+  // alphabet backtick (three of eight pieces, so runs and spans are common),
+  // backslash, "<!--", "-->", "<", "-", ">", letters, space and newline.
+  const pieces = ['`', '`', '`', '\\', '<!--', '-->', '<', '-', '>', 'a', 'b', ' ', '\n']
+  const next = seeded(0x5eed1234)
+  let changed = 0
+  for (let n = 0; n < 3000; n++) {
+    let text = ''
+    const length = Math.floor(next() * 65)
+    while (text.length < length) text += pieces[Math.floor(next() * pieces.length)]
+    text = text.slice(0, length)
+    const expected = oldStripComments(text)
+    if (expected !== text) changed++
+    assert.equal(stripComments(text), expected, JSON.stringify(text))
+  }
+  assert.ok(changed > 300, `the generated text holds comments to remove: ${changed} of 3000`)
+})
+
+// What the work tests below cannot see is the expression itself: the steps one
+// match takes are not calls on a string. The old expression passes them (its
+// work per character on the input below is the same as the new one's), and the
+// differential test compares against it, so neither fails if the expression is
+// put back. What made it slow is a property of its source: it needs a
+// backreference and a lookbehind, which the engine matches by backtracking, a
+// code span at a time from each run that has no closer. The new expression
+// needs neither, so this checks the source.
+const hasBackreferenceOrLookaround = (source) => /\\[1-9]|\\k<|\(\?<?[=!]/.test(source)
+
+test('the step expression has no backreference and no lookaround', () => {
+  assert.ok(hasBackreferenceOrLookaround(OLD_OUTSIDE_CODE.source), 'the check sees the old expression')
+  assert.ok(hasBackreferenceOrLookaround('a(?<=b)'), 'the check sees a lookbehind')
+  assert.ok(hasBackreferenceOrLookaround('(x)\\1'), 'the check sees a numbered backreference')
+  assert.ok(hasBackreferenceOrLookaround('(?<n>x)\\k<n>'), 'the check sees a named backreference')
+  assert.ok(!hasBackreferenceOrLookaround('\\\\[!-/]|`+|<!--'), 'the check passes an escaped backslash')
+  assert.ok(!hasBackreferenceOrLookaround(STEPS.source), STEPS.source)
+})
+
+test('the work of stripComments on a paragraph of unclosed backtick runs grows with its length', () => {
+  // Runs of the lengths 1 to n with no later run of the same length, then one
+  // opener with its closer. Each run is the start of a code span that never
+  // closes, so a closer search that reads to the end of the text for each run
+  // makes the work per character grow with n. The count sees the calls on
+  // strings, not the steps inside one regular expression, so this pins the
+  // scan around the expression and not the expression (see the check above);
+  // the differential test above pins its result.
+  // The work per character measured here is about 3.1 at 60 runs and at 120
+  // runs, a ratio of 0.99; a bound of 1.5 leaves room for a constant change
+  // and fails a search that doubles the work per character when n doubles.
+  const text = (n) => Array.from({ length: n }, (_, i) => '`'.repeat(i + 1)).join(' ') + ' <!-- x -->'
+  const small = text(60)
+  const large = text(120)
+  assert.equal(stripComments(small), small.slice(0, -'<!-- x -->'.length))
+  const perChar = (src) => countWork(() => stripComments(src)) / src.length
+  const ratio = perChar(large) / perChar(small)
+  assert.ok(ratio < 1.5, `twice the runs took ${ratio.toFixed(2)} times the work per character`)
+})
+
+test('the work of stripComments stays within a constant per character on these texts', () => {
+  // The work is counted by countWork over the string methods it wraps, not
+  // only by the methods the current implementation uses, so a rescan through
+  // slice and search, match, split, includes or at shows as surely as one
+  // through indexOf: each opener that is searched for a closer from the start
+  // again makes the total grow with the square of the length. A rescan that
+  // reads by index or by iteration does not show (see countWork).
+  // The bound is a fixed number of units per character: 6. The work per
+  // character measured on these cases is 2.0, 2.7, 1.5, 2.4 and 2.9, so the
+  // bound leaves room for a constant change, and a scan that reads the rest of
+  // the text again for each opener costs about 150 or more per character at
+  // these sizes.
   const cases = {
     'unclosed openers': 'text line\n<!-- o\n'.repeat(500),
     'unclosed openers and a closer in a code span': '<!-- o `-->`\n'.repeat(500),
     'comments': 'a <!-- x --> b <!-- y --> c\n'.repeat(500),
-    'comments and unclosed backticks': '`<!-- x --> `` <!-- y\n'.repeat(300)
+    'comments and unclosed backticks': '`<!-- x --> `` <!-- y\n'.repeat(300),
+    'escapes and refused-looking openers': '\\<!-- x \\`--> <!-- y --> `` `<!--` ``\n'.repeat(400)
   }
   for (const [name, src] of Object.entries(cases)) {
-    current = src
-    spans.length = 0
-    stripComments(src)
-    assert.ok(spans.length > 0, `${name}: the spies see the searches`)
-    for (let i = 1; i < spans.length; i++) {
-      assert.ok(spans[i].start >= spans[i - 1].end, `${name}: search ${i} started at ${spans[i].start}, inside the ${spans[i - 1].start}-${spans[i - 1].end} read before it`)
-    }
+    const work = countWork(() => stripComments(src))
+    assert.ok(work > 0, `${name}: the count sees the scan`)
+    assert.ok(work <= 6 * src.length, `${name}: ${(work / src.length).toFixed(1)} units of work per character`)
   }
 })
 
@@ -942,4 +1134,226 @@ test('text rendered inline with blank lines finds the line of a closer relative 
   // that follow would put the closer in it.
   const closed = md.renderInline('a <!-- x\nb --> y\n```\nc\n\nd\n```', { relativePath: 'fixture.md' })
   assert.ok(!closed.includes('x') && !closed.includes('&lt;!--'), closed)
+})
+
+// A multi-line comment with text after it in a list item ends the item, so
+// the lines after it, a fence among them, reach one paragraph as text. That
+// block structure is not the subject here and is the same as without the
+// change under test; the fence lines are, because a refused opener leaves their
+// backticks in the text of the paragraph.
+//
+// The paragraph's text is not rewritten, so markdown-it pairs those backticks
+// as it does without the comment rules, and every rendering below is the one
+// that the renderer without the change produced for the same page (the
+// expected HTML was computed from the code the change started from). Some of
+// them show the open case: the backtick on a fence line pairs with a later
+// backtick and the code span hides text, as in the first. Text written to
+// steer that pairing changed the output in autolinks, linkified URLs and
+// reference labels (see the test after the next one), so a rewrite of the
+// paragraph's text is the thing these pins catch.
+test('a refused opener leaves the backticks around the fence lines to markdown-it, as without the change', () => {
+  const head = '1. <!-- a\nb --> z\n<!-- typo\n'
+  const fence = (inner) => `    ~~~\n    ${inner}\n    ~~~\n`
+  const ol = '<ol>\n<li>z</li>\n</ol>\n'
+  const deleted = '1. z\n<!-- typo\n10. item\n' + fence('` x --> y') + '`<!-- q` K -->\n'
+  // The page as it would be without the closed comment shows the code span and
+  // the text after it.
+  assert.match(renderPlain(deleted), /<code>&lt;!-- q<\/code> K --&gt;/)
+  const replay = head + '10. item\n' + fence('` x --> y') + '`<!-- q` K -->\n'
+  // The open case: the fence-line backtick pairs with the one after the fence,
+  // and the opener of the hidden comment `<!-- q` K -->` is in no code span, so
+  // the text after the pair is cut off at its first "-->".
+  assert.equal(render(replay), ol + '<p>&lt;!-- typo\n10. item\n~~~\n<code>x --&gt; y     ~~~</code></p>\n')
+  assert.deepEqual(htmlTokens(replay), [])
+  // The same when the code span that holds an opener starts on a later line
+  // than the refused one and runs over a line break.
+  assert.equal(
+    render(head + fence('` x --> y') + '`<!-- q\nr` K -->\n'),
+    ol + '<p>&lt;!-- typo\n~~~\n<code>x --&gt; y     ~~~</code></p>\n'
+  )
+  // A backtick that is escaped on the fence line is text and pairs with
+  // nothing, so the code span after the fence is the one that stays.
+  assert.equal(
+    render(head + fence('\\` x --> y') + '`<!-- q` K -->\n'),
+    ol + '<p>&lt;!-- typo\n~~~\n` x --&gt; y\n~~~\n<code>&lt;!-- q</code> K --&gt;</p>\n'
+  )
+  // A fence line holding a run of three backticks, which no later run closes.
+  assert.equal(
+    render(head + fence('``` x --> y') + '`<!-- q` K -->\n'),
+    ol + '<p>&lt;!-- typo\n~~~\n``` x --&gt; y\n~~~\n<code>&lt;!-- q</code> K --&gt;</p>\n'
+  )
+})
+
+test('a code span that crosses fence lines, or opens with no closer, is paired as without the change', () => {
+  const head = '1. <!-- a\nb --> z\n<!-- typo '
+  const ol = '<ol>\n<li>z</li>\n</ol>\n'
+  // The span opens and closes on lines that are no fence lines, and holds fence
+  // lines with backtick runs of a length other than its own.
+  const cases = [
+    [head + '`` a\n    ~~~\n    x --> y ` w\n    ~~~\nb `` tail\n', 'a     ~~~     x --&gt; y ` w     ~~~ b'],
+    [head + '`a\n    ~~~\n    x --> y `` w\n    ~~~\nb` tail\n', 'a     ~~~     x --&gt; y `` w     ~~~ b']
+  ]
+  for (const [src, code] of cases) {
+    const out = render(src)
+    assert.equal(out, `${ol}<p>&lt;!-- typo <code>${code}</code> tail</p>\n`, src)
+    assert.ok(!out.includes('\\'), out)
+  }
+  // An opener with no closer outside the fence lines: the fence-line backtick
+  // of its own length closes it, as markdown-it pairs them (the open case).
+  assert.equal(
+    render(head + '`a\n    ~~~\n    x --> ` y\n    ~~~\nb tail\n'),
+    ol + '<p>&lt;!-- typo <code>a     ~~~     x --&gt; </code> y\n~~~\nb tail</p>\n'
+  )
+  // A run of two and a fence line with two runs of one: nothing pairs.
+  assert.equal(
+    render(head + '``a\n    ~~~\n    x --> ` y `\n    ~~~\nb tail\n'),
+    ol + '<p>&lt;!-- typo ``a\n~~~\nx --&gt; <code>y</code>\n~~~\nb tail</p>\n'
+  )
+})
+
+test('a backtick in an autolink, a linkified URL or a reference label is left as it is in a paragraph with a refused opener', () => {
+  // markdown-it does not read escapes inside these, so a backslash put in front
+  // of such a backtick would show in the link target and its text, and a
+  // reference label with one would no longer match its definition. The
+  // renderings are those without the change.
+  const head = '1. <!-- a\nb --> z\n'
+  const fence = '    ~~~\n    x --> y\n    ~~~\n'
+  const ol = '<ol>\n<li>z</li>\n</ol>\n'
+  const link = (href, text) => `<a href="${href}" target="_blank" rel="noreferrer">${text}</a>`
+  assert.equal(
+    render(head + '<!-- typo <http://x.com/a`b>\n' + fence),
+    ol + '<p>&lt;!-- typo ' + link('http://x.com/a%60b', 'http://x.com/a`b') + '\n~~~\nx --&gt; y\n~~~</p>\n'
+  )
+  assert.equal(
+    render(head + '<!-- typo see http://x.com/a`b c\n' + fence),
+    ol + '<p>&lt;!-- typo see ' + link('http://x.com/a%60b', 'http://x.com/a`b') + ' c\n~~~\nx --&gt; y\n~~~</p>\n'
+  )
+  assert.equal(
+    render('[a`b]: http://ex.com/r\n\n' + head + '<!-- typo see [a`b] here\n' + fence),
+    ol + '<p>&lt;!-- typo see ' + link('http://ex.com/r', 'a`b') + ' here\n~~~\nx --&gt; y\n~~~</p>\n'
+  )
+})
+
+test('the work of a render with a refused opener and many fence lines stays within a constant per character', () => {
+  // The opener's closer lies in the fence, and the fence lines reach the
+  // paragraph as text. A pass over the paragraph for each fence line, such as
+  // a search for a backtick that finds none, reads the rest of the paragraph
+  // each time, so the work per character grows with the number of lines.
+  // The count sees the string methods wrapped by countWork, which is where
+  // that search reads. The count includes the rest of the render, which costs
+  // about 26.5 units per character here, at 1000 lines and at 2000. The bound
+  // of 40 leaves room for a constant change; a search for a backtick from the
+  // start of each line, added to the rule as a probe, brings it to about 530
+  // at 1000 lines and 1030 at 2000.
+  const page = (lines) => '1. <!-- a\nb --> z\n<!-- typo\n    ~~~\n' + '    plain line\n'.repeat(lines) + '    x --> y\n    ~~~\n'
+  const perChar = (lines) => {
+    const src = page(lines)
+    let out = ''
+    const work = countWork(() => {
+      out = render(src)
+    })
+    assert.equal(out.split('plain line').length - 1, lines, 'the fence lines stay')
+    assert.match(out, /^<ol>\n<li>z<\/li>\n<\/ol>\n<p>&lt;!-- typo\n~~~\n/, 'the opener is refused')
+    return work / src.length
+  }
+  const small = perChar(1000)
+  const large = perChar(2000)
+  assert.ok(small <= 40 && large <= 40, `${small.toFixed(1)} and ${large.toFixed(1)} units of work per character`)
+})
+
+test('the work of a render with a refused opener and many openers that never close stays within a constant per character', () => {
+  // The openers after the fence have no "-->" after them, so a search for each
+  // one reads to the end of the paragraph. The count includes the rest of the
+  // render: about 44.5 units per character at 1000 lines and at 2000, and the
+  // bound is 67.
+  const page = (lines) => '1. <!-- a\nb --> z\n<!-- typo\n    ~~~\n    x --> y\n    ~~~\n' + 'text <!-- o\n'.repeat(lines)
+  const perChar = (lines) => {
+    const src = page(lines)
+    let out = ''
+    const work = countWork(() => {
+      out = render(src)
+    })
+    assert.equal(out.split('&lt;!-- o').length - 1, lines, 'the openers stay')
+    return work / src.length
+  }
+  const small = perChar(1000)
+  const large = perChar(2000)
+  assert.ok(small <= 67 && large <= 67, `${small.toFixed(1)} and ${large.toFixed(1)} units of work per character`)
+})
+
+test('a backtick inside a comment that is hidden pairs with no backtick of the text, as without the change', () => {
+  // The comment before the refused opener is hidden, so its backtick opens
+  // nothing. The fence-line backtick and the one after the fence are paired by
+  // markdown-it, which is the open case.
+  const src = '1. <!-- a\nb --> z\n<!-- c ` --> d <!-- typo\n    ~~~\n    ` x --> y\n    ~~~\n` e\n'
+  assert.equal(render(src), '<ol>\n<li>z</li>\n</ol>\n<p>d &lt;!-- typo\n~~~\n<code>x --&gt; y     ~~~</code> e</p>\n')
+})
+
+test('a refused opener after a fence-line backtick is still the one that is refused', () => {
+  // The backtick on the first fence is text with no partner, and the opener
+  // behind it is refused by its own closer.
+  const src = '1. <!-- a\nb --> z\nq\n    ~~~\n    ` k\n    ~~~\n10. item <!-- typo\n    ~~~\n    x --> y\n    ~~~\n'
+  assert.equal(render(src), '<ol>\n<li>z</li>\n</ol>\n<p>q\n~~~\n` k\n~~~\n10. item &lt;!-- typo\n~~~\nx --&gt; y\n~~~</p>\n')
+})
+
+test('an opener after a comment that closed is refused by its own closer', () => {
+  // The first comment closes at the "-->" of its second line and is hidden. The
+  // opener after it has its closer on a fence line, so it stays visible.
+  const src = '1. <!-- a\nb --> z\nq <!-- c\nd --> e <!-- typo\n    ~~~\n    x --> y\n    ~~~\n'
+  assert.equal(render(src), '<ol>\n<li>z</li>\n</ol>\n<p>q  e &lt;!-- typo\n~~~\nx --&gt; y\n~~~</p>\n')
+})
+
+test('a paragraph without a refused opener is parsed as it is, fence lines and all', () => {
+  // The only opener lies in a code span that starts on a fence line, so
+  // nothing is refused and the backticks pair as markdown-it pairs them.
+  const src = '1. <!-- a\nb --> z\nq\n    ~~~\n    ` x <!-- c --> y\n    ~~~\n`r` K\n'
+  assert.equal(render(src), '<ol>\n<li>z</li>\n</ol>\n<p>q\n~~~\n<code>x &lt;!-- c --&gt; y     ~~~</code>r` K</p>\n')
+})
+
+// The text and the permalink label of the first heading, with every run of
+// white space read as one space.
+const headingParts = (html) => {
+  const m = html.match(/<h\d[^>]*>([\s\S]*?) <a class="header-anchor"[^>]*aria-label="Permalink to &quot;([\s\S]*?)&quot;">/)
+  const flat = (s) => s.replace(/\s+/g, ' ')
+  return { text: flat(m[1]), label: flat(m[2]) }
+}
+
+test('a heading built from lines with a refused opener shows the same text in its label', () => {
+  // The lines reach one setext heading as text after a hidden comment that
+  // ended the list item they belong to. The opener's closer lies on a fence
+  // line, so the opener stays text, and the label is built from the raw text.
+  const head = '1. <!-- a\nb --> z\n<!-- typo\n    ~~~\n'
+  for (const [src, bar] of [
+    [head + '    x --> y\n    ~~~\n===\n', '==='],
+    [head + '    x --> y\n    ~~~\n---\n', '---'],
+    [head + '    ` x --> y\n    ~~~\n===\n', '===']
+  ]) {
+    const { text, label } = headingParts(render(src))
+    assert.match(text, /^&lt;!-- typo ~~~ .*x --&gt; y ~~~$/, bar)
+    assert.equal(label, text, src)
+  }
+})
+
+test('a heading with fence-line backticks and a refused opener has the same text in its label', () => {
+  // The replay of the refused-opener case as a setext heading. The text is
+  // paired as markdown-it pairs it, and the label is made from the same text
+  // with the same openers kept, so they agree even where both hide the comment
+  // at the end (the open case). Code tags are backticks in the label, and the
+  // code span trims the white space next to them.
+  const head = '1. <!-- a\nb --> z\n<!-- typo\n    ~~~\n'
+  const plain = (s) => s.replace(/<\/?code>|`|\s/g, '')
+  for (const bar of ['===', '---']) {
+    const src = head + '    ` x --> y\n    ~~~\n`<!-- q` K -->\n' + bar + '\n'
+    const { text, label } = headingParts(render(src))
+    assert.match(text, /^&lt;!-- typo ~~~ /, bar)
+    assert.equal(plain(label), plain(text), bar)
+  }
+})
+
+test('a comment that closes in a setext heading is dropped from its text and from its label', () => {
+  for (const src of ['A <!-- c --> B\n===\n', 'A <!-- c\nd --> B\n===\n', 'A <!-- c\nd --> B\n---\n']) {
+    const { text, label } = headingParts(render(src))
+    assert.equal(text, 'A B', src)
+    assert.equal(label, text, src)
+  }
 })

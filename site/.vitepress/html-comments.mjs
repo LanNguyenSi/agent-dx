@@ -17,33 +17,90 @@
 // visible, whether the fence stands at the top level, in a quote, or in a list
 // item at any depth. A whole fence may lie inside a comment. A comment inside
 // text that spans lines follows the same rule, whatever grouped those lines
-// into a paragraph, such as a hidden comment earlier on the page. Fences are
-// found as markdown-it finds them in the page without the comment rules, and
-// an indented code block that holds a line starting with three backticks or
-// tildes counts as a fence indented too far.
+// into a paragraph, such as a hidden comment earlier on the page. Which
+// openers a paragraph refuses is decided once, before it is parsed, so the
+// inline rule, the heading text and the permalink label built from the same
+// text all keep the same openers. The text of the paragraph is not changed
+// for that, so markdown-it and the removal of comments from the raw text pair
+// backticks the same way. Open: when the fence lines of a refused opener
+// reached the paragraph as text, markdown-it's own backtick rule can pair a
+// backtick on one of them with a backtick of another line and hide text. Fences
+// are found as markdown-it finds them in the page without the comment rules,
+// and an indented code block that holds a line starting with three backticks
+// or tildes counts as a fence indented too far.
 
 // Within text, what markdown-it reads before a comment can start: backslash
-// escapes and code spans (a run of backticks closed by a run of the same
-// length), then the comment itself. Used to remove comments from text that
-// markdown-it keeps as raw source: the heading text the permalink label is
-// built from, link titles, container titles, and comment lines.
-const OUTSIDE_CODE = /\\[!-\/:-@[-`{-~]|(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)|`+|<!--/g
+// escapes and code spans (a run of backticks closed by a later run of exactly
+// the same length), then the comment itself. Used to remove comments from text
+// that markdown-it keeps as raw source: the heading text the permalink label
+// is built from, link titles, container titles, and comment lines.
+//
+// One expression finds the things a scan steps over: an escape, a run of
+// backticks (taken whole, from where the scan stands), or an opener. Whether a
+// run opens a code span is not asked of the expression. The runs of the text
+// are listed once, each by the length it has in the text, and a run of length
+// n closes the first run of length n that starts at or after the opener's end
+// (a run always ends before a character that is not a backtick, so a closer
+// is a whole run, never a part of a longer one). A run with no closer is bare
+// backticks. Looking a closer up in the list takes a binary search, so the
+// scan costs the same whatever the number of runs that never close.
+export const STEPS = /\\[!-\/:-@[-`{-~]|`+|<!--/g
+
+// The backtick runs of `text`, by length: for each length, the start of every
+// run of that length in source order.
+function backtickRuns(text) {
+  const runs = new Map()
+  for (let i = 0; i < text.length; ) {
+    if (text.charCodeAt(i) !== 96) {
+      i++
+      continue
+    }
+    const start = i
+    while (text.charCodeAt(i) === 96) i++
+    const starts = runs.get(i - start)
+    if (starts) starts.push(start)
+    else runs.set(i - start, [start])
+  }
+  return runs
+}
+
+// The start of the first run in `starts` (ascending) at or after `from`, or -1.
+function runAtOrAfter(starts, from) {
+  let lo = 0
+  let hi = starts.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (starts[mid] < from) lo = mid + 1
+    else hi = mid
+  }
+  return lo < starts.length ? starts[lo] : -1
+}
 
 // A comment runs from its opener to the first "-->" after the opener's four
-// characters. The opener is matched on its own and its closer looked up with
-// indexOf, so an opener with no closer ends the search at once instead of
-// being scanned to the end of the text again for each one that follows.
-export function stripComments(text) {
+// characters. The closer is looked up with indexOf, so an opener with no
+// closer ends the search at once instead of being scanned to the end of the
+// text again for each one that follows. `refused` holds the offsets of the
+// openers that stay text (see commentRefusals); the scan passes over those.
+export function stripComments(text, refused) {
   if (!text.includes('<!--')) return text
-  const re = new RegExp(OUTSIDE_CODE.source, 'g')
+  const re = new RegExp(STEPS.source, 'g')
+  let runs = null
   let out = ''
   let from = 0
   for (let m = re.exec(text); m; m = re.exec(text)) {
-    if (m[0] !== '<!--') continue
-    const close = text.indexOf('-->', m.index + 4)
-    if (close === -1) break
-    out += text.slice(from, m.index)
-    from = re.lastIndex = close + 3
+    if (m[0] === '<!--') {
+      if (refused?.has(m.index)) continue
+      const close = text.indexOf('-->', m.index + 4)
+      if (close === -1) break
+      out += text.slice(from, m.index)
+      from = re.lastIndex = close + 3
+    } else if (m[0][0] === '`') {
+      runs ??= backtickRuns(text)
+      const starts = runs.get(m[0].length)
+      const end = m.index + m[0].length
+      const closer = starts ? runAtOrAfter(starts, end) : -1
+      if (closer !== -1) re.lastIndex = closer + m[0].length
+    }
   }
   return out + text.slice(from)
 }
@@ -56,6 +113,9 @@ export function htmlComments(md) {
   // Right after the block parse, before any other core rule can change a
   // paragraph's text (see commentLines).
   md.core.ruler.after('block', 'agent-dx-comment-lines', commentLines)
+  // Once the other rules have had their say over a paragraph's text and
+  // before it is parsed (see commentRefusals).
+  md.core.ruler.before('inline', 'agent-dx-comment-refusals', commentRefusals)
   md.core.ruler.after('inline', 'agent-dx-comment-text', commentText)
 }
 
@@ -151,16 +211,15 @@ function findClose(state, from) {
 // A comment inside text is skipped without a token, so the text around it
 // joins as if the comment had never been written. As for a comment that starts
 // a line, it is not one when its first "-->" lies in a fence markdown-it finds
-// in the page. The fence shows up in the text of a paragraph when a hidden
-// comment earlier on the page regroups the lines, and the text then holds the
-// opener and the fence lines, with the fence's opening line as a code span. A
-// "-->" in an ordinary code span still closes the comment, as it does where
-// no fence is involved.
+// in the page. Whether an opener is refused for that reason is decided for the
+// whole paragraph before it is parsed (see commentRefusals), so the rule only
+// looks the opener up. A "-->" in an ordinary code span still closes the
+// comment, as it does where no fence is involved.
 function commentInline(state) {
   if (!state.src.startsWith('<!--', state.pos)) return false
   const close = findClose(state, state.pos + 4)
   if (close === -1 || close + 3 > state.posMax) return false
-  if (closesInFenceText(state, close)) return false
+  if (refusals.get(state.tokens)?.inline.has(state.pos)) return false
   state.pos = close + 3
   return true
 }
@@ -172,9 +231,9 @@ function commentInline(state) {
 // rule reaches through its state. Later a core rule can cut lines off the
 // front of the text without changing the lines the token spans, as VitePress
 // does when it takes the "[!NOTE]" line out of a quote's first paragraph. The
-// text the inline rule sees is then shorter than the text kept here, and the
-// difference is the number of lines to skip, so the lines of the text are the
-// lines of the page from the first line plus that difference.
+// text is then shorter than the text kept here, and the difference is the
+// number of lines to skip, so the lines of the text are the lines of the page
+// from the first line plus that difference.
 const textStart = new WeakMap()
 function commentLines(state) {
   for (const tok of state.tokens) {
@@ -184,46 +243,74 @@ function commentLines(state) {
   }
 }
 
-// True when the closer lies on a later line than the opener, in a fence.
-function closesInFenceText(state, close) {
-  const text = textStart.get(state.tokens)
-  if (!text) return false
-  const closeLine = lineAt(state, close)
-  if (closeLine === lineAt(state, state.pos)) return false
-  const cut = text.lines - lineStartsOf(state).length
-  return inFence(fenceSpans(state.md, state.env, text.src), text.line + cut + closeLine)
+// Which openers of a paragraph are refused, decided before the paragraph is
+// parsed. An opener is refused when its first "-->" lies on a later line than
+// the opener and in a fence. The decision is a function of the opener alone,
+// so the inline rule, which meets the openers that are not inside a code span,
+// and the removal of comments from the raw text (commentText), which must keep
+// the same openers, both read it from here and neither works it out again.
+// Only the offsets are recorded; the text of the paragraph stays as it is, so
+// the offsets are the same for the parser and for the removal.
+//
+// Not handled (open): the lines that make the fence reach the paragraph as
+// text when a hidden comment earlier on the page ended the list or quote they
+// belong to. A backtick on such a line is no part of a code span for the
+// reader, but markdown-it pairs it with a backtick of another line, which can
+// move the code spans around it and hide text.
+const refusals = new WeakMap()
+function commentRefusals(state) {
+  for (const tok of state.tokens) {
+    if (tok.type !== 'inline' || !tok.children || !tok.content.includes('<!--')) continue
+    const text = textStart.get(tok.children)
+    if (!text) continue
+    const raw = tok.content
+    const starts = lineStartsOf(raw)
+    const cut = text.lines - starts.length
+    const offsets = new Set()
+    let closer = null
+    for (let at = raw.indexOf('<!--'); at !== -1; at = raw.indexOf('<!--', at + 1)) {
+      // Openers go from the start, so one answer of the search for "-->" serves
+      // every opener up to it, and none is left once there is no "-->".
+      if (!closer || closer.at < at + 4) closer = { at: raw.indexOf('-->', at + 4) }
+      if (closer.at === -1) break
+      const line = lineAt(starts, at)
+      const closeLine = lineAt(starts, closer.at)
+      if (closeLine !== line && inFence(fenceSpans(state.md, state.env, text.src), text.line + cut + closeLine)) offsets.add(at)
+    }
+    if (offsets.size) refusals.set(tok.children, { inline: offsets })
+  }
 }
 
-// The line of the text that holds position `at`, counted from 0.
-function lineAt(state, at) {
-  const starts = lineStartsOf(state)
+// How many of the ascending offsets in `list` lie before `at`.
+function countBefore(list, at) {
   let lo = 0
-  let hi = starts.length - 1
+  let hi = list.length
   while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1
-    if (starts[mid] <= at) lo = mid
-    else hi = mid - 1
+    const mid = (lo + hi) >> 1
+    if (list[mid] < at) lo = mid + 1
+    else hi = mid
   }
   return lo
 }
 
-// The start of each line of the text. They are found once per paragraph, so a
-// paragraph with many openers is not searched again for each one.
-const lineStarts = new WeakMap()
-function lineStartsOf(state) {
-  let starts = lineStarts.get(state)
-  if (!starts) {
-    starts = [0]
-    for (let i = state.src.indexOf('\n'); i !== -1; i = state.src.indexOf('\n', i + 1)) starts.push(i + 1)
-    lineStarts.set(state, starts)
-  }
+// The line of the text that holds position `at`, counted from 0, given the
+// start of each line.
+function lineAt(starts, at) {
+  return countBefore(starts, at + 1) - 1
+}
+
+// The start of each line of the text.
+function lineStartsOf(text) {
+  const starts = [0]
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) starts.push(i + 1)
   return starts
 }
 
 // After inline parsing. Comments in link, image, and container titles are
 // removed. Where text held a comment, the whitespace the comment leaves at the
 // start or end of the text or of a line is trimmed as for any other text, and
-// the raw text the heading permalink label is built from loses the comment.
+// the raw text the heading permalink label is built from loses the comment,
+// except for the openers that were refused, which the heading text shows.
 // No paragraph is left empty here: the block rule leaves a paragraph that
 // starts with a comment to the inline rule only when text follows the comment
 // on its line, the comment does not close inside its quote or container, or
@@ -235,8 +322,9 @@ function commentText(state) {
     for (const child of tok.children) {
       if (child.type === 'link_open' || child.type === 'image') stripTitle(child)
     }
-    const content = stripComments(tok.content)
-    if (content === tok.content) continue
+    const raw = tok.content
+    const content = stripComments(raw, refusals.get(tok.children)?.inline)
+    if (content === raw) continue
     tok.content = content.trim()
     tok.children = trimText(tok.children)
   }
