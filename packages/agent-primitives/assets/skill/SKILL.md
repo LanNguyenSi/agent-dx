@@ -364,6 +364,10 @@ A drop you intend is declared with `--intended-deletion <path>[=<n>|all]`
 units, applied to `test_cases_dropped` only, echoed in the envelope as
 `intended_deletions` and on the `--summary` totals line; a declaration that
 matched nothing warns.
+A warning `N tracked files have uncommitted changes not covered by this
+comparison` (`uncommitted=N` on the totals line) means the check did not look
+at them: to hand back with uncommitted changes, run `hygiene --base <rev>
+--worktree`, which compares the working tree (not with `--staged` or `--head`).
 Exit `0` ok, `1` a finding, `2` it could not conclude. See the
 agent-primitives package's docs/hygiene.md.
 

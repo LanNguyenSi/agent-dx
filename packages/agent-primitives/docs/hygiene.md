@@ -11,6 +11,7 @@ them from git alone, so it works in any repository without installing a hook.
 ```bash
 agent-primitives hygiene --base <rev>
 agent-primitives hygiene --base <rev> --staged
+agent-primitives hygiene --base <rev> --worktree
 agent-primitives hygiene --base <rev> --extend-only docs/log.md --extend-only-file extend-only.txt
 agent-primitives hygiene --base <rev> --intended-deletion test/dropped.test.ts --intended-deletion-file intended.txt
 ```
@@ -27,9 +28,72 @@ comparison is from the merge-base of `--base` and `HEAD` against the git
 index, so it covers every commit since the branch point plus what is about to
 be committed; run it before `git commit` to refuse a bad commit, and again
 without `--staged` before handing back. The envelope names the resolved
-commits as `base_sha`, `head_sha` (`null` with `--staged`) and `merge_base`.
-Renames are followed, so a moved test file is compared with its old
-content, not reported as a deletion plus an addition.
+commits as `base_sha`, `head_sha` (`null` with `--staged` or `--worktree`)
+and `merge_base`. Renames are followed, so a moved test file is compared
+with its old content, not reported as a deletion plus an addition.
+
+## Modes
+
+| Mode | What is compared | What the uncommitted-changes warning covers |
+| --- | --- | --- |
+| default (`--head <rev>`, default `HEAD`) | the merge-base of `--base` and the head commit against the head commit | every tracked file with staged or unstaged changes: the comparison never looked at it |
+| `--staged` | the merge-base of `--base` and `HEAD` against the git index | tracked files with unstaged changes (the staged part is the comparison); `--head` is ignored |
+| `--worktree` | the merge-base of `--base` and `HEAD` against the working tree: tracked files, staged and unstaged changes alike | tracked files whose staged version differs from both `HEAD` and the working tree (the working-tree comparison never looks at the index); untracked files that match a test or backup pattern are named in a separate warning |
+
+`--worktree` is for a handback with uncommitted changes: it checks the work
+as it stands on disk. It cannot be combined with `--staged` or `--head`
+(a usage error naming both flags, exit `2`); `head` is `(worktree)` and
+`head_sha` is `null`. Between the other two, `--staged` wins over `--head`:
+the head revision is not read at all, even an unresolvable one.
+
+### Uncommitted changes the comparison did not look at
+
+`hygiene` never reports a silent ok while tracked files have changes it did
+not compare. In the default and `--staged` modes it runs `git status
+--porcelain -z --untracked-files=no` (renames count once; paths with spaces
+stay whole) and, when there are such files, adds a warning of the form
+`N tracked files have uncommitted changes not covered by this comparison;
+commit them, or use --staged / --worktree (<up to five paths>)`. With
+`--staged` the remedy reads `stage and commit them, or use --worktree` and
+only unstaged changes count. The result stays what the comparison found:
+the warning changes neither `status` nor the exit code. It also feeds:
+
+- `counts.uncommitted`, the exact number of such files, and `uncommitted=N`
+  on the `--summary` totals line (`0` on a clean tree);
+- `uncommitted_files` (also accepted by `--print`), the paths, capped at 50
+  entries; `counts.uncommitted` still holds the full number.
+
+With `--worktree` the warning covers the one case the working-tree
+comparison cannot see: a tracked file whose index version differs from both
+`HEAD` and the working tree (status `MM`, `AM` and the like). It reads `N
+tracked files have a staged version that differs from both HEAD and the
+working tree; stage the working tree (git add) or check with --staged
+(<paths>)`, and the file counts in `counts.uncommitted` and
+`uncommitted_files` like in the other modes.
+
+Untracked files never count as uncommitted. In `--worktree` mode, untracked
+files whose path matches a test pattern (as for `test_cases_dropped`) or a
+backup pattern (as for `backup_file`) are named in a separate warning (`N
+untracked files match a test or backup pattern and are not compared; git
+add them to include them`) because adding them would put them in range;
+other untracked files are ignored. If `git status` (or, with `--worktree`,
+`git ls-files`) fails, a warning says so and the result, status and exit
+code stay as the comparison found them.
+
+`hygiene` never writes the index in any mode: the status query runs as
+`git --no-optional-locks status`, and `--worktree` compares with `git
+diff-index` instead of `git diff`, which would refresh the index and write
+`.git/index` back (a concurrent `git add` or `git commit` could then find
+`index.lock` held). The consequence: `--worktree` never refreshes the
+index, so a file whose stat data is merely stale can be listed as modified;
+its content equals the base, so it yields no finding.
+
+`--worktree` reads each changed file from the working tree under the same
+rules the index path follows: a path must stay inside the repository root
+and its directory must not resolve outside it through a symlink; a symlink
+is read as its target text (what the index stores for it), never followed;
+a directory or submodule is unreadable and skipped like an unreadable index
+entry; a file deleted in the working tree counts as deleted.
 
 ## Findings
 
@@ -108,8 +172,9 @@ argument or revision is a usage error (exit `2`).
 | Option | Meaning |
 | --- | --- |
 | `--base <rev>` | Required. The revision the task started from. |
-| `--head <rev>` | Head revision, default `HEAD`. Ignored with `--staged`. |
-| `--staged` | Compare the merge-base of `--base` and `HEAD` with the index. |
+| `--head <rev>` | Head revision, default `HEAD`. Ignored with `--staged`; a usage error with `--worktree`. |
+| `--staged` | Compare the merge-base of `--base` and `HEAD` with the index. A usage error with `--worktree`. |
+| `--worktree` | Compare the merge-base of `--base` and `HEAD` with the working tree (tracked files). A usage error with `--staged` or `--head`. |
 | `--extend-only <path>` | A path the task may only extend; repeatable. |
 | `--extend-only-file <file>` | A file listing extend-only paths. |
 | `--intended-deletion <spec>` | Declare a test file's case drop intended; repeatable. |
@@ -117,7 +182,7 @@ argument or revision is a usage error (exit `2`).
 | `--max-delete-percent <n>` | Threshold from `0` to `100`, default `20`. |
 
 The result also carries `counts` (`files`, `backupFiles`,
-`extendOnlyRewrites`, `testCaseDrops`, `intendedDeletions`), which is kept
+`extendOnlyRewrites`, `testCaseDrops`, `intendedDeletions`, `uncommitted`), which is kept
 whole when the envelope is reduced to fit `--max-chars`.
 
 ## Intended deletions

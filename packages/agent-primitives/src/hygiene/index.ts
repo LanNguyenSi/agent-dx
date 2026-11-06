@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { UsageError } from "../envelope.js";
 import { findGitRoot } from "../probe/containment.js";
 import {
@@ -61,6 +63,11 @@ export interface HygieneOptions {
   /** Compare `base` against the git index instead of a commit, so the
    * check can run before `git commit` and see exactly what would land. */
   staged?: boolean;
+  /** Compare the merge-base of `base` and `HEAD` with the working tree
+   * (tracked files: staged and unstaged changes alike), so uncommitted
+   * work is checked as it stands. Mutually exclusive with `staged` and
+   * `head`. */
+  worktree?: boolean;
   /** Root-relative paths the task only extends. */
   extendOnly?: readonly string[];
   /** Raw `--intended-deletion` specs (`<path>`, `<path>=<n>` or
@@ -76,11 +83,11 @@ export interface HygieneResult {
   head: string;
   /** The commit `base` resolved to. */
   baseSha: string;
-  /** The commit `head` resolved to; `null` with `staged` (the index is
-   * not a commit). */
+  /** The commit `head` resolved to; `null` with `staged` or `worktree`
+   * (neither the index nor the working tree is a commit). */
   headSha: string | null;
   /** The commit the comparison starts from: the merge-base of `baseSha`
-   * and the head commit (`HEAD` with `staged`), or `baseSha` when there
+   * and the head commit (`HEAD` with `staged` or `worktree`), or `baseSha` when there
    * is none (a warning says why). */
   mergeBase: string;
   maxDeletePercent: number;
@@ -93,15 +100,30 @@ export interface HygieneResult {
   /** The declarations that were applied to a real drop. */
   intendedDeletions: IntendedDeletionApplied[];
   findings: HygieneFinding[];
+  /** Tracked files with changes the comparison did not look at, capped at
+   * `UNCOMMITTED_FILES_CAP` entries (`counts.uncommitted` is the full
+   * number). Without `staged`/`worktree`: every tracked file with staged
+   * or unstaged changes. With `staged`: those with unstaged changes.
+   * With `worktree`: tracked files whose index version differs from both
+   * HEAD and the working tree (the working-tree comparison does not look
+   * at the index). Untracked files are never listed here. */
+  uncommittedFiles: string[];
   counts: {
     files: number;
     backupFiles: number;
     extendOnlyRewrites: number;
     testCaseDrops: number;
     intendedDeletions: number;
+    /** Tracked files with changes the comparison did not cover (exact; `uncommittedFiles` is capped). */
+    uncommitted: number;
   };
   warnings: string[];
 }
+
+/** Most paths `HygieneResult.uncommittedFiles` lists; the count is exact. */
+export const UNCOMMITTED_FILES_CAP = 50;
+/** Most paths the uncommitted-changes warning itself names. */
+const UNCOMMITTED_WARNING_PATHS = 5;
 
 /** Basename patterns of editor and `sed -i` leftovers. BSD sed takes the
  * argument after `-i` as the backup suffix, so `sed -i -E ...` or
@@ -387,8 +409,74 @@ function lineCount(content: string): number {
   return content.endsWith("\n") ? n - 1 : n;
 }
 
+/** One tracked path `git status` reports as changed, with its two status
+ * letters: `x` is the index side, `y` the working-tree side. */
+interface StatusEntry {
+  x: string;
+  y: string;
+  path: string;
+}
+
+/** Parses `git status --porcelain -z`: `XY <path>\0`, and for a rename or
+ * copy `XY <new>\0<old>\0` (the source path is consumed, the new path is
+ * the entry's). */
+function parsePorcelainStatus(out: string): StatusEntry[] {
+  const parts = out.split("\0");
+  const entries: StatusEntry[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i] ?? "";
+    if (part.length < 4 || part[2] !== " ") continue;
+    const x = part[0] ?? " ";
+    const y = part[1] ?? " ";
+    entries.push({ x, y, path: part.slice(3) });
+    if (x === "R" || x === "C" || y === "R" || y === "C") i += 1;
+  }
+  return entries;
+}
+
+/** `true` for a `path.relative` result that leaves its base directory. */
+function escapesRoot(relative: string): boolean {
+  return (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  );
+}
+
 /**
- * Mechanical commit-hygiene check for a git range (or the index). Reports
+ * Reads a tracked file's content from the working tree the way the index
+ * path sees it: a regular file by its bytes, a symlink by its link target
+ * text (what `git show :<path>` returns for a symlink blob). A path that
+ * leaves the repository root, whose directory resolves outside it through
+ * a symlink, or that is neither a regular file nor a symlink (a directory
+ * or submodule checkout) is unreadable, like a path `git show` refuses.
+ */
+export function readWorktreeFile(
+  gitRoot: string,
+  rel: string,
+): string | undefined {
+  try {
+    const full = path.resolve(gitRoot, rel);
+    const relative = path.relative(gitRoot, full);
+    // Defence in depth: the realpath check below already refuses a path
+    // that leaves the root, git never reports one.
+    if (relative === "" || escapesRoot(relative)) return undefined;
+    const realRoot = fs.realpathSync(gitRoot);
+    const realDir = fs.realpathSync(path.dirname(full));
+    const dirRelative = path.relative(realRoot, realDir);
+    if (escapesRoot(dirRelative)) return undefined;
+    const stat = fs.lstatSync(full);
+    if (stat.isSymbolicLink()) return fs.readlinkSync(full);
+    if (!stat.isFile()) return undefined;
+    return fs.readFileSync(full, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Mechanical commit-hygiene check for a git range, the index (`staged`) or
+ * the working tree (`worktree`). Reports
  * backup files the change adds, extend-only files the change mostly
  * deletes, and test files whose test-case count went down. The comparison
  * starts at the merge-base of `base` and the head (`HEAD` with `staged`),
@@ -400,6 +488,18 @@ function lineCount(content: string): number {
  * other finding kind can be declared away.
  */
 export function hygiene(options: HygieneOptions): HygieneResult {
+  const staged = options.staged === true;
+  const worktree = options.worktree === true;
+  if (worktree && staged) {
+    throw new UsageError(
+      "hygiene: --worktree and --staged are mutually exclusive (pick one comparison)",
+    );
+  }
+  if (worktree && options.head !== undefined) {
+    throw new UsageError(
+      "hygiene: --worktree and --head are mutually exclusive (the working tree has no head revision)",
+    );
+  }
   const warnings: string[] = [];
   const maxPct = options.maxDeletePercent ?? DEFAULT_MAX_DELETE_PERCENT;
   if (!Number.isFinite(maxPct) || maxPct < 0 || maxPct > 100) {
@@ -417,10 +517,15 @@ export function hygiene(options: HygieneOptions): HygieneResult {
   if (baseSha === undefined) {
     throw new UsageError(`hygiene: --base revision not found: ${options.base}`);
   }
-  const staged = options.staged === true;
-  const head = staged ? "(index)" : (options.head ?? "HEAD");
+  /** The head side is not a commit: the index or the working tree. */
+  const uncommittedHead = staged || worktree;
+  const head = worktree
+    ? "(worktree)"
+    : staged
+      ? "(index)"
+      : (options.head ?? "HEAD");
   let headSha: string | null = null;
-  if (!staged) {
+  if (!uncommittedHead) {
     const resolved = resolveCommit(gitRoot, head);
     if (resolved === undefined) {
       throw new UsageError(`hygiene: --head revision not found: ${head}`);
@@ -434,12 +539,12 @@ export function hygiene(options: HygieneOptions): HygieneResult {
   // as the SHA it resolves to. Comparing against the base directly would
   // count every change the base side made since the branch point, for
   // example test cases added there, against the head side. With `staged`
-  // the head commit for the merge-base is `HEAD`.
-  const headCommit = staged ? resolveCommit(gitRoot, "HEAD") : headSha;
+  // or `worktree` the head commit for the merge-base is `HEAD`.
+  const headCommit = uncommittedHead ? resolveCommit(gitRoot, "HEAD") : headSha;
   let diffBase = baseSha;
   if (headCommit === undefined || headCommit === null) {
     warnings.push(
-      `HEAD does not resolve to a commit: comparing the index with ${baseSha} directly`,
+      `HEAD does not resolve to a commit: comparing the ${worktree ? "working tree" : "index"} with ${baseSha} directly`,
     );
   } else {
     const mb = mergeBase(gitRoot, baseSha, headCommit);
@@ -479,11 +584,21 @@ export function hygiene(options: HygieneOptions): HygieneResult {
    * declaration that matched no drop at all is reported stale. */
   const consultedDeclarations = new Set<string>();
 
-  const rangeArgs = staged
-    ? ["--cached", diffBase]
-    : [diffBase, headSha ?? head];
+  // The commit-versus-working-tree comparison (tracked files only, staged
+  // and unstaged changes alike) is `git diff-index <commit>`, not `git diff
+  // <commit>`: the porcelain refreshes the index and writes `.git/index`
+  // back, the plumbing never does. A file whose stat data is merely stale
+  // can therefore show up as modified; its content then equals the base's
+  // and yields no finding. `--cached` compares with the index, a second
+  // revision with that commit.
+  const diffCommand = worktree ? "diff-index" : "diff";
+  const rangeArgs = worktree
+    ? [diffBase]
+    : staged
+      ? ["--cached", diffBase]
+      : [diffBase, headSha ?? head];
   const names = runGit(gitRoot, [
-    "diff",
+    diffCommand,
     "--no-color",
     "-z",
     "-M",
@@ -498,6 +613,7 @@ export function hygiene(options: HygieneOptions): HygieneResult {
   const changed = parseNameStatus(names.stdout);
 
   const showHead = (p: string): string | undefined => {
+    if (worktree) return readWorktreeFile(gitRoot, p);
     const r = runGit(gitRoot, [
       "show",
       staged ? `:${p}` : `${headSha ?? head}:${p}`,
@@ -559,7 +675,7 @@ export function hygiene(options: HygieneOptions): HygieneResult {
         gitRoot,
         [
           "--literal-pathspecs",
-          "diff",
+          diffCommand,
           "--no-color",
           "-z",
           "-M",
@@ -644,6 +760,74 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     }
   }
 
+  // Tracked files with changes the comparison above did not look at. A
+  // git failure here is a warning only: findings and status stay as they
+  // were.
+  //
+  // `--no-optional-locks` keeps `git status` from refreshing the index and
+  // writing it back: hygiene never changes `.git/index`, and never takes
+  // `index.lock` away from a concurrent `git add` or `git commit`.
+  //
+  // Which entries the comparison did not cover: default mode, any change;
+  // `--staged`, a change in the working tree (`y`); `--worktree`, an index
+  // version that differs from both HEAD and the working tree (`x` and `y`
+  // both set), since the working-tree comparison never looks at the index.
+  let uncommittedAll: string[] = [];
+  const status = runGit(gitRoot, [
+    "--no-optional-locks",
+    "status",
+    "--porcelain",
+    "-z",
+    "--untracked-files=no",
+  ]);
+  if (status.error !== undefined || status.status !== 0) {
+    warnings.push(
+      `could not list uncommitted changes (git status failed: ${status.error ?? status.stderr.trim()}); changes outside this comparison, if any, are not reported`,
+    );
+  } else {
+    uncommittedAll = parsePorcelainStatus(status.stdout)
+      .filter((e) =>
+        worktree ? e.x !== " " && e.y !== " " : staged ? e.y !== " " : true,
+      )
+      .map((e) => e.path);
+  }
+  if (uncommittedAll.length > 0) {
+    const named = uncommittedAll.slice(0, UNCOMMITTED_WARNING_PATHS);
+    const more = uncommittedAll.length - named.length;
+    const paths = `(${named.join(", ")}${more > 0 ? `, and ${String(more)} more` : ""})`;
+    warnings.push(
+      worktree
+        ? `${String(uncommittedAll.length)} tracked files have a staged version that differs from both HEAD and the working tree; stage the working tree (git add) or check with --staged ${paths}`
+        : `${String(uncommittedAll.length)} tracked files have uncommitted changes not covered by this comparison; ${staged ? "stage and commit them, or use --worktree" : "commit them, or use --staged / --worktree"} ${paths}`,
+    );
+  }
+  if (worktree) {
+    // Untracked files are not compared; the ones that look like a test or a
+    // backup leftover are named, since `git add` would put them in range.
+    const untracked = runGit(gitRoot, [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      "-z",
+    ]);
+    if (untracked.error !== undefined || untracked.status !== 0) {
+      warnings.push(
+        `could not list untracked files (git ls-files failed: ${untracked.error ?? untracked.stderr.trim()}); untracked test or backup files, if any, are not reported`,
+      );
+    } else {
+      const matching = untracked.stdout
+        .split("\0")
+        .filter((f) => f !== "" && (isTestPath(f) || isBackupPath(f)));
+      if (matching.length > 0) {
+        const named = matching.slice(0, UNCOMMITTED_WARNING_PATHS);
+        const more = matching.length - named.length;
+        warnings.push(
+          `${String(matching.length)} untracked files match a test or backup pattern and are not compared; git add them to include them (${named.join(", ")}${more > 0 ? `, and ${String(more)} more` : ""})`,
+        );
+      }
+    }
+  }
+
   const count = (k: HygieneFindingKind): number =>
     findings.filter((f) => f.kind === k).length;
   return {
@@ -658,12 +842,14 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     intendedDeclarations: [...declaredByPath.values()],
     intendedDeletions,
     findings,
+    uncommittedFiles: uncommittedAll.slice(0, UNCOMMITTED_FILES_CAP),
     counts: {
       files: changed.length,
       backupFiles: count("backup_file"),
       extendOnlyRewrites: count("extend_only_rewrite"),
       testCaseDrops: count("test_cases_dropped"),
       intendedDeletions: intendedDeletions.length,
+      uncommitted: uncommittedAll.length,
     },
     warnings,
   };

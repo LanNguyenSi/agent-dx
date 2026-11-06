@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `hygiene` no longer reports a silent ok while tracked files have changes
+  its comparison did not look at (agent-dx#618). Without `--staged`, staged
+  or unstaged changes to tracked files (`git status --porcelain -z
+  --untracked-files=no`; untracked files never count) add a warning naming
+  the count, up to five paths and the remedy (`commit them, or use --staged
+  / --worktree`); with `--staged` the same holds for unstaged changes only.
+  The warning changes neither `status` nor the exit code. The `--summary`
+  totals line gains `uncommitted=N` after `warnings=`, `counts` gains
+  `uncommitted`, and the envelope lists the paths as `uncommitted_files`
+  (capped at 50, accepted by `--print`). A failing `git status` is a
+  warning only.
+- `hygiene --worktree` compares the merge-base of `--base` and `HEAD` with
+  the working tree (tracked files, staged and unstaged changes alike), for
+  a handback with uncommitted changes; `head` is `(worktree)` and
+  `head_sha` `null`. It is a usage error with `--staged` or `--head`.
+  Files are read from the working tree under the index path's safety rules
+  (a symlink is read as its target text); untracked files that match a
+  test or backup pattern are named in a separate warning, and tracked
+  files whose staged version differs from both `HEAD` and the working tree
+  (status `MM`) get their own warning, counted in `counts.uncommitted`.
+  The skill's commit-hygiene section names the flag.
+- `hygiene` leaves `.git/index` byte-identical in every mode: the status
+  query uses `git --no-optional-locks status` and `--worktree` compares
+  with `git diff-index`, neither of which refreshes and writes the index
+  (a stat-stale file may appear as modified in `--worktree` mode and
+  yields no finding).
+
 ### Fixed
 
 - `patch`: the branch guard decides per target on a protected branch (or a
