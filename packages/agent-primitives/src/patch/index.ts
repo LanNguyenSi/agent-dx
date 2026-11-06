@@ -40,6 +40,7 @@ import {
   protectedNameProblem,
   type BranchGuard,
   type BranchGuardVerdict,
+  type GuardTarget,
   type RepoGuard,
 } from "./branch-guard.js";
 
@@ -50,6 +51,8 @@ export type {
   BranchGuardStatus,
   ProtectedSource,
   RepoGuard,
+  TargetGuard,
+  TargetTracking,
 } from "./branch-guard.js";
 
 /** One edit of a plan, as given. */
@@ -1263,11 +1266,26 @@ export function patch(options: PatchOptions): PatchResult {
   const judged = new Map<string, BranchGuardVerdict>();
   const repos: RepoGuard[] = [];
   const stateVerdict = new Map<FileState, BranchGuardVerdict | undefined>();
+  // The targets each repository holds, for the per-target decision on a
+  // protected branch. A file the path checks refused already is left out:
+  // its edits are refused whatever the branch.
+  const holders = new Map<FileState, string | undefined>();
+  const targetsOf = new Map<string, GuardTarget[]>();
+  for (const state of order) {
+    const holder = repoHolding(path.dirname(state.real));
+    holders.set(state, holder);
+    if (holder !== undefined && state.status === undefined) {
+      const list = targetsOf.get(holder) ?? [];
+      list.push({ path: state.real, label: state.display });
+      targetsOf.set(holder, list);
+    }
+  }
   const judge = (repoRoot: string): BranchGuardVerdict => {
     let v = judged.get(repoRoot);
     if (v === undefined) {
       v = evaluateBranchGuard({
         root: repoRoot,
+        targets: targetsOf.get(repoRoot) ?? [],
         hazard: gitDiscoveryHazard(repoRoot),
         timeoutMs: options.gitTimeoutMs ?? BRANCH_GUARD_TIMEOUT_MS,
         flagNames: options.protectedBranches ?? [],
@@ -1283,7 +1301,7 @@ export function patch(options: PatchOptions): PatchResult {
   if (gitRoot !== undefined) judge(root);
   let outsideAnyRepo = false;
   for (const state of order) {
-    const holder = repoHolding(path.dirname(state.real));
+    const holder = holders.get(state);
     if (holder === undefined) {
       outsideAnyRepo = true;
       stateVerdict.set(state, undefined);
@@ -1309,6 +1327,11 @@ export function patch(options: PatchOptions): PatchResult {
       `branch guard: a real run would be refused in ${String(wouldRefuse.length)} ${wouldRefuse.length === 1 ? "repository" : "repositories"} (${[...new Set(wouldRefuse.map((v) => v.guard.reason))].join(", ")}); pass --allow-protected to edit anyway`,
     );
   }
+  for (const v of verdicts) {
+    for (const why of v.classifyFailures ?? []) {
+      warnings.push(`branch guard: ${why}`);
+    }
+  }
   const firstRefusal = verdicts.find((v) => v.refuse);
   if (firstRefusal !== undefined) {
     const refusing = verdicts.filter((v) => v.refuse);
@@ -1318,13 +1341,21 @@ export function patch(options: PatchOptions): PatchResult {
     for (const state of order) {
       if (state.status === "refused") continue;
       const own = stateVerdict.get(state);
-      const cause = own !== undefined && own.refuse ? own : firstRefusal;
+      // A state is refused for its own repository's verdict when that
+      // refused the whole repository or named this very file as tracked;
+      // an untracked or ignored file of the plan goes with the plan.
+      const ownCause =
+        own !== undefined &&
+        own.refuse &&
+        (own.refusedTargets === undefined ||
+          own.refusedTargets.size === 0 ||
+          own.refusedTargets.has(state.real));
+      const cause = ownCause ? own : firstRefusal;
       state.status = "refused";
       state.reason = cause.guard.reason;
-      state.detail =
-        cause === own
-          ? cause.detail
-          : `the plan is refused as a whole, nothing is written: ${cause.detail ?? ""}`;
+      state.detail = ownCause
+        ? cause.detail
+        : `the plan is refused as a whole, nothing is written: ${cause.detail ?? ""}`;
     }
   }
 

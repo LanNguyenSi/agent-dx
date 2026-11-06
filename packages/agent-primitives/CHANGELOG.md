@@ -81,6 +81,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from N files not collected`, and `--summary` prints and counts it.
   See docs/drift.md.
 
+### Fixed
+
+- `patch`: the branch guard decides per target on a protected branch (or a
+  detached HEAD under `--protect-detached`). A target that has no
+  index entry (untracked, or ignored per `git check-ignore -q`) is
+  allowed, because no edit to it can reach the protected branch
+  through the command; a tracked target is refused as before, and one tracked
+  target still refuses the whole plan, the untracked files of it included, with
+  a detail that names the tracked targets. Before, an untracked run file
+  (`.ai/runs/<run>/...`) or an ignored cache file on `main` was refused with
+  `protected_branch` and only the blanket `--allow-protected` helped. The
+  decision is recorded per target in `branch_guard.repos[].targets`
+  (`path`, `status`, `tracking`, `reason`) with the new statuses
+  `allowed_untracked` and `allowed_ignored`; a repository's status is the most
+  severe of its targets, and `combineGuards` ranks the two new statuses
+  between `detached` and `allowed`. Tracked is asked first
+  and tolerates another spelling of the file: letter case when
+  `core.ignorecase` is true, NFC against NFD, and, when no index entry is
+  found that way, a comparison of file identity (`dev:ino`) against the index
+  entries of the target's directory, so a case or Unicode variant that is the
+  same file on the volume is refused whatever `core.ignorecase` says. The guard's
+  git calls also drop git's `GIT_*_PATHSPECS` switches. A git failure while
+  classifying a target counts as tracked (fail closed) and adds a warning. `--allow-protected`
+  lifts the tracked targets only; a branch that cannot be resolved is refused
+  whole as before. No new flag; the exit codes are unchanged. The skill's
+  `patch` section names the rule.
+- Three output lows, none of them verdicts. `probe --summary` of a
+  `mutant_not_applicable` refusal now counts the mutant in the single
+  form (`total=1 inconclusive=1`, like the plan form), names the refused
+  line as `line=<content>` (on the `note:` line for a single probe, as a
+  trailing column on the `--plan` row), keeps the plan row's id
+  `file:line` (the line is known when the target text is not found on
+  it) and prints `log=-` for a mutant that never ran instead of the
+  baseline's log. A usage error's envelope now names the subcommand
+  whose parsing was in flight (`hygiene`, `drift`, ...) instead of
+  `unknown` (which it stays when no subcommand was resolved), and given
+  `--summary` alone such an error prints the one line `totals:
+  status=usage_error command=<cmd> reason=<reason> message=<message>`
+  instead of the JSON envelope, exit `2` unchanged. `drift --head` is
+  optional and defaults to `HEAD`, like `hygiene`; the envelope still
+  reports the resolved `head_sha`.
+
 ## [0.20.0] - 2026-11-04
 
 ### Added

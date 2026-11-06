@@ -8,7 +8,7 @@ them. Anchored by a measurement of the real case this prototype is
 built from; see this package's own `CHANGELOG.md` for the detail.
 
 ```bash
-agent-primitives drift --base <rev> --head <rev>
+agent-primitives drift --base <rev>
 agent-primitives drift --base <rev> --head <rev> --allow 'docs/legacy/**' --strict
 agent-primitives drift --base <rev> --head <rev> --ignore-identifier legacyHelper --ignore-identifier-file ignore.txt
 ```
@@ -30,7 +30,9 @@ against the git work tree's root, whatever subdirectory `-C`/`--cwd`
 itself points at: the whole work tree is always scanned, never only the
 named subdirectory.
 
-`--base` and `--head` are each resolved to a commit SHA once, and the
+`--head` is optional and defaults to `HEAD` (like `hygiene`); a given
+`--head` always wins over the default. `--base` and `--head` are each
+resolved to a commit SHA once, and the
 diff runs from the merge-base of the two to `--head`: the change the
 head side made since it branched off, never the base side's later
 commits. A symbolic base such as `origin/master` therefore reports the
@@ -299,4 +301,12 @@ exclusive (naming both is a `usage_error` with exit `2` before anything
 runs, as is an unknown `--print` field, which lists this command's own
 fields), and leave the envelope schema, the exit code and the saved full
 result untouched. A usage error prints the JSON `usage_error` envelope as
-for every other command.
+for every other command -- except given `--summary` alone (no
+`--print`), where it prints instead of the envelope, exit `2` unchanged,
+one line
+`totals: status=usage_error command=<command> reason=<reason> message=<message>`
+with the message collapsed onto it. `command` names the subcommand whose
+parsing was in flight when the error surfaced (here `drift`: action-level
+refusals and a missing required option alike), or `unknown` when the
+failure happened before a subcommand was chosen (an unknown subcommand,
+a bad global option); the JSON envelope's `command` follows the same rule.

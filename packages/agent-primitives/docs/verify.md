@@ -535,4 +535,5 @@ exclusive (naming both is a `usage_error` with exit `2` before anything
 runs, as is an unknown `--print` field, which lists this command's own
 fields), and leave the envelope schema, the exit code and the saved full
 result untouched. A usage error prints the JSON `usage_error` envelope as
-for every other command.
+for every other command; with `--summary` alone it prints the one-line
+`totals: status=usage_error command=<cmd> ...` form instead.

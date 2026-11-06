@@ -6,6 +6,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { patch, PatchUsageError, type RepoGuard } from "../src/patch/index.js";
 import {
   branchGuardEnv,
+  combineGuards,
   protectedNameProblem,
 } from "../src/patch/branch-guard.js";
 import { CLI_PATH, spawnCli } from "./helpers/spawn-cli.js";
@@ -66,12 +67,14 @@ function git(cwd: string, ...args: string[]): string {
   });
 }
 
-/** A work tree on `branch` (no commit yet) holding `a.txt`. */
+/** A work tree on `branch` (no commit yet) holding `a.txt`, staged: the
+ * guard refuses a tracked target, and one in the index is tracked. */
 function repoOn(branch: string, dir = tmpDir()): string {
   fs.mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q");
   git(dir, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
   fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+  git(dir, "add", "a.txt");
   return dir;
 }
 
@@ -592,11 +595,1053 @@ describe("patch branch guard: nothing is written when it refuses", () => {
   });
 });
 
+/** A repository on `branch` with one tracked file (`a.txt`, committed), an
+ * untracked `run/notes.md`, a tracked-by-force `kept.log` that an ignore
+ * rule also names, and an ignored `.cache/note.txt`. */
+function mixedRepo(branch = "main"): string {
+  const dir = repoOn(branch);
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".cache/\n*.log\n");
+  fs.writeFileSync(path.join(dir, "kept.log"), "k\n");
+  git(dir, "add", ".gitignore");
+  git(dir, "add", "-f", "kept.log");
+  commitAll(dir);
+  fs.mkdirSync(path.join(dir, "run"));
+  fs.writeFileSync(path.join(dir, "run", "notes.md"), "n\n");
+  fs.mkdirSync(path.join(dir, ".cache"));
+  fs.writeFileSync(path.join(dir, ".cache", "note.txt"), "c\n");
+  return dir;
+}
+
+const NOTES = { file: "run/notes.md", old: "n", new: "N" };
+const CACHED = { file: ".cache/note.txt", old: "c", new: "C" };
+const TRACKED = { file: "a.txt", old: "a", new: "A" };
+
+function read(dir: string, rel: string): string {
+  return fs.readFileSync(path.join(dir, rel), "utf8");
+}
+
+/** Runs `fn` with a `git` first on PATH that answers `body` for the calls
+ * it matches and hands every other call to the real git. */
+function withGitShim<T>(shimBody: string, fn: () => T): T {
+  const real = execFileSync("sh", ["-c", "command -v git"], {
+    encoding: "utf8",
+  }).trim();
+  const bin = tmpDir();
+  const script = path.join(bin, "git");
+  fs.writeFileSync(
+    script,
+    `#!/bin/sh\n${shimBody}\nexec ${JSON.stringify(real)} "$@"\n`,
+    { mode: 0o755 },
+  );
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+  try {
+    return fn();
+  } finally {
+    if (saved === undefined) delete process.env.PATH;
+    else process.env.PATH = saved;
+  }
+}
+
+describe("patch branch guard: untracked and ignored targets", () => {
+  it("edits an untracked and an ignored file on main and records each", () => {
+    const dir = mixedRepo();
+    const r = patch({ cwd: dir, edits: [NOTES, CACHED] });
+    expect(r.status).toBe("written");
+    expect(read(dir, "run/notes.md")).toBe("N\n");
+    expect(read(dir, ".cache/note.txt")).toBe("C\n");
+    expect(r.allowedProtected).toBe(false);
+    expect(r.warnings).toEqual([]);
+    expect(g(r)).toMatchObject({
+      status: "allowed_untracked",
+      branch: "main",
+      protected: ["main", "master"],
+      targets: [
+        {
+          path: "run/notes.md",
+          status: "allowed_untracked",
+          tracking: "untracked",
+        },
+        {
+          path: ".cache/note.txt",
+          status: "allowed_ignored",
+          tracking: "ignored",
+        },
+      ],
+    });
+    expect(g(r).reason).toBeUndefined();
+    expect(r.branchGuard.status).toBe("allowed_untracked");
+    expect(r.branchGuard.reason).toBeUndefined();
+  });
+
+  it("an ignored target alone is allowed_ignored", () => {
+    const dir = mixedRepo();
+    const r = patch({ cwd: dir, edits: [CACHED] });
+    expect(r.status).toBe("written");
+    expect(g(r).status).toBe("allowed_ignored");
+    expect(g(r).targets).toEqual([
+      {
+        path: ".cache/note.txt",
+        status: "allowed_ignored",
+        tracking: "ignored",
+      },
+    ]);
+    expect(r.branchGuard.status).toBe("allowed_ignored");
+  });
+
+  it("an untracked target alone is allowed_untracked", () => {
+    const dir = mixedRepo();
+    const r = patch({ cwd: dir, edits: [NOTES] });
+    expect(r.status).toBe("written");
+    expect(g(r).status).toBe("allowed_untracked");
+    expect(r.branchGuard.status).toBe("allowed_untracked");
+  });
+
+  it("the order of the targets does not change the repository's status", () => {
+    const dir = mixedRepo();
+    const r = patch({ cwd: dir, edits: [CACHED, NOTES] });
+    expect(g(r).status).toBe("allowed_untracked");
+    expect(g(r).targets?.map((t) => t.status)).toEqual([
+      "allowed_ignored",
+      "allowed_untracked",
+    ]);
+  });
+
+  it("classifies a name with glob characters as that name", () => {
+    const dir = mixedRepo();
+    fs.writeFileSync(path.join(dir, "n1.md"), "n\n");
+    git(dir, "add", "n1.md");
+    fs.writeFileSync(path.join(dir, "n[1].md"), "n\n");
+    const r = patch({
+      cwd: dir,
+      edits: [{ file: "n[1].md", old: "n", new: "N" }],
+    });
+    expect(r.status).toBe("written");
+    expect(g(r).targets).toEqual([
+      { path: "n[1].md", status: "allowed_untracked", tracking: "untracked" },
+    ]);
+  });
+
+  it("an untracked target in a subdirectory of an ignored directory is ignored", () => {
+    const dir = mixedRepo();
+    fs.mkdirSync(path.join(dir, ".cache", "deep", "er"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".cache", "deep", "er", "x.txt"), "c\n");
+    const r = patch({
+      cwd: dir,
+      edits: [{ file: ".cache/deep/er/x.txt", old: "c", new: "C" }],
+    });
+    expect(r.status).toBe("written");
+    expect(g(r).targets?.[0]).toMatchObject({
+      status: "allowed_ignored",
+      tracking: "ignored",
+    });
+  });
+
+  it("a tracked file that an ignore rule names is still tracked and refused", () => {
+    const dir = mixedRepo();
+    const r = patch({
+      cwd: dir,
+      edits: [{ file: "kept.log", old: "k", new: "K" }],
+    });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(read(dir, "kept.log")).toBe("k\n");
+    expect(g(r).targets).toEqual([
+      {
+        path: "kept.log",
+        status: "refused",
+        tracking: "tracked",
+        reason: "protected_branch",
+      },
+    ]);
+  });
+
+  it("a tracked target is refused: exit-2 reason, nothing written", () => {
+    const dir = mixedRepo();
+    const r = patch({ cwd: dir, edits: [TRACKED] });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(r.edits.map((e) => e.status)).toEqual(["refused"]);
+    expect(r.writtenFiles).toEqual([]);
+    expect(r.branchGuard.status).toBe("refused");
+    expect(read(dir, "a.txt")).toBe("a\n");
+  });
+
+  it("one tracked target refuses the whole plan and the detail names it", () => {
+    const dir = mixedRepo();
+    const r = patch({ cwd: dir, edits: [NOTES, TRACKED, CACHED] });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    expect(r.edits.map((e) => e.status)).toEqual([
+      "refused",
+      "refused",
+      "refused",
+    ]);
+    expect(r.writtenFiles).toEqual([]);
+    expect(r.counts.files_written).toBe(0);
+    expect(read(dir, "run/notes.md")).toBe("n\n");
+    expect(read(dir, ".cache/note.txt")).toBe("c\n");
+    expect(read(dir, "a.txt")).toBe("a\n");
+    // The tracked file is named by its own edit's refusal; the files that
+    // would have been allowed say that the plan goes down with it.
+    expect(r.edits[1].detail).toContain('"a.txt"');
+    expect(r.edits[1].detail).not.toContain("refused as a whole");
+    for (const i of [0, 2]) {
+      expect(r.edits[i].detail).toContain("refused as a whole");
+      expect(r.edits[i].detail).toContain('"a.txt"');
+      expect(r.edits[i].detail).not.toContain("notes.md");
+      expect(r.edits[i].detail).not.toContain("note.txt");
+    }
+    expect(g(r).status).toBe("refused");
+    expect(g(r).targets?.map((t) => [t.path, t.status, t.tracking])).toEqual([
+      ["run/notes.md", "allowed_untracked", "untracked"],
+      ["a.txt", "refused", "tracked"],
+      [".cache/note.txt", "allowed_ignored", "ignored"],
+    ]);
+    expect(tree(dir)).toEqual(tree(dir).slice().sort());
+  });
+
+  it("a refusal still names the tracked targets when two are tracked", () => {
+    const dir = mixedRepo();
+    const r = patch({
+      cwd: dir,
+      edits: [TRACKED, NOTES, { file: ".gitignore", old: ".cache", new: "x" }],
+    });
+    expect(r.status).toBe("usage_error");
+    const detail = r.edits[1].detail ?? "";
+    expect(detail).toContain('"a.txt"');
+    expect(detail).toContain('".gitignore"');
+    expect(read(dir, "run/notes.md")).toBe("n\n");
+  });
+
+  it("--dry-run: tracked would_refuse, the others keep their own status", () => {
+    const dir = mixedRepo();
+    const r = patch({
+      cwd: dir,
+      edits: [NOTES, TRACKED, CACHED],
+      dryRun: true,
+    });
+    expect(r.status).toBe("would_write");
+    expect(g(r).status).toBe("would_refuse");
+    expect(r.branchGuard.status).toBe("would_refuse");
+    expect(g(r).targets?.map((t) => t.status)).toEqual([
+      "allowed_untracked",
+      "would_refuse",
+      "allowed_ignored",
+    ]);
+    expect(g(r).targets?.[1].reason).toBe("protected_branch");
+    expect(r.warnings.join("\n")).toContain("would be refused");
+    expect(read(dir, "a.txt")).toBe("a\n");
+  });
+
+  it("--dry-run with only untracked targets has nothing to refuse", () => {
+    const dir = mixedRepo();
+    const r = patch({ cwd: dir, edits: [NOTES, CACHED], dryRun: true });
+    expect(r.status).toBe("would_write");
+    expect(r.branchGuard.status).toBe("allowed_untracked");
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("--allow-protected lifts only the tracked target and leaves the others' status", () => {
+    const dir = mixedRepo();
+    const r = patch({
+      cwd: dir,
+      edits: [NOTES, TRACKED, CACHED],
+      allowProtected: true,
+    });
+    expect(r.status).toBe("written");
+    expect(r.allowedProtected).toBe(true);
+    expect(read(dir, "a.txt")).toBe("A\n");
+    expect(g(r).status).toBe("allowed_protected");
+    expect(r.branchGuard.status).toBe("allowed_protected");
+    expect(g(r).targets?.map((t) => t.status)).toEqual([
+      "allowed_untracked",
+      "allowed_protected",
+      "allowed_ignored",
+    ]);
+  });
+
+  it("--allow-protected with only untracked targets records no override", () => {
+    const dir = mixedRepo();
+    const r = patch({ cwd: dir, edits: [NOTES], allowProtected: true });
+    expect(r.status).toBe("written");
+    expect(r.allowedProtected).toBe(false);
+    expect(r.branchGuard.status).toBe("allowed_untracked");
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("an unprotected branch lists no targets and runs no classification", () => {
+    const dir = mixedRepo("task");
+    const r = patch({ cwd: dir, edits: [NOTES, TRACKED] });
+    expect(r.status).toBe("written");
+    expect(g(r).status).toBe("allowed");
+    expect(g(r).targets).toBeUndefined();
+  });
+
+  it("a branch that cannot be resolved still refuses an untracked target", () => {
+    const dir = mixedRepo("task");
+    git(dir, "symbolic-ref", "HEAD", "refs/odd/place");
+    const r = patch({ cwd: dir, edits: [NOTES] });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch_unresolved");
+    expect(read(dir, "run/notes.md")).toBe("n\n");
+    expect(g(r).targets).toBeUndefined();
+  });
+
+  describe("detached HEAD under --protect-detached", () => {
+    function detached(): string {
+      const dir = mixedRepo("task");
+      git(dir, "checkout", "-q", "--detach");
+      return dir;
+    }
+
+    it("allows untracked and ignored targets", () => {
+      const dir = detached();
+      const r = patch({
+        cwd: dir,
+        edits: [NOTES, CACHED],
+        protectDetached: true,
+      });
+      expect(r.status).toBe("written");
+      expect(g(r)).toMatchObject({
+        status: "allowed_untracked",
+        branch: "HEAD",
+      });
+      expect(g(r).targets?.map((t) => t.status)).toEqual([
+        "allowed_untracked",
+        "allowed_ignored",
+      ]);
+    });
+
+    it("refuses a tracked target and with it the whole plan", () => {
+      const dir = detached();
+      const r = patch({
+        cwd: dir,
+        edits: [NOTES, TRACKED],
+        protectDetached: true,
+      });
+      expect(r.status).toBe("usage_error");
+      expect(r.reason).toBe("protected_branch");
+      expect(r.edits[1].detail).toContain("detached HEAD");
+      expect(r.edits[1].detail).toContain('"a.txt"');
+      expect(read(dir, "run/notes.md")).toBe("n\n");
+      expect(read(dir, "a.txt")).toBe("a\n");
+    });
+
+    it("without --protect-detached nothing is classified", () => {
+      const dir = detached();
+      const r = patch({ cwd: dir, edits: [NOTES, TRACKED] });
+      expect(r.status).toBe("written");
+      expect(g(r).status).toBe("detached");
+      expect(g(r).targets).toBeUndefined();
+    });
+  });
+
+  describe("when git cannot classify a target", () => {
+    const FAIL_IGNORE =
+      '[ "$1" = check-ignore ] && { echo boom >&2; exit 128; }';
+    const FAIL_LS = '[ "$1" = ls-files ] && { echo boom >&2; exit 128; }';
+
+    it("treats a failing check-ignore as tracked: refused, with a warning", () => {
+      const dir = mixedRepo();
+      const r = withGitShim(FAIL_IGNORE, () =>
+        patch({ cwd: dir, edits: [NOTES] }),
+      );
+      expect(r.status).toBe("usage_error");
+      expect(r.reason).toBe("protected_branch");
+      expect(read(dir, "run/notes.md")).toBe("n\n");
+      expect(g(r).targets).toEqual([
+        {
+          path: "run/notes.md",
+          status: "refused",
+          tracking: "unknown",
+          reason: "protected_branch",
+        },
+      ]);
+      const warned = r.warnings.filter((w) => w.includes("could not tell"));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain("run/notes.md");
+      expect(warned[0]).toContain("check-ignore");
+      expect(warned[0]).toContain("treated as tracked");
+    });
+
+    it("treats a failing ls-files as tracked", () => {
+      const dir = mixedRepo();
+      const r = withGitShim(FAIL_LS, () => patch({ cwd: dir, edits: [NOTES] }));
+      expect(r.status).toBe("usage_error");
+      expect(g(r).targets?.[0].tracking).toBe("unknown");
+      expect(r.warnings.join("\n")).toContain("ls-files");
+    });
+
+    it("a classification that fails does not hide the one that worked", () => {
+      const dir = mixedRepo();
+      const r = withGitShim(
+        `case "$*" in *notes.md*) [ "$1" = check-ignore ] && exit 128 ;; esac`,
+        () => patch({ cwd: dir, edits: [NOTES, CACHED] }),
+      );
+      expect(r.status).toBe("usage_error");
+      expect(g(r).targets?.map((t) => [t.tracking, t.status])).toEqual([
+        ["unknown", "refused"],
+        ["ignored", "allowed_ignored"],
+      ]);
+      expect(read(dir, ".cache/note.txt")).toBe("c\n");
+    });
+
+    it("treats a call that outlives the guard's timeout as tracked", () => {
+      const dir = mixedRepo();
+      const r = withGitShim('[ "$1" = check-ignore ] && exec sleep 20', () =>
+        patch({ cwd: dir, edits: [NOTES], gitTimeoutMs: 400 }),
+      );
+      expect(r.status).toBe("usage_error");
+      expect(r.reason).toBe("protected_branch");
+      expect(g(r).targets?.[0].tracking).toBe("unknown");
+      expect(r.warnings.join("\n")).toContain("did not finish within 400 ms");
+    });
+
+    it("--allow-protected writes the unclassifiable target and records the override", () => {
+      const dir = mixedRepo();
+      const r = withGitShim(FAIL_IGNORE, () =>
+        patch({ cwd: dir, edits: [NOTES], allowProtected: true }),
+      );
+      expect(r.status).toBe("written");
+      expect(r.allowedProtected).toBe(true);
+      expect(g(r).targets?.[0]).toMatchObject({
+        status: "allowed_protected",
+        tracking: "unknown",
+      });
+    });
+
+    it("--dry-run reports would_refuse for it", () => {
+      const dir = mixedRepo();
+      const r = withGitShim(FAIL_IGNORE, () =>
+        patch({ cwd: dir, edits: [NOTES], dryRun: true }),
+      );
+      expect(g(r).targets?.[0].status).toBe("would_refuse");
+    });
+  });
+});
+
+/** A repository on `main` with the given case and Unicode settings. */
+function spellingRepo(settings: Record<string, string | undefined>): string {
+  const dir = tmpDir();
+  git(dir, "init", "-q");
+  git(dir, "symbolic-ref", "HEAD", "refs/heads/main");
+  for (const [k, v] of Object.entries(settings)) {
+    if (v === undefined) {
+      // `git init` sets core.ignorecase only on a case-insensitive volume;
+      // unsetting a key that is absent exits 5 and means the same thing.
+      try {
+        git(dir, "config", "--unset", k);
+      } catch {
+        /* not set */
+      }
+    } else git(dir, "config", k, v);
+  }
+  return dir;
+}
+
+/** Renames `from` to `to` through a temporary name, so that a volume that
+ * folds letter case or Unicode form takes the new spelling. */
+function respell(dir: string, from: string, to: string): void {
+  const tmp = path.join(path.dirname(path.join(dir, from)), ".respell-tmp");
+  fs.renameSync(path.join(dir, from), tmp);
+  fs.renameSync(tmp, path.join(dir, to));
+}
+
+function write(dir: string, rel: string, text: string): void {
+  fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+  fs.writeFileSync(path.join(dir, rel), text);
+}
+
+/** The edit that `file` carries in the spelling tests. */
+const hi = (file: string) => ({ file, old: "hi", new: "Z" });
+
+/** A patch that the guard must have refused as tracked, with the file
+ * unchanged. */
+function expectTrackedRefusal(
+  dir: string,
+  r: ReturnType<typeof patch>,
+  rel: string,
+): void {
+  expect(r.status).toBe("usage_error");
+  expect(r.reason).toBe("protected_branch");
+  expect(r.writtenFiles).toEqual([]);
+  expect(read(dir, rel)).toBe("hi\n");
+  expect(g(r).targets?.[0]).toMatchObject({
+    status: "refused",
+    tracking: "tracked",
+  });
+}
+
+describe("patch branch guard: another spelling of a tracked file is tracked", () => {
+  const foldsCase = (dir: string, spelling: string): boolean => {
+    const other =
+      spelling === spelling.toLowerCase()
+        ? spelling.toUpperCase()
+        : spelling.toLowerCase();
+    return other !== spelling && fs.existsSync(path.join(dir, other));
+  };
+
+  describe("with core.ignorecase=true", () => {
+    it("refuses the on-disk spelling of an index entry that differs in letter case", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "Bar.md", "hi\n");
+      git(dir, "add", "Bar.md");
+      commitAll(dir);
+      respell(dir, "Bar.md", "bar.md");
+      expectTrackedRefusal(
+        dir,
+        patch({ cwd: dir, edits: [hi("bar.md")] }),
+        "bar.md",
+      );
+      if (foldsCase(dir, "bar.md")) {
+        // The volume folds case: the name in the index reaches the file too.
+        expectTrackedRefusal(
+          dir,
+          patch({ cwd: dir, edits: [hi("Bar.md")] }),
+          "bar.md",
+        );
+      }
+    });
+
+    it("refuses a tracked file below a directory that differs in letter case", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "Dir/Sub/a.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      respell(dir, "Dir", "dir");
+      expectTrackedRefusal(
+        dir,
+        patch({ cwd: dir, edits: [hi("dir/Sub/a.md")] }),
+        "dir/Sub/a.md",
+      );
+    });
+
+    it("refuses the ignored variant: a tracked file that an ignore rule names", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, ".gitignore", "*.log\n");
+      write(dir, "Bar.log", "hi\n");
+      git(dir, "add", ".gitignore");
+      git(dir, "add", "-f", "Bar.log");
+      commitAll(dir);
+      respell(dir, "Bar.log", "bar.log");
+      expectTrackedRefusal(
+        dir,
+        patch({ cwd: dir, edits: [hi("bar.log")] }),
+        "bar.log",
+      );
+    });
+
+    it("still allows an untracked file whose name only resembles a tracked one", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "Bar.md", "hi\n");
+      write(dir, "Bar.md.bak", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "Bar.mdx", "hi\n");
+      write(dir, "Bar", "hi\n");
+      for (const f of ["Bar.mdx", "Bar"]) {
+        const r = patch({ cwd: dir, edits: [hi(f)], dryRun: true });
+        expect(g(r).targets?.[0]).toMatchObject({
+          status: "allowed_untracked",
+          tracking: "untracked",
+        });
+      }
+    });
+
+    it("a name with glob characters stays literal under icase", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "g[1]*/t.md", "hi\n");
+      write(dir, "g1x/t.md", "hi\n");
+      write(dir, "g1x/u.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "g[1]*/u.md", "hi\n");
+      const tracked = patch({ cwd: dir, edits: [hi("g[1]*/t.md")] });
+      expectTrackedRefusal(dir, tracked, "g[1]*/t.md");
+      const free = patch({ cwd: dir, edits: [hi("g[1]*/u.md")] });
+      expect(free.status).toBe("written");
+      expect(g(free).targets?.[0].tracking).toBe("untracked");
+    });
+
+    it("an untracked and an ignored file beside tracked ones keep their allowed statuses", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, ".gitignore", "*.log\n");
+      write(dir, "d/t.md", "hi\n");
+      write(dir, "d/u.md.bak", "hi\n");
+      write(dir, "dd/u.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "d/u.md", "hi\n");
+      write(dir, "d/i.log", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("d/u.md"), hi("d/i.log")] });
+      expect(r.status).toBe("written");
+      expect(g(r).targets?.map((t) => [t.tracking, t.status])).toEqual([
+        ["untracked", "allowed_untracked"],
+        ["ignored", "allowed_ignored"],
+      ]);
+    });
+
+    it("fails closed when core.ignorecase cannot be read: the case variant is refused", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "Bar.md", "hi\n");
+      git(dir, "add", "Bar.md");
+      commitAll(dir);
+      respell(dir, "Bar.md", "bar.md");
+      const r = withGitShim(
+        '[ "$1" = config ] && { echo boom >&2; exit 2; }',
+        () => patch({ cwd: dir, edits: [hi("bar.md")] }),
+      );
+      expectTrackedRefusal(dir, r, "bar.md");
+    });
+  });
+
+  describe("with core.ignorecase=false or unset", () => {
+    // On a volume that keeps the two spellings apart, a case variant that
+    // is not in the index is a file of its own and is untracked. (On a
+    // volume that folds case it is the same file; the identity tests below
+    // cover that.) The exact name the index carries is tracked either way.
+    for (const [label, setting] of [
+      ["false", "false"],
+      ["unset", undefined],
+    ] as const) {
+      it(`${label}: a case variant that is not in the index is untracked`, () => {
+        const dir = spellingRepo({ "core.ignorecase": setting });
+        write(dir, "Bar.md", "hi\n");
+        git(dir, "add", "Bar.md");
+        commitAll(dir);
+        write(dir, "bar.md.new", "hi\n");
+        respell(dir, "bar.md.new", "Baz.md");
+        const r = patch({ cwd: dir, edits: [hi("Baz.md")], dryRun: true });
+        expect(g(r).targets?.[0]).toMatchObject({
+          status: "allowed_untracked",
+          tracking: "untracked",
+        });
+        // The same name as the index carries is tracked either way.
+        const tracked = patch({ cwd: dir, edits: [hi("Bar.md")] });
+        expectTrackedRefusal(dir, tracked, "Bar.md");
+      });
+    }
+  });
+
+  describe("Unicode form", () => {
+    const NFC = "café.md";
+    const NFD = "café.md";
+
+    function nfdRepo(): string {
+      const dir = spellingRepo({
+        "core.ignorecase": "false",
+        "core.precomposeunicode": "false",
+      });
+      write(dir, NFC, "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      respell(dir, NFC, NFD);
+      return dir;
+    }
+
+    it("refuses an NFD on-disk name of an NFC index entry", () => {
+      const dir = nfdRepo();
+      expect(fs.readdirSync(dir)).toContain(NFD);
+      expectTrackedRefusal(dir, patch({ cwd: dir, edits: [hi(NFD)] }), NFD);
+    });
+
+    it("refuses an NFD directory component of an NFC index entry", () => {
+      const dir = spellingRepo({
+        "core.ignorecase": "false",
+        "core.precomposeunicode": "false",
+      });
+      write(dir, "déjà/a.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      respell(dir, "déjà", "déjà");
+      expectTrackedRefusal(
+        dir,
+        patch({ cwd: dir, edits: [hi("déjà/a.md")] }),
+        "déjà/a.md",
+      );
+    });
+
+    it("refuses an NFC on-disk name of an NFD index entry", () => {
+      const dir = spellingRepo({
+        "core.ignorecase": "false",
+        "core.precomposeunicode": "false",
+      });
+      write(dir, NFD, "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      respell(dir, NFD, NFC);
+      expectTrackedRefusal(dir, patch({ cwd: dir, edits: [hi(NFC)] }), NFC);
+    });
+
+    it("allows an untracked file with a combining character that no entry has", () => {
+      const dir = nfdRepo();
+      write(dir, "naïve.md", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("naïve.md")], dryRun: true });
+      expect(g(r).targets?.[0].tracking).toBe("untracked");
+    });
+  });
+});
+
+/** Whether the volume that holds the temporary directories treats two
+ * spellings as one file (same dev:ino): creates a file under `a` and looks
+ * it up as `b`. */
+function sameFileOnVolume(a: string, b: string): boolean {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, a), "x");
+  try {
+    const one = fs.lstatSync(path.join(dir, a));
+    const two = fs.lstatSync(path.join(dir, b));
+    return one.dev === two.dev && one.ino === two.ino;
+  } catch {
+    return false;
+  }
+}
+
+describe("patch branch guard: a tracked file is found by identity, not by its spelling", () => {
+  const folds = sameFileOnVolume("Probe.md", "pROBE.md");
+  const foldsNonAscii = sameFileOnVolume("Äpfel.md", "äpfel.md");
+  const MIXED = "xệ.md"; // U+00EA U+0323: neither NFC nor NFD
+  const MIXED_NFC = "xệ.md";
+  const foldsUnicode = sameFileOnVolume(MIXED, MIXED_NFC);
+
+  for (const [label, setting] of [
+    ["false", "false"],
+    ["unset", undefined],
+  ] as const) {
+    it(`core.ignorecase ${label}: the case variant of a tracked file is refused where it is the same file`, () => {
+      const dir = spellingRepo({ "core.ignorecase": setting });
+      write(dir, "Bar.md", "hi\n");
+      git(dir, "add", "Bar.md");
+      commitAll(dir);
+      respell(dir, "Bar.md", "bar.md");
+      const r = patch({ cwd: dir, edits: [hi("bar.md")] });
+      if (folds) {
+        expectTrackedRefusal(dir, r, "bar.md");
+      } else {
+        // Two files on this volume: bar.md is a file of its own.
+        expect(r.status).toBe("written");
+        expect(g(r).targets?.[0]).toMatchObject({
+          status: "allowed_untracked",
+          tracking: "untracked",
+        });
+      }
+    });
+  }
+
+  it("a letter outside ASCII that differs only in case is refused where it is the same file", () => {
+    const dir = spellingRepo({ "core.ignorecase": "true" });
+    write(dir, "Äpfel.md", "hi\n");
+    git(dir, "add", "-A");
+    commitAll(dir);
+    respell(dir, "Äpfel.md", "äpfel.md");
+    const r = patch({ cwd: dir, edits: [hi("äpfel.md")] });
+    if (foldsNonAscii) {
+      expectTrackedRefusal(dir, r, "äpfel.md");
+    } else {
+      expect(r.status).toBe("written");
+    }
+  });
+
+  it("a partly decomposed index entry with the NFC name on disk is refused where it is the same file", () => {
+    const dir = spellingRepo({
+      "core.ignorecase": "false",
+      "core.precomposeunicode": "false",
+    });
+    write(dir, MIXED, "hi\n");
+    git(dir, "add", "-A");
+    commitAll(dir);
+    respell(dir, MIXED, MIXED_NFC);
+    const r = patch({ cwd: dir, edits: [hi(MIXED_NFC)] });
+    if (foldsUnicode) {
+      expectTrackedRefusal(dir, r, MIXED_NFC);
+    } else {
+      expect(r.status).toBe("written");
+    }
+  });
+
+  for (const setting of ["false", "true"]) {
+    it(`core.ignorecase ${setting}: an untracked and an ignored file beside tracked ones keep their allowed statuses`, () => {
+      const dir = spellingRepo({ "core.ignorecase": setting });
+      write(dir, ".gitignore", "*.log\n");
+      write(dir, "d/t.md", "hi\n");
+      write(dir, "d/T2.md", "hi\n");
+      write(dir, "u.md.bak", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "d/u.md", "hi\n");
+      write(dir, "d/i.log", "hi\n");
+      write(dir, "u.md", "hi\n");
+      const r = patch({
+        cwd: dir,
+        edits: [hi("d/u.md"), hi("d/i.log"), hi("u.md")],
+      });
+      expect(r.status).toBe("written");
+      expect(g(r).targets?.map((t) => [t.tracking, t.status])).toEqual([
+        ["untracked", "allowed_untracked"],
+        ["ignored", "allowed_ignored"],
+        ["untracked", "allowed_untracked"],
+      ]);
+    });
+  }
+
+  it("a directory name with glob characters is listed literally by the fallback", () => {
+    const dir = spellingRepo({ "core.ignorecase": "false" });
+    write(dir, "g[1]*/t.md", "hi\n");
+    write(dir, "g1x/other.md", "hi\n");
+    git(dir, "add", "-A");
+    commitAll(dir);
+    write(dir, "g[1]*/u.md", "hi\n");
+    write(dir, "g1x/u.md", "hi\n");
+    const r = patch({
+      cwd: dir,
+      edits: [hi("g[1]*/u.md"), hi("g1x/u.md")],
+    });
+    expect(r.status).toBe("written");
+    expect(g(r).targets?.map((t) => t.tracking)).toEqual([
+      "untracked",
+      "untracked",
+    ]);
+  });
+
+  for (const name of ["D[1]", "W*", "Q?"]) {
+    it(`a case variant below the glob-named directory ${name} is refused where it is the same file`, () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      write(dir, `${name}/F.md`, "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      const lower = name.toLowerCase();
+      respell(dir, name, lower);
+      respell(dir, `${lower}/F.md`, `${lower}/f.md`);
+      const r = patch({ cwd: dir, edits: [hi(`${lower}/f.md`)] });
+      if (folds) {
+        expectTrackedRefusal(dir, r, `${lower}/f.md`);
+      } else {
+        expect(r.status).toBe("written");
+        expect(g(r).targets?.[0]).toMatchObject({ tracking: "untracked" });
+      }
+    });
+  }
+
+  it("targets in one directory share the listing and a variant among them is still found", () => {
+    const dir = spellingRepo({ "core.ignorecase": "false" });
+    write(dir, "d/Bar.md", "hi\n");
+    write(dir, "d/other.md", "hi\n");
+    git(dir, "add", "-A");
+    commitAll(dir);
+    respell(dir, "d/Bar.md", "d/bar.md");
+    write(dir, "d/u1.md", "hi\n");
+    write(dir, "d/u2.md", "hi\n");
+    const counter = path.join(tmpDir(), "count");
+    const r = withGitShim(
+      `[ "$1" = ls-files ] && echo x >> ${JSON.stringify(counter)}`,
+      () =>
+        patch({
+          cwd: dir,
+          edits: [hi("d/u1.md"), hi("d/u2.md"), hi("d/bar.md")],
+        }),
+    );
+    if (folds) {
+      expect(r.status).toBe("usage_error");
+      expect(g(r).targets?.map((t) => t.tracking)).toEqual([
+        "untracked",
+        "untracked",
+        "tracked",
+      ]);
+      // One fast lookup per target, one directory listing for all three.
+      expect(fs.readFileSync(counter, "utf8").trim().split("\n")).toHaveLength(
+        4,
+      );
+    }
+  });
+
+  describe("when the fallback cannot finish", () => {
+    it("a failing second ls-files call is unknown: refused, with a warning", () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      write(dir, "t.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "u.md", "hi\n");
+      const counter = path.join(tmpDir(), "count");
+      const r = withGitShim(
+        [
+          '[ "$1" = ls-files ] && {',
+          `  n=$(cat ${JSON.stringify(counter)} 2>/dev/null || echo 0); n=$((n+1)); echo $n > ${JSON.stringify(counter)}`,
+          '  [ "$n" -ge 2 ] && { echo boom >&2; exit 128; }',
+          "}",
+        ].join("\n"),
+        () => patch({ cwd: dir, edits: [hi("u.md")] }),
+      );
+      expect(r.status).toBe("usage_error");
+      expect(r.reason).toBe("protected_branch");
+      expect(read(dir, "u.md")).toBe("hi\n");
+      expect(g(r).targets?.[0]).toMatchObject({
+        status: "refused",
+        tracking: "unknown",
+      });
+      expect(r.warnings.join("\n")).toContain("could not tell whether");
+    });
+
+    it("a directory listing over the output cap is unknown: refused, with a warning", () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      for (let n = 0; n < 1500; n++) {
+        write(
+          dir,
+          `big/a-rather-long-file-name-for-the-cap-${String(n).padStart(5, "0")}.md`,
+          "x\n",
+        );
+      }
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "big/new.md", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("big/new.md")] });
+      expect(r.status).toBe("usage_error");
+      expect(g(r).targets?.[0].tracking).toBe("unknown");
+      expect(r.warnings.join("\n")).toContain("wrote more than 65536 bytes");
+      expect(read(dir, "big/new.md")).toBe("hi\n");
+    });
+
+    it("a root-level target is classified from the top-level entries only: a large index below does not matter", () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      for (let n = 0; n < 3000; n++) {
+        write(
+          dir,
+          `sub${String(n % 20)}/file-number-${String(n).padStart(5, "0")}.md`,
+          "x\n",
+        );
+      }
+      write(dir, "top.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "fresh.md", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("fresh.md")] });
+      expect(r.status).toBe("written");
+      expect(g(r).targets?.[0].tracking).toBe("untracked");
+      if (folds) {
+        const tracked = patch({ cwd: dir, edits: [hi("TOP.md")] });
+        expect(tracked.status).toBe("usage_error");
+      }
+    });
+
+    it("a root-level directory with more top-level entries than the cap allows is unknown", () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      for (let n = 0; n < 1500; n++) {
+        write(
+          dir,
+          `a-rather-long-top-level-name-for-the-cap-${String(n).padStart(5, "0")}.md`,
+          "x\n",
+        );
+      }
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "fresh.md", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("fresh.md")] });
+      expect(r.status).toBe("usage_error");
+      expect(g(r).targets?.[0].tracking).toBe("unknown");
+    });
+  });
+});
+
+describe("patch branch guard: git's pathspec switches in the environment", () => {
+  for (const name of [
+    "GIT_ICASE_PATHSPECS",
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_LITERAL_PATHSPECS",
+  ]) {
+    it(`${name}=1 does not break the classification of an untracked target`, async () => {
+      const dir = mixedRepo();
+      const res = await spawnCli(
+        [
+          "--json",
+          "-C",
+          dir,
+          "patch",
+          "--file",
+          "run/notes.md",
+          "--old",
+          "n",
+          "--new",
+          "N",
+        ],
+        {
+          env: {
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_CONFIG_NOSYSTEM: "1",
+            [name]: "1",
+          },
+        },
+      );
+      expect(res.code).toBe(0);
+      const out = JSON.parse(res.stdout) as {
+        status: string;
+        warnings: string[];
+        branch_guard: { repos: { targets: { status: string }[] }[] };
+      };
+      expect(out.status).toBe("written");
+      expect(out.branch_guard.repos[0].targets[0].status).toBe(
+        "allowed_untracked",
+      );
+      expect(out.warnings).toEqual([]);
+    });
+  }
+});
+
+describe("patch branch guard: the overall status of a plan", () => {
+  const entry = (status: RepoGuard["status"]): RepoGuard => ({
+    status,
+    protected: [],
+    sources: [],
+  });
+  const overall = (...statuses: RepoGuard["status"][]): string =>
+    combineGuards(statuses.map(entry)).status;
+
+  it("takes the most severe status of the repositories", () => {
+    expect(overall("allowed", "allowed_ignored")).toBe("allowed_ignored");
+    expect(overall("allowed_ignored", "allowed_untracked")).toBe(
+      "allowed_untracked",
+    );
+    expect(overall("allowed_untracked", "allowed_ignored")).toBe(
+      "allowed_untracked",
+    );
+    expect(overall("allowed_untracked", "allowed")).toBe("allowed_untracked");
+    expect(overall("not_a_repo", "allowed_ignored")).toBe("allowed_ignored");
+    expect(overall("detached", "allowed_untracked")).toBe("detached");
+    expect(overall("allowed_untracked", "allowed_protected")).toBe(
+      "allowed_protected",
+    );
+    expect(overall("allowed_protected", "would_refuse")).toBe("would_refuse");
+    expect(overall("would_refuse", "refused")).toBe("refused");
+    expect(overall("allowed_untracked", "refused")).toBe("refused");
+  });
+
+  it("is not_a_repo for no repository at all", () => {
+    expect(combineGuards([])).toEqual({ status: "not_a_repo", repos: [] });
+  });
+
+  it("a plan over two repositories: one untracked on main, one on a task branch", () => {
+    const main = mixedRepo();
+    const task = repoOn("task");
+    const r = patch({
+      cwd: main,
+      allowOutside: true,
+      edits: [NOTES, { file: path.join(task, "a.txt"), old: "a", new: "b" }],
+    });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.repos.map((x) => x.status)).toEqual([
+      "allowed_untracked",
+      "allowed",
+    ]);
+    expect(r.branchGuard.status).toBe("allowed_untracked");
+  });
+});
+
 describe("patch branch guard: layouts", () => {
   it("judges the repository root when -C is a subdirectory of a repository on main", () => {
     const dir = repoOn("main");
     fs.mkdirSync(path.join(dir, "deep", "er"), { recursive: true });
     fs.writeFileSync(path.join(dir, "deep", "er", "x.txt"), "x\n");
+    git(dir, "add", "deep/er/x.txt");
     const r = patch({
       cwd: path.join(dir, "deep", "er"),
       edits: [{ file: "x.txt", old: "x", new: "y" }],
@@ -628,6 +1673,7 @@ describe("patch branch guard: layouts", () => {
     git(wt, "init", "-q", "--separate-git-dir", path.join(base, "gd"), ".");
     git(wt, "symbolic-ref", "HEAD", "refs/heads/main");
     fs.writeFileSync(path.join(wt, "a.txt"), "a\n");
+    git(wt, "add", "a.txt");
     expect(fs.statSync(path.join(wt, ".git")).isFile()).toBe(true);
     expectRefused(wt, patch({ cwd: wt, edits: EDIT }));
   });
@@ -693,6 +1739,7 @@ describe("patch branch guard: layouts", () => {
     const inner = path.join(outer, "inner");
     fs.mkdirSync(path.join(inner, ".git"), { recursive: true });
     fs.writeFileSync(path.join(inner, "a.txt"), "a\n");
+    git(outer, "add", "inner/a.txt");
     const r = patch({ cwd: inner, edits: EDIT });
     expect(r.status).toBe("usage_error");
     expect(r.reason).toBe("protected_branch");
@@ -705,6 +1752,7 @@ describe("patch branch guard: layouts", () => {
     fs.mkdirSync(path.join(dir, ".git", "refs"));
     fs.writeFileSync(path.join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
     fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+    git(dir, "add", "a.txt");
     expectRefused(dir, patch({ cwd: dir, edits: EDIT }));
   });
 
@@ -1199,6 +2247,12 @@ interface GuardJson {
       protected: string[];
       sources: string[];
       reason?: string;
+      targets: {
+        path: string;
+        status: string;
+        tracking: string;
+        reason?: string;
+      }[];
     }[];
   };
   warnings: string[];
@@ -1254,6 +2308,14 @@ describe("patch branch guard: the CLI", () => {
           protected: ["main", "master"],
           sources: ["builtin"],
           reason: "protected_branch",
+          targets: [
+            {
+              path: "a.txt",
+              status: "refused",
+              tracking: "tracked",
+              reason: "protected_branch",
+            },
+          ],
         },
       ],
     });
@@ -1328,6 +2390,7 @@ describe("patch branch guard: the CLI", () => {
       }));
       for (const e of edits) fs.writeFileSync(path.join(dir, e.file), "a\n");
       fs.writeFileSync(path.join(dir, "plan.json"), JSON.stringify({ edits }));
+      git(dir, "add", "-A");
       const res = await spawnCli(
         [
           "--json",
@@ -1346,7 +2409,7 @@ describe("patch branch guard: the CLI", () => {
     }
 
     it("keeps written_files, counts and allowed_protected when --allow-protected wrote", async () => {
-      const out = await tight("1200", "--allow-protected");
+      const out = await tight("1300", "--allow-protected");
       // The edits and files were cut down; the audit fields were not.
       expect(out.truncated).toBe(true);
       expect(out.written_files).toHaveLength(12);
@@ -1355,7 +2418,7 @@ describe("patch branch guard: the CLI", () => {
     });
 
     it("keeps reason, counts and written_files of a refusal", async () => {
-      const out = await tight("1200");
+      const out = await tight("1300");
       expect(out.truncated).toBe(true);
       expect(out.status).toBe("usage_error");
       expect(out.reason).toBe("protected_branch");
@@ -1398,6 +2461,13 @@ describe("patch branch guard: the CLI", () => {
       "root",
       "sources",
       "status",
+      "targets",
+    ]);
+    expect(Object.keys(r.out.branch_guard.repos[0].targets[0]).sort()).toEqual([
+      "path",
+      "reason",
+      "status",
+      "tracking",
     ]);
     expect(Object.keys(r.out.branch_guard).sort()).toEqual([
       "reason",
