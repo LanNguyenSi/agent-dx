@@ -1319,7 +1319,12 @@ export interface PlanMutantResult {
   /** This mutant's own warnings; the plan's setup and teardown warnings
    * stay on the plan. */
   warnings: string[];
-  mutant?: MutantField;
+  /** The computed mutant, or -- for a `mutant_not_applicable` row of a
+   * named-line form -- just the line the mutant named: the line was
+   * known, only the mutation could not be computed on it, so nothing
+   * else about the mutant is claimed. Every other field is optional
+   * exactly for that line-only record. */
+  mutant?: MutantField | (Partial<MutantField> & { line: number });
   mutation_probe?: MutationProbeField;
   test?: TestPhaseField;
   /** See `ProbeResult.line_content`. */
@@ -2155,6 +2160,16 @@ async function runProbePlanPipeline(
           status: "inconclusive",
           reason: prepared.reason,
           warnings: mutantWarnings,
+          // The line this mutant named is still known even though the
+          // mutation was never computed on it: carry it (and nothing
+          // else -- `before`/`after` were never derived, so they are not
+          // invented) so a refused mutant's summary row reads
+          // `file:line` like every other row. Only the named-line forms
+          // have a line; a patch mutant refused by its dry run does not.
+          ...(prepared.reason === "mutant_not_applicable" &&
+          item.spec.line !== undefined
+            ? { mutant: { line: item.spec.line } }
+            : {}),
           ...(prepared.lineContent !== undefined
             ? { line_content: prepared.lineContent }
             : {}),

@@ -237,6 +237,64 @@ describe("probe --summary (CLI)", { timeout: 60000 }, () => {
     expect(run.code).not.toBe(0);
     expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
+
+  it("single not-applicable probe: totals count the mutant, the note ends with line=, exit 2 as in JSON", async () => {
+    const { repo, logs } = makeRepo();
+    const args = [
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-M",
+      "not-there",
+      "-w",
+      "x",
+      "-t",
+      TEST_CMD,
+    ];
+    const { json, view } = await both(repo, logs, args, ["--summary"]);
+    expect(json.code).toBe(2);
+    expect(view.code).toBe(2);
+    const lines = view.stdout.trimEnd().split("\n");
+    expect(lines[0]).toBe(
+      "totals: status=inconclusive reason=mutant_not_applicable total=1 killed=0 survived=0 inconclusive=1 not_run=0 met=0 violated=0",
+    );
+    expect(lines[lines.length - 1]).toBe(
+      "note: substring not found on line 1 line=module.exports = true;",
+    );
+  });
+
+  it("--plan with a not-applicable mutant: file:line id, log=- and a line= column on its row; the killed row unchanged", async () => {
+    const { repo, logs } = makeRepo();
+    const plan = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      plan,
+      JSON.stringify({
+        test: TEST_CMD,
+        mutants: [
+          { file: "fixture.js", line: 1, match: "not-there", with: "x" },
+          { file: "fixture.js", line: 1, replace: "module.exports = false;" },
+        ],
+      }),
+    );
+    const { json, view } = await both(
+      repo,
+      logs,
+      ["--plan", plan],
+      ["--summary"],
+    );
+    expect(view.code).toBe(json.code);
+    const lines = view.stdout.trimEnd().split("\n");
+    expect(lines[0]).toBe(
+      "#0 fixture.js:1 | inconclusive(mutant_not_applicable) | expectation=- | restored=- | failing=- | log=- | line=module.exports = true;",
+    );
+    expect(lines[1]).toMatch(
+      /^#1 fixture\.js:1 \| killed \| expectation=met \| restored=true \| failing=FAIL fixture is false \| log=\S+\.log$/,
+    );
+    expect(lines[2]).toContain(
+      "status=inconclusive reason=mutant_inconclusive total=2 killed=1 survived=0 inconclusive=1",
+    );
+  });
 });
 
 describe("probe --print (CLI)", { timeout: 60000 }, () => {
@@ -690,6 +748,82 @@ describe("summary helpers", () => {
     });
     expect(text).toContain("a.ts:4 | not_run(baseline_failed)");
     expect(text).toContain("log=/logs/base.log");
+  });
+
+  it("single-form mutant_not_applicable: totals count the mutant and the note ends with line=", () => {
+    const text = renderProbeSummary({
+      status: "inconclusive",
+      reason: "mutant_not_applicable",
+      warnings: ["substring not found on line 45"],
+      line_content: "  return a + b; ",
+    });
+    expect(text.trimEnd().split("\n")).toEqual([
+      "totals: status=inconclusive reason=mutant_not_applicable total=1 killed=0 survived=0 inconclusive=1 not_run=0 met=0 violated=0",
+      "note: substring not found on line 45 line=return a + b;",
+    ]);
+  });
+
+  it("single-form mutant_not_applicable without line_content: counts the mutant, prints no line= part", () => {
+    const text = renderProbeSummary({
+      status: "inconclusive",
+      reason: "mutant_not_applicable",
+      warnings: ["line 99 is out of range (file has 3 lines)"],
+    });
+    expect(text).toContain("total=1");
+    expect(text).toContain("inconclusive=1");
+    expect(text).toContain(
+      "note: line 99 is out of range (file has 3 lines)\n",
+    );
+    expect(text).not.toContain("line=");
+  });
+
+  it("a plan's mutant_not_applicable row: file:line id, log=- (never ran), line= appended last", () => {
+    const text = renderProbeSummary({
+      status: "inconclusive",
+      reason: "mutant_inconclusive",
+      plan: {
+        baseline: { logPath: "/logs/b0.log" },
+        results: [
+          {
+            index: 2,
+            file: "src/Foo.php",
+            status: "inconclusive",
+            reason: "mutant_not_applicable",
+            mutant: { line: 45 },
+            line_content: "    return $total + $tax;",
+            logs: [],
+          },
+        ],
+        summary: { total: 1, inconclusive: 1 },
+      },
+    });
+    expect(text.trimEnd().split("\n")[0]).toBe(
+      "#2 src/Foo.php:45 | inconclusive(mutant_not_applicable) | expectation=- | restored=- | failing=- | log=- | line=return $total + $tax;",
+    );
+  });
+
+  it("a plan row whose dry run left a log names it; a row without line_content prints no line= part", () => {
+    const text = renderProbeSummary({
+      status: "inconclusive",
+      reason: "mutant_inconclusive",
+      plan: {
+        baseline: { logPath: "/logs/b0.log" },
+        results: [
+          {
+            index: 0,
+            file: "a.ts",
+            status: "inconclusive",
+            reason: "mutant_not_applicable",
+            mutant: { line: 3 },
+            logs: ["/logs/dry-run.log"],
+          },
+        ],
+        summary: { total: 1, inconclusive: 1 },
+      },
+    });
+    expect(text).toContain("a.ts:3 | inconclusive(mutant_not_applicable)");
+    expect(text).toContain("log=/logs/dry-run.log");
+    expect(text).not.toContain("line=");
   });
 });
 

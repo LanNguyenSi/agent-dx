@@ -12,6 +12,7 @@ import {
   classifyStdoutError,
   looksLikeFullSuiteTestCommand,
   mapTopLevelError,
+  renderUsageErrorSummaryLine,
   writeAndExitTo,
   parseExecOverride,
   parsePassRegexOverride,
@@ -1335,10 +1336,12 @@ describe("cli verify", () => {
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("usage_error");
     // This refusal is the OPTION PARSER's (`--max-failures` is validated
-    // while the options are parsed), so it stays a top-level parser error
-    // with `command: "unknown"`; verify()'s own `maxFailures` refusal is
-    // only reachable from the library API and is pinned there.
-    expect(parsed.command).toBe("unknown");
+    // while the options are parsed), and commander parses a subcommand's
+    // options after dispatching to it, so it names `verify`; an error
+    // before any dispatch stays `unknown` (see the usage-error command
+    // resolution block). verify()'s own `maxFailures` refusal is only
+    // reachable from the library API and is pinned there.
+    expect(parsed.command).toBe("verify");
   });
 
   it("--timeout 1 -x a busy-looping check times out: check status error, one synthetic failure naming timedOut, summary.errors 1, exit 2", async () => {
@@ -2398,6 +2401,7 @@ describe("mapTopLevelError", () => {
     expect(envelope.status).toBe("error");
     expect(exitCode).toBe(2);
     expect((envelope as { message?: string }).message).toBe("boom");
+    expect(envelope.command).toBe("unknown");
   });
 
   it("maps a UsageError to status: usage_error, exit 2", () => {
@@ -2409,6 +2413,7 @@ describe("mapTopLevelError", () => {
     expect(envelope.status).toBe("usage_error");
     expect(exitCode).toBe(2);
     expect((envelope as { message?: string }).message).toBe("bad flag");
+    expect(envelope.command).toBe("unknown");
   });
 
   it("maps a CommanderError to status: usage_error, exit 2", () => {
@@ -2421,6 +2426,266 @@ describe("mapTopLevelError", () => {
     expect(envelope.status).toBe("usage_error");
     expect(exitCode).toBe(2);
     expect((envelope as { message?: string }).message).toBe("unknown option");
+    expect(envelope.command).toBe("unknown");
+  });
+
+  it("reports a resolved command beside every error class, without inventing one", () => {
+    const cases: unknown[] = [
+      new CommanderError(1, "commander.missingMandatoryOptionValue", "no --x"),
+      new UsageError("bad flag"),
+      new Error("boom"),
+    ];
+    for (const err of cases) {
+      const { envelope } = mapTopLevelError(
+        err,
+        global,
+        Date.now(),
+        false,
+        "hygiene",
+      );
+      expect(envelope.command).toBe("hygiene");
+    }
+    // The default stays `unknown` (an omitted command is never guessed).
+    const { envelope } = mapTopLevelError(
+      new UsageError("x"),
+      global,
+      0,
+      false,
+    );
+    expect(envelope.command).toBe("unknown");
+  });
+});
+
+describe("usage-error command resolution (CLI)", () => {
+  function gitRepo(): string {
+    const dir = makeTmpDir();
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["config", "user.email", "t@example.com"], {
+      cwd: dir,
+    });
+    execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
+    fs.writeFileSync(path.join(dir, "a.txt"), "x\n");
+    execFileSync("git", ["add", "-A"], { cwd: dir });
+    execFileSync("git", ["commit", "-qm", "base"], { cwd: dir });
+    return dir;
+  }
+
+  it("a UsageError thrown by a subcommand action names that subcommand", async () => {
+    const run = await spawnCli([
+      "-C",
+      gitRepo(),
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--intended-deletion",
+      "p=0",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.command).toBe("hygiene");
+  });
+
+  it("a missing required option names the subcommand whose parsing failed", async () => {
+    const run = await spawnCli(["-C", gitRepo(), "drift", "--head", "HEAD"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.command).toBe("drift");
+    expect(parsed.message).toContain("required option '--base");
+  });
+
+  it("an unknown subcommand and a bad global option stay command: unknown", async () => {
+    for (const args of [
+      ["nosuch"],
+      ["--bogus", "drift"],
+      ["--max-chars", "x", "hygiene", "--base", "HEAD"],
+    ]) {
+      const run = await spawnCli(args);
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.command).toBe("unknown");
+    }
+  });
+
+  it("an invalid option value or an unknown option inside a known subcommand names that subcommand", async () => {
+    const cases: Array<[string[], string, string]> = [
+      [
+        ["verify", "-c", "true", "--max-failures", "abc"],
+        "verify",
+        "--max-failures",
+      ],
+      [["verify", "-c", "true", "--bogus"], "verify", "unknown option"],
+      // An empty -c parses; the failing token is the invalid 0 value.
+      [["verify", "-c", "", "--max-failures", "0"], "verify", "0"],
+      [
+        ["hygiene", "--base", "HEAD", "--max-delete-percent", "x"],
+        "hygiene",
+        "max-delete-percent",
+      ],
+    ];
+    for (const [args, name, needle] of cases) {
+      const run = await spawnCli(["-C", gitRepo(), ...args]);
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.command).toBe(name);
+      expect(parsed.message).toContain(needle);
+    }
+  });
+
+  it("the one-line usage view names the subcommand for an invalid value, whatever side of the failing token --summary sits on", async () => {
+    const verify = await spawnCli([
+      "-C",
+      gitRepo(),
+      "verify",
+      "-c",
+      "true",
+      "--max-failures",
+      "abc",
+      "--summary",
+    ]);
+    expect(verify.code).toBe(2);
+    expect(() => JSON.parse(verify.stdout)).toThrow();
+    expect(verify.stdout.trimEnd().split("\n")).toHaveLength(1);
+    expect(verify.stdout).toContain("command=verify");
+    const hygiene = await spawnCli([
+      "-C",
+      gitRepo(),
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--summary",
+      "--max-delete-percent",
+      "x",
+    ]);
+    expect(hygiene.code).toBe(2);
+    expect(() => JSON.parse(hygiene.stdout)).toThrow();
+    expect(hygiene.stdout.trimEnd().split("\n")).toHaveLength(1);
+    expect(hygiene.stdout).toContain("command=hygiene");
+  });
+
+  it("a competing --print token keeps the JSON envelope even when its own value failed to parse (the view is decided from raw argv)", async () => {
+    const space = await spawnCli([
+      "-C",
+      gitRepo(),
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--summary",
+      "--print",
+      "x",
+    ]);
+    expect(space.code).toBe(2);
+    const parsed = JSON.parse(space.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.command).toBe("hygiene");
+    expect(parsed.message).toContain("unknown field");
+    const eq = await spawnCli([
+      "-C",
+      gitRepo(),
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--summary",
+      "--print=status",
+    ]);
+    expect(eq.code).toBe(2);
+    expect(JSON.parse(eq.stdout).message).toContain("mutually exclusive");
+  });
+
+  it("--summary on a subcommand that supports it prints the one-line totals form for a usage error, exit 2", async () => {
+    const repo = gitRepo();
+    const json = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--intended-deletion",
+      "p=0",
+    ]);
+    const parsed = JSON.parse(json.stdout);
+    const view = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--intended-deletion",
+      "p=0",
+      "--summary",
+    ]);
+    expect(view.code).toBe(2);
+    expect(view.stdout).toBe(
+      `totals: status=usage_error command=hygiene reason=usage_error message=${parsed.message}\n`,
+    );
+    expect(() => JSON.parse(view.stdout)).toThrow();
+  });
+
+  it("a parse-level usage error with --summary prints the one-line form too", async () => {
+    const run = await spawnCli([
+      "-C",
+      gitRepo(),
+      "hygiene",
+      "--head",
+      "HEAD",
+      "--summary",
+    ]);
+    expect(run.code).toBe(2);
+    const lines = run.stdout.trimEnd().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe(
+      "totals: status=usage_error command=hygiene reason=usage_error message=error: required option '--base <rev>' not specified",
+    );
+  });
+
+  it("--summary competing with another view flag keeps the JSON envelope", async () => {
+    const run = await spawnCli([
+      "-C",
+      gitRepo(),
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--summary",
+      "--print",
+      "status",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toContain("mutually exclusive");
+  });
+
+  it("patch has no --summary: the flag is a usage error and the JSON envelope stays", async () => {
+    const run = await spawnCli(["patch", "--summary"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toContain("unknown option '--summary'");
+  });
+});
+
+describe("renderUsageErrorSummaryLine", () => {
+  it("prints the single `totals:` line with the fields named in order", () => {
+    expect(
+      renderUsageErrorSummaryLine("hygiene", "usage_error", "bad flag"),
+    ).toBe(
+      "totals: status=usage_error command=hygiene reason=usage_error message=bad flag\n",
+    );
+  });
+
+  it("collapses newlines (and other whitespace runs) out of the message", () => {
+    const line = renderUsageErrorSummaryLine(
+      "drift",
+      "format_conflict",
+      "first line\n  second line\tstill one\n",
+    );
+    expect(line).toBe(
+      "totals: status=usage_error command=drift reason=format_conflict message=first line second line still one\n",
+    );
+    expect(line.split("\n")).toHaveLength(2); // text plus its own newline
   });
 });
 
