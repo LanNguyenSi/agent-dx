@@ -52,8 +52,11 @@ export interface ParsedDiff {
    * `looksLikeIdentifier` (the bar a deleted file's basename already
    * faces): a framework method name (`up`, `down`, `index`, `show`,
    * `handle`) is an ordinary prose word, and scanning it word by word
-   * across every doc is noise, not a finding. Ordered by first occurrence
-   * for a deterministic envelope; `drift()` warns once per name. */
+   * across every doc is noise, not a finding. A name the diff ALSO
+   * declares on an added line is dropped from here (the removal was a
+   * signature edit or a move, not a removal, so there is no blind spot to
+   * warn about). Ordered by first occurrence for a deterministic envelope;
+   * `drift()` warns once per name. */
   skippedPhpNames: string[];
   /** One entry per extension this command SCANS for sites (`SCAN_PATHSPECS`)
    * and does NOT have a declaration extractor for (see
@@ -325,7 +328,10 @@ const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
  * identifier either: a framework method name (`up`, `down`, `index`,
  * `handle`) is an ordinary prose word that would be scanned against
  * every doc and comment. Each distinct such name is recorded once in
- * `skippedPhpNames` so `drift()` can warn, not stay silent.
+ * `skippedPhpNames` so `drift()` can warn, not stay silent - unless the
+ * same diff also declares that name on an ADDED PHP line, which makes the
+ * removal a signature edit or a move rather than a removal, and there is
+ * then nothing to warn about.
  */
 export function parseRemovedIdentifiers(diff: string): ParsedDiff {
   const lines = diff.split("\n");
@@ -337,6 +343,12 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
   // bar: never emitted, but recorded once each (first occurrence wins) so
   // `drift()` warns about the blind spot instead of leaving a silent zero.
   const skippedPhpNames: string[] = [];
+  // The same names seen on an ADDED PHP declaration line. A name that
+  // failed the bar on a removed line and appears again on an added one was
+  // edited (a signature change on a migration or controller method) or
+  // moved, not removed, so it is dropped from `skippedPhpNames` at the end
+  // rather than warned about.
+  const addedBarFailedNames = new Set<string>();
   const deletedFiles: { path: string }[] = [];
   // Extension -> the distinct files of that extension this diff removed
   // lines from, for the extensions with no declaration extractor
@@ -443,10 +455,16 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
       const filePath = newPath ?? oldPath;
       if (filePath !== undefined) {
         const found = extractIdentifier(content, filePath);
-        // A name that failed the bar is not extracted at all, so it never
-        // joins the moved rule either (no candidate of that name exists).
-        if (found !== undefined && found.identifierBarFailed !== true) {
-          addedNames.add(found.name);
+        // A PHP name that fails the identifier bar never joins `addedNames`,
+        // so the moved rule never sees it and a same-spelled name removed in
+        // ANOTHER language (a YAML `show:` key beside an added PHP `function
+        // show()`) stays reported rather than being treated as moved.
+        if (found !== undefined) {
+          if (found.identifierBarFailed === true) {
+            addedBarFailedNames.add(found.name);
+          } else {
+            addedNames.add(found.name);
+          }
         }
       }
       newLine++;
@@ -506,7 +524,12 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
     removed,
     movedNames,
     skippedFileBasenames,
-    skippedPhpNames,
+    // Mirroring the moved rule for a name the bar never let through: one
+    // the diff declares again on an added PHP line was edited or moved,
+    // not removed, so it is no blind spot and gets no warning.
+    skippedPhpNames: skippedPhpNames.filter(
+      (name) => !addedBarFailedNames.has(name),
+    ),
     extractorGaps,
   };
 }

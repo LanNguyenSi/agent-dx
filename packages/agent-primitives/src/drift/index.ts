@@ -170,10 +170,11 @@ function capSiteText(text: string): string {
  * already listed), and a head-side `type`, `interface` or `enum`
  * declaration now counts for the TS/JS local-binding rule the same way a
  * `class` one does. Several of these are common English words, which is
- * safe only because `isLiveHeadDeclaration` anchors the keyword to the
- * line's first token: one appearing inside a string or after other code
- * does not count. Add a keyword HERE, never in the grep call, which is
- * derived from this list. */
+ * safe only because `isAnchoredBefore` rejects a keyword reached through
+ * an open string literal or standing behind anything but a modifier or an
+ * opener: one inside a string or in the middle of an expression does not
+ * count. Add a keyword HERE, never in the grep call, which is derived
+ * from this list. */
 export const DECLARATION_KEYWORDS = [
   "const",
   "let",
@@ -187,16 +188,19 @@ export const DECLARATION_KEYWORDS = [
 ];
 
 /** The words that may stand between a head-side line's start and its
- * declaration keyword and still leave the keyword the line's first
- * token (the anchor `isLiveHeadDeclaration` requires): TS/JS's
- * `export`/`default`/`declare` plus the modifiers PHP spells ahead of a
- * declaration (`abstract`, `final`, `readonly`, `static`, visibility).
- * Derived into the anchor regex below; add a modifier HERE, never in the
- * regex. */
+ * declaration keyword and still leave the keyword the line's first token
+ * (the anchor `isAnchoredBefore` accepts on its own): TS/JS's
+ * `export`/`default`/`declare`/`async` plus the modifiers PHP spells
+ * ahead of a declaration (`abstract`, `final`, `readonly`, `static`,
+ * visibility); `async` is here because the extraction regex accepts it
+ * ahead of `function`, so a head-side `async function` binding must
+ * anchor too. Derived into the modifier-prefix test below; add a
+ * modifier HERE, never in the expression. */
 export const HEAD_KEYWORD_MODIFIERS = [
   "export",
   "default",
   "declare",
+  "async",
   "abstract",
   "final",
   "readonly",
@@ -206,16 +210,55 @@ export const HEAD_KEYWORD_MODIFIERS = [
   "private",
 ];
 
-/** Tests the text before a head-side keyword occurrence: only whitespace
- * and `HEAD_KEYWORD_MODIFIERS` may stand there (the anchor); a keyword
- * reached through code, a string or a mid-line comment fails it. */
-const HEAD_KEYWORD_ANCHOR_RE = new RegExp(
+/** The openers that may stand immediately before a head-side keyword (with
+ * only whitespace after the opener) and still leave what follows a
+ * declaration: the boundaries a legal declaration follows - an open paren
+ * (a `for (const x of y)` head), an open brace (a block or arrow body, an
+ * `if (x) { const y = 1 }`), a semicolon (the statement after one), an
+ * arrow (an expression-bodied callback), a colon (a `case` or label).
+ * Checked by `isAnchoredBefore`; add an opener HERE, never in the
+ * expression. */
+export const HEAD_KEYWORD_OPENERS = ["(", "{", ";", "=>", ":"];
+
+const HEAD_KEYWORD_MODIFIER_PREFIX_RE = new RegExp(
   `^\\s*(?:(?:${HEAD_KEYWORD_MODIFIERS.join("|")})\\s+)*$`,
 );
 
+const HEAD_KEYWORD_OPENER_SUFFIX_RE = new RegExp(
+  `(?:${HEAD_KEYWORD_OPENERS.map((opener) => escapeRegExp(opener)).join("|")})\\s*$`,
+);
+
+/**
+ * Whether the text before a head-side keyword occurrence is an anchor for
+ * it, i.e. whether a keyword standing there is a declaration rather than
+ * part of an expression. Both must hold: (i) QUOTE PARITY - `before`
+ * holds an even number of `"`, an even number of `'` and an even number
+ * of backticks, so a keyword reached through an open string literal never
+ * counts (`const s = "const err` has one `"` open, and `const` and `type`
+ * are common English words inside prose strings); and (ii) it is either
+ * only whitespace plus `HEAD_KEYWORD_MODIFIERS` (the keyword is the
+ * line's first token after optional modifiers), or it ends with one of
+ * `HEAD_KEYWORD_OPENERS` plus optional whitespace (a loop head, a block
+ * or arrow body, the statement after a `;`, a `case` label). Accepted
+ * limits: a keyword behind a mid-line comment that itself follows an
+ * opener counts (`{ // const err`), since the comment guard below only
+ * names a comment at the START of `before`; and a string that opened on an
+ * earlier line has no quote visible here, so parity cannot see it.
+ * Callers pass `before` already lowercased when the keyword was matched
+ * case-insensitively (the `.php` pass).
+ */
+export function isAnchoredBefore(before: string): boolean {
+  for (const quote of ['"', "'", "`"]) {
+    if ((before.split(quote).length - 1) % 2 !== 0) return false;
+  }
+  return (
+    HEAD_KEYWORD_MODIFIER_PREFIX_RE.test(before) ||
+    HEAD_KEYWORD_OPENER_SUFFIX_RE.test(before)
+  );
+}
+
 /** Regex metacharacters, escaped before an identifier is put into an
- * extended regular expression (a name can legally contain `$`). Same
- * escape `git.ts` applies to its own fixed-keyword patterns. */
+ * extended regular expression (a name can legally contain `$`). */
 function escapeRegExp(text: string): string {
   return text.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
 }
@@ -247,7 +290,7 @@ export function headDeclarationPattern(
  * (`isLiveHeadDeclaration`): a comment line (`// const stamp = old
  * approach`), a longer name whose next character `-w` reads as a word
  * boundary (`let retired$old`, because git treats `$` as a non-word
- * character), and a keyword that is not the line's first token
+ * character), and a keyword reached through an expression or a string
  * (`throw new Error("unexpected type payload")`). A name bound by
  * destructuring (`const { err } = ...`) and a function parameter are not
  * declaration shapes and are not seen. */
@@ -281,8 +324,12 @@ function headDeclarationGrep(
 
 /** What a head-side hit's text before the keyword, trimmed, may start with
  * to count as a comment line (`isLiveHeadDeclaration` rejects it; the
- * modifier anchor already rejects a line-start comment, this is the
- * guard that does not depend on the anchor regex). */
+ * anchor already rejects a line-start comment, this is the guard that does
+ * not depend on the anchor). It reads the START of that text only, so a
+ * mid-line comment behind an opener (`{ // const err`) passes: an accepted
+ * limit, since rejecting it would mean treating `//` anywhere on the line
+ * as a comment and losing real declarations whose initializer contains a
+ * string with those characters. */
 export const LOCAL_BINDING_COMMENT_PREFIXES = ["//", "/*", "*", "#"];
 
 /** A character that continues an identifier: right after the name it means
@@ -295,21 +342,25 @@ export const NAME_CONTINUATION_CHARACTER = /[A-Za-z0-9_$]/;
  * any line CARRYING `(const|let|var|function|class|type|interface|enum|
  * trait) <name>` (the pattern is derived from `DECLARATION_KEYWORDS`), so
  * three shapes reach the caller without being declarations: a keyword
- * that is not the line's first token (`throw new Error("unexpected type
- * payload")`), a comment line (`// const stamp = old approach`), and a
+ * reached through an expression or a string (`throw new Error("unexpected
+ * type payload")`), a comment line (`// const stamp = old approach`), and a
  * longer name whose next character `-w` reads as a word boundary
  * (`let retired$old` - git treats `$` as a non-word character). A hit
- * counts only when (i) the text before the keyword is only whitespace and
- * `HEAD_KEYWORD_MODIFIERS` - the keyword is the line's first token after
- * optional modifiers, so a keyword inside a string or after other code
- * never counts - (ii) it names no comment (`//`, `*`, `/*` or `#`; the
- * anchor already rejects a line-start comment, this is kept as a guard
- * that does not depend on the anchor), and (iii) the character right
+ * counts only when (i) `isAnchoredBefore` accepts the text before the
+ * keyword - quote parity, and either only whitespace and
+ * `HEAD_KEYWORD_MODIFIERS` or a trailing `HEAD_KEYWORD_OPENERS` opener,
+ * so a loop head, a block or arrow body or the statement after a `;`
+ * counts while a keyword inside a string or in the middle of an
+ * expression never does - (ii) it names no comment (`//`, `*`, `/*` or
+ * `#`; the anchor already rejects a line-start comment, this is kept as a
+ * guard that does not depend on the anchor), and (iii) the character right
  * after `name` is absent or outside `[A-Za-z0-9_$]`; a real declaration
  * satisfies all three. `ignoreCase` is the PHP pass (the `.php`-only
  * case-insensitive grep, see `headDeclarationGrep`): keyword, comment
- * prefixes and modifier anchor are then matched case-insensitively (PHP
- * keywords are), the NAME still must match its exact case, and the
+ * prefixes and the anchor are then matched case-insensitively (PHP
+ * keywords are), the NAME still must match its exact case (a
+ * case-variant NAME is a different binding for this tool; PHP's own
+ * case-insensitivity of function names is a documented limit), and the
  * caller passes it only for hits that can only come from `.php` files.
  * The word boundary BEFORE the keyword is not checked here either; it is
  * `git grep -w`'s (see `headDeclarationGrep`). Behind `-w` the letter,
@@ -338,9 +389,7 @@ export function isLiveHeadDeclaration(
         continue;
       }
       const before = text.slice(0, at);
-      if (
-        !HEAD_KEYWORD_ANCHOR_RE.test(ignoreCase ? before.toLowerCase() : before)
-      ) {
+      if (!isAnchoredBefore(ignoreCase ? before.toLowerCase() : before)) {
         continue;
       }
       const trimmedBefore = before.trim();

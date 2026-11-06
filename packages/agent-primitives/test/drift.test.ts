@@ -5,10 +5,13 @@ import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
 import {
   DECLARATION_KEYWORDS,
+  HEAD_KEYWORD_MODIFIERS,
+  HEAD_KEYWORD_OPENERS,
   LOCAL_BINDING_COMMENT_PREFIXES,
   NAME_CONTINUATION_CHARACTER,
   drift,
   headDeclarationPattern,
+  isAnchoredBefore,
   isLiveHeadDeclaration,
   type DriftResult,
 } from "../src/drift/index.js";
@@ -648,6 +651,89 @@ describe("parseRemovedIdentifiers (PHP declarations)", () => {
       expect(result.movedNames).toEqual([]);
     },
   );
+});
+
+/** `diff --git` blocks for the identifier bar: each removes or adds one
+ * line of one file, in the given order. */
+function barDiff(...blocks: readonly string[]): string {
+  return [...blocks, ""].join("\n");
+}
+
+function phpFileDiff(
+  file: string,
+  removedLine: string | undefined,
+  addedLine: string | undefined,
+): string {
+  const hunk = `-1 +1`;
+  return [
+    `diff --git a/${file} b/${file}`,
+    "index 1111111..2222222 100644",
+    `--- a/${file}`,
+    `+++ b/${file}`,
+    `@@ -${hunk} @@`,
+    ...(removedLine === undefined ? [] : [`-${removedLine}`]),
+    ...(addedLine === undefined ? [] : [`+${addedLine}`]),
+  ].join("\n");
+}
+
+describe("parseRemovedIdentifiers (PHP identifier bar)", () => {
+  it("records one bar-failing name removed from two files once", () => {
+    const result = parseRemovedIdentifiers(
+      barDiff(
+        phpFileDiff("src/First.php", "    public function up() {}", undefined),
+        phpFileDiff("src/Second.php", "    public function up() {}", undefined),
+      ),
+    );
+    expect(result.removed).toEqual([]);
+    expect(result.skippedPhpNames).toEqual(["up"]);
+  });
+
+  it("drops a bar-failing name the same diff declares again on an added line (a signature edit, not a removal)", () => {
+    const result = parseRemovedIdentifiers(
+      barDiff(
+        phpFileDiff(
+          "src/Migration.php",
+          "    public function up() {}",
+          "    public function up(): void {}",
+        ),
+      ),
+    );
+    expect(result.removed).toEqual([]);
+    expect(result.skippedPhpNames).toEqual([]);
+    expect(result.movedNames).toEqual([]);
+  });
+
+  it("keeps a same-spelled name removed in another language reported when a bar-failing PHP declaration is added", () => {
+    const result = parseRemovedIdentifiers(
+      barDiff(
+        [
+          "diff --git a/config.yml b/config.yml",
+          "index 1111111..2222222 100644",
+          "--- a/config.yml",
+          "+++ b/config.yml",
+          "@@ -1 +0,0 @@",
+          "-show: true",
+        ].join("\n"),
+        phpFileDiff(
+          "src/Controller.php",
+          undefined,
+          "    public function show() {}",
+        ),
+      ),
+    );
+    expect(result.removed).toEqual([
+      {
+        name: "show",
+        kind: "config_key",
+        file: "config.yml",
+        line: 1,
+        exported: false,
+        indented: false,
+      },
+    ]);
+    expect(result.movedNames).toEqual([]);
+    expect(result.skippedPhpNames).toEqual([]);
+  });
 });
 
 describe("parseRemovedIdentifiers (extractor gaps)", () => {
@@ -1709,6 +1795,12 @@ const PHP_HEAD_DECL_ROWS: readonly {
   {
     label: "only mentioned at head (negative control)",
     headDecl: "$x = legacyThing();",
+    expect: "reported",
+  },
+  {
+    label:
+      "re-declared with a case-variant NAME (PHP's own case-insensitivity is a limit)",
+    headDecl: "FUNCTION LegacyThing() {}",
     expect: "reported",
   },
 ];
@@ -3039,16 +3131,16 @@ describe("drift (local-binding rule)", () => {
       headLine: "  const err",
       expect: "suppressed",
     },
-    // the scan goes past a rejected occurrence; the anchor then rejects a
-    // second occurrence that stands behind other code
+    // the scan goes past a rejected occurrence; the anchor then accepts the
+    // second one, which stands after a statement boundary
     {
-      label: "longer name first, second occurrence behind code",
+      label: "longer name first, second occurrence after a semicolon",
       headLine: "  const errFoo = 1; const err = 2;",
-      expect: "reported",
+      expect: "suppressed",
     },
-    // the keyword anchor: the keyword must be the line's first token after
-    // optional whitespace and optional modifiers, so a keyword behind
-    // other code or inside a string never counts
+    // the keyword anchor: only whitespace and modifiers, or an opener, may
+    // stand before the keyword, so a keyword behind other code or inside a
+    // string never counts
     {
       label: "comment that does not start the line (anchor)",
       headLine: "  const x = 1; // const err = 1",
@@ -3065,11 +3157,60 @@ describe("drift (local-binding rule)", () => {
       keyword: "type",
       expect: "reported",
     },
+    {
+      label: "open single-quote string before the keyword (parity)",
+      headLine: "  label = 'unexpected const err",
+      expect: "reported",
+    },
+    {
+      label: "prose string whose own colon would anchor it (parity)",
+      headLine: '  throw new Error("bad value: const err is missing");',
+      expect: "reported",
+    },
+    {
+      label: "mid-line comment after a rejected longer name (anchor)",
+      headLine: "  const errFoo = 1; // const err = 2;",
+      expect: "reported",
+    },
+    // ...and an opener before the keyword keeps it anchored too: a loop
+    // head, a block body, an arrow body, a statement after a `;`, a `case`
+    // label
+    {
+      label: "for-of loop head (opener)",
+      headLine: "  for (const err of counts) {}",
+      expect: "suppressed",
+    },
+    {
+      label: "block body (opener)",
+      headLine: "  if (counts) { const err = 1; }",
+      expect: "suppressed",
+    },
+    {
+      label: "arrow body (opener)",
+      headLine: "  const f = () => { const err = 1; };",
+      expect: "suppressed",
+    },
+    {
+      label: "statement after a semicolon, quotes balanced (opener)",
+      headLine: '  x = "a"; const err = 1;',
+      expect: "suppressed",
+    },
+    {
+      label: "case label (opener)",
+      headLine: "  case 1: const err = 1;",
+      expect: "suppressed",
+    },
     // ...and a modifier standing before the keyword keeps it anchored
     {
       label: "export type (modifier before the keyword)",
       headLine: "  export type err = string;",
       keyword: "type",
+      expect: "suppressed",
+    },
+    {
+      label: "async function (modifier the extraction regex also accepts)",
+      headLine: "  async function err() {}",
+      keyword: "function",
       expect: "suppressed",
     },
     // the `.php`-only case-insensitive head grep: PHP keywords are
@@ -3166,6 +3307,109 @@ describe("drift (local-binding rule)", () => {
           (row.file ?? "").endsWith(".php"),
         ),
       ).toBe(row.expect === "suppressed");
+    },
+  );
+
+  // The anchor alone, on the text before a keyword occurrence: quote
+  // parity, then either only whitespace and modifiers or a trailing
+  // opener. `opener` is the opener the row is the test for; the table must
+  // cover every entry of HEAD_KEYWORD_OPENERS.
+  interface AnchoredBeforeRow {
+    label: string;
+    before: string;
+    opener?: string;
+    expect: boolean;
+  }
+
+  const ANCHORED_BEFORE_ROWS: readonly AnchoredBeforeRow[] = [
+    { label: "indentation only", before: "  ", expect: true },
+    {
+      label: "PHP modifiers",
+      before: "    private static ",
+      expect: true,
+    },
+    {
+      label: "async (the modifier the extraction regex accepts)",
+      before: "  async ",
+      expect: true,
+    },
+    {
+      label: "TS modifiers",
+      before: "  export default ",
+      expect: true,
+    },
+    {
+      label: "after a loop head's paren",
+      before: "  for (",
+      opener: "(",
+      expect: true,
+    },
+    {
+      label: "after a block's brace",
+      before: "  if (counts) { ",
+      opener: "{",
+      expect: true,
+    },
+    {
+      label: "after an arrow",
+      before: "  const f = () => ",
+      opener: "=>",
+      expect: true,
+    },
+    {
+      label: "after a semicolon, quotes balanced",
+      before: '  x = "a"; ',
+      opener: ";",
+      expect: true,
+    },
+    {
+      label: "after a case label's colon",
+      before: "  case 1: ",
+      opener: ":",
+      expect: true,
+    },
+    { label: "a word before it", before: "  throw ", expect: false },
+    { label: "an assignment", before: "  x = ", expect: false },
+    { label: "a line-start comment", before: "  // ", expect: false },
+    {
+      label: "a mid-line comment",
+      before: "  const x = 1; // ",
+      expect: false,
+    },
+    {
+      label: "an unterminated double-quoted string",
+      before: '  throw new Error("unexpected ',
+      expect: false,
+    },
+    {
+      label: "an unterminated single-quoted string",
+      before: "  label = '",
+      expect: false,
+    },
+    {
+      label: "an unterminated template literal",
+      before: "  const t = `unclosed ",
+      expect: false,
+    },
+    {
+      label: "an opener standing inside an unterminated string",
+      before: '  throw new Error("bad value: ',
+      expect: false,
+    },
+  ];
+
+  it("covers every opener the anchor accepts", () => {
+    const tested = new Set(
+      ANCHORED_BEFORE_ROWS.flatMap((r) => (r.opener ? [r.opener] : [])),
+    );
+    expect(tested).toEqual(new Set(HEAD_KEYWORD_OPENERS));
+    expect(HEAD_KEYWORD_MODIFIERS).toContain("async");
+  });
+
+  it.each(ANCHORED_BEFORE_ROWS)(
+    "the anchor $expect the text before a keyword in `$before` ($label)",
+    (row) => {
+      expect(isAnchoredBefore(row.before)).toBe(row.expect);
     },
   );
 });

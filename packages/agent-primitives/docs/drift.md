@@ -86,7 +86,9 @@ resource controller's `index`/`show`/`store`/`update`/`destroy`, a
 `handle`, a `render`, or PHP 8's legal method name `function` - is not
 extracted, and each such name warns `removed PHP declaration "<name>"
 not scanned: does not look like an identifier` (counted by `--summary`
-like the basename warning it mirrors). Every extracted identifier also carries the two facts the
+like the basename warning it mirrors; the warning is skipped for a name
+the same diff also declares on an added PHP line, where the removal was a
+signature edit or a move rather than a removal). Every extracted identifier also carries the two facts the
 same line shows: `exported` (for TS/JS, the line had an `export`
 keyword after any indentation; for PHP, the declaration is open: not a
 `private`/`protected` member) and `indented` (the line began with
@@ -154,8 +156,8 @@ are added exactly once (the `type`/`interface`/`enum`/`trait` entries
 are why a head-side PHP `interface legacyThing {}` or a TS
 `type err = ...` now suppresses the way a `class` one always did;
 several of these keywords are common English words, which is safe only
-because the filter below anchors the keyword to the line's first
-token). Where at least
+because the filter below accepts a keyword only after a modifier or an
+opener and only outside an open string literal). Where at least
 one such head-side declaration exists, the name is still alive under a
 binding of its own, and its sites are allowlisted with reason
 `local binding "<name>" still declared at head` (visible under
@@ -165,20 +167,34 @@ sites are reported as usual. The trailing word boundary that shape needs
 is `-w`'s own (git's `-E` on a BSD regex build reads `\b` as a literal,
 which would silently match nothing). Three shapes the grep itself matches
 are not live declarations and are filtered after the grep: a keyword
-that is not the line's first token (the filter admits only whitespace
-and the modifiers `export`, `default`, `declare`, `abstract`, `final`,
-`readonly`, `static` and a visibility before it, so
-`throw new Error("unexpected type payload")` never suppresses a real
-comment about a removed local `payload`), a comment line (`// const
-stamp = old approach`, whose text before the keyword names a comment),
-and a longer name whose next character `-w` reads as a word boundary
-(`let retired$old`, because git treats `$` as a non-word character).
-For a `.php` hit the filter matches keyword, modifiers and comment
+reached through an expression or a string (the filter admits a keyword
+only when the text before it has QUOTE PARITY - an even number of `"`, an
+even number of `'` and an even number of backticks, so a keyword inside an
+open string literal never counts - and, before that, only whitespace and
+the modifiers `export`, `default`, `declare`, `async`, `abstract`, `final`,
+`readonly`, `static` and a visibility, or one of the openers `(`, `{`, `;`,
+`=>` and `:` with optional whitespace after it; so `for (const rowCount of
+counts) {}`, `async function rowCount() {}`, `if (counts) { const rowCount
+= 1; }`, `const f = () => { const rowCount = 1; };`, `case 1: const err =
+1` and `x = "a"; const err = 1` all suppress, while
+`throw new Error("unexpected type payload")` (an odd number of `"` before
+the keyword) and `label = 'unexpected const err` do not, because `const`
+and `type` are common English words inside prose strings), a comment line
+(`// const stamp = old approach`, whose text before the keyword names a
+comment), and a longer name whose next character `-w` reads as a word
+boundary (`let retired$old`, because git treats `$` as a non-word
+character).
+For a `.php` hit the filter matches keyword, modifiers, anchor and comment
 prefix case-insensitively (the name itself keeps its exact case), so
 `PRIVATE FUNCTION helperThing()` suppresses the way a lowercase one
-does. `-w` supplies the word boundary on both sides of the shape, so
-`superclass err` never matches. Limits: a real declaration that is not
-the line's first token (`if (x) { const err = 1 }`) does not count;
+does; a case-variant NAME does not suppress (`FUNCTION LegacyThing()` is
+not a live `legacyThing` for this tool - PHP itself treats function names
+case-insensitively, and that is a documented limit). `-w` supplies the
+word boundary on both sides of the shape, so
+`superclass err` never matches. Limits: the comment guard reads only the
+start of the text before the keyword, so a mid-line comment behind an
+opener (`{ // const err`) counts as a declaration; a string opened on an
+earlier line leaves no quote in the line, so parity cannot see it;
 indentation is a proxy for
 scope, not a scope analysis, so an indented declaration inside a block
 that still leaves a name unreachable at head is suppressed too, while a
