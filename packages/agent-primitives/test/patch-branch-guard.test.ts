@@ -1397,6 +1397,25 @@ describe("patch branch guard: a tracked file is found by identity, not by its sp
     ]);
   });
 
+  for (const name of ["D[1]", "W*", "Q?"]) {
+    it(`a case variant below the glob-named directory ${name} is refused where it is the same file`, () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      write(dir, `${name}/F.md`, "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      const lower = name.toLowerCase();
+      respell(dir, name, lower);
+      respell(dir, `${lower}/F.md`, `${lower}/f.md`);
+      const r = patch({ cwd: dir, edits: [hi(`${lower}/f.md`)] });
+      if (folds) {
+        expectTrackedRefusal(dir, r, `${lower}/f.md`);
+      } else {
+        expect(r.status).toBe("written");
+        expect(g(r).targets?.[0]).toMatchObject({ tracking: "untracked" });
+      }
+    });
+  }
+
   it("targets in one directory share the listing and a variant among them is still found", () => {
     const dir = spellingRepo({ "core.ignorecase": "false" });
     write(dir, "d/Bar.md", "hi\n");

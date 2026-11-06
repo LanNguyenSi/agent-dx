@@ -410,7 +410,8 @@ the fallback, is `unknown` (fail closed, a warning). Limit: the directory
 itself is looked up by its spelling, NFC, NFD and ASCII case, so a
 directory component that differs from the index only by a non-ASCII case
 letter or a partly decomposed form is not found by the fallback (the file
-is then called untracked). A file that shares its inode with a tracked file
+is then called untracked, and on a folding volume the edit lands on the
+tracked file). A file that shares its inode with a tracked file
 (a hard link, which `patch` refuses unless `--break-hard-links`) counts as
 tracked. Only a file that neither step finds goes on to `git check-ignore
 -q`, which says ignored (exit 0) or untracked (exit 1). Pathspecs are literal (a name with
