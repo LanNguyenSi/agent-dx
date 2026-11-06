@@ -1477,7 +1477,7 @@ describe("patch branch guard: a tracked file is found by identity, not by its sp
 
     it("a root-level target is classified from the top-level entries only: a large index below does not matter", () => {
       const dir = spellingRepo({ "core.ignorecase": "false" });
-      for (let n = 0; n < 2000; n++) {
+      for (let n = 0; n < 3000; n++) {
         write(
           dir,
           `sub${String(n % 20)}/file-number-${String(n).padStart(5, "0")}.md`,
