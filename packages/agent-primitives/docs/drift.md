@@ -145,8 +145,8 @@ non-declaration candidate is never touched, and neither is a name an
 explicit `--ignore-identifier` already covers) the command runs a PAIR
 of `git grep -n -w -E` calls at `--head` over the scanned source
 pathspecs for the declaration shape `(const|let|var|function|class|
-type|interface|enum|trait) <name>`: one case-sensitive over every
-source pathspec, and one case-insensitive (`-i`) over the `.php`
+type|interface|enum|trait) <name>`: one case-sensitive over the TS/JS
+and PHP source pathspecs, and one case-insensitive (`-i`) over the `.php`
 pathspecs only (PHP keywords are case-insensitive, so a head-side
 `PRIVATE FUNCTION helperThing()` is as live a binding as the lowercase
 spelling; no other scanned language's keywords are, so no other
@@ -193,8 +193,18 @@ case-insensitively, and that is a documented limit). `-w` supplies the
 word boundary on both sides of the shape, so
 `superclass err` never matches. Limits: the comment guard reads only the
 start of the text before the keyword, so a mid-line comment behind an
-opener (`{ // const err`) counts as a declaration; a string opened on an
-earlier line leaves no quote in the line, so parity cannot see it;
+opener (`{ // const err`) counts as a declaration, and so does any opener
+inside a mid-line comment of a TS/JS/PHP file (`log("x"); // fix: type
+rowCount` still suppresses a stale `rowCount` site); a string opened on an
+earlier line leaves no quote in the line, so parity cannot see it, and
+parity has two more false negatives: an apostrophe inside a double-quoted
+string, or a regex literal holding a quote, before the keyword on the same
+line makes the count odd (`const msg = "it's"; const rowCount = 1;` does
+not suppress), while an escaped quote does not (backslash escapes are
+stripped before counting, so `const q = "a\"b"; const rowCount = 1;`
+suppresses); the case-sensitive head grep covers TS/JS and PHP files only
+(a `.yml`, `.sh` or `.py` line never declares with these keywords, so
+`summary: type rowCount is shown` in a config no longer suppresses);
 indentation is a proxy for
 scope, not a scope analysis, so an indented declaration inside a block
 that still leaves a name unreachable at head is suppressed too, while a

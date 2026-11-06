@@ -25,9 +25,9 @@ import {
 import {
   classifyLine,
   parseGrepOutput,
+  HEAD_SOURCE_PATHSPECS,
   PHP_SOURCE_PATHSPECS,
   SCAN_PATHSPECS,
-  SOURCE_PATHSPECS,
 } from "./scan.js";
 
 export type { RemovedIdentifier, RemovedIdentifierKind } from "./parseDiff.js";
@@ -233,23 +233,28 @@ const HEAD_KEYWORD_OPENER_SUFFIX_RE = new RegExp(
  * it, i.e. whether a keyword standing there is a declaration rather than
  * part of an expression. Both must hold: (i) QUOTE PARITY - `before`
  * holds an even number of `"`, an even number of `'` and an even number
- * of backticks, so a keyword reached through an open string literal never
- * counts (`const s = "const err` has one `"` open, and `const` and `type`
- * are common English words inside prose strings); and (ii) it is either
+ * of backticks after backslash escapes are stripped (`\"` is not a quote),
+ * so a keyword reached through an open string literal never counts
+ * (`const s = "const err` has one `"` open, and `const` and `type` are
+ * common English words inside prose strings); and (ii) it is either
  * only whitespace plus `HEAD_KEYWORD_MODIFIERS` (the keyword is the
  * line's first token after optional modifiers), or it ends with one of
  * `HEAD_KEYWORD_OPENERS` plus optional whitespace (a loop head, a block
  * or arrow body, the statement after a `;`, a `case` label). Accepted
  * limits: a keyword behind a mid-line comment that itself follows an
  * opener counts (`{ // const err`), since the comment guard below only
- * names a comment at the START of `before`; and a string that opened on an
- * earlier line has no quote visible here, so parity cannot see it.
+ * names a comment at the START of `before`, and any opener inside a
+ * mid-line comment (`log("x"); // fix: type rowCount`) anchors too; a
+ * string that opened on an earlier line has no quote visible here, so
+ * parity cannot see it; and an apostrophe inside a double-quoted string
+ * or a regex literal holding a quote before the keyword makes parity odd.
  * Callers pass `before` already lowercased when the keyword was matched
  * case-insensitively (the `.php` pass).
  */
 export function isAnchoredBefore(before: string): boolean {
+  const unescaped = before.replace(/\\./g, "");
   for (const quote of ['"', "'", "`"]) {
-    if ((before.split(quote).length - 1) % 2 !== 0) return false;
+    if ((unescaped.split(quote).length - 1) % 2 !== 0) return false;
   }
   return (
     HEAD_KEYWORD_MODIFIER_PREFIX_RE.test(before) ||
@@ -279,7 +284,9 @@ export function headDeclarationPattern(
 
 /** `git grep -n -w -E [-i] -e <headDeclarationPattern(name)> <rev> --
  * <pathspecs>`: does `name` still have a declaration-shaped line at
- * `rev` anywhere in the scanned source files (the head-side binding the
+ * `rev` anywhere in the given pathspecs (the caller passes
+ * `HEAD_SOURCE_PATHSPECS`, TS/JS and PHP only, and `PHP_SOURCE_PATHSPECS`
+ * for the second pass) (the head-side binding the
  * local-binding rule of `drift()` looks for)? One call per name and
  * pathspec group, never one per file; `ignoreCase` is set only for the
  * second, `.php`-only pass (`PHP_SOURCE_PATHSPECS`), because PHP is the
@@ -625,7 +632,12 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
           candidate.indented === true,
       );
     if (!everyCandidateLocal) continue;
-    const head = headDeclarationGrep(gitRoot, headSha, name, SOURCE_PATHSPECS);
+    const head = headDeclarationGrep(
+      gitRoot,
+      headSha,
+      name,
+      HEAD_SOURCE_PATHSPECS,
+    );
     // A second pass over the `.php` pathspecs only, case-insensitively:
     // PHP keywords are case-insensitive, so a `PRIVATE FUNCTION
     // helperThing()` at head is as live a binding as the lowercase

@@ -52,13 +52,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    identifier` unless the same diff declares that name again on an added
    line, which is a signature edit or a move rather than a removal. The
    head-side local-binding grep
-   learns `interface`, `trait`, `enum` and `type`, runs a second
+   learns `interface`, `trait`, `enum` and `type`, searches TS/JS and
+   PHP files only (a `.yml`, `.sh` or `.py` line never declares with
+   these keywords, and `summary: type rowCount` there used to suppress a
+   stale site), runs a second
    case-insensitive pass over the `.php` pathspecs only (PHP keywords
    are case-insensitive, so a `PRIVATE FUNCTION helperThing()` at head
    suppresses like a lowercase one, while a case-variant NAME does not),
    and its filter now anchors the keyword on the text before it: that
-   text must hold an even number of `"`, of `'` and of backticks (a
-   keyword inside a string never counts) and be either only whitespace
+   text must hold an even number of `"`, of `'` and of backticks, counted
+   after backslash escapes are stripped (a keyword inside a string never
+   counts, an escaped quote does not flip the count) and be either only whitespace
    and modifiers (`export`, `default`, `declare`, `async`, `abstract`,
    `final`, `readonly`, `static`, visibility) or an opener `(`, `{`, `;`,
    `=>` or `:` plus optional whitespace, so a loop head (`for (const

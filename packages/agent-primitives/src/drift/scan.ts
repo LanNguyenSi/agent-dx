@@ -4,7 +4,14 @@ export const DOC_EXTENSIONS = new Set(["md", "mdx", "txt"]);
 
 /** Source extensions scanned for `//`, `/* ... *\/` and `*`-continuation
  * comment lines. */
-const SLASH_STAR_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs"]);
+export const SLASH_STAR_EXTENSIONS = new Set([
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+]);
 
 /** Source extensions scanned for `#` comment lines. */
 const HASH_COMMENT_EXTENSIONS = new Set(["py", "sh", "yml", "yaml"]);
@@ -45,6 +52,21 @@ export const SCAN_PATHSPECS: readonly string[] = [
  * doc file declares nothing, so its pathspec is dropped here. */
 export const SOURCE_PATHSPECS: readonly string[] = SCAN_PATHSPECS.filter(
   (spec) => !DOC_EXTENSIONS.has(spec.replace(/^\*\./, "")),
+);
+
+/** The part of `SOURCE_PATHSPECS` the head-side binding grep (the
+ * case-sensitive pass of `drift()`'s local-binding rule) searches: the
+ * TS/JS family (`SLASH_STAR_EXTENSIONS`, the extensions the declaration
+ * extractor reads) and PHP. Those are the only scanned languages whose
+ * lines can declare with `DECLARATION_KEYWORDS`; a `.yml`, `.sh` or `.py`
+ * line never does, and `key: type rowCount` in a config or a shell
+ * comment would otherwise suppress a real stale site through the `:`
+ * opener. */
+export const HEAD_SOURCE_PATHSPECS: readonly string[] = SOURCE_PATHSPECS.filter(
+  (spec) => {
+    const ext = spec.replace(/^\*\./, "");
+    return SLASH_STAR_EXTENSIONS.has(ext) || PHP_EXTENSIONS.has(ext);
+  },
 );
 
 /** The `.php` part of `SOURCE_PATHSPECS`: PHP keywords are case-

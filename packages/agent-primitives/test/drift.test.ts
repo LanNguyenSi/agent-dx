@@ -25,7 +25,11 @@ import {
   nearestHeading,
   parseHeadings,
 } from "../src/drift/allowlist.js";
-import { classifyLine, parseGrepOutput } from "../src/drift/scan.js";
+import {
+  classifyLine,
+  HEAD_SOURCE_PATHSPECS,
+  parseGrepOutput,
+} from "../src/drift/scan.js";
 import { mergeBase } from "../src/drift/git.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 
@@ -3163,6 +3167,26 @@ describe("drift (local-binding rule)", () => {
       expect: "reported",
     },
     {
+      label: "opener inside an open single-quoted string (parity)",
+      headLine: "  x = 'a; const err = 1",
+      expect: "reported",
+    },
+    {
+      label: "opener inside an open template literal (parity)",
+      headLine: "  x = `a; const err = 1",
+      expect: "reported",
+    },
+    {
+      label: "opener inside an open double-quoted string (parity)",
+      headLine: '  x = "a; const err = 1',
+      expect: "reported",
+    },
+    {
+      label: "escaped quote inside a closed string (escape stripping)",
+      headLine: '  const q = "a\\"b"; const err = 1;',
+      expect: "suppressed",
+    },
+    {
       label: "prose string whose own colon would anchor it (parity)",
       headLine: '  throw new Error("bad value: const err is missing");',
       expect: "reported",
@@ -3392,6 +3416,26 @@ describe("drift (local-binding rule)", () => {
       expect: false,
     },
     {
+      label: "an opener inside an unterminated single-quoted string",
+      before: "  x = 'a; ",
+      expect: false,
+    },
+    {
+      label: "an opener inside an unterminated template literal",
+      before: "  x = `a; ",
+      expect: false,
+    },
+    {
+      label: "an opener inside an unterminated double-quoted string",
+      before: '  x = "a; ',
+      expect: false,
+    },
+    {
+      label: "an escaped quote does not count toward parity",
+      before: '  const q = "a\\"b"; ',
+      expect: true,
+    },
+    {
       label: "an opener standing inside an unterminated string",
       before: '  throw new Error("bad value: ',
       expect: false,
@@ -3412,6 +3456,70 @@ describe("drift (local-binding rule)", () => {
       expect(isAnchoredBefore(row.before)).toBe(row.expect);
     },
   );
+});
+
+describe("drift (head-side binding grep languages)", () => {
+  function rowCountRepo(headFile: string, headLine: string) {
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/a.ts",
+      [
+        "export function removedHolder() {",
+        "  const rowCount = 1;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFile(
+      repo,
+      "notes.md",
+      "# Notes\n\nrowCount is the count this module shows.\n",
+    );
+    // The head-side file exists unchanged on both sides, so its line is
+    // never an added declaration (which would make `rowCount` a moved name).
+    writeFile(repo, headFile, `${headLine}\n`);
+    const base = commit(repo, "base");
+    writeFile(repo, "src/a.ts", "export const placeholder = 1;\n");
+    const head = commit(repo, "head");
+    return { repo, base, head };
+  }
+
+  it("a head-side config.yml line `key: type <name>` does not suppress a stale site", async () => {
+    const { repo, base, head } = rowCountRepo(
+      "config.yml",
+      "summary: type rowCount is shown",
+    );
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.status).toBe("fail");
+    expect(result.sites.filter((s) => s.path === "notes.md")).toHaveLength(1);
+    expect(result.ignoredIdentifiers).not.toContainEqual({
+      name: "rowCount",
+      source: "local-binding",
+    });
+  });
+
+  it("the same name declared in a head .ts file suppresses (control)", async () => {
+    const { repo, base, head } = rowCountRepo(
+      "src/b.ts",
+      "  const rowCount = 2;",
+    );
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.sites.filter((s) => s.path === "notes.md")).toEqual([]);
+    expect(result.ignoredIdentifiers).toContainEqual({
+      name: "rowCount",
+      source: "local-binding",
+    });
+  });
+
+  it("HEAD_SOURCE_PATHSPECS holds the TS/JS and PHP pathspecs only", () => {
+    for (const spec of ["*.ts", "*.tsx", "*.js", "*.mjs", "*.php"]) {
+      expect(HEAD_SOURCE_PATHSPECS).toContain(spec);
+    }
+    for (const spec of ["*.yml", "*.yaml", "*.sh", "*.py", "*.json", "*.md"]) {
+      expect(HEAD_SOURCE_PATHSPECS).not.toContain(spec);
+    }
+  });
 });
 
 describe("drift (ignored identifiers)", () => {
