@@ -51,7 +51,31 @@ export type BranchGuardStatus =
   | "would_refuse"
   | "not_a_repo"
   | "detached"
-  | "allowed_protected";
+  | "allowed_protected"
+  | "allowed_untracked"
+  | "allowed_ignored";
+
+/** What git says about a target's file: `untracked` and `ignored` cannot
+ * reach a protected branch through `patch`; `tracked` can; `unknown` is a
+ * classification that failed and is treated as `tracked`. */
+export type TargetTracking = "tracked" | "untracked" | "ignored" | "unknown";
+
+/** The guard's decision for one target, listed in `RepoGuard.targets`
+ * when the repository was on a protected branch (or a detached HEAD under
+ * `--protect-detached`). */
+export interface TargetGuard {
+  /** The target as the edits name it (their `path`). */
+  path: string;
+  /** `allowed_untracked` and `allowed_ignored` for a target no edit of
+   * which can reach the branch; for a tracked (or unclassifiable) one the
+   * status the repository's refusal settled to: `refused`,
+   * `would_refuse` or `allowed_protected`. */
+  status: BranchGuardStatus;
+  tracking: TargetTracking;
+  /** The refusal's reason, for a target whose status is `refused`,
+   * `would_refuse` or `allowed_protected`. */
+  reason?: string;
+}
 
 /** What the envelope reports for one repository (or for the targets that
  * lie in none): no free text, the refusal's wording is in the edits. */
@@ -70,6 +94,12 @@ export interface RepoGuard {
   /** Why the guard refused, would refuse or was overridden:
    * `protected_branch` or `protected_branch_unresolved`. */
   reason?: string;
+  /** One entry per target of the plan in this repository, present only
+   * when the repository needed a per-target decision (a protected branch,
+   * or a detached HEAD under `--protect-detached`, with at least one
+   * target). The entry's `status` is the most severe of its targets', in
+   * the order of `STATUS_ORDER`. */
+  targets?: TargetGuard[];
 }
 
 /** What the envelope reports as `branch_guard`: the overall status (the
@@ -82,9 +112,22 @@ export interface BranchGuard {
   repos: RepoGuard[];
 }
 
+/** A target of the plan that lies in the repository being judged. */
+export interface GuardTarget {
+  /** The real path of the file (absolute, symlinks resolved). */
+  path: string;
+  /** How the edits name it. */
+  label: string;
+}
+
 export interface BranchGuardInput {
   /** The real path of the work tree to judge. */
   root: string;
+  /** The targets in this repository whose path checks passed. On a
+   * protected branch each is classified (ignored, untracked, tracked) and
+   * only a tracked one is refused; with none, the repository is judged as
+   * a whole. */
+  targets?: readonly GuardTarget[];
   /** Why git must not be run in `root` (`gitDiscoveryHazard`), if so. */
   hazard: string | undefined;
   timeoutMs: number;
@@ -103,13 +146,28 @@ export interface BranchGuardVerdict {
   refuse: boolean;
   /** True when `--allow-protected` overrode a refusal. */
   overridden: boolean;
+  /** When the refusal rests on tracked targets: their real paths. Empty
+   * or absent when the whole repository is refused. */
+  refusedTargets?: ReadonlySet<string>;
+  /** One sentence for each target whose classification failed (treated as
+   * tracked). */
+  classifyFailures?: string[];
 }
 
+/** Most severe first: `combineGuards` takes the first status of this list
+ * that any repository has, and a repository's own status is the first that
+ * any of its targets has. The two per-target statuses sit between
+ * `detached` and `allowed`: a protected branch that only untracked or
+ * ignored targets touch is more notable than a plain `allowed`, and an
+ * untracked target (which `git add` could still bring in) outranks an
+ * ignored one. */
 const STATUS_ORDER: BranchGuardStatus[] = [
   "refused",
   "would_refuse",
   "allowed_protected",
   "detached",
+  "allowed_untracked",
+  "allowed_ignored",
   "allowed",
   "not_a_repo",
 ];
@@ -353,9 +411,10 @@ export function evaluateBranchGuard(
     };
     if (!input.protectDetached)
       return { guard, refuse: false, overridden: false };
-    return settle(
+    return judgeTargets(
       { ...guard, status: "refused", reason: "protected_branch" },
-      `patch refuses to edit on a detached HEAD of ${input.root} (--protect-detached); check out a task branch, or pass --allow-protected to edit here anyway`,
+      (tracked) =>
+        `patch refuses to edit on a detached HEAD of ${input.root} (--protect-detached)${trackedNote(tracked)}; check out a task branch, or pass --allow-protected to edit here anyway`,
       input,
     );
   }
@@ -370,11 +429,135 @@ export function evaluateBranchGuard(
   };
   if (hit.length === 0) return { guard, refuse: false, overridden: false };
   const via = [...new Set(hit.map((n) => n.source))].join(", ");
-  return settle(
+  return judgeTargets(
     { ...guard, status: "refused", reason: "protected_branch" },
-    `patch refuses to edit on the protected branch ${JSON.stringify(branch)} of ${input.root} (protected by: ${via}); switch to a task branch, or pass --allow-protected to edit here anyway`,
+    (tracked) =>
+      `patch refuses to edit on the protected branch ${JSON.stringify(branch)} of ${input.root} (protected by: ${via})${trackedNote(tracked)}; switch to a task branch, or pass --allow-protected to edit here anyway`,
     input,
   );
+}
+
+/** The part of a refusal that names the tracked targets; empty when the
+ * whole repository is judged (no target was classified). */
+function trackedNote(tracked: readonly string[]): string {
+  if (tracked.length === 0) return "";
+  return ` (tracked ${tracked.length === 1 ? "target" : "targets"}: ${tracked.map((t) => JSON.stringify(t)).join(", ")})`;
+}
+
+interface Classified {
+  target: GuardTarget;
+  tracking: TargetTracking;
+  /** Why a classification failed (`tracking` is `unknown`). */
+  why?: string;
+}
+
+/** Asks git, in the repository root, whether one target is ignored,
+ * untracked or tracked. `ls-files` takes pathspecs literally (a name with
+ * `[` or `*` is that name; `check-ignore` takes pathnames and refuses the
+ * pathspec option), the target is given as the absolute real path so git
+ * itself relates it to the work tree whatever the volume's letter case.
+ * `check-ignore` does not report a tracked file, so ignored is asked
+ * first. Anything but a clear answer is `unknown`. */
+function classifyTarget(
+  root: string,
+  target: GuardTarget,
+  timeoutMs: number,
+): Classified {
+  const unknown = (why: string): Classified => ({
+    target,
+    tracking: "unknown",
+    why,
+  });
+  const ignored = runGit(
+    root,
+    ["check-ignore", "-q", "--", target.path],
+    timeoutMs,
+  );
+  if (ignored.kind === "failed") return unknown(ignored.why);
+  if (ignored.status === 0) return { target, tracking: "ignored" };
+  if (ignored.status !== 1) {
+    return unknown(
+      `git check-ignore failed with exit code ${String(ignored.status)}`,
+    );
+  }
+  const listed = runGit(
+    root,
+    ["--literal-pathspecs", "ls-files", "--error-unmatch", "--", target.path],
+    timeoutMs,
+  );
+  if (listed.kind === "failed") return unknown(listed.why);
+  if (listed.status === 0) return { target, tracking: "tracked" };
+  if (listed.status === 1) return { target, tracking: "untracked" };
+  return unknown(`git ls-files failed with exit code ${String(listed.status)}`);
+}
+
+/**
+ * The verdict of a repository that would be refused (a protected branch,
+ * or a detached HEAD under `--protect-detached`), per target: an ignored or
+ * an untracked target cannot reach the protected branch through `patch`
+ * and is allowed; a tracked one, or one whose classification failed (fail
+ * closed), is refused, and a refusal of any of them is the whole plan's
+ * (the caller refuses every file). With no target to classify the
+ * repository is judged as a whole.
+ */
+function judgeTargets(
+  refused: RepoGuard,
+  describe: (tracked: string[]) => string,
+  input: BranchGuardInput,
+): BranchGuardVerdict {
+  const targets = input.targets ?? [];
+  if (targets.length === 0) return settle(refused, describe([]), input);
+  const classified = targets.map((t) =>
+    classifyTarget(input.root, t, input.timeoutMs),
+  );
+  const classifyFailures = classified
+    .filter((c) => c.tracking === "unknown")
+    .map(
+      (c) =>
+        `could not tell whether ${JSON.stringify(c.target.label)} is tracked (${c.why ?? "no answer"}); treated as tracked`,
+    );
+  const blocking = classified.filter(
+    (c) => c.tracking === "tracked" || c.tracking === "unknown",
+  );
+  const own = (c: Classified): TargetGuard => ({
+    path: c.target.label,
+    status: c.tracking === "ignored" ? "allowed_ignored" : "allowed_untracked",
+    tracking: c.tracking,
+  });
+  if (blocking.length === 0) {
+    const { reason: _reason, ...rest } = refused;
+    void _reason;
+    const entries = classified.map(own);
+    const status = STATUS_ORDER.find((s) =>
+      entries.some((e) => e.status === s),
+    ) as BranchGuardStatus;
+    return {
+      guard: { ...rest, status, targets: entries },
+      refuse: false,
+      overridden: false,
+      classifyFailures,
+    };
+  }
+  const base = settle(
+    refused,
+    describe(blocking.map((c) => c.target.label)),
+    input,
+  );
+  const entries = classified.map((c): TargetGuard => {
+    if (!blocking.includes(c)) return own(c);
+    return {
+      path: c.target.label,
+      status: base.guard.status,
+      tracking: c.tracking,
+      ...(base.guard.reason !== undefined ? { reason: base.guard.reason } : {}),
+    };
+  });
+  return {
+    ...base,
+    guard: { ...base.guard, targets: entries },
+    refusedTargets: new Set(blocking.map((c) => c.target.path)),
+    classifyFailures,
+  };
 }
 
 function withBuiltin(names: Named[]): Named[] {

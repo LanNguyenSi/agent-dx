@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `patch`: the branch guard decides per target on a protected branch (or a
+  detached HEAD under `--protect-detached`). A target git ignores
+  (`git check-ignore -q`) or does not track (`git ls-files --error-unmatch`
+  fails) is allowed, because no edit to it can reach the protected branch
+  through the command; a tracked target is refused as before, and one tracked
+  target still refuses the whole plan, the untracked files of it included, with
+  a detail that names the tracked targets. Before, an untracked run file
+  (`.ai/runs/<run>/...`) or an ignored cache file on `main` was refused with
+  `protected_branch` and only the blanket `--allow-protected` helped. The
+  decision is recorded per target in `branch_guard.repos[].targets`
+  (`path`, `status`, `tracking`, `reason`) with the new statuses
+  `allowed_untracked` and `allowed_ignored`; a repository's status is the most
+  severe of its targets, and `combineGuards` ranks the two new statuses
+  between `detached` and `allowed`. A git failure while classifying a target
+  counts as tracked (fail closed) and adds a warning. `--allow-protected`
+  lifts the tracked targets only; a branch that cannot be resolved is refused
+  whole as before. No new flag; the exit codes are unchanged. The skill's
+  `patch` section names the rule.
+
 ## [0.20.0] - 2026-11-04
 
 ### Added
