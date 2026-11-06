@@ -2,20 +2,31 @@
  * no "code" lines to exclude. */
 export const DOC_EXTENSIONS = new Set(["md", "mdx", "txt"]);
 
-/** Source extensions scanned for `//`, `/* ... *\/` and `*`-continuation
- * comment lines. */
-const SLASH_STAR_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs"]);
+/** The TS/JS family: the source extensions scanned for `//`, `/* ... *\/`
+ * and `*`-continuation comment lines, and the ones the declaration
+ * extractor reads (`parseDiff.ts` imports this set, so the list lives
+ * exactly once). */
+export const SOURCE_EXTENSIONS = new Set([
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+]);
 
 /** Source extensions scanned for `#` comment lines. */
 const HASH_COMMENT_EXTENSIONS = new Set(["py", "sh", "yml", "yaml"]);
 
 /** PHP scans BOTH comment grammars: `//`, `/* ... *\/`, and docblock
- * ` * ` continuation lines (like `SLASH_STAR_EXTENSIONS`), plus `#`
+ * ` * ` continuation lines (like `SOURCE_EXTENSIONS`), plus `#`
  * line comments (like `HASH_COMMENT_EXTENSIONS`) -- PHP is the only
  * language this command recognizes that accepts both forms, so it gets
  * its own set and its own branch in `classifyLine` rather than being
- * folded into either existing set. */
-const PHP_EXTENSIONS = new Set(["php"]);
+ * folded into either existing set. Exported because `parseDiff.ts` runs
+ * the same classifier over removed PHP diff lines to skip comment lines
+ * before matching a declaration against them. */
+export const PHP_EXTENSIONS = new Set(["php"]);
 
 /** `git grep` pathspecs this command searches: docs, plus the source
  * extensions above. Anything outside this list is a known, documented
@@ -45,6 +56,31 @@ export const SOURCE_PATHSPECS: readonly string[] = SCAN_PATHSPECS.filter(
   (spec) => !DOC_EXTENSIONS.has(spec.replace(/^\*\./, "")),
 );
 
+/** The part of `SOURCE_PATHSPECS` the head-side binding grep (the
+ * case-sensitive pass of `drift()`'s local-binding rule) searches: the
+ * TS/JS family (`SOURCE_EXTENSIONS`) and PHP, the languages the
+ * declaration extractor reads. A same-named Python `class rowCount:` or
+ * bash `function rowCount {` at head is a different language's binding,
+ * not the removed TS/JS/PHP local's, so it does not suppress a stale site
+ * (0.20.0 suppressed it); and `key: type rowCount` in a config or a shell
+ * comment would otherwise suppress one through the `:` opener. */
+export const HEAD_SOURCE_PATHSPECS: readonly string[] = SOURCE_PATHSPECS.filter(
+  (spec) => {
+    const ext = spec.replace(/^\*\./, "");
+    return SOURCE_EXTENSIONS.has(ext) || PHP_EXTENSIONS.has(ext);
+  },
+);
+
+/** The `.php` part of `SOURCE_PATHSPECS`: PHP keywords are case-
+ * insensitive, so `drift()`'s head-side binding grep runs a second,
+ * case-insensitive pass over just these pathspecs (`PRIVATE FUNCTION
+ * helperThing()` at head is as live as the lowercase spelling); no other
+ * scanned language has case-insensitive keywords, so no other pathspec
+ * joins the pass. */
+export const PHP_SOURCE_PATHSPECS: readonly string[] = SOURCE_PATHSPECS.filter(
+  (spec) => PHP_EXTENSIONS.has(spec.replace(/^\*\./, "")),
+);
+
 function extOf(filePath: string): string {
   const base = filePath.split("/").pop() ?? filePath;
   const dot = base.lastIndexOf(".");
@@ -64,7 +100,7 @@ export function classifyLine(
   const ext = extOf(filePath);
   if (DOC_EXTENSIONS.has(ext)) return "doc";
   const trimmed = text.trimStart();
-  if (SLASH_STAR_EXTENSIONS.has(ext)) {
+  if (SOURCE_EXTENSIONS.has(ext)) {
     if (
       trimmed.startsWith("//") ||
       trimmed.startsWith("/*") ||

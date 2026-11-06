@@ -35,6 +35,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `git diff-index`, neither of which refreshes and writes the index
   (a stat-stale file may appear as modified in `--worktree` mode and
   yields no finding).
+- `drift` extracts removed identifiers from PHP:
+  `(public|protected|private|static|abstract|final|readonly)*
+  (function|const|class|interface|trait|enum) Name` at any indentation,
+  keywords matched
+  case-insensitively, a `private`/`protected` member reported
+  `exported: false` and everything else `exported: true`, comment
+  lines skipped and anonymous closures/`new class` contributing
+  nothing (`define()`, same-line `#[...]` attributes and
+  heredoc/nowdoc or multi-line-string body lines are documented
+  limits). A PHP declaration name must clear the same identifier bar a
+  deleted file's basename faces, so framework method names (a
+  migration's `up`/`down`, a controller's `index`/`show`/`handle`) are
+   not scanned word by word across the docs, and each such name warns
+   `removed PHP declaration "<name>" not scanned: does not look like an
+   identifier` unless the same diff declares that name again on an added
+   line, which is a signature edit or a move rather than a removal. The
+   head-side local-binding grep
+   learns `interface`, `trait`, `enum` and `type`, searches only the
+   languages the extractor reads (TS/JS and PHP; `summary: type rowCount`
+   in a config, a Python `class rowCount:` or a bash `function rowCount {`
+   no longer suppresses a stale site for a removed local of another
+   language), runs a second
+   case-insensitive pass over the `.php` pathspecs only (PHP keywords
+   are case-insensitive, so a `PRIVATE FUNCTION helperThing()` at head
+   suppresses like a lowercase one, while a case-variant NAME does not),
+   and its filter now anchors the keyword on the text before it: that
+   text must hold an even number of `"`, of `'` and of backticks, counted
+   after backslash escapes are stripped (a keyword inside a string never
+   counts, an escaped quote does not flip the count) and be either only whitespace
+   and modifiers (`export`, `default`, `declare`, `async`, `abstract`,
+   `final`, `readonly`, `static`, visibility) or an opener `(`, `{`, `;`,
+   `=>` or `:` plus optional whitespace, so a loop head (`for (const
+   rowCount of counts)`), a block (`if (counts) { const rowCount = 1; }`),
+   an arrow body, a `case` label, `async function` and the statement
+   after a `;` all suppress while
+   `throw new Error("unexpected type payload")` still does not; its
+   pattern is
+   now derived from the one `DECLARATION_KEYWORDS` list, so a name
+  re-declared at head with any of these keywords suppresses the way a
+  `class` one always did. Independently of the language, when the diff
+  removes lines from a scanned file whose extension has no declaration
+  extractor (today `.py` and `.sh`), the envelope warns once per
+  extension, `no declaration extractor for .<ext>; removed identifiers
+  from N files not collected`, and `--summary` prints and counts it.
+  See docs/drift.md.
 
 ### Fixed
 

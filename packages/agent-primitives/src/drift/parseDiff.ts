@@ -1,3 +1,11 @@
+import {
+  classifyLine,
+  DOC_EXTENSIONS,
+  PHP_EXTENSIONS,
+  SCAN_PATHSPECS,
+  SOURCE_EXTENSIONS,
+} from "./scan.js";
+
 export type RemovedIdentifierKind = "declaration" | "config_key" | "file";
 
 export interface RemovedIdentifier {
@@ -40,6 +48,26 @@ export interface ParsedDiff {
    * explain, rather than silently drop, why an obviously-deleted file
    * contributed nothing. */
   skippedFileBasenames: { path: string; basename: string }[];
+  /** One entry per distinct PHP declaration name the extractor read off a
+   * removed line but did NOT emit, because the name does not clear
+   * `looksLikeIdentifier` (the bar a deleted file's basename already
+   * faces): a framework method name (`up`, `down`, `index`, `show`,
+   * `handle`) is an ordinary prose word, and scanning it word by word
+   * across every doc is noise, not a finding. A name the diff ALSO
+   * declares on an added line is dropped from here (the removal was a
+   * signature edit or a move, not a removal, so there is no blind spot to
+   * warn about). Ordered by first occurrence for a deterministic envelope;
+   * `drift()` warns once per name. */
+  skippedPhpNames: string[];
+  /** One entry per extension this command SCANS for sites (`SCAN_PATHSPECS`)
+   * and does NOT have a declaration extractor for (see
+   * `DECLARATION_EXTRACTOR_EXTENSIONS`): the diff removed lines from at
+   * least one file of that extension, so a declaration may well have been
+   * removed there and nothing was collected from it. Ordered by extension
+   * for a deterministic envelope. Docs (`.md`/`.mdx`/`.txt`) are excluded:
+   * they are scanned for sites but never declare anything, so their having
+   * no extractor is not a gap. */
+  extractorGaps: { ext: string; files: number }[];
 }
 
 /**
@@ -61,6 +89,35 @@ export interface ParsedDiff {
 const DECL_RE =
   /^(?<indent>\s*)(?<exported>export\s+)?(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:type|interface|class|function\*?|enum|const|let|var)\s+(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\b/;
 
+/**
+ * PHP declaration: `(public|protected|private|static|abstract|final|readonly)*
+ * (function|const|class|interface|trait|enum) [&]Name`, at any indentation
+ * (a method is the common case, so unlike the TS/JS regex column 0 is not
+ * required). `exported` is read from the modifier prefix: a `private` or
+ * `protected` visibility is a member hidden inside the class, every other
+ * shape (top-level, public, or visibility left unspecified, which is PHP's
+ * public) is open. The keyword list is matched case-insensitively (PHP
+ * keywords are: `Function`, `CLASS`, `Readonly` are all legal spellings);
+ * the captured name keeps the line's case. The regex is anchored, which
+ * is what keeps the two anonymous shapes out of it: a closure (`function
+ * (` with no name) never matches because a name is required, and `new
+ * class extends Foo` never matches because the line starts with `new`,
+ * which is neither a modifier nor a declaration keyword - an inline
+ * anonymous class is a use, not a declaration. Like the TS/JS regex this
+ * is one line of a diff, not a parser: a declaration split across lines
+ * is missed, and so is one behind a leading `#[...]` attribute on the
+ * same line. The same anchor is why a `function foo` inside a string
+ * literal on an otherwise code line is NOT matched (the line starts with
+ * code, not with the keyword or a modifier); the real false positive is a
+ * heredoc/nowdoc or multi-line string whose body line itself starts with
+ * a declaration shape. A comment line is skipped before matching (see
+ * `classifyLine`), never by this regex's shape. The extracted name must
+ * still clear `looksLikeIdentifier` to be reported (see
+ * `extractIdentifier`).
+ */
+const PHP_DECL_RE =
+  /^(?<indent>\s*)(?<modifiers>(?:(?:public|protected|private|static|abstract|final|readonly)\s+)*)(?:function|const|class|interface|trait|enum)\s+&?(?<name>[A-Za-z_][A-Za-z0-9_]*)\b/i;
+
 /** A JSON object's top-level key: `"name":` indented by at most two
  * spaces. Cheap and documented as such: it has no notion of nesting
  * depth beyond "how far the line is indented", so a deeply-indented but
@@ -76,7 +133,29 @@ const JSON_TOP_KEY_RE = /^ {0,2}"([A-Za-z0-9_.$-]+)"\s*:/;
  * or a key on the same line as its parent is missed. */
 const YAML_TOP_KEY_RE = /^([A-Za-z0-9_.-]+):(?:\s|$)/;
 
-const SOURCE_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs"]);
+/** The extensions `extractIdentifier` knows how to read a declaration or
+ * config key out of: the TS/JS source extensions, JSON/YAML top-level
+ * keys, and PHP (`PHP_DECL_RE`). */
+const DECLARATION_EXTRACTOR_EXTENSIONS = new Set([
+  ...SOURCE_EXTENSIONS,
+  ...PHP_EXTENSIONS,
+  "json",
+  "yml",
+  "yaml",
+]);
+
+/** The extensions `SCAN_PATHSPECS` scans for sites but has no declaration
+ * extractor for, docs excluded (a doc never declares anything, so its
+ * missing extractor is not a gap). When a diff removes lines from a file
+ * of one of these extensions a declaration may have been removed there
+ * and nothing collected from it; `parseRemovedIdentifiers` reports that
+ * as an extractor gap (`extractorGaps`) instead of staying silent. */
+const EXTRACTOR_GAP_EXTENSIONS = new Set(
+  SCAN_PATHSPECS.map((spec) => spec.replace(/^\*\./, "")).filter(
+    (ext) =>
+      !DOC_EXTENSIONS.has(ext) && !DECLARATION_EXTRACTOR_EXTENSIONS.has(ext),
+  ),
+);
 
 function extOf(filePath: string): string {
   const base = filePath.split("/").pop() ?? filePath;
@@ -90,24 +169,36 @@ export function basenameNoExt(filePath: string): string {
   return dot > 0 ? base.slice(0, dot) : base;
 }
 
-/** True when `basename` (already extension-stripped) is shaped enough
- * like an identifier to be worth reporting as one: at least 4 characters,
- * and containing an uppercase letter, a hyphen, or an underscore. Without
- * this guard a deleted file's basename floods the report with every
- * ordinary lowercase prose word that happens to also be a filename
- * (`index`, `setup`, `logo`, ...). A prototype-scope heuristic, documented
- * in docs/drift.md as a known limitation: a short or all-lowercase-no-
- * separator identifier (`db`, `api`) is never reported this way. */
-function looksLikeIdentifier(basename: string): boolean {
-  return basename.length >= 4 && /[A-Z_-]/.test(basename);
+/** True when `name` is shaped enough like an identifier to be worth
+ * reporting as one: at least 4 characters, and containing an uppercase
+ * letter, a hyphen, or an underscore. Without this guard a deleted file's
+ * basename floods the report with every ordinary lowercase prose word that
+ * happens to also be a filename (`index`, `setup`, `logo`, ...), and a PHP
+ * declaration's name floods it with every framework method name (`up`,
+ * `down`, `index`, `show`, `store`, `handle`, `render` - a Laravel
+ * migration, a resource controller). A prototype-scope heuristic,
+ * documented in docs/drift.md as a known limitation: a short or
+ * all-lowercase-no-separator identifier (`db`, `api`) is never reported
+ * this way. */
+function looksLikeIdentifier(name: string): boolean {
+  return name.length >= 4 && /[A-Z_-]/.test(name);
 }
 
 /** Extracts the one declared/keyed identifier a diff line names, per the
- * file it belongs to: a TS/JS declaration for a source extension, a
- * top-level config key for `.json`/`.yml`/`.yaml`. Every other extension
- * (Markdown, plain text, ...) never contributes a removed identifier -
- * only a declaration's own file can remove one. The line's shape (exported,
- * indented) travels with the name; see `RemovedIdentifier`. */
+ * file it belongs to: a TS/JS declaration for a source extension, a PHP
+ * declaration for `.php`, a top-level config key for `.json`/`.yml`/`.yaml`.
+ * Every other extension (Markdown, plain text, ...) never contributes a
+ * removed identifier - only a declaration's own file can remove one, and
+ * the extensions that are scanned for sites without having an extractor
+ * here surface as `extractorGaps` instead. A removed PHP line whose
+ * trimmed text starts a comment (`//`, `#`, `*`, `/*`, the same classifier
+ * `scan.ts` uses for site lines) is not a declaration even when the
+ * comment quotes one. A PHP declaration NAME that does not clear
+ * `looksLikeIdentifier` (the bar a deleted file's basename already faces)
+ * is not emitted: the result comes back flagged
+ * (`identifierBarFailed: true`) so `parseRemovedIdentifiers` can record
+ * the name as skipped rather than silently drop it. The line's shape
+ * (exported, indented) travels with the name; see `RemovedIdentifier`. */
 function extractIdentifier(
   line: string,
   filePath: string,
@@ -117,6 +208,7 @@ function extractIdentifier(
       kind: RemovedIdentifierKind;
       exported: boolean;
       indented: boolean;
+      identifierBarFailed?: true;
     }
   | undefined {
   const ext = extOf(filePath);
@@ -129,6 +221,23 @@ function extractIdentifier(
       kind: "declaration",
       exported: groups["exported"] !== undefined,
       indented: (groups["indent"] ?? "").length > 0,
+    };
+  }
+  if (PHP_EXTENSIONS.has(ext)) {
+    if (classifyLine(filePath, line) !== undefined) return undefined;
+    const m = PHP_DECL_RE.exec(line);
+    if (m === null) return undefined;
+    const groups = m.groups ?? {};
+    const modifiers = (groups["modifiers"] ?? "").toLowerCase();
+    const name = groups["name"] ?? "";
+    return {
+      name,
+      kind: "declaration",
+      exported: !/\b(?:private|protected)\b/.test(modifiers),
+      indented: (groups["indent"] ?? "").length > 0,
+      ...(looksLikeIdentifier(name)
+        ? {}
+        : { identifierBarFailed: true as const }),
     };
   }
   if (ext === "json") {
@@ -202,6 +311,26 @@ const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
  * over- and under-forgive: an identifier removed from one file and
  * coincidentally declared fresh, unrelated, in another counts as moved
  * too; documented as a known limitation, not fixed here.
+ *
+ * Independently of any extractor: when the diff removes lines from a
+ * file whose extension `SCAN_PATHSPECS` scans for sites but no
+ * declaration extractor reads (a `.py` or `.sh` file), a declaration
+ * may have been removed there without anything being collected from
+ * it. Each such extension is recorded once in `extractorGaps`, with
+ * the number of distinct files of that extension the diff removed
+ * lines from, so `drift()` can warn per extension; docs are excluded
+ * because they never declare, and an extension with an extractor
+ * (TS/JS, JSON, YAML, PHP) never appears.
+ *
+ * A PHP declaration line whose NAME does not clear `looksLikeIdentifier`
+ * - the bar a deleted file's basename already faces - contributes no
+ * identifier either: a framework method name (`up`, `down`, `index`,
+ * `handle`) is an ordinary prose word that would be scanned against
+ * every doc and comment. Each distinct such name is recorded once in
+ * `skippedPhpNames` so `drift()` can warn, not stay silent - unless the
+ * same diff also declares that name on an ADDED PHP line, which makes the
+ * removal a signature edit or a move rather than a removal, and there is
+ * then nothing to warn about.
  */
 export function parseRemovedIdentifiers(diff: string): ParsedDiff {
   const lines = diff.split("\n");
@@ -209,7 +338,23 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
   const removedCandidates: RemovedIdentifier[] = [];
   const addedNames = new Set<string>();
   const addedFileBasenames = new Set<string>();
+  // Names a removed PHP line declared that did not clear the identifier
+  // bar: never emitted, but recorded once each (first occurrence wins) so
+  // `drift()` warns about the blind spot instead of leaving a silent zero.
+  const skippedPhpNames: string[] = [];
+  // The same names seen on an ADDED PHP declaration line. A name that
+  // failed the bar on a removed line and appears again on an added one was
+  // edited (a signature change on a migration or controller method) or
+  // moved, not removed, so it is dropped from `skippedPhpNames` at the end
+  // rather than warned about.
+  const addedBarFailedNames = new Set<string>();
   const deletedFiles: { path: string }[] = [];
+  // Extension -> the distinct files of that extension this diff removed
+  // lines from, for the extensions with no declaration extractor
+  // (`EXTRACTOR_GAP_EXTENSIONS`): a `.py`/`.sh` line is scanned for sites
+  // but never read for declarations, so the caller is warned (per
+  // extension, with the file count) rather than left with a silent zero.
+  const gapFilesByExt = new Map<string, Set<string>>();
 
   let oldPath: string | undefined;
   let newPath: string | undefined;
@@ -277,16 +422,28 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
       const content = raw.slice(1);
       const filePath = oldPath ?? newPath;
       if (filePath !== undefined) {
+        const gapExt = extOf(filePath);
+        if (EXTRACTOR_GAP_EXTENSIONS.has(gapExt)) {
+          const files = gapFilesByExt.get(gapExt) ?? new Set<string>();
+          files.add(filePath);
+          gapFilesByExt.set(gapExt, files);
+        }
         const found = extractIdentifier(content, filePath);
-        if (found) {
-          removedCandidates.push({
-            name: found.name,
-            kind: found.kind,
-            file: filePath,
-            line: oldLine,
-            exported: found.exported,
-            indented: found.indented,
-          });
+        if (found !== undefined) {
+          if (found.identifierBarFailed === true) {
+            if (!skippedPhpNames.includes(found.name)) {
+              skippedPhpNames.push(found.name);
+            }
+          } else {
+            removedCandidates.push({
+              name: found.name,
+              kind: found.kind,
+              file: filePath,
+              line: oldLine,
+              exported: found.exported,
+              indented: found.indented,
+            });
+          }
         }
       }
       oldLine++;
@@ -297,7 +454,17 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
       const filePath = newPath ?? oldPath;
       if (filePath !== undefined) {
         const found = extractIdentifier(content, filePath);
-        if (found) addedNames.add(found.name);
+        // A PHP name that fails the identifier bar never joins `addedNames`,
+        // so the moved rule never sees it and a same-spelled name removed in
+        // ANOTHER language (a YAML `show:` key beside an added PHP `function
+        // show()`) stays reported rather than being treated as moved.
+        if (found !== undefined) {
+          if (found.identifierBarFailed === true) {
+            addedBarFailedNames.add(found.name);
+          } else {
+            addedNames.add(found.name);
+          }
+        }
       }
       newLine++;
       continue;
@@ -344,5 +511,24 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
     removed.push(candidate);
   }
 
-  return { removed, movedNames, skippedFileBasenames };
+  const extractorGaps: { ext: string; files: number }[] = [];
+  for (const ext of [...gapFilesByExt.keys()].sort()) {
+    const files = gapFilesByExt.get(ext);
+    if (files !== undefined && files.size > 0) {
+      extractorGaps.push({ ext, files: files.size });
+    }
+  }
+
+  return {
+    removed,
+    movedNames,
+    skippedFileBasenames,
+    // Mirroring the moved rule for a name the bar never let through: one
+    // the diff declares again on an added PHP line was edited or moved,
+    // not removed, so it is no blind spot and gets no warning.
+    skippedPhpNames: skippedPhpNames.filter(
+      (name) => !addedBarFailedNames.has(name),
+    ),
+    extractorGaps,
+  };
 }

@@ -346,6 +346,9 @@ to reuse prior test evidence. See the agent-primitives package's
 docs/snapshot.md and docs/delta.md for unsupported states and best-effort
 observation limits. Use `drift --base <rev> --head <rev>` for identifier
 references in prose; see its docs/drift.md.
+It extracts removed declarations from TS/JS, JSON, YAML and PHP; a scanned
+file type without an extractor (`.py`, `.sh`) is named in a warning instead
+of passing silently.
 `--ignore-identifier <name>` (or `--ignore-identifier-file <file>`) drops a
 name's sites (shown under `--strict` as allowlisted), and a removed
 indented, non-exported local that is still declared at head is suppressed

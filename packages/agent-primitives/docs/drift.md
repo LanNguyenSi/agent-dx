@@ -51,7 +51,26 @@ parser, and is prototype scope: a top-level or exported TS/JS
 declaration (`export? default? declare? abstract? async?
 (type|interface|class|function[*]|const|let|var|enum) Name`, so
 `export async function`, `export abstract class` and a generator
-`function*` are all recognized), a top-level JSON/YAML config key
+`function*` are all recognized), a PHP declaration at any indentation
+(`(public|protected|private|static|abstract|final|readonly)*
+(function|const|class|interface|trait|enum) [&]Name`, keywords matched
+case-insensitively like PHP does, so `public function legacyName()`, a
+bare `function helperThing()`, `private const MAX_SIZE` and `final
+readonly class
+Widget` all count; a method with `private` or `protected` visibility is
+reported `exported: false`, everything else - top level, public, or
+visibility left unspecified, which is PHP's public - `exported: true`.
+An anonymous closure (`function (` with no name) and `new class`
+contribute nothing, and a removed line whose trimmed text starts a
+comment (`//`, `#`, `*`, `/*`, the same classifier the site scan uses)
+is never a declaration; limits: `define('X', ...)` is not a `const X`,
+an attribute `#[...]` sharing the declaration's line hides it, and the
+PHP match is anchored at the line start, so a `function foo` inside a
+string on an otherwise code line is NOT matched (the line starts with
+code, not the keyword); the real false positive is a heredoc/nowdoc or
+multi-line string body line that itself starts with a declaration
+shape),
+a top-level JSON/YAML config key
 (cheap indentation-based heuristic: a key at column 0 for YAML, indented
 by at most two spaces for JSON; a more deeply nested key is missed), or
 a wholly deleted file's own basename (without extension) - only when
@@ -62,12 +81,30 @@ file whose basename does not clear that bar (`docs/setup.md`,
 `logo.png`, `src/index.ts`) contributes nothing and is named instead in
 a warning, so an all-lowercase, no-separator basename like `index` or
 `setup` never floods the report with every ordinary prose mention of
-that word. Every extracted identifier also carries the two facts the
-same line shows: `exported` (the line had an `export` keyword after any
-indentation) and `indented` (the line began with whitespace, so the
-binding was inside an enclosing scope rather than at column 0). A config
-key is never `exported`, and a kind `file` candidate has no line to read
-either fact from, so both are `false` for it. An identifier declared on
+that word. PHP declaration names (function/method, const,
+class/interface/trait/enum) face that same bar: a name that does not
+clear it - a framework method name like a migration's `up`/`down` or a
+resource controller's `index`/`show`/`store`/`update`/`destroy`, a
+`handle`, a `render`, or PHP 8's legal method name `function` - is not
+extracted, and each such name warns `removed PHP declaration "<name>"
+not scanned: does not look like an identifier` (counted by `--summary`
+like the basename warning it mirrors; the warning is skipped for a name
+the same diff also declares on an added PHP line, where the removal was a
+signature edit or a move rather than a removal). Every extracted identifier also carries the two facts the
+same line shows: `exported` (for TS/JS, the line had an `export`
+keyword after any indentation; for PHP, the declaration is open: not a
+`private`/`protected` member) and `indented` (the line began with
+whitespace, so the binding was inside an enclosing scope rather than at
+column 0). A config key is never `exported`, and a kind `file`
+candidate has no line to read either fact from, so both are `false`
+for it. An extension the site scan covers but no declaration extractor
+reads, when the diff removed lines from a file of it (today `.py` and
+`.sh`; docs are excluded, a doc never declares), is warned once per
+extension rather than staying a silent zero: `no declaration extractor
+for .<ext>; removed identifiers from N files not collected`, `N` being
+the number of distinct files of that extension the diff removed lines
+from. The warning is ordered by extension and lands in `warnings` (so
+`--summary` prints and counts it too). An identifier declared on
 both a removed and an added line
 anywhere in the same diff is treated as MOVED, never as removed, on the
 reading that the same declaration reappearing means it moved rather
@@ -107,9 +144,22 @@ bound inside some enclosing scope (a function body, a method, a block),
 so its removal says nothing about whether the name is gone. For every
 such candidate name (and only those: an exported, column-0 or
 non-declaration candidate is never touched, and neither is a name an
-explicit `--ignore-identifier` already covers) the command runs ONE
-`git grep -n -w -E` at `--head` over the scanned source pathspecs for the
-declaration shape `(const|let|var|function|class) <name>`. Where at least
+explicit `--ignore-identifier` already covers) the command runs a PAIR
+of `git grep -n -w -E` calls at `--head` over the scanned source
+pathspecs for the declaration shape `(const|let|var|function|class|
+type|interface|enum|trait) <name>`: one case-sensitive over the TS/JS
+and PHP source pathspecs, and one case-insensitive (`-i`) over the `.php`
+pathspecs only (PHP keywords are case-insensitive, so a head-side
+`PRIVATE FUNCTION helperThing()` is as live a binding as the lowercase
+spelling; no other scanned language's keywords are, so no other
+pathspec joins the pass). Every keyword of the keyword list shared by
+these greps and the filter below, so a language's declaration keywords
+are added exactly once (the `type`/`interface`/`enum`/`trait` entries
+are why a head-side PHP `interface legacyThing {}` or a TS
+`type err = ...` now suppresses the way a `class` one always did;
+several of these keywords are common English words, which is safe only
+because the filter below accepts a keyword only after a modifier or an
+opener and only outside an open string literal). Where at least
 one such head-side declaration exists, the name is still alive under a
 binding of its own, and its sites are allowlisted with reason
 `local binding "<name>" still declared at head` (visible under
@@ -117,17 +167,50 @@ binding of its own, and its sites are allowlisted with reason
 `local-binding`. Where none exists, behaviour is exactly as before: the
 sites are reported as usual. The trailing word boundary that shape needs
 is `-w`'s own (git's `-E` on a BSD regex build reads `\b` as a literal,
-which would silently match nothing). Two shapes the grep itself matches
-are not live declarations and are filtered after the grep: a comment line
+which would silently match nothing). Three shapes the grep itself matches
+are not live declarations and are filtered after the grep: a keyword
+reached through an expression or a string (the filter admits a keyword
+only when the text before it has QUOTE PARITY - an even number of `"`, an
+even number of `'` and an even number of backticks, so a keyword inside an
+open string literal never counts - and, before that, only whitespace and
+the modifiers `export`, `default`, `declare`, `async`, `abstract`, `final`,
+`readonly`, `static` and a visibility, or one of the openers `(`, `{`, `;`,
+`=>` and `:` with optional whitespace after it; so `for (const rowCount of
+counts) {}`, `async function rowCount() {}`, `if (counts) { const rowCount
+= 1; }`, `const f = () => { const rowCount = 1; };`, `case 1: const err =
+1` and `x = "a"; const err = 1` all suppress, while
+`throw new Error("unexpected type payload")` (an odd number of `"` before
+the keyword) and `label = 'unexpected const err` do not, because `const`
+and `type` are common English words inside prose strings), a comment line
 (`// const stamp = old approach`, whose text before the keyword names a
-comment) and a longer name whose next character `-w` reads as a word
+comment), and a longer name whose next character `-w` reads as a word
 boundary (`let retired$old`, because git treats `$` as a non-word
-character). That filter checks only a comment prefix at the start of the
-line (`//`, `/*`, `*`, `#`) and the character after the name; `-w` supplies
-the word boundary on both sides of the shape, so `superclass err` never
-matches. Limits: the shape inside a string, a template literal, JSX text,
-or a comment that does not start the line still counts as a declaration
-and suppresses; indentation is a proxy for
+character).
+For a `.php` hit the filter matches keyword, modifiers, anchor and comment
+prefix case-insensitively (the name itself keeps its exact case), so
+`PRIVATE FUNCTION helperThing()` suppresses the way a lowercase one
+does; a case-variant NAME does not suppress (`FUNCTION LegacyThing()` is
+not a live `legacyThing` for this tool - PHP itself treats function names
+case-insensitively, and that is a documented limit). `-w` supplies the
+word boundary on both sides of the shape, so
+`superclass err` never matches. Limits: the comment guard reads only the
+start of the text before the keyword, so a mid-line comment behind an
+opener (`{ // const err`) counts as a declaration, and so does any opener
+inside a mid-line comment of a TS/JS/PHP file (`log("x"); // fix: type
+rowCount` still suppresses a stale `rowCount` site); a string opened on an
+earlier line leaves no quote in the line, so parity cannot see it, and
+parity has two more false negatives: an apostrophe inside a double-quoted
+string, or a regex literal holding a quote, before the keyword on the same
+line makes the count odd (`const msg = "it's"; const rowCount = 1;` does
+not suppress), while an escaped quote does not (backslash escapes are
+stripped before counting, so `const q = "a\"b"; const rowCount = 1;`
+suppresses); the case-sensitive head grep covers only the languages the extractor
+reads (TS/JS and PHP files), so `summary: type rowCount is shown` in a
+config no longer suppresses, and neither does a Python `class rowCount:`
+or a bash `function rowCount {` at head: that is a different language's
+binding, not the removed local's (0.20.0 suppressed it, reporting is the
+intended outcome);
+indentation is a proxy for
 scope, not a scope analysis, so an indented declaration inside a block
 that still leaves a name unreachable at head is suppressed too, while a
 top-level `let` reassigned by a local of the same name is not; and the
