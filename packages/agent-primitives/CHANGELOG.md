@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `hygiene` no longer reports a silent ok while tracked files have changes
+  its comparison did not look at (agent-dx#618). Without `--staged`, staged
+  or unstaged changes to tracked files (`git status --porcelain -z
+  --untracked-files=no`; untracked files never count) add a warning naming
+  the count, up to five paths and the remedy (`commit them, or use --staged
+  / --worktree`); with `--staged` the same holds for unstaged changes only.
+  The warning changes neither `status` nor the exit code. The `--summary`
+  totals line gains `uncommitted=N` after `warnings=`, `counts` gains
+  `uncommitted`, and the envelope lists the paths as `uncommitted_files`
+  (capped at 50, accepted by `--print`). A failing `git status` is a
+  warning only.
+- `hygiene --worktree` compares the merge-base of `--base` and `HEAD` with
+  the working tree (tracked files, staged and unstaged changes alike), for
+  a handback with uncommitted changes; `head` is `(worktree)` and
+  `head_sha` `null`. It is a usage error with `--staged` or `--head`.
+  Files are read from the working tree under the index path's safety rules
+  (a symlink is read as its target text); untracked files that match a
+  test or backup pattern are named in a separate warning. The skill's
+  commit-hygiene section names the flag.
+
 ## [0.20.0] - 2026-11-04
 
 ### Added

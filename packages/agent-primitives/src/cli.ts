@@ -2689,6 +2689,7 @@ interface HygieneCliOptions {
   base: string;
   head?: string;
   staged?: boolean;
+  worktree?: boolean;
   extendOnly: string[];
   extendOnlyFile?: string;
   intendedDeletion: string[];
@@ -2727,10 +2728,17 @@ program
     "Refuse backup files (*.bak, *.orig, *~, and the BSD sed -i leftovers *-e, *-E, *-n, *-r, *-s) and flag wholesale rewrites of extend-only files and dropped test cases in a git range or the index",
   )
   .requiredOption("--base <rev>", "base revision the task started from")
-  .option("--head <rev>", "head revision (default HEAD)")
+  .option(
+    "--head <rev>",
+    "head revision (default HEAD; ignored with --staged, exclusive with --worktree)",
+  )
   .option(
     "--staged",
     "compare the merge-base of --base and HEAD against the git index instead of a commit (run before git commit)",
+  )
+  .option(
+    "--worktree",
+    "compare the merge-base of --base and HEAD against the working tree (tracked files, staged and unstaged), for a handback with uncommitted changes; exclusive with --staged and --head",
   )
   .option(
     "--extend-only <path>",
@@ -2794,6 +2802,7 @@ program
       base: opts.base,
       head: opts.head,
       staged: Boolean(opts.staged),
+      worktree: Boolean(opts.worktree),
       extendOnly,
       intendedDeletions,
       maxDeletePercent: Number(opts.maxDeletePercent),
@@ -2817,6 +2826,7 @@ program
         intended_declarations: result.intendedDeclarations,
         intended_deletions: result.intendedDeletions,
         findings: result.findings,
+        uncommitted_files: result.uncommittedFiles,
         counts: result.counts,
       },
       // The applied intended deletions are the record of an allowance the
