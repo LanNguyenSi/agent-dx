@@ -1146,6 +1146,7 @@ describe("patch branch guard: another spelling of a tracked file is tracked", ()
       const dir = spellingRepo({ "core.ignorecase": "true" });
       write(dir, "g[1]*/t.md", "hi\n");
       write(dir, "g1x/t.md", "hi\n");
+      write(dir, "g1x/u.md", "hi\n");
       git(dir, "add", "-A");
       commitAll(dir);
       write(dir, "g[1]*/u.md", "hi\n");
