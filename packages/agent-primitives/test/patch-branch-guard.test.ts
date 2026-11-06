@@ -940,8 +940,7 @@ describe("patch branch guard: untracked and ignored targets", () => {
   describe("when git cannot classify a target", () => {
     const FAIL_IGNORE =
       '[ "$1" = check-ignore ] && { echo boom >&2; exit 128; }';
-    const FAIL_LS =
-      '[ "$1" = "--literal-pathspecs" ] && [ "$2" = ls-files ] && { echo boom >&2; exit 128; }';
+    const FAIL_LS = '[ "$1" = ls-files ] && { echo boom >&2; exit 128; }';
 
     it("treats a failing check-ignore as tracked: refused, with a warning", () => {
       const dir = mixedRepo();
@@ -1020,6 +1019,305 @@ describe("patch branch guard: untracked and ignored targets", () => {
       expect(g(r).targets?.[0].status).toBe("would_refuse");
     });
   });
+});
+
+/** A repository on `main` with the given case and Unicode settings. */
+function spellingRepo(settings: Record<string, string | undefined>): string {
+  const dir = tmpDir();
+  git(dir, "init", "-q");
+  git(dir, "symbolic-ref", "HEAD", "refs/heads/main");
+  for (const [k, v] of Object.entries(settings)) {
+    if (v === undefined) git(dir, "config", "--unset", k);
+    else git(dir, "config", k, v);
+  }
+  return dir;
+}
+
+/** Renames `from` to `to` through a temporary name, so that a volume that
+ * folds letter case or Unicode form takes the new spelling. */
+function respell(dir: string, from: string, to: string): void {
+  const tmp = path.join(path.dirname(path.join(dir, from)), ".respell-tmp");
+  fs.renameSync(path.join(dir, from), tmp);
+  fs.renameSync(tmp, path.join(dir, to));
+}
+
+function write(dir: string, rel: string, text: string): void {
+  fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+  fs.writeFileSync(path.join(dir, rel), text);
+}
+
+/** The edit that `file` carries in the spelling tests. */
+const hi = (file: string) => ({ file, old: "hi", new: "Z" });
+
+/** A patch that the guard must have refused as tracked, with the file
+ * unchanged. */
+function expectTrackedRefusal(
+  dir: string,
+  r: ReturnType<typeof patch>,
+  rel: string,
+): void {
+  expect(r.status).toBe("usage_error");
+  expect(r.reason).toBe("protected_branch");
+  expect(r.writtenFiles).toEqual([]);
+  expect(read(dir, rel)).toBe("hi\n");
+  expect(g(r).targets?.[0]).toMatchObject({
+    status: "refused",
+    tracking: "tracked",
+  });
+}
+
+describe("patch branch guard: another spelling of a tracked file is tracked", () => {
+  const foldsCase = (dir: string, spelling: string): boolean => {
+    const other =
+      spelling === spelling.toLowerCase()
+        ? spelling.toUpperCase()
+        : spelling.toLowerCase();
+    return other !== spelling && fs.existsSync(path.join(dir, other));
+  };
+
+  describe("with core.ignorecase=true", () => {
+    it("refuses the on-disk spelling of an index entry that differs in letter case", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "Bar.md", "hi\n");
+      git(dir, "add", "Bar.md");
+      commitAll(dir);
+      respell(dir, "Bar.md", "bar.md");
+      expectTrackedRefusal(
+        dir,
+        patch({ cwd: dir, edits: [hi("bar.md")] }),
+        "bar.md",
+      );
+      if (foldsCase(dir, "bar.md")) {
+        // The volume folds case: the name in the index reaches the file too.
+        expectTrackedRefusal(
+          dir,
+          patch({ cwd: dir, edits: [hi("Bar.md")] }),
+          "bar.md",
+        );
+      }
+    });
+
+    it("refuses a tracked file below a directory that differs in letter case", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "Dir/Sub/a.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      respell(dir, "Dir", "dir");
+      expectTrackedRefusal(
+        dir,
+        patch({ cwd: dir, edits: [hi("dir/Sub/a.md")] }),
+        "dir/Sub/a.md",
+      );
+    });
+
+    it("refuses the ignored variant: a tracked file that an ignore rule names", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, ".gitignore", "*.log\n");
+      write(dir, "Bar.log", "hi\n");
+      git(dir, "add", ".gitignore");
+      git(dir, "add", "-f", "Bar.log");
+      commitAll(dir);
+      respell(dir, "Bar.log", "bar.log");
+      expectTrackedRefusal(
+        dir,
+        patch({ cwd: dir, edits: [hi("bar.log")] }),
+        "bar.log",
+      );
+    });
+
+    it("still allows an untracked file whose name only resembles a tracked one", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "Bar.md", "hi\n");
+      write(dir, "Bar.md.bak", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "Bar.mdx", "hi\n");
+      write(dir, "Bar", "hi\n");
+      for (const f of ["Bar.mdx", "Bar"]) {
+        const r = patch({ cwd: dir, edits: [hi(f)], dryRun: true });
+        expect(g(r).targets?.[0]).toMatchObject({
+          status: "allowed_untracked",
+          tracking: "untracked",
+        });
+      }
+    });
+
+    it("a name with glob characters stays literal under icase", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "g[1]*/t.md", "hi\n");
+      write(dir, "g1x/t.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "g[1]*/u.md", "hi\n");
+      const tracked = patch({ cwd: dir, edits: [hi("g[1]*/t.md")] });
+      expectTrackedRefusal(dir, tracked, "g[1]*/t.md");
+      const free = patch({ cwd: dir, edits: [hi("g[1]*/u.md")] });
+      expect(free.status).toBe("written");
+      expect(g(free).targets?.[0].tracking).toBe("untracked");
+    });
+
+    it("an untracked and an ignored file beside tracked ones keep their allowed statuses", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, ".gitignore", "*.log\n");
+      write(dir, "d/t.md", "hi\n");
+      write(dir, "d/u.md.bak", "hi\n");
+      write(dir, "dd/u.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "d/u.md", "hi\n");
+      write(dir, "d/i.log", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("d/u.md"), hi("d/i.log")] });
+      expect(r.status).toBe("written");
+      expect(g(r).targets?.map((t) => [t.tracking, t.status])).toEqual([
+        ["untracked", "allowed_untracked"],
+        ["ignored", "allowed_ignored"],
+      ]);
+    });
+
+    it("fails closed when core.ignorecase cannot be read: the case variant is refused", () => {
+      const dir = spellingRepo({ "core.ignorecase": "true" });
+      write(dir, "Bar.md", "hi\n");
+      git(dir, "add", "Bar.md");
+      commitAll(dir);
+      respell(dir, "Bar.md", "bar.md");
+      const r = withGitShim(
+        '[ "$1" = config ] && { echo boom >&2; exit 2; }',
+        () => patch({ cwd: dir, edits: [hi("bar.md")] }),
+      );
+      expectTrackedRefusal(dir, r, "bar.md");
+    });
+  });
+
+  describe("with core.ignorecase=false or unset", () => {
+    // git itself then treats the two spellings as two files. The case
+    // variant that is not in the index is untracked here and is allowed;
+    // the setting is wrong for a volume that folds case, which git init
+    // detects, and the guard goes by what the repository says.
+    for (const [label, setting] of [
+      ["false", "false"],
+      ["unset", undefined],
+    ] as const) {
+      it(`${label}: a case variant that is not in the index is untracked`, () => {
+        const dir = spellingRepo({ "core.ignorecase": setting });
+        write(dir, "Bar.md", "hi\n");
+        git(dir, "add", "Bar.md");
+        commitAll(dir);
+        write(dir, "bar.md.new", "hi\n");
+        respell(dir, "bar.md.new", "Baz.md");
+        const r = patch({ cwd: dir, edits: [hi("Baz.md")], dryRun: true });
+        expect(g(r).targets?.[0]).toMatchObject({
+          status: "allowed_untracked",
+          tracking: "untracked",
+        });
+        // The same name as the index carries is tracked either way.
+        const tracked = patch({ cwd: dir, edits: [hi("Bar.md")] });
+        expectTrackedRefusal(dir, tracked, "Bar.md");
+      });
+    }
+  });
+
+  describe("Unicode form", () => {
+    const NFC = "café.md";
+    const NFD = "café.md";
+
+    function nfdRepo(): string {
+      const dir = spellingRepo({
+        "core.ignorecase": "false",
+        "core.precomposeunicode": "false",
+      });
+      write(dir, NFC, "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      respell(dir, NFC, NFD);
+      return dir;
+    }
+
+    it("refuses an NFD on-disk name of an NFC index entry", () => {
+      const dir = nfdRepo();
+      expect(fs.readdirSync(dir)).toContain(NFD);
+      expectTrackedRefusal(dir, patch({ cwd: dir, edits: [hi(NFD)] }), NFD);
+    });
+
+    it("refuses an NFD directory component of an NFC index entry", () => {
+      const dir = spellingRepo({
+        "core.ignorecase": "false",
+        "core.precomposeunicode": "false",
+      });
+      write(dir, "déjà/a.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      respell(dir, "déjà", "déjà");
+      expectTrackedRefusal(
+        dir,
+        patch({ cwd: dir, edits: [hi("déjà/a.md")] }),
+        "déjà/a.md",
+      );
+    });
+
+    it("refuses an NFC on-disk name of an NFD index entry", () => {
+      const dir = spellingRepo({
+        "core.ignorecase": "false",
+        "core.precomposeunicode": "false",
+      });
+      write(dir, NFD, "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      respell(dir, NFD, NFC);
+      expectTrackedRefusal(dir, patch({ cwd: dir, edits: [hi(NFC)] }), NFC);
+    });
+
+    it("allows an untracked file with a combining character that no entry has", () => {
+      const dir = nfdRepo();
+      write(dir, "naïve.md", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("naïve.md")], dryRun: true });
+      expect(g(r).targets?.[0].tracking).toBe("untracked");
+    });
+  });
+});
+
+describe("patch branch guard: git's pathspec switches in the environment", () => {
+  for (const name of [
+    "GIT_ICASE_PATHSPECS",
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_LITERAL_PATHSPECS",
+  ]) {
+    it(`${name}=1 does not break the classification of an untracked target`, async () => {
+      const dir = mixedRepo();
+      const res = await spawnCli(
+        [
+          "--json",
+          "-C",
+          dir,
+          "patch",
+          "--file",
+          "run/notes.md",
+          "--old",
+          "n",
+          "--new",
+          "N",
+        ],
+        {
+          env: {
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_CONFIG_NOSYSTEM: "1",
+            [name]: "1",
+          },
+        },
+      );
+      expect(res.code).toBe(0);
+      const out = JSON.parse(res.stdout) as {
+        status: string;
+        warnings: string[];
+        branch_guard: { repos: { targets: { status: string }[] }[] };
+      };
+      expect(out.status).toBe("written");
+      expect(out.branch_guard.repos[0].targets[0].status).toBe(
+        "allowed_untracked",
+      );
+      expect(out.warnings).toEqual([]);
+    });
+  }
 });
 
 describe("patch branch guard: the overall status of a plan", () => {

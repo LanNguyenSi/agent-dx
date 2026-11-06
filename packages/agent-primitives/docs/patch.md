@@ -384,22 +384,36 @@ not outweigh another on `main`. Nothing is written in either.
 `--protect-detached`) the guard decides for each target, because no edit to
 a file that git ignores or does not track can reach the branch through this
 command: `git add` of such a file is a separate, deliberate action the guard
-does not police. In the repository root, with the absolute real path of the
-file (so git relates it to the work tree whatever the volume's letter case),
-`git check-ignore -q` asks whether the file is ignored (a tracked file is
-never reported as ignored, whatever the ignore rules say) and, if not,
-`git ls-files --error-unmatch` whether it is tracked, with pathspecs taken
-literally (`--literal-pathspecs`; a name with `[` or `*` is that name). A file
-that does not exist yet is untracked; a file below an ignored directory is
-ignored. So a run file such as `.ai/runs/<run>/notes.md` in a checkout that
-stays on `master` can be edited without `--allow-protected`, and a tracked
-file of the same plan cannot.
+does not police. In the repository root, with the root-relative path of the
+file, it asks tracked first and tells ignored from untracked only for a file
+that is not tracked. Tracked first, because the on-disk spelling of a file
+need not be the index's: on a case-insensitive volume `Bar.md` can be
+`bar.md` on disk with `git status` clean, and a file stored as NFC can sit
+on disk as NFD. `git ls-files -z --full-name` with literal pathspecs of the
+path in its spelling, its NFC form and its NFD form (a prefix directory
+included) lists the index entries, each pathspec `icase` when
+`core.ignorecase` is true for the repository (read once per repository;
+unset is false, a failed read counts as true); any entry listed is a tracked
+file. With `core.ignorecase` false git itself treats `bar.md` and `Bar.md`
+as two files, so a case variant that is not in the index is untracked.
+Limits: letter case is folded the way git's `icase` pathspec does (ASCII),
+so a letter outside ASCII that differs only in case is not matched, and a
+partly decomposed spelling (neither NFC nor NFD) is not matched either.
+Only a file with no index entry goes on to `git check-ignore -q`, which says
+ignored (exit 0) or untracked (exit 1). Pathspecs are literal (a name with
+`[` or `*` is that name) and git's own pathspec switches in the environment
+(`GIT_ICASE_PATHSPECS` and the others) are removed from the guard's git
+environment. So a run file such as `.ai/runs/<run>/notes.md` in a checkout
+that stays on `master` can be edited without `--allow-protected`, and a
+tracked file of the same plan cannot. A target that does not exist is
+refused as `missing` by the path checks, before the guard classifies
+anything.
 
 | Target | Status in `targets` |
 | --- | --- |
-| ignored (`check-ignore` exit 0) | `allowed_ignored` |
-| untracked and not ignored | `allowed_untracked` |
-| tracked | the repository's refusal: `refused`, `would_refuse` or `allowed_protected` |
+| no index entry, ignored (`check-ignore` exit 0) | `allowed_ignored` |
+| no index entry, not ignored | `allowed_untracked` |
+| an index entry, whatever the ignore rules say | the repository's refusal: `refused`, `would_refuse` or `allowed_protected` |
 | classification failed (git failed, timed out, answered unexpectedly) | counted as tracked (fail closed), `tracking: "unknown"`, and a warning `branch guard: could not tell whether "<file>" is tracked (<why>); treated as tracked` |
 
 The plan stays atomic: one tracked target in a protected repository refuses

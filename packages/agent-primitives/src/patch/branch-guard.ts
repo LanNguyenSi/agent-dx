@@ -1,3 +1,4 @@
+import path from "node:path";
 import {
   spawnSync,
   type SpawnSyncOptionsWithStringEncoding,
@@ -8,7 +9,11 @@ import {
   endGroupIfAbnormal,
   isTimeoutError,
 } from "../bounded-spawn.js";
-import { REF_FORMAT_ENV_VARS, REPO_SELECTION_ENV_VARS } from "../git-env.js";
+import {
+  PATHSPEC_ENV_VARS,
+  REF_FORMAT_ENV_VARS,
+  REPO_SELECTION_ENV_VARS,
+} from "../git-env.js";
 
 /**
  * The branch guard of `patch`: the command refuses to write while a
@@ -210,7 +215,9 @@ export function protectedNameProblem(name: string): string | undefined {
  * discovery steering variables, plus the ones that change which refs git
  * reads (a namespace, a ref storage format) or what its configuration
  * says (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` and the pairs it
- * numbers), with terminal prompts off. */
+ * numbers) and git's pathspec switches (`GIT_ICASE_PATHSPECS` and the
+ * others: the guard names its own pathspec magic), with terminal prompts
+ * off. */
 export function branchGuardEnv(
   base: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
@@ -218,6 +225,7 @@ export function branchGuardEnv(
   const drop = new Set<string>([
     ...REPO_SELECTION_ENV_VARS,
     ...REF_FORMAT_ENV_VARS,
+    ...PATHSPEC_ENV_VARS,
     "GIT_CEILING_DIRECTORIES",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM",
     "GIT_NAMESPACE",
@@ -451,16 +459,49 @@ interface Classified {
   why?: string;
 }
 
-/** Asks git, in the repository root, whether one target is ignored,
- * untracked or tracked. `ls-files` takes pathspecs literally (a name with
- * `[` or `*` is that name; `check-ignore` takes pathnames and refuses the
- * pathspec option), the target is given as the absolute real path so git
- * itself relates it to the work tree whatever the volume's letter case.
- * `check-ignore` does not report a tracked file, so ignored is asked
- * first. Anything but a clear answer is `unknown`. */
+/** Whether git folds letter case for this repository (`core.ignorecase`,
+ * set by `git init` on a case-insensitive volume). Read once per
+ * repository. Unset is false; anything but a clear answer counts as true
+ * (fail closed: the lookup then also matches other spellings, which can
+ * only refuse more). */
+function readIgnoreCase(root: string, timeoutMs: number): boolean {
+  const res = runGit(
+    root,
+    ["config", "--type=bool", "core.ignorecase"],
+    timeoutMs,
+  );
+  if (res.kind === "failed") return true;
+  if (res.status === 1) return false;
+  if (res.status !== 0) return true;
+  return res.stdout.trim() !== "false";
+}
+
+/** Asks git, in the repository root, whether one target is tracked,
+ * ignored or untracked, in that order.
+ *
+ * Tracked first, because the on-disk spelling of a file need not be the
+ * index's: on a case-insensitive volume `Bar.md` can be `bar.md` on disk
+ * (git status clean), and a file can be stored in the index as NFC and
+ * sit on disk as NFD. `git check-ignore` and a plain pathspec compare
+ * bytes, so asking them first would call such a tracked file untracked.
+ * The lookup is one `git ls-files -z --full-name` with literal pathspecs
+ * of the root-relative path in its spelling, its NFC form and its NFD
+ * form (covering both stored forms, a prefix directory included), each
+ * `icase` when `core.ignorecase` is true; any listed entry is a tracked
+ * file. With `core.ignorecase` false, git itself treats `bar.md` and
+ * `Bar.md` as two files, so a case variant that is not in the index is
+ * untracked. Limits: letter case is folded the way git's `icase`
+ * pathspec does (ASCII), so a non-ASCII letter that differs only in case
+ * is not matched; a partly decomposed spelling is neither NFC nor NFD
+ * and is not matched.
+ *
+ * Only a file with no index entry goes on to `git check-ignore -q`, which
+ * tells ignored from untracked. Anything but a clear answer from git is
+ * `unknown`. */
 function classifyTarget(
   root: string,
   target: GuardTarget,
+  ignoreCase: boolean,
   timeoutMs: number,
 ): Classified {
   const unknown = (why: string): Classified => ({
@@ -468,6 +509,37 @@ function classifyTarget(
     tracking: "unknown",
     why,
   });
+  const rel = path.relative(root, target.path).split(path.sep).join("/");
+  if (
+    rel === "" ||
+    rel === ".." ||
+    rel.startsWith("../") ||
+    path.isAbsolute(rel)
+  ) {
+    return unknown(`the target lies outside ${root}`);
+  }
+  const magic = ignoreCase ? "literal,icase" : "literal";
+  const spellings = [
+    ...new Set([rel, rel.normalize("NFC"), rel.normalize("NFD")]),
+  ];
+  const listed = runGit(
+    root,
+    [
+      "ls-files",
+      "-z",
+      "--full-name",
+      "--",
+      ...spellings.map((spelling) => `:(${magic})${spelling}`),
+    ],
+    timeoutMs,
+  );
+  if (listed.kind === "failed") return unknown(listed.why);
+  if (listed.status !== 0) {
+    return unknown(
+      `git ls-files failed with exit code ${String(listed.status)}`,
+    );
+  }
+  if (listed.stdout !== "") return { target, tracking: "tracked" };
   const ignored = runGit(
     root,
     ["check-ignore", "-q", "--", target.path],
@@ -475,20 +547,10 @@ function classifyTarget(
   );
   if (ignored.kind === "failed") return unknown(ignored.why);
   if (ignored.status === 0) return { target, tracking: "ignored" };
-  if (ignored.status !== 1) {
-    return unknown(
-      `git check-ignore failed with exit code ${String(ignored.status)}`,
-    );
-  }
-  const listed = runGit(
-    root,
-    ["--literal-pathspecs", "ls-files", "--error-unmatch", "--", target.path],
-    timeoutMs,
+  if (ignored.status === 1) return { target, tracking: "untracked" };
+  return unknown(
+    `git check-ignore failed with exit code ${String(ignored.status)}`,
   );
-  if (listed.kind === "failed") return unknown(listed.why);
-  if (listed.status === 0) return { target, tracking: "tracked" };
-  if (listed.status === 1) return { target, tracking: "untracked" };
-  return unknown(`git ls-files failed with exit code ${String(listed.status)}`);
 }
 
 /**
@@ -507,8 +569,9 @@ function judgeTargets(
 ): BranchGuardVerdict {
   const targets = input.targets ?? [];
   if (targets.length === 0) return settle(refused, describe([]), input);
+  const ignoreCase = readIgnoreCase(input.root, input.timeoutMs);
   const classified = targets.map((t) =>
-    classifyTarget(input.root, t, input.timeoutMs),
+    classifyTarget(input.root, t, ignoreCase, input.timeoutMs),
   );
   const classifyFailures = classified
     .filter((c) => c.tracking === "unknown")

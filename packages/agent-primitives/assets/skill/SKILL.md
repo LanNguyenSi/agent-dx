@@ -439,8 +439,8 @@ lifts it and is recorded as `allowed_protected`, `--dry-run` reports
 `protected_branch_unresolved`. The guard judges each target: an untracked or
 git-ignored file (a run file under `.ai/runs/`) is allowed on a protected
 branch and listed in `branch_guard.repos[].targets`, while one tracked target
-refuses the whole plan. Work on a task branch so the guard never fires. See the agent-primitives package's
-docs/patch.md.
+refuses the whole plan. Work on a task branch so the guard never fires. See
+the agent-primitives package's docs/patch.md.
 
 ## 12. Bounded runs
 

@@ -657,7 +657,8 @@ describe.skipIf(process.platform === "win32")(
         [
           'case "$*" in',
           "  *check-ignore*) exit 1 ;;",
-          "  *ls-files*) exit 0 ;;",
+          "  *config*) exit 1 ;;",
+          "  *ls-files*) echo a.txt; exit 0 ;;",
           "esac",
           standIn(
             "echo refs/heads/trunk; exit 0",

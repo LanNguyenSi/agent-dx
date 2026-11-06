@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `patch`: the branch guard decides per target on a protected branch (or a
-  detached HEAD under `--protect-detached`). A target git ignores
-  (`git check-ignore -q`) or does not track (`git ls-files --error-unmatch`
-  fails) is allowed, because no edit to it can reach the protected branch
+  detached HEAD under `--protect-detached`). A target that has no
+  index entry (untracked, or ignored per `git check-ignore -q`) is
+  allowed, because no edit to it can reach the protected branch
   through the command; a tracked target is refused as before, and one tracked
   target still refuses the whole plan, the untracked files of it included, with
   a detail that names the tracked targets. Before, an untracked run file
@@ -22,8 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`path`, `status`, `tracking`, `reason`) with the new statuses
   `allowed_untracked` and `allowed_ignored`; a repository's status is the most
   severe of its targets, and `combineGuards` ranks the two new statuses
-  between `detached` and `allowed`. A git failure while classifying a target
-  counts as tracked (fail closed) and adds a warning. `--allow-protected`
+  between `detached` and `allowed`. Tracked is asked first and
+  tolerates another spelling of the file: letter case when `core.ignorecase`
+  is true, and NFC against NFD (the on-disk name of an index entry can differ
+  from it on a case-insensitive or Unicode-normalising volume). The guard's
+  git calls also drop git's `GIT_*_PATHSPECS` switches. A git failure while
+  classifying a target counts as tracked (fail closed) and adds a warning. `--allow-protected`
   lifts the tracked targets only; a branch that cannot be resolved is refused
   whole as before. No new flag; the exit codes are unchanged. The skill's
   `patch` section names the rule.
