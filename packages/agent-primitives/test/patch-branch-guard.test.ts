@@ -1027,8 +1027,15 @@ function spellingRepo(settings: Record<string, string | undefined>): string {
   git(dir, "init", "-q");
   git(dir, "symbolic-ref", "HEAD", "refs/heads/main");
   for (const [k, v] of Object.entries(settings)) {
-    if (v === undefined) git(dir, "config", "--unset", k);
-    else git(dir, "config", k, v);
+    if (v === undefined) {
+      // `git init` sets core.ignorecase only on a case-insensitive volume;
+      // unsetting a key that is absent exits 5 and means the same thing.
+      try {
+        git(dir, "config", "--unset", k);
+      } catch {
+        /* not set */
+      }
+    } else git(dir, "config", k, v);
   }
   return dir;
 }
