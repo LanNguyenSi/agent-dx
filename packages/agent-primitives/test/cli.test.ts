@@ -1312,10 +1312,12 @@ describe("cli verify", () => {
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("usage_error");
     // This refusal is the OPTION PARSER's (`--max-failures` is validated
-    // while the options are parsed), so it stays a top-level parser error
-    // with `command: "unknown"`; verify()'s own `maxFailures` refusal is
-    // only reachable from the library API and is pinned there.
-    expect(parsed.command).toBe("unknown");
+    // while the options are parsed), and commander parses a subcommand's
+    // options after dispatching to it, so it names `verify`; an error
+    // before any dispatch stays `unknown` (see the usage-error command
+    // resolution block). verify()'s own `maxFailures` refusal is only
+    // reachable from the library API and is pinned there.
+    expect(parsed.command).toBe("verify");
   });
 
   it("--timeout 1 -x a busy-looping check times out: check status error, one synthetic failure naming timedOut, summary.errors 1, exit 2", async () => {
@@ -2470,13 +2472,103 @@ describe("usage-error command resolution (CLI)", () => {
   });
 
   it("an unknown subcommand and a bad global option stay command: unknown", async () => {
-    for (const args of [["nosuch"], ["--bogus", "drift"]]) {
+    for (const args of [
+      ["nosuch"],
+      ["--bogus", "drift"],
+      ["--max-chars", "x", "hygiene", "--base", "HEAD"],
+    ]) {
       const run = await spawnCli(args);
       expect(run.code).toBe(2);
       const parsed = JSON.parse(run.stdout);
       expect(parsed.status).toBe("usage_error");
       expect(parsed.command).toBe("unknown");
     }
+  });
+
+  it("an invalid option value or an unknown option inside a known subcommand names that subcommand", async () => {
+    const cases: Array<[string[], string, string]> = [
+      [
+        ["verify", "-c", "true", "--max-failures", "abc"],
+        "verify",
+        "--max-failures",
+      ],
+      [["verify", "-c", "true", "--bogus"], "verify", "unknown option"],
+      // An empty -c parses; the failing token is the invalid 0 value.
+      [["verify", "-c", "", "--max-failures", "0"], "verify", "0"],
+      [
+        ["hygiene", "--base", "HEAD", "--max-delete-percent", "x"],
+        "hygiene",
+        "max-delete-percent",
+      ],
+    ];
+    for (const [args, name, needle] of cases) {
+      const run = await spawnCli(["-C", gitRepo(), ...args]);
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.command).toBe(name);
+      expect(parsed.message).toContain(needle);
+    }
+  });
+
+  it("the one-line usage view names the subcommand for an invalid value, whatever side of the failing token --summary sits on", async () => {
+    const verify = await spawnCli([
+      "-C",
+      gitRepo(),
+      "verify",
+      "-c",
+      "true",
+      "--max-failures",
+      "abc",
+      "--summary",
+    ]);
+    expect(verify.code).toBe(2);
+    expect(() => JSON.parse(verify.stdout)).toThrow();
+    expect(verify.stdout.trimEnd().split("\n")).toHaveLength(1);
+    expect(verify.stdout).toContain("command=verify");
+    const hygiene = await spawnCli([
+      "-C",
+      gitRepo(),
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--summary",
+      "--max-delete-percent",
+      "x",
+    ]);
+    expect(hygiene.code).toBe(2);
+    expect(() => JSON.parse(hygiene.stdout)).toThrow();
+    expect(hygiene.stdout.trimEnd().split("\n")).toHaveLength(1);
+    expect(hygiene.stdout).toContain("command=hygiene");
+  });
+
+  it("a competing --print token keeps the JSON envelope even when its own value failed to parse (the view is decided from raw argv)", async () => {
+    const space = await spawnCli([
+      "-C",
+      gitRepo(),
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--summary",
+      "--print",
+      "x",
+    ]);
+    expect(space.code).toBe(2);
+    const parsed = JSON.parse(space.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.command).toBe("hygiene");
+    expect(parsed.message).toContain("unknown field");
+    const eq = await spawnCli([
+      "-C",
+      gitRepo(),
+      "hygiene",
+      "--base",
+      "HEAD",
+      "--summary",
+      "--print=status",
+    ]);
+    expect(eq.code).toBe(2);
+    expect(JSON.parse(eq.stdout).message).toContain("mutually exclusive");
   });
 
   it("--summary on a subcommand that supports it prints the one-line totals form for a usage error, exit 2", async () => {

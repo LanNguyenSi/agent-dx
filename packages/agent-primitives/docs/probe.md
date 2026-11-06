@@ -2207,17 +2207,22 @@ What a run that stops early prints, by case:
   `--summary` together with `--print`, `--report` together with either
   of them, `--replayed` without `--report`, an invalid value, an invalid
   combination such as `--plan` with `--pre`. The envelope's `command`
-  names the subcommand whose parsing failed (`probe` here), or `unknown`
-  when the failure happened before a subcommand was chosen (an unknown
-  subcommand, a bad global option). Given `--summary` alone (no
-  `--print`, no `--report`), a usage error of a command that supports
-  `--summary` prints instead of the envelope one summary line, exit `2`
-  unchanged:
+  names the subcommand that was dispatched and whose parsing or action
+  failed (`probe` here), or `unknown` when the failure happened before
+  any subcommand was dispatched (an unknown subcommand, a bad global
+  option such as `--max-chars x` given ahead of the subcommand name).
+  Given `--summary` alone (no `--print`, no `--report`), a usage error
+  of a command that supports `--summary` prints instead of the envelope
+  one summary line, exit `2` unchanged:
   `totals: status=usage_error command=<command> reason=<reason> message=<message>`,
-  with the message collapsed onto that one line. The same line stands in
-  for the JSON envelope of a `hygiene`, `drift` or `verify` usage error
-  given `--summary` alone; `patch` has no `--summary` and always gets
-  the envelope.
+  with the message collapsed onto that one line. Whether that line
+  stands in for the envelope is decided from the raw argv, so a
+  `--summary` token appearing after the failing argument still gets it,
+  and any `--print` or `--report` token (in any form, even one whose
+  own value failed to parse) keeps the JSON envelope. The same line
+  stands in for the JSON envelope of a `hygiene`, `drift` or `verify`
+  usage error given `--summary` alone; `patch` has no `--summary` and
+  always gets the envelope.
 - A refusal that names no mutant prints the `totals:` line (`total=0`)
   and a `note:` line with the first warning or message: an unreadable
   plan file, a single-probe `--file` outside the containment root.
@@ -2371,8 +2376,12 @@ parsing has succeeded. Two narrower envelopes sit outside it: a
 **top-level usage error** -- thrown by commander's own option parsing, or
 by a check this CLI runs before `probe()`/`probePlan()` is ever called
 (`-t/--test is required`, `--json` conflicting with `-f text`, `--plan`
-combined with a single-mutant flag) -- reports `command: "unknown"` and
-carries only `reason` and `message` from the rows below: no `mutant`,
+combined with a single-mutant flag) -- reports `command` as the
+dispatched subcommand, `probe` here (all of these are raised after the
+`probe` subcommand has been dispatched; `command` is `unknown` only
+when no subcommand was resolved, e.g. an unknown subcommand or a bad
+global option ahead of it) and carries only `reason` and `message` from
+the rows below: no `mutant`,
 `mutation_probe`, `baseline`, `test`, `env`, `isolation` or
 `totalDurationMs`, because none of them were ever computed. A `--plan`
 file that cannot be read or parsed is not one of these: it reports

@@ -901,29 +901,25 @@ program.hook("preSubcommand", (_thisCommand, subcommand) => {
 });
 
 /** The subcommand the usage-error envelope reports, derived from the
- * command path commander had parsed when the error unwound.
+ * command path commander had reached when the error unwound.
  *
- * A `UsageError` (or any error) from an action handler necessarily ran
- * after the subcommand was chosen and fully parsed, so it names the
- * dispatched subcommand. A `CommanderError` is subtler: commander checks
- * the mandatory options only once the whole option set of the
- * dispatched subcommand is parsed (those name it), but it fails on an
- * option's own argument parser (InvalidArgumentError) or on an option
- * name it cannot match (unknown option) while still parsing -- those
- * stay top-level parser errors with no command. That also covers a bad
- * GLOBAL option: with subcommands registered, commander defers the
- * unmatched-name check into the dispatched subcommand, so an unknown
- * option can only be reported as unknown if unknown options never name
- * the subcommand at all. No subcommand dispatched (unknown subcommand,
- * an error before dispatch) is always `unknown`. */
-function usageCommandName(err: unknown): string {
-  if (dispatchedSubcommand === undefined) return "unknown";
-  if (err instanceof CommanderError) {
-    return err.code === "commander.missingMandatoryOptionValue"
-      ? dispatchedSubcommand.name()
-      : "unknown";
-  }
-  return dispatchedSubcommand.name();
+ * Once the dispatch hook has fired, EVERY usage error belongs to the
+ * dispatched subcommand, whatever its class: a `UsageError` (or any
+ * error) from an action handler ran after the subcommand was chosen and
+ * fully parsed, and every `CommanderError` raised during parsing of a
+ * dispatched subcommand -- missing mandatory option, invalid option or
+ * argument value, unknown option, excess arguments, missing argument --
+ * is thrown by that subcommand's own parse, because commander dispatches
+ * (firing `preSubcommand`) before the subcommand parses its own argv.
+ * Only an error raised before any dispatch -- unknown subcommand, a bad
+ * GLOBAL option such as `--max-chars x` given ahead of the subcommand
+ * name, an unknown option of the program itself -- has no command to
+ * name, and stays `unknown`. Derived from the recorded dispatched
+ * command, never from matching argv: what commander actually dispatched
+ * is the only reliable witness of which command's parsing was in
+ * flight. */
+function usageCommandName(): string {
+  return dispatchedSubcommand?.name() ?? "unknown";
 }
 
 // Route commander's own usage errors (unknown option, missing required
@@ -3966,25 +3962,26 @@ export function mapTopLevelError(
 
 /** Whether a top-level usage error for this dispatched subcommand should
  * print the one-line `--summary` view instead of the JSON envelope: the
- * subcommand registered a `--summary` flag, `--summary` was actually
- * given, and no competing view flag (`--print`, probe's `--report`) was
- * -- with a second view requested the caller has not settled on one
- * shape, and the exclusive-views error itself keeps the JSON envelope. */
-function wantsSummaryUsageView(command: Command | undefined): boolean {
+ * subcommand registered a `--summary` flag, and the raw argv asked for
+ * that view alone -- a `--summary` token and no competing view flag
+ * (`--print`, probe's `--report`) in any form. Decided from the raw
+ * argv, never from `command.opts()`: a usage error unwinds the parse
+ * where it failed, so after `--summary --print x` with a rejected `x`
+ * the option bag would not yet hold `--print` (and after a failure even
+ * `--summary` itself may be unset), which would pick the one-line form
+ * exactly when the caller asked for two views and has not settled on
+ * one shape -- the exclusive-views error itself keeps the JSON envelope. */
+function wantsSummaryUsageView(
+  command: Command | undefined,
+  argv: readonly string[],
+): boolean {
   if (command === undefined) return false;
   if (!command.options.some((option) => option.long === "--summary")) {
     return false;
   }
-  const opts = command.opts() as {
-    summary?: boolean;
-    print?: unknown;
-    report?: unknown;
-  };
-  return (
-    opts.summary === true &&
-    opts.print === undefined &&
-    opts.report === undefined
-  );
+  const asksFor = (flag: string) =>
+    argv.some((arg) => arg === flag || arg.startsWith(`${flag}=`));
+  return asksFor("--summary") && !asksFor("--print") && !asksFor("--report");
 }
 
 /** The one line `--summary` prints for a top-level usage error, in the
@@ -4037,7 +4034,7 @@ if (isMainModule) {
       return;
     }
     const global = bestEffortGlobal(program.opts<GlobalOptions>());
-    const command = usageCommandName(err);
+    const command = usageCommandName();
     const { envelope, exitCode } = mapTopLevelError(
       err,
       global,
@@ -4050,7 +4047,7 @@ if (isMainModule) {
     // A `--summary` run that never reached its view: the one-line totals
     // form instead of the JSON envelope, same exit code.
     if (
-      wantsSummaryUsageView(dispatchedSubcommand) &&
+      wantsSummaryUsageView(dispatchedSubcommand, process.argv.slice(2)) &&
       envelope.status === "usage_error"
     ) {
       writeAndExit(
