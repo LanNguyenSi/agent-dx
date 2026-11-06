@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,8 @@ import {
   hygiene,
   isBackupPath,
   isTestPath,
+  readWorktreeFile,
+  UNCOMMITTED_FILES_CAP,
 } from "../src/hygiene/index.js";
 import { UsageError } from "../src/envelope.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
@@ -1853,5 +1856,595 @@ describe("hygiene intended deletions CLI", () => {
       },
     ]);
     expect(cut.counts.intendedDeletions).toBe(cut.intended_deletions.length);
+  });
+});
+
+const PHP_TWO_METHODS = [
+  "<?php",
+  "final class FooTest extends TestCase {",
+  "  public function testOne(): void {}",
+  "  public function testTwo(): void {}",
+  "}",
+  "",
+].join("\n");
+const PHP_ONE_METHOD = [
+  "<?php",
+  "final class FooTest extends TestCase {",
+  "  public function testOne(): void {}",
+  "}",
+  "",
+].join("\n");
+
+/** A repo whose base commit holds `tests/FooTest.php` with two PHPUnit
+ * methods; the tree is clean when this returns. */
+function phpRepo(): { repo: string; base: string } {
+  const repo = initRepo();
+  write(repo, "tests/FooTest.php", PHP_TWO_METHODS);
+  commitAll(repo, "php test");
+  return { repo, base: git(repo, ["rev-parse", "HEAD"]).trim() };
+}
+
+/** Runs `fn` with a `git` first on PATH that fails when `subcommand` is
+ * anywhere in its argument list (global options such as
+ * `--no-optional-locks` come before the subcommand) and otherwise runs the
+ * real git. */
+function withFailingGit<T>(subcommand: string, fn: () => T): T {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], {
+    encoding: "utf8",
+  }).trim();
+  const shimDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "agent-primitives-git-shim-"),
+  );
+  tmpDirs.push(shimDir);
+  fs.writeFileSync(
+    path.join(shimDir, "git"),
+    `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = ${subcommand} ]; then echo "simulated ${subcommand} failure" >&2; exit 128; fi\ndone\nexec "${realGit}" "$@"\n`,
+    { mode: 0o755 },
+  );
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${shimDir}${path.delimiter}${savedPath ?? ""}`;
+  try {
+    return fn();
+  } finally {
+    process.env.PATH = savedPath;
+  }
+}
+
+function uncommittedWarnings(warnings: readonly string[]): string[] {
+  return warnings.filter((w) => w.includes("uncommitted changes"));
+}
+
+describe("hygiene: uncommitted changes outside the comparison", () => {
+  it("warns about an unstaged test-method deletion that plain mode does not see, and --worktree finds it", async () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+
+    const plain = hygiene({ cwd: repo, base });
+    expect(plain.status).toBe("ok");
+    expect(plain.findings).toEqual([]);
+    expect(plain.counts.uncommitted).toBe(1);
+    expect(plain.uncommittedFiles).toEqual(["tests/FooTest.php"]);
+    expect(plain.warnings).toEqual([
+      "1 tracked files have uncommitted changes not covered by this comparison; commit them, or use --staged / --worktree (tests/FooTest.php)",
+    ]);
+
+    const summary = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--summary",
+    ]);
+    expect(summary.code).toBe(0);
+    const lines = summary.stdout.trimEnd().split("\n");
+    expect(lines[0]).toMatch(
+      /^warning: 1 tracked files have uncommitted changes .*tests\/FooTest\.php/,
+    );
+    expect(lines[0]).toContain("--staged / --worktree");
+    expect(lines[lines.length - 1]).toContain("warnings=1 uncommitted=1");
+
+    const worktree = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--worktree",
+      "--summary",
+    ]);
+    expect(worktree.code).toBe(1);
+    expect(worktree.stdout).toContain(
+      "test_cases_dropped | tests/FooTest.php | test-case markers fell from 2 to 1",
+    );
+    expect(worktree.stdout).toContain("warnings=0 uncommitted=0");
+  });
+
+  it("puts the envelope fields in place: uncommitted_files, head label and null head_sha", async () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    const plain = JSON.parse(
+      (await spawnCli(["-C", repo, "hygiene", "--base", base])).stdout,
+    ) as {
+      head: string;
+      head_sha: string | null;
+      uncommitted_files: string[];
+      counts: { uncommitted: number };
+    };
+    expect(plain.uncommitted_files).toEqual(["tests/FooTest.php"]);
+    expect(plain.counts.uncommitted).toBe(1);
+    expect(plain.head).toBe("HEAD");
+    expect(plain.head_sha).toMatch(/^[0-9a-f]{40}$/);
+    const wt = JSON.parse(
+      (await spawnCli(["-C", repo, "hygiene", "--base", base, "--worktree"]))
+        .stdout,
+    ) as typeof plain;
+    expect(wt.head).toBe("(worktree)");
+    expect(wt.head_sha).toBeNull();
+    expect(wt.uncommitted_files).toEqual([]);
+    const printed = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--print",
+      "uncommitted_files",
+    ]);
+    expect(JSON.parse(printed.stdout)).toMatchObject({
+      uncommitted_files: ["tests/FooTest.php"],
+    });
+  });
+
+  it("a staged-only change: plain mode warns, --staged finds the drop and warns about nothing", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    git(repo, ["add", "tests/FooTest.php"]);
+
+    const plain = hygiene({ cwd: repo, base });
+    expect(plain.status).toBe("ok");
+    expect(plain.counts.uncommitted).toBe(1);
+    expect(uncommittedWarnings(plain.warnings)).toHaveLength(1);
+
+    const staged = hygiene({ cwd: repo, base, staged: true });
+    expect(staged.status).toBe("fail");
+    expect(staged.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
+        path: "tests/FooTest.php",
+        baseCases: 2,
+        headCases: 1,
+      }),
+    ]);
+    expect(staged.warnings).toEqual([]);
+    expect(staged.counts.uncommitted).toBe(0);
+    expect(staged.uncommittedFiles).toEqual([]);
+  });
+
+  it("a change staged and then modified further: --staged warns about the unstaged part", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    git(repo, ["add", "tests/FooTest.php"]);
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD + "// later edit\n");
+    const staged = hygiene({ cwd: repo, base, staged: true });
+    expect(staged.status).toBe("fail");
+    expect(staged.counts.uncommitted).toBe(1);
+    expect(staged.uncommittedFiles).toEqual(["tests/FooTest.php"]);
+    expect(staged.warnings).toEqual([
+      "1 tracked files have uncommitted changes not covered by this comparison; stage and commit them, or use --worktree (tests/FooTest.php)",
+    ]);
+  });
+
+  it("--staged ignores an unstaged-only change of another file only through the warning", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "src/a.ts", "export const a = 2;\n");
+    const staged = hygiene({ cwd: repo, base, staged: true });
+    expect(staged.status).toBe("ok");
+    expect(staged.counts.uncommitted).toBe(1);
+    expect(staged.uncommittedFiles).toEqual(["src/a.ts"]);
+  });
+
+  it("a clean tree has no warning and uncommitted=0, and the other envelope fields are as before", async () => {
+    const { repo, base } = phpRepo();
+    write(repo, "src/b.ts", "export const b = 1;\n");
+    write(repo, "docs/x.md.bak", "x\n");
+    commitAll(repo, "change");
+    const head = git(repo, ["rev-parse", "HEAD"]).trim();
+    const r = hygiene({ cwd: repo, base });
+    expect(r.warnings).toEqual([]);
+    expect(r.counts.uncommitted).toBe(0);
+    expect(r.uncommittedFiles).toEqual([]);
+    const { uncommittedFiles: _files, ...rest } = r;
+    const { uncommitted: _count, ...otherCounts } = r.counts;
+    expect({ ...rest, counts: otherCounts }).toEqual({
+      status: "fail",
+      base,
+      head: "HEAD",
+      baseSha: base,
+      headSha: head,
+      mergeBase: base,
+      maxDeletePercent: 20,
+      extendOnly: [],
+      intendedDeclarations: [],
+      intendedDeletions: [],
+      findings: [
+        expect.objectContaining({ kind: "backup_file", path: "docs/x.md.bak" }),
+      ],
+      counts: {
+        files: 2,
+        backupFiles: 1,
+        extendOnlyRewrites: 0,
+        testCaseDrops: 0,
+        intendedDeletions: 0,
+      },
+      warnings: [],
+    });
+    for (const extra of [[], ["--staged"], ["--worktree"]]) {
+      const run = await spawnCli([
+        "-C",
+        repo,
+        "hygiene",
+        "--base",
+        base,
+        ...extra,
+        "--summary",
+      ]);
+      const lines = run.stdout.trimEnd().split("\n");
+      expect(lines.some((l) => l.startsWith("warning:"))).toBe(false);
+      expect(lines[lines.length - 1]).toMatch(/ warnings=0 uncommitted=0 /);
+    }
+  });
+
+  it("never counts an untracked file as uncommitted in plain or --staged mode", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/NewTest.php", PHP_TWO_METHODS);
+    write(repo, "notes.md.bak", "x\n");
+    for (const staged of [false, true]) {
+      const r = hygiene({ cwd: repo, base, staged });
+      expect(r.status).toBe("ok");
+      expect(r.counts.uncommitted).toBe(0);
+      expect(r.uncommittedFiles).toEqual([]);
+      expect(r.warnings).toEqual([]);
+    }
+  });
+
+  it("counts a rename once and keeps a path with spaces whole", () => {
+    const { repo, base } = phpRepo();
+    git(repo, ["mv", "src/a.ts", "src/a b.ts"]);
+    const plain = hygiene({ cwd: repo, base });
+    expect(plain.counts.uncommitted).toBe(1);
+    expect(plain.uncommittedFiles).toEqual(["src/a b.ts"]);
+    // Fully staged rename: nothing unstaged for --staged to warn about.
+    const staged = hygiene({ cwd: repo, base, staged: true });
+    expect(staged.counts.uncommitted).toBe(0);
+    write(repo, "src/a b.ts", "export const a = 3;\n");
+    const staged2 = hygiene({ cwd: repo, base, staged: true });
+    expect(staged2.uncommittedFiles).toEqual(["src/a b.ts"]);
+  });
+
+  it("does not read the source path of a rename as an entry of its own", () => {
+    // A source path whose third character is a space looks like a status
+    // line ("ab cd.ts" reads as XY "ab", path "cd.ts") if it is not skipped.
+    const repo = initRepo();
+    write(repo, "ab cd.ts", "export const x = 1;\n");
+    commitAll(repo, "spaced name");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["mv", "ab cd.ts", "renamed.ts"]);
+    const r = hygiene({ cwd: repo, base });
+    expect(r.counts.uncommitted).toBe(1);
+    expect(r.uncommittedFiles).toEqual(["renamed.ts"]);
+  });
+
+  it("lists at most the cap, with the exact count, and names five paths in the warning", () => {
+    const { repo, base } = phpRepo();
+    const total = UNCOMMITTED_FILES_CAP + 5;
+    for (let i = 0; i < total; i++)
+      write(repo, `bulk/f${String(i)}.txt`, "a\n");
+    commitAll(repo, "bulk");
+    const base2 = git(repo, ["rev-parse", "HEAD"]).trim();
+    for (let i = 0; i < total; i++)
+      write(repo, `bulk/f${String(i)}.txt`, "b\n");
+    const r = hygiene({ cwd: repo, base: base2 });
+    expect(base).not.toBe(base2);
+    expect(r.counts.uncommitted).toBe(total);
+    expect(r.uncommittedFiles).toHaveLength(UNCOMMITTED_FILES_CAP);
+    expect(r.warnings).toEqual([
+      expect.stringContaining(
+        `${String(total)} tracked files have uncommitted changes`,
+      ),
+    ]);
+    expect(r.warnings[0]).toContain(`and ${String(total - 5)} more)`);
+  });
+
+  it("a failing git status becomes a warning and leaves the result and status unchanged", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "docs/x.md-E", "x\n");
+    commitAll(repo, "backup");
+    const expected = hygiene({ cwd: repo, base });
+    const r = withFailingGit("status", () => hygiene({ cwd: repo, base }));
+    expect(r.status).toBe("fail");
+    expect(r.findings).toEqual(expected.findings);
+    expect(r.counts.uncommitted).toBe(0);
+    expect(r.uncommittedFiles).toEqual([]);
+    expect(r.warnings).toEqual([
+      expect.stringContaining("could not list uncommitted changes"),
+    ]);
+    expect(r.warnings[0]).toContain("simulated status failure");
+    const wt = withFailingGit("status", () =>
+      hygiene({ cwd: repo, base, worktree: true }),
+    );
+    expect(wt.status).toBe("fail");
+    expect(wt.findings).toEqual(expected.findings);
+    expect(wt.warnings).toEqual([
+      expect.stringContaining("could not list uncommitted changes"),
+    ]);
+  });
+
+  it("a failing git ls-files in --worktree mode is a warning and leaves the result unchanged", async () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    write(repo, "tests/NewTest.php", PHP_TWO_METHODS);
+    const expected = hygiene({ cwd: repo, base, worktree: true });
+    expect(expected.status).toBe("fail");
+    const r = withFailingGit("ls-files", () =>
+      hygiene({ cwd: repo, base, worktree: true }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.findings).toEqual(expected.findings);
+    expect(r.warnings).toEqual([
+      expect.stringContaining("could not list untracked files"),
+    ]);
+    expect(r.warnings[0]).toContain("simulated ls-files failure");
+    expect(expected.warnings).toEqual([
+      expect.stringContaining("1 untracked files match a test or backup"),
+    ]);
+  });
+
+  it("leaves .git/index byte-identical in every mode, also on a stat-dirty tree", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "src/a.ts", "export const a = 1;\n");
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    git(repo, ["add", "tests/FooTest.php"]);
+    // Stat data that no longer matches the index entry, content unchanged:
+    // `git status` and `git diff` would refresh the index and write it.
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(path.join(repo, "src/a.ts"), future, future);
+    fs.utimesSync(path.join(repo, "docs/log.md"), future, future);
+    const indexFile = path.join(repo, ".git", "index");
+    const md5 = (): string =>
+      createHash("md5").update(fs.readFileSync(indexFile)).digest("hex");
+    const before = md5();
+    for (const options of [{}, { staged: true }, { worktree: true }]) {
+      hygiene({ cwd: repo, base, ...options });
+      expect(md5()).toBe(before);
+    }
+    // The refresh is real: the porcelain commands do write this index.
+    git(repo, ["status", "--porcelain"]);
+    expect(md5()).not.toBe(before);
+  });
+
+  it("pins the path-list cap at 50", () => {
+    expect(UNCOMMITTED_FILES_CAP).toBe(50);
+    const { repo, base } = phpRepo();
+    for (let i = 0; i < 55; i++) write(repo, `bulk/f${String(i)}.txt`, "a\n");
+    commitAll(repo, "bulk");
+    const base2 = git(repo, ["rev-parse", "HEAD"]).trim();
+    for (let i = 0; i < 55; i++) write(repo, `bulk/f${String(i)}.txt`, "b\n");
+    const r = hygiene({ cwd: repo, base: base2 });
+    expect(base).not.toBe(base2);
+    expect(r.uncommittedFiles).toHaveLength(50);
+    expect(r.counts.uncommitted).toBe(55);
+  });
+});
+
+describe("hygiene --worktree", () => {
+  it("compares the merge-base with the working tree, staged and unstaged changes alike", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    git(repo, ["add", "tests/FooTest.php"]);
+    const r = hygiene({ cwd: repo, base, worktree: true });
+    expect(r.status).toBe("fail");
+    expect(r.head).toBe("(worktree)");
+    expect(r.headSha).toBeNull();
+    expect(r.mergeBase).toBe(base);
+    expect(r.findings.map((f) => f.path).sort()).toEqual([
+      "test/a.test.ts",
+      "tests/FooTest.php",
+    ]);
+    expect(r.counts.uncommitted).toBe(0);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("warns when the index holds a version that differs from both HEAD and the working tree", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    git(repo, ["add", "tests/FooTest.php"]);
+    git(repo, ["restore", "--source=HEAD", "--worktree", "tests/FooTest.php"]);
+    expect(git(repo, ["status", "--porcelain"]).slice(0, 2)).toBe("MM");
+    const wt = hygiene({ cwd: repo, base, worktree: true });
+    expect(wt.status).toBe("ok");
+    expect(wt.counts.uncommitted).toBe(1);
+    expect(wt.uncommittedFiles).toEqual(["tests/FooTest.php"]);
+    expect(wt.warnings).toEqual([
+      "1 tracked files have a staged version that differs from both HEAD and the working tree; stage the working tree (git add) or check with --staged (tests/FooTest.php)",
+    ]);
+    const staged = hygiene({ cwd: repo, base, staged: true });
+    expect(staged.status).toBe("fail");
+    // A staged-only change is the comparison itself in --worktree mode.
+    git(repo, ["add", "tests/FooTest.php"]);
+    const settled = hygiene({ cwd: repo, base, worktree: true });
+    expect(settled.counts.uncommitted).toBe(0);
+    expect(settled.warnings).toEqual([]);
+  });
+
+  it("reports a test file deleted in the working tree", () => {
+    const { repo, base } = phpRepo();
+    fs.rmSync(path.join(repo, "tests/FooTest.php"));
+    const r = hygiene({ cwd: repo, base, worktree: true });
+    expect(r.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
+        path: "tests/FooTest.php",
+        baseCases: 2,
+        headCases: 0,
+        detail: expect.stringContaining("(file deleted)"),
+      }),
+    ]);
+  });
+
+  it("uses the merge-base of base and HEAD when the base moved", () => {
+    const repo = initRepo();
+    const main = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+    const forkSha = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["checkout", "-q", "-b", "feat"]);
+    git(repo, ["checkout", "-q", main]);
+    write(
+      repo,
+      "test/a.test.ts",
+      'it("one", () => {});\nit("two", () => {});\ntest("three", () => {});\nit("four", () => {});\n',
+    );
+    commitAll(repo, "main adds a case");
+    git(repo, ["checkout", "-q", "feat"]);
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
+    const r = hygiene({ cwd: repo, base: main, worktree: true });
+    expect(r.mergeBase).toBe(forkSha);
+    expect(r.findings).toEqual([
+      expect.objectContaining({ baseCases: 3, headCases: 1 }),
+    ]);
+  });
+
+  it("measures an extend-only rewrite made in the working tree", () => {
+    const repo = initRepo();
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "docs/log.md", "entry new\n");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      worktree: true,
+      extendOnly: ["docs/log.md"],
+    });
+    expect(r.findings).toEqual([
+      expect.objectContaining({ kind: "extend_only_rewrite" }),
+    ]);
+  });
+
+  it("names untracked test and backup files in a separate warning, ignores other untracked files", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/NewTest.php", PHP_TWO_METHODS);
+    write(repo, "notes.md.bak", "x\n");
+    write(repo, "src/untracked.ts", "export const u = 1;\n");
+    const r = hygiene({ cwd: repo, base, worktree: true });
+    expect(r.status).toBe("ok");
+    expect(r.counts.uncommitted).toBe(0);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain("2 untracked files match a test or backup");
+    expect(r.warnings[0]).toContain("tests/NewTest.php");
+    expect(r.warnings[0]).toContain("notes.md.bak");
+    expect(r.warnings[0]).not.toContain("src/untracked.ts");
+    const clean = initRepo();
+    write(clean, "src/untracked.ts", "export const u = 1;\n");
+    const base2 = git(clean, ["rev-parse", "HEAD"]).trim();
+    expect(
+      hygiene({ cwd: clean, base: base2, worktree: true }).warnings,
+    ).toEqual([]);
+  });
+
+  it("treats a symlink as --staged does: the link target text, not the file behind it", () => {
+    const repo = initRepo();
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(
+      repo,
+      "elsewhere/five.test.ts",
+      Array.from({ length: 5 }, () => 'it("x", () => {});\n').join(""),
+    );
+    fs.rmSync(path.join(repo, "test/a.test.ts"));
+    fs.symlinkSync(
+      "../elsewhere/five.test.ts",
+      path.join(repo, "test/a.test.ts"),
+    );
+    git(repo, ["add", "-A"]);
+    const staged = hygiene({ cwd: repo, base, staged: true });
+    const wt = hygiene({ cwd: repo, base, worktree: true });
+    expect(wt.findings).toEqual(staged.findings);
+    expect(wt.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
+        path: "test/a.test.ts",
+        baseCases: 3,
+        headCases: 0,
+      }),
+    ]);
+  });
+});
+
+describe("readWorktreeFile", () => {
+  it("reads a regular file and a symlink's target text, and refuses escapes", () => {
+    const repo = initRepo();
+    const outside = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-outside-"),
+    );
+    tmpDirs.push(outside);
+    fs.writeFileSync(path.join(outside, "secret.txt"), "secret\n");
+    fs.symlinkSync(outside, path.join(repo, "linked-dir"));
+    fs.symlinkSync("src/a.ts", path.join(repo, "link.ts"));
+    expect(readWorktreeFile(repo, "src/a.ts")).toBe("export const a = 1;\n");
+    expect(readWorktreeFile(repo, "link.ts")).toBe("src/a.ts");
+    expect(readWorktreeFile(repo, "linked-dir/secret.txt")).toBeUndefined();
+    expect(
+      readWorktreeFile(
+        repo,
+        path.join("..", path.basename(outside), "secret.txt"),
+      ),
+    ).toBeUndefined();
+    expect(readWorktreeFile(repo, "src")).toBeUndefined();
+    expect(readWorktreeFile(repo, "src/missing.ts")).toBeUndefined();
+  });
+});
+
+describe("hygiene mode combinations", () => {
+  it("--worktree alone is a worktree comparison", () => {
+    const { repo, base } = phpRepo();
+    const r = hygiene({ cwd: repo, base, worktree: true });
+    expect(r.head).toBe("(worktree)");
+    expect(r.status).toBe("ok");
+  });
+
+  it("--worktree with --staged is a usage error naming both flags", () => {
+    const { repo, base } = phpRepo();
+    expect(() =>
+      hygiene({ cwd: repo, base, worktree: true, staged: true }),
+    ).toThrow(/--worktree and --staged are mutually exclusive/);
+  });
+
+  it("--worktree with --head is a usage error naming both flags, even for HEAD", () => {
+    const { repo, base } = phpRepo();
+    for (const head of ["HEAD", base]) {
+      expect(() => hygiene({ cwd: repo, base, worktree: true, head })).toThrow(
+        /--worktree and --head are mutually exclusive/,
+      );
+    }
+    expect(() =>
+      hygiene({ cwd: repo, base, worktree: true, head: "HEAD" }),
+    ).toThrow(UsageError);
+  });
+
+  it("--staged wins over --head: the head is ignored, even an unresolvable one", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    git(repo, ["add", "tests/FooTest.php"]);
+    const r = hygiene({ cwd: repo, base, staged: true, head: "no-such-rev" });
+    expect(r.head).toBe("(index)");
+    expect(r.headSha).toBeNull();
+    expect(r.status).toBe("fail");
+  });
+
+  it("neither flag keeps the commit comparison against --head", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    commitAll(repo, "drop");
+    const r = hygiene({ cwd: repo, base, head: "HEAD~1" });
+    expect(r.status).toBe("ok");
+    expect(r.head).toBe("HEAD~1");
   });
 });
