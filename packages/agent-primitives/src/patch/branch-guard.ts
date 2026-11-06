@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import {
   spawnSync,
@@ -459,11 +460,104 @@ interface Classified {
   why?: string;
 }
 
+/** Escapes the characters git's glob magic reads in a name. */
+function globEscape(name: string): string {
+  return name.replace(/[\\*?[\]]/g, "\\$&");
+}
+
+/** The fallback's directory listings of one repository, by directory (the
+ * index does not change while the guard judges the plan): the entry names,
+ * or why the listing failed. */
+type DirListings = Map<string, string[] | { unknown: string }>;
+
+function listDirectoryEntries(
+  root: string,
+  parent: string,
+  timeoutMs: number,
+): string[] | { unknown: string } {
+  const specs =
+    parent === "."
+      ? [":(glob)*"]
+      : [
+          ...new Set([
+            parent,
+            parent.normalize("NFC"),
+            parent.normalize("NFD"),
+          ]),
+        ].map((dir) => `:(glob,icase)${globEscape(dir)}/*`);
+  const listed = runGit(
+    root,
+    ["ls-files", "-z", "--full-name", "--", ...specs],
+    timeoutMs,
+  );
+  if (listed.kind === "failed") return { unknown: listed.why };
+  if (listed.status !== 0) {
+    return {
+      unknown: `git ls-files failed with exit code ${String(listed.status)}`,
+    };
+  }
+  return listed.stdout.split("\0").filter((entry) => entry !== "");
+}
+
+/**
+ * The identity fallback of `classifyTarget`, for a target the pathspec
+ * lookup found no index entry for. The pathspec lookup compares spellings
+ * (case for ASCII, NFC, NFD); this one compares files. It lists the index
+ * entries that sit directly in the target's directory (`:(glob,icase)`
+ * with the directory in its spelling, NFC and NFD form, so only that
+ * directory's own entries are listed, not everything below it; for a
+ * root-level target, the top-level entries) and compares the `dev:ino` of
+ * each entry, as `lstat` finds it under the index's spelling, with the
+ * target's. On a volume that folds letter case or Unicode form an entry
+ * and a variant spelling are the same file whatever `core.ignorecase` and
+ * `core.precomposeunicode` say, and on a volume that does not they are two
+ * files and the entry is not found. A listing that git does not finish
+ * within the bound or output cap, or any stat error but "no such entry",
+ * is `unknown`. A directory is listed once for all the targets in it.
+ */
+function trackedByIdentity(
+  root: string,
+  target: GuardTarget,
+  rel: string,
+  timeoutMs: number,
+  listings: DirListings,
+): "tracked" | "other" | { unknown: string } {
+  let own: fs.Stats;
+  try {
+    own = fs.lstatSync(target.path);
+  } catch (err) {
+    return { unknown: `could not stat the target: ${(err as Error).message}` };
+  }
+  if (own.ino === 0) return { unknown: "the volume reports no inode numbers" };
+  const parent = path.posix.dirname(rel);
+  let entries = listings.get(parent);
+  if (entries === undefined) {
+    entries = listDirectoryEntries(root, parent, timeoutMs);
+    listings.set(parent, entries);
+  }
+  if (!Array.isArray(entries)) return entries;
+  for (const entry of entries) {
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(path.join(root, entry));
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") continue;
+      return {
+        unknown: `could not stat an index entry: ${(err as Error).message}`,
+      };
+    }
+    if (st.dev === own.dev && st.ino === own.ino) return "tracked";
+  }
+  return "other";
+}
+
 /** Whether git folds letter case for this repository (`core.ignorecase`,
  * set by `git init` on a case-insensitive volume). Read once per
- * repository. Unset is false; anything but a clear answer counts as true
- * (fail closed: the lookup then also matches other spellings, which can
- * only refuse more). */
+ * repository, only to choose `icase` for the fast lookup of
+ * `classifyTarget`. Unset is false; anything but a clear answer counts as
+ * true (fail closed: the lookup then also matches other spellings, which
+ * can only refuse more). */
 function readIgnoreCase(root: string, timeoutMs: number): boolean {
   const res = runGit(
     root,
@@ -484,25 +578,26 @@ function readIgnoreCase(root: string, timeoutMs: number): boolean {
  * (git status clean), and a file can be stored in the index as NFC and
  * sit on disk as NFD. `git check-ignore` and a plain pathspec compare
  * bytes, so asking them first would call such a tracked file untracked.
- * The lookup is one `git ls-files -z --full-name` with literal pathspecs
- * of the root-relative path in its spelling, its NFC form and its NFD
- * form (covering both stored forms, a prefix directory included), each
- * `icase` when `core.ignorecase` is true; any listed entry is a tracked
- * file. With `core.ignorecase` false, git itself treats `bar.md` and
- * `Bar.md` as two files, so a case variant that is not in the index is
- * untracked. Limits: letter case is folded the way git's `icase`
- * pathspec does (ASCII), so a non-ASCII letter that differs only in case
- * is not matched; a partly decomposed spelling is neither NFC nor NFD
- * and is not matched.
+ * Two steps. The fast path is one `git ls-files -z --full-name` with
+ * literal pathspecs of the root-relative path in its spelling, its NFC
+ * form and its NFD form (a prefix directory included), each `icase` when
+ * `core.ignorecase` is true; any listed entry is a tracked file. When it
+ * lists nothing, `trackedByIdentity` compares files instead of
+ * spellings, which does not trust the configuration: it also catches a
+ * case variant with `core.ignorecase` false or unset on a folding volume,
+ * a letter outside ASCII that differs only in case, and a partly
+ * decomposed index entry. A variant that is a different file on the volume
+ * is untracked.
  *
- * Only a file with no index entry goes on to `git check-ignore -q`, which
- * tells ignored from untracked. Anything but a clear answer from git is
- * `unknown`. */
+ * Only a file that neither step finds goes on to `git check-ignore -q`,
+ * which tells ignored from untracked. Anything but a clear answer from
+ * git is `unknown`. */
 function classifyTarget(
   root: string,
   target: GuardTarget,
   ignoreCase: boolean,
   timeoutMs: number,
+  listings: DirListings,
 ): Classified {
   const unknown = (why: string): Classified => ({
     target,
@@ -540,6 +635,9 @@ function classifyTarget(
     );
   }
   if (listed.stdout !== "") return { target, tracking: "tracked" };
+  const same = trackedByIdentity(root, target, rel, timeoutMs, listings);
+  if (typeof same === "object") return unknown(same.unknown);
+  if (same === "tracked") return { target, tracking: "tracked" };
   const ignored = runGit(
     root,
     ["check-ignore", "-q", "--", target.path],
@@ -570,8 +668,9 @@ function judgeTargets(
   const targets = input.targets ?? [];
   if (targets.length === 0) return settle(refused, describe([]), input);
   const ignoreCase = readIgnoreCase(input.root, input.timeoutMs);
+  const listings: DirListings = new Map();
   const classified = targets.map((t) =>
-    classifyTarget(input.root, t, ignoreCase, input.timeoutMs),
+    classifyTarget(input.root, t, ignoreCase, input.timeoutMs, listings),
   );
   const classifyFailures = classified
     .filter((c) => c.tracking === "unknown")

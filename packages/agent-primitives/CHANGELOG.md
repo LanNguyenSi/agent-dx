@@ -22,10 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`path`, `status`, `tracking`, `reason`) with the new statuses
   `allowed_untracked` and `allowed_ignored`; a repository's status is the most
   severe of its targets, and `combineGuards` ranks the two new statuses
-  between `detached` and `allowed`. Tracked is asked first and
-  tolerates another spelling of the file: letter case when `core.ignorecase`
-  is true, and NFC against NFD (the on-disk name of an index entry can differ
-  from it on a case-insensitive or Unicode-normalising volume). The guard's
+  between `detached` and `allowed`. Tracked is asked first
+  and tolerates another spelling of the file: letter case when
+  `core.ignorecase` is true, NFC against NFD, and, when no index entry is
+  found that way, a comparison of file identity (`dev:ino`) against the index
+  entries of the target's directory, so a case or Unicode variant that is the
+  same file on the volume is refused whatever `core.ignorecase` says. The guard's
   git calls also drop git's `GIT_*_PATHSPECS` switches. A git failure while
   classifying a target counts as tracked (fail closed) and adds a warning. `--allow-protected`
   lifts the tracked targets only; a branch that cannot be resolved is refused

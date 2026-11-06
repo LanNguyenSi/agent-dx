@@ -389,18 +389,31 @@ file, it asks tracked first and tells ignored from untracked only for a file
 that is not tracked. Tracked first, because the on-disk spelling of a file
 need not be the index's: on a case-insensitive volume `Bar.md` can be
 `bar.md` on disk with `git status` clean, and a file stored as NFC can sit
-on disk as NFD. `git ls-files -z --full-name` with literal pathspecs of the
-path in its spelling, its NFC form and its NFD form (a prefix directory
-included) lists the index entries, each pathspec `icase` when
-`core.ignorecase` is true for the repository (read once per repository;
+on disk as NFD. Two steps. The fast path is `git ls-files -z --full-name`
+with literal pathspecs of the path in its spelling, its NFC form and its NFD form (a
+prefix directory included), each pathspec `icase` when `core.ignorecase` is
+true for the repository (read once per repository, only to choose `icase`;
 unset is false, a failed read counts as true); any entry listed is a tracked
-file. With `core.ignorecase` false git itself treats `bar.md` and `Bar.md`
-as two files, so a case variant that is not in the index is untracked.
-Limits: letter case is folded the way git's `icase` pathspec does (ASCII),
-so a letter outside ASCII that differs only in case is not matched, and a
-partly decomposed spelling (neither NFC nor NFD) is not matched either.
-Only a file with no index entry goes on to `git check-ignore -q`, which says
-ignored (exit 0) or untracked (exit 1). Pathspecs are literal (a name with
+file. When it lists nothing, the guard compares files instead of spellings:
+it lists the index entries that sit directly in the target's directory
+(`:(glob,icase)` of the directory in its spelling, NFC and NFD; for a
+root-level target the top-level entries), and an entry whose `lstat`
+`dev:ino` equals the target's is the same file, so the target is tracked.
+This does not trust the configuration: a case or Unicode variant of a
+tracked file is refused on any volume where it is the same file, with
+`core.ignorecase` false or unset too, for a letter outside ASCII that
+differs only in case, and for a partly decomposed index entry. A variant
+that is a different file on the volume (a case-sensitive one) is untracked.
+The listing is bounded like the other calls (3 s, 64 KiB): a directory
+whose own entries do not fit the output cap, or any git or stat failure in
+the fallback, is `unknown` (fail closed, a warning). Limit: the directory
+itself is looked up by its spelling, NFC, NFD and ASCII case, so a
+directory component that differs from the index only by a non-ASCII case
+letter or a partly decomposed form is not found by the fallback (the file
+is then called untracked). A file that shares its inode with a tracked file
+(a hard link, which `patch` refuses unless `--break-hard-links`) counts as
+tracked. Only a file that neither step finds goes on to `git check-ignore
+-q`, which says ignored (exit 0) or untracked (exit 1). Pathspecs are literal (a name with
 `[` or `*` is that name) and git's own pathspec switches in the environment
 (`GIT_ICASE_PATHSPECS` and the others) are removed from the guard's git
 environment. So a run file such as `.ai/runs/<run>/notes.md` in a checkout

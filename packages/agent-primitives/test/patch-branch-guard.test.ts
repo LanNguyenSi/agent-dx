@@ -1190,10 +1190,10 @@ describe("patch branch guard: another spelling of a tracked file is tracked", ()
   });
 
   describe("with core.ignorecase=false or unset", () => {
-    // git itself then treats the two spellings as two files. The case
-    // variant that is not in the index is untracked here and is allowed;
-    // the setting is wrong for a volume that folds case, which git init
-    // detects, and the guard goes by what the repository says.
+    // On a volume that keeps the two spellings apart, a case variant that
+    // is not in the index is a file of its own and is untracked. (On a
+    // volume that folds case it is the same file; the identity tests below
+    // cover that.) The exact name the index carries is tracked either way.
     for (const [label, setting] of [
       ["false", "false"],
       ["unset", undefined],
@@ -1272,6 +1272,246 @@ describe("patch branch guard: another spelling of a tracked file is tracked", ()
       write(dir, "naïve.md", "hi\n");
       const r = patch({ cwd: dir, edits: [hi("naïve.md")], dryRun: true });
       expect(g(r).targets?.[0].tracking).toBe("untracked");
+    });
+  });
+});
+
+/** Whether the volume that holds the temporary directories treats two
+ * spellings as one file (same dev:ino): creates a file under `a` and looks
+ * it up as `b`. */
+function sameFileOnVolume(a: string, b: string): boolean {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, a), "x");
+  try {
+    const one = fs.lstatSync(path.join(dir, a));
+    const two = fs.lstatSync(path.join(dir, b));
+    return one.dev === two.dev && one.ino === two.ino;
+  } catch {
+    return false;
+  }
+}
+
+describe("patch branch guard: a tracked file is found by identity, not by its spelling", () => {
+  const folds = sameFileOnVolume("Probe.md", "pROBE.md");
+  const foldsNonAscii = sameFileOnVolume("Äpfel.md", "äpfel.md");
+  const MIXED = "xệ.md"; // U+00EA U+0323: neither NFC nor NFD
+  const MIXED_NFC = "xệ.md";
+  const foldsUnicode = sameFileOnVolume(MIXED, MIXED_NFC);
+
+  for (const [label, setting] of [
+    ["false", "false"],
+    ["unset", undefined],
+  ] as const) {
+    it(`core.ignorecase ${label}: the case variant of a tracked file is refused where it is the same file`, () => {
+      const dir = spellingRepo({ "core.ignorecase": setting });
+      write(dir, "Bar.md", "hi\n");
+      git(dir, "add", "Bar.md");
+      commitAll(dir);
+      respell(dir, "Bar.md", "bar.md");
+      const r = patch({ cwd: dir, edits: [hi("bar.md")] });
+      if (folds) {
+        expectTrackedRefusal(dir, r, "bar.md");
+      } else {
+        // Two files on this volume: bar.md is a file of its own.
+        expect(r.status).toBe("written");
+        expect(g(r).targets?.[0]).toMatchObject({
+          status: "allowed_untracked",
+          tracking: "untracked",
+        });
+      }
+    });
+  }
+
+  it("a letter outside ASCII that differs only in case is refused where it is the same file", () => {
+    const dir = spellingRepo({ "core.ignorecase": "true" });
+    write(dir, "Äpfel.md", "hi\n");
+    git(dir, "add", "-A");
+    commitAll(dir);
+    respell(dir, "Äpfel.md", "äpfel.md");
+    const r = patch({ cwd: dir, edits: [hi("äpfel.md")] });
+    if (foldsNonAscii) {
+      expectTrackedRefusal(dir, r, "äpfel.md");
+    } else {
+      expect(r.status).toBe("written");
+    }
+  });
+
+  it("a partly decomposed index entry with the NFC name on disk is refused where it is the same file", () => {
+    const dir = spellingRepo({
+      "core.ignorecase": "false",
+      "core.precomposeunicode": "false",
+    });
+    write(dir, MIXED, "hi\n");
+    git(dir, "add", "-A");
+    commitAll(dir);
+    respell(dir, MIXED, MIXED_NFC);
+    const r = patch({ cwd: dir, edits: [hi(MIXED_NFC)] });
+    if (foldsUnicode) {
+      expectTrackedRefusal(dir, r, MIXED_NFC);
+    } else {
+      expect(r.status).toBe("written");
+    }
+  });
+
+  for (const setting of ["false", "true"]) {
+    it(`core.ignorecase ${setting}: an untracked and an ignored file beside tracked ones keep their allowed statuses`, () => {
+      const dir = spellingRepo({ "core.ignorecase": setting });
+      write(dir, ".gitignore", "*.log\n");
+      write(dir, "d/t.md", "hi\n");
+      write(dir, "d/T2.md", "hi\n");
+      write(dir, "u.md.bak", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "d/u.md", "hi\n");
+      write(dir, "d/i.log", "hi\n");
+      write(dir, "u.md", "hi\n");
+      const r = patch({
+        cwd: dir,
+        edits: [hi("d/u.md"), hi("d/i.log"), hi("u.md")],
+      });
+      expect(r.status).toBe("written");
+      expect(g(r).targets?.map((t) => [t.tracking, t.status])).toEqual([
+        ["untracked", "allowed_untracked"],
+        ["ignored", "allowed_ignored"],
+        ["untracked", "allowed_untracked"],
+      ]);
+    });
+  }
+
+  it("a directory name with glob characters is listed literally by the fallback", () => {
+    const dir = spellingRepo({ "core.ignorecase": "false" });
+    write(dir, "g[1]*/t.md", "hi\n");
+    write(dir, "g1x/other.md", "hi\n");
+    git(dir, "add", "-A");
+    commitAll(dir);
+    write(dir, "g[1]*/u.md", "hi\n");
+    write(dir, "g1x/u.md", "hi\n");
+    const r = patch({
+      cwd: dir,
+      edits: [hi("g[1]*/u.md"), hi("g1x/u.md")],
+    });
+    expect(r.status).toBe("written");
+    expect(g(r).targets?.map((t) => t.tracking)).toEqual([
+      "untracked",
+      "untracked",
+    ]);
+  });
+
+  it("targets in one directory share the listing and a variant among them is still found", () => {
+    const dir = spellingRepo({ "core.ignorecase": "false" });
+    write(dir, "d/Bar.md", "hi\n");
+    write(dir, "d/other.md", "hi\n");
+    git(dir, "add", "-A");
+    commitAll(dir);
+    respell(dir, "d/Bar.md", "d/bar.md");
+    write(dir, "d/u1.md", "hi\n");
+    write(dir, "d/u2.md", "hi\n");
+    const counter = path.join(tmpDir(), "count");
+    const r = withGitShim(
+      `[ "$1" = ls-files ] && echo x >> ${JSON.stringify(counter)}`,
+      () =>
+        patch({
+          cwd: dir,
+          edits: [hi("d/u1.md"), hi("d/u2.md"), hi("d/bar.md")],
+        }),
+    );
+    if (folds) {
+      expect(r.status).toBe("usage_error");
+      expect(g(r).targets?.map((t) => t.tracking)).toEqual([
+        "untracked",
+        "untracked",
+        "tracked",
+      ]);
+      // One fast lookup per target, one directory listing for all three.
+      expect(fs.readFileSync(counter, "utf8").trim().split("\n")).toHaveLength(
+        4,
+      );
+    }
+  });
+
+  describe("when the fallback cannot finish", () => {
+    it("a failing second ls-files call is unknown: refused, with a warning", () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      write(dir, "t.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "u.md", "hi\n");
+      const counter = path.join(tmpDir(), "count");
+      const r = withGitShim(
+        [
+          '[ "$1" = ls-files ] && {',
+          `  n=$(cat ${JSON.stringify(counter)} 2>/dev/null || echo 0); n=$((n+1)); echo $n > ${JSON.stringify(counter)}`,
+          '  [ "$n" -ge 2 ] && { echo boom >&2; exit 128; }',
+          "}",
+        ].join("\n"),
+        () => patch({ cwd: dir, edits: [hi("u.md")] }),
+      );
+      expect(r.status).toBe("usage_error");
+      expect(r.reason).toBe("protected_branch");
+      expect(read(dir, "u.md")).toBe("hi\n");
+      expect(g(r).targets?.[0]).toMatchObject({
+        status: "refused",
+        tracking: "unknown",
+      });
+      expect(r.warnings.join("\n")).toContain("could not tell whether");
+    });
+
+    it("a directory listing over the output cap is unknown: refused, with a warning", () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      for (let n = 0; n < 1500; n++) {
+        write(
+          dir,
+          `big/a-rather-long-file-name-for-the-cap-${String(n).padStart(5, "0")}.md`,
+          "x\n",
+        );
+      }
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "big/new.md", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("big/new.md")] });
+      expect(r.status).toBe("usage_error");
+      expect(g(r).targets?.[0].tracking).toBe("unknown");
+      expect(r.warnings.join("\n")).toContain("wrote more than 65536 bytes");
+      expect(read(dir, "big/new.md")).toBe("hi\n");
+    });
+
+    it("a root-level target is classified from the top-level entries only: a large index below does not matter", () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      for (let n = 0; n < 2000; n++) {
+        write(
+          dir,
+          `sub${String(n % 20)}/file-number-${String(n).padStart(5, "0")}.md`,
+          "x\n",
+        );
+      }
+      write(dir, "top.md", "hi\n");
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "fresh.md", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("fresh.md")] });
+      expect(r.status).toBe("written");
+      expect(g(r).targets?.[0].tracking).toBe("untracked");
+      if (folds) {
+        const tracked = patch({ cwd: dir, edits: [hi("TOP.md")] });
+        expect(tracked.status).toBe("usage_error");
+      }
+    });
+
+    it("a root-level directory with more top-level entries than the cap allows is unknown", () => {
+      const dir = spellingRepo({ "core.ignorecase": "false" });
+      for (let n = 0; n < 1500; n++) {
+        write(
+          dir,
+          `a-rather-long-top-level-name-for-the-cap-${String(n).padStart(5, "0")}.md`,
+          "x\n",
+        );
+      }
+      git(dir, "add", "-A");
+      commitAll(dir);
+      write(dir, "fresh.md", "hi\n");
+      const r = patch({ cwd: dir, edits: [hi("fresh.md")] });
+      expect(r.status).toBe("usage_error");
+      expect(g(r).targets?.[0].tracking).toBe("unknown");
     });
   });
 });
