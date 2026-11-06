@@ -3187,6 +3187,16 @@ describe("drift (local-binding rule)", () => {
       expect: "suppressed",
     },
     {
+      label: "escaped backslash before the closing quote (escape stripping)",
+      headLine: '  const p = "C:\\\\"; const err = 1;',
+      expect: "suppressed",
+    },
+    {
+      label: "escaped apostrophe in a single-quoted string (escape stripping)",
+      headLine: "  const s = 'it\\'s'; const err = 1;",
+      expect: "suppressed",
+    },
+    {
       label: "prose string whose own colon would anchor it (parity)",
       headLine: '  throw new Error("bad value: const err is missing");',
       expect: "reported",
@@ -3436,6 +3446,16 @@ describe("drift (local-binding rule)", () => {
       expect: true,
     },
     {
+      label: "an escaped backslash before the closing quote",
+      before: '  const p = "C:\\\\"; ',
+      expect: true,
+    },
+    {
+      label: "an escaped apostrophe in a single-quoted string",
+      before: "  const s = 'it\\'s'; ",
+      expect: true,
+    },
+    {
       label: "an opener standing inside an unterminated string",
       before: '  throw new Error("bad value: ',
       expect: false,
@@ -3513,9 +3533,9 @@ describe("drift (head-side binding grep languages)", () => {
   });
 
   it("HEAD_SOURCE_PATHSPECS holds the TS/JS and PHP pathspecs only", () => {
-    for (const spec of ["*.ts", "*.tsx", "*.js", "*.mjs", "*.php"]) {
-      expect(HEAD_SOURCE_PATHSPECS).toContain(spec);
-    }
+    expect([...HEAD_SOURCE_PATHSPECS].sort()).toEqual(
+      ["*.cjs", "*.js", "*.jsx", "*.mjs", "*.php", "*.ts", "*.tsx"].sort(),
+    );
     for (const spec of ["*.yml", "*.yaml", "*.sh", "*.py", "*.json", "*.md"]) {
       expect(HEAD_SOURCE_PATHSPECS).not.toContain(spec);
     }

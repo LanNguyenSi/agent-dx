@@ -3,6 +3,7 @@ import {
   DOC_EXTENSIONS,
   PHP_EXTENSIONS,
   SCAN_PATHSPECS,
+  SOURCE_EXTENSIONS,
 } from "./scan.js";
 
 export type RemovedIdentifierKind = "declaration" | "config_key" | "file";
@@ -131,8 +132,6 @@ const JSON_TOP_KEY_RE = /^ {0,2}"([A-Za-z0-9_.$-]+)"\s*:/;
  * inferred purely from "no leading whitespace", so a flow-style mapping
  * or a key on the same line as its parent is missed. */
 const YAML_TOP_KEY_RE = /^([A-Za-z0-9_.-]+):(?:\s|$)/;
-
-const SOURCE_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs"]);
 
 /** The extensions `extractIdentifier` knows how to read a declaration or
  * config key out of: the TS/JS source extensions, JSON/YAML top-level

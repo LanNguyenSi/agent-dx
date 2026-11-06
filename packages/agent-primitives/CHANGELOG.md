@@ -52,10 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    identifier` unless the same diff declares that name again on an added
    line, which is a signature edit or a move rather than a removal. The
    head-side local-binding grep
-   learns `interface`, `trait`, `enum` and `type`, searches TS/JS and
-   PHP files only (a `.yml`, `.sh` or `.py` line never declares with
-   these keywords, and `summary: type rowCount` there used to suppress a
-   stale site), runs a second
+   learns `interface`, `trait`, `enum` and `type`, searches only the
+   languages the extractor reads (TS/JS and PHP; `summary: type rowCount`
+   in a config, a Python `class rowCount:` or a bash `function rowCount {`
+   no longer suppresses a stale site for a removed local of another
+   language), runs a second
    case-insensitive pass over the `.php` pathspecs only (PHP keywords
    are case-insensitive, so a `PRIVATE FUNCTION helperThing()` at head
    suppresses like a lowercase one, while a case-variant NAME does not),

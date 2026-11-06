@@ -202,9 +202,12 @@ string, or a regex literal holding a quote, before the keyword on the same
 line makes the count odd (`const msg = "it's"; const rowCount = 1;` does
 not suppress), while an escaped quote does not (backslash escapes are
 stripped before counting, so `const q = "a\"b"; const rowCount = 1;`
-suppresses); the case-sensitive head grep covers TS/JS and PHP files only
-(a `.yml`, `.sh` or `.py` line never declares with these keywords, so
-`summary: type rowCount is shown` in a config no longer suppresses);
+suppresses); the case-sensitive head grep covers only the languages the extractor
+reads (TS/JS and PHP files), so `summary: type rowCount is shown` in a
+config no longer suppresses, and neither does a Python `class rowCount:`
+or a bash `function rowCount {` at head: that is a different language's
+binding, not the removed local's (0.20.0 suppressed it, reporting is the
+intended outcome);
 indentation is a proxy for
 scope, not a scope analysis, so an indented declaration inside a block
 that still leaves a name unreachable at head is suppressed too, while a

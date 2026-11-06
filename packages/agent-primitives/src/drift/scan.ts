@@ -2,9 +2,11 @@
  * no "code" lines to exclude. */
 export const DOC_EXTENSIONS = new Set(["md", "mdx", "txt"]);
 
-/** Source extensions scanned for `//`, `/* ... *\/` and `*`-continuation
- * comment lines. */
-export const SLASH_STAR_EXTENSIONS = new Set([
+/** The TS/JS family: the source extensions scanned for `//`, `/* ... *\/`
+ * and `*`-continuation comment lines, and the ones the declaration
+ * extractor reads (`parseDiff.ts` imports this set, so the list lives
+ * exactly once). */
+export const SOURCE_EXTENSIONS = new Set([
   "ts",
   "tsx",
   "js",
@@ -17,7 +19,7 @@ export const SLASH_STAR_EXTENSIONS = new Set([
 const HASH_COMMENT_EXTENSIONS = new Set(["py", "sh", "yml", "yaml"]);
 
 /** PHP scans BOTH comment grammars: `//`, `/* ... *\/`, and docblock
- * ` * ` continuation lines (like `SLASH_STAR_EXTENSIONS`), plus `#`
+ * ` * ` continuation lines (like `SOURCE_EXTENSIONS`), plus `#`
  * line comments (like `HASH_COMMENT_EXTENSIONS`) -- PHP is the only
  * language this command recognizes that accepts both forms, so it gets
  * its own set and its own branch in `classifyLine` rather than being
@@ -56,16 +58,16 @@ export const SOURCE_PATHSPECS: readonly string[] = SCAN_PATHSPECS.filter(
 
 /** The part of `SOURCE_PATHSPECS` the head-side binding grep (the
  * case-sensitive pass of `drift()`'s local-binding rule) searches: the
- * TS/JS family (`SLASH_STAR_EXTENSIONS`, the extensions the declaration
- * extractor reads) and PHP. Those are the only scanned languages whose
- * lines can declare with `DECLARATION_KEYWORDS`; a `.yml`, `.sh` or `.py`
- * line never does, and `key: type rowCount` in a config or a shell
- * comment would otherwise suppress a real stale site through the `:`
- * opener. */
+ * TS/JS family (`SOURCE_EXTENSIONS`) and PHP, the languages the
+ * declaration extractor reads. A same-named Python `class rowCount:` or
+ * bash `function rowCount {` at head is a different language's binding,
+ * not the removed TS/JS/PHP local's, so it does not suppress a stale site
+ * (0.20.0 suppressed it); and `key: type rowCount` in a config or a shell
+ * comment would otherwise suppress one through the `:` opener. */
 export const HEAD_SOURCE_PATHSPECS: readonly string[] = SOURCE_PATHSPECS.filter(
   (spec) => {
     const ext = spec.replace(/^\*\./, "");
-    return SLASH_STAR_EXTENSIONS.has(ext) || PHP_EXTENSIONS.has(ext);
+    return SOURCE_EXTENSIONS.has(ext) || PHP_EXTENSIONS.has(ext);
   },
 );
 
@@ -98,7 +100,7 @@ export function classifyLine(
   const ext = extOf(filePath);
   if (DOC_EXTENSIONS.has(ext)) return "doc";
   const trimmed = text.trimStart();
-  if (SLASH_STAR_EXTENSIONS.has(ext)) {
+  if (SOURCE_EXTENSIONS.has(ext)) {
     if (
       trimmed.startsWith("//") ||
       trimmed.startsWith("/*") ||
