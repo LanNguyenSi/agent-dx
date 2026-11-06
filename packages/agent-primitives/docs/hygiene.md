@@ -38,7 +38,7 @@ with its old content, not reported as a deletion plus an addition.
 | --- | --- | --- |
 | default (`--head <rev>`, default `HEAD`) | the merge-base of `--base` and the head commit against the head commit | every tracked file with staged or unstaged changes: the comparison never looked at it |
 | `--staged` | the merge-base of `--base` and `HEAD` against the git index | tracked files with unstaged changes (the staged part is the comparison); `--head` is ignored |
-| `--worktree` | the merge-base of `--base` and `HEAD` against the working tree: tracked files, staged and unstaged changes alike | nothing to warn about for tracked files; untracked files that match a test or backup pattern are named in a separate warning |
+| `--worktree` | the merge-base of `--base` and `HEAD` against the working tree: tracked files, staged and unstaged changes alike | tracked files whose staged version differs from both `HEAD` and the working tree (the working-tree comparison never looks at the index); untracked files that match a test or backup pattern are named in a separate warning |
 
 `--worktree` is for a handback with uncommitted changes: it checks the work
 as it stands on disk. It cannot be combined with `--staged` or `--head`
@@ -61,8 +61,15 @@ the warning changes neither `status` nor the exit code. It also feeds:
 - `counts.uncommitted`, the exact number of such files, and `uncommitted=N`
   on the `--summary` totals line (`0` on a clean tree);
 - `uncommitted_files` (also accepted by `--print`), the paths, capped at 50
-  entries; `counts.uncommitted` still holds the full number. Empty in
-  `--worktree` mode.
+  entries; `counts.uncommitted` still holds the full number.
+
+With `--worktree` the warning covers the one case the working-tree
+comparison cannot see: a tracked file whose index version differs from both
+`HEAD` and the working tree (status `MM`, `AM` and the like). It reads `N
+tracked files have a staged version that differs from both HEAD and the
+working tree; stage the working tree (git add) or check with --staged
+(<paths>)`, and the file counts in `counts.uncommitted` and
+`uncommitted_files` like in the other modes.
 
 Untracked files never count as uncommitted. In `--worktree` mode, untracked
 files whose path matches a test pattern (as for `test_cases_dropped`) or a
@@ -72,6 +79,14 @@ add them to include them`) because adding them would put them in range;
 other untracked files are ignored. If `git status` (or, with `--worktree`,
 `git ls-files`) fails, a warning says so and the result, status and exit
 code stay as the comparison found them.
+
+`hygiene` never writes the index in any mode: the status query runs as
+`git --no-optional-locks status`, and `--worktree` compares with `git
+diff-index` instead of `git diff`, which would refresh the index and write
+`.git/index` back (a concurrent `git add` or `git commit` could then find
+`index.lock` held). The consequence: `--worktree` never refreshes the
+index, so a file whose stat data is merely stale can be listed as modified;
+its content equals the base, so it yields no finding.
 
 `--worktree` reads each changed file from the working tree under the same
 rules the index path follows: a path must stay inside the repository root

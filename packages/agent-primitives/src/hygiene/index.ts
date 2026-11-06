@@ -104,8 +104,9 @@ export interface HygieneResult {
    * `UNCOMMITTED_FILES_CAP` entries (`counts.uncommitted` is the full
    * number). Without `staged`/`worktree`: every tracked file with staged
    * or unstaged changes. With `staged`: those with unstaged changes.
-   * With `worktree`: always empty (the working tree is the comparison).
-   * Untracked files are never listed here. */
+   * With `worktree`: tracked files whose index version differs from both
+   * HEAD and the working tree (the working-tree comparison does not look
+   * at the index). Untracked files are never listed here. */
   uncommittedFiles: string[];
   counts: {
     files: number;
@@ -457,6 +458,8 @@ export function readWorktreeFile(
   try {
     const full = path.resolve(gitRoot, rel);
     const relative = path.relative(gitRoot, full);
+    // Defence in depth: the realpath check below already refuses a path
+    // that leaves the root, git never reports one.
     if (relative === "" || escapesRoot(relative)) return undefined;
     const realRoot = fs.realpathSync(gitRoot);
     const realDir = fs.realpathSync(path.dirname(full));
@@ -581,16 +584,21 @@ export function hygiene(options: HygieneOptions): HygieneResult {
    * declaration that matched no drop at all is reported stale. */
   const consultedDeclarations = new Set<string>();
 
-  // `git diff <commit>` compares the commit with the working tree (tracked
-  // files only, staged and unstaged changes alike); `--cached` with the
-  // index.
+  // The commit-versus-working-tree comparison (tracked files only, staged
+  // and unstaged changes alike) is `git diff-index <commit>`, not `git diff
+  // <commit>`: the porcelain refreshes the index and writes `.git/index`
+  // back, the plumbing never does. A file whose stat data is merely stale
+  // can therefore show up as modified; its content then equals the base's
+  // and yields no finding. `--cached` compares with the index, a second
+  // revision with that commit.
+  const diffCommand = worktree ? "diff-index" : "diff";
   const rangeArgs = worktree
     ? [diffBase]
     : staged
       ? ["--cached", diffBase]
       : [diffBase, headSha ?? head];
   const names = runGit(gitRoot, [
-    "diff",
+    diffCommand,
     "--no-color",
     "-z",
     "-M",
@@ -667,7 +675,7 @@ export function hygiene(options: HygieneOptions): HygieneResult {
         gitRoot,
         [
           "--literal-pathspecs",
-          "diff",
+          diffCommand,
           "--no-color",
           "-z",
           "-M",
@@ -755,29 +763,42 @@ export function hygiene(options: HygieneOptions): HygieneResult {
   // Tracked files with changes the comparison above did not look at. A
   // git failure here is a warning only: findings and status stay as they
   // were.
+  //
+  // `--no-optional-locks` keeps `git status` from refreshing the index and
+  // writing it back: hygiene never changes `.git/index`, and never takes
+  // `index.lock` away from a concurrent `git add` or `git commit`.
+  //
+  // Which entries the comparison did not cover: default mode, any change;
+  // `--staged`, a change in the working tree (`y`); `--worktree`, an index
+  // version that differs from both HEAD and the working tree (`x` and `y`
+  // both set), since the working-tree comparison never looks at the index.
   let uncommittedAll: string[] = [];
-  if (!worktree) {
-    const status = runGit(gitRoot, [
-      "status",
-      "--porcelain",
-      "-z",
-      "--untracked-files=no",
-    ]);
-    if (status.error !== undefined || status.status !== 0) {
-      warnings.push(
-        `could not list uncommitted changes (git status failed: ${status.error ?? status.stderr.trim()}); changes outside this comparison, if any, are not reported`,
-      );
-    } else {
-      uncommittedAll = parsePorcelainStatus(status.stdout)
-        .filter((e) => (staged ? e.y !== " " : true))
-        .map((e) => e.path);
-    }
+  const status = runGit(gitRoot, [
+    "--no-optional-locks",
+    "status",
+    "--porcelain",
+    "-z",
+    "--untracked-files=no",
+  ]);
+  if (status.error !== undefined || status.status !== 0) {
+    warnings.push(
+      `could not list uncommitted changes (git status failed: ${status.error ?? status.stderr.trim()}); changes outside this comparison, if any, are not reported`,
+    );
+  } else {
+    uncommittedAll = parsePorcelainStatus(status.stdout)
+      .filter((e) =>
+        worktree ? e.x !== " " && e.y !== " " : staged ? e.y !== " " : true,
+      )
+      .map((e) => e.path);
   }
   if (uncommittedAll.length > 0) {
     const named = uncommittedAll.slice(0, UNCOMMITTED_WARNING_PATHS);
     const more = uncommittedAll.length - named.length;
+    const paths = `(${named.join(", ")}${more > 0 ? `, and ${String(more)} more` : ""})`;
     warnings.push(
-      `${String(uncommittedAll.length)} tracked files have uncommitted changes not covered by this comparison; ${staged ? "stage and commit them, or use --worktree" : "commit them, or use --staged / --worktree"} (${named.join(", ")}${more > 0 ? `, and ${String(more)} more` : ""})`,
+      worktree
+        ? `${String(uncommittedAll.length)} tracked files have a staged version that differs from both HEAD and the working tree; stage the working tree (git add) or check with --staged ${paths}`
+        : `${String(uncommittedAll.length)} tracked files have uncommitted changes not covered by this comparison; ${staged ? "stage and commit them, or use --worktree" : "commit them, or use --staged / --worktree"} ${paths}`,
     );
   }
   if (worktree) {

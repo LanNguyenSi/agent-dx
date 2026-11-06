@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1883,6 +1884,32 @@ function phpRepo(): { repo: string; base: string } {
   return { repo, base: git(repo, ["rev-parse", "HEAD"]).trim() };
 }
 
+/** Runs `fn` with a `git` first on PATH that fails when `subcommand` is
+ * anywhere in its argument list (global options such as
+ * `--no-optional-locks` come before the subcommand) and otherwise runs the
+ * real git. */
+function withFailingGit<T>(subcommand: string, fn: () => T): T {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], {
+    encoding: "utf8",
+  }).trim();
+  const shimDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "agent-primitives-git-shim-"),
+  );
+  tmpDirs.push(shimDir);
+  fs.writeFileSync(
+    path.join(shimDir, "git"),
+    `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = ${subcommand} ]; then echo "simulated ${subcommand} failure" >&2; exit 128; fi\ndone\nexec "${realGit}" "$@"\n`,
+    { mode: 0o755 },
+  );
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${shimDir}${path.delimiter}${savedPath ?? ""}`;
+  try {
+    return fn();
+  } finally {
+    process.env.PATH = savedPath;
+  }
+}
+
 function uncommittedWarnings(warnings: readonly string[]): string[] {
   return warnings.filter((w) => w.includes("uncommitted changes"));
 }
@@ -2133,27 +2160,8 @@ describe("hygiene: uncommitted changes outside the comparison", () => {
     const { repo, base } = phpRepo();
     write(repo, "docs/x.md-E", "x\n");
     commitAll(repo, "backup");
-    const realGit = execFileSync("sh", ["-c", "command -v git"], {
-      encoding: "utf8",
-    }).trim();
-    const shimDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "agent-primitives-git-shim-"),
-    );
-    tmpDirs.push(shimDir);
-    fs.writeFileSync(
-      path.join(shimDir, "git"),
-      `#!/bin/sh\nif [ "$1" = status ]; then echo "simulated status failure" >&2; exit 128; fi\nexec "${realGit}" "$@"\n`,
-      { mode: 0o755 },
-    );
     const expected = hygiene({ cwd: repo, base });
-    const savedPath = process.env.PATH;
-    process.env.PATH = `${shimDir}${path.delimiter}${savedPath ?? ""}`;
-    let r;
-    try {
-      r = hygiene({ cwd: repo, base });
-    } finally {
-      process.env.PATH = savedPath;
-    }
+    const r = withFailingGit("status", () => hygiene({ cwd: repo, base }));
     expect(r.status).toBe("fail");
     expect(r.findings).toEqual(expected.findings);
     expect(r.counts.uncommitted).toBe(0);
@@ -2162,6 +2170,70 @@ describe("hygiene: uncommitted changes outside the comparison", () => {
       expect.stringContaining("could not list uncommitted changes"),
     ]);
     expect(r.warnings[0]).toContain("simulated status failure");
+    const wt = withFailingGit("status", () =>
+      hygiene({ cwd: repo, base, worktree: true }),
+    );
+    expect(wt.status).toBe("fail");
+    expect(wt.findings).toEqual(expected.findings);
+    expect(wt.warnings).toEqual([
+      expect.stringContaining("could not list uncommitted changes"),
+    ]);
+  });
+
+  it("a failing git ls-files in --worktree mode is a warning and leaves the result unchanged", async () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    write(repo, "tests/NewTest.php", PHP_TWO_METHODS);
+    const expected = hygiene({ cwd: repo, base, worktree: true });
+    expect(expected.status).toBe("fail");
+    const r = withFailingGit("ls-files", () =>
+      hygiene({ cwd: repo, base, worktree: true }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.findings).toEqual(expected.findings);
+    expect(r.warnings).toEqual([
+      expect.stringContaining("could not list untracked files"),
+    ]);
+    expect(r.warnings[0]).toContain("simulated ls-files failure");
+    expect(expected.warnings).toEqual([
+      expect.stringContaining("1 untracked files match a test or backup"),
+    ]);
+  });
+
+  it("leaves .git/index byte-identical in every mode, also on a stat-dirty tree", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "src/a.ts", "export const a = 1;\n");
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    git(repo, ["add", "tests/FooTest.php"]);
+    // Stat data that no longer matches the index entry, content unchanged:
+    // `git status` and `git diff` would refresh the index and write it.
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(path.join(repo, "src/a.ts"), future, future);
+    fs.utimesSync(path.join(repo, "docs/log.md"), future, future);
+    const indexFile = path.join(repo, ".git", "index");
+    const md5 = (): string =>
+      createHash("md5").update(fs.readFileSync(indexFile)).digest("hex");
+    const before = md5();
+    for (const options of [{}, { staged: true }, { worktree: true }]) {
+      hygiene({ cwd: repo, base, ...options });
+      expect(md5()).toBe(before);
+    }
+    // The refresh is real: the porcelain commands do write this index.
+    git(repo, ["status", "--porcelain"]);
+    expect(md5()).not.toBe(before);
+  });
+
+  it("pins the path-list cap at 50", () => {
+    expect(UNCOMMITTED_FILES_CAP).toBe(50);
+    const { repo, base } = phpRepo();
+    for (let i = 0; i < 55; i++) write(repo, `bulk/f${String(i)}.txt`, "a\n");
+    commitAll(repo, "bulk");
+    const base2 = git(repo, ["rev-parse", "HEAD"]).trim();
+    for (let i = 0; i < 55; i++) write(repo, `bulk/f${String(i)}.txt`, "b\n");
+    const r = hygiene({ cwd: repo, base: base2 });
+    expect(base).not.toBe(base2);
+    expect(r.uncommittedFiles).toHaveLength(50);
+    expect(r.counts.uncommitted).toBe(55);
   });
 });
 
@@ -2182,6 +2254,28 @@ describe("hygiene --worktree", () => {
     ]);
     expect(r.counts.uncommitted).toBe(0);
     expect(r.warnings).toEqual([]);
+  });
+
+  it("warns when the index holds a version that differs from both HEAD and the working tree", () => {
+    const { repo, base } = phpRepo();
+    write(repo, "tests/FooTest.php", PHP_ONE_METHOD);
+    git(repo, ["add", "tests/FooTest.php"]);
+    git(repo, ["restore", "--source=HEAD", "--worktree", "tests/FooTest.php"]);
+    expect(git(repo, ["status", "--porcelain"]).slice(0, 2)).toBe("MM");
+    const wt = hygiene({ cwd: repo, base, worktree: true });
+    expect(wt.status).toBe("ok");
+    expect(wt.counts.uncommitted).toBe(1);
+    expect(wt.uncommittedFiles).toEqual(["tests/FooTest.php"]);
+    expect(wt.warnings).toEqual([
+      "1 tracked files have a staged version that differs from both HEAD and the working tree; stage the working tree (git add) or check with --staged (tests/FooTest.php)",
+    ]);
+    const staged = hygiene({ cwd: repo, base, staged: true });
+    expect(staged.status).toBe("fail");
+    // A staged-only change is the comparison itself in --worktree mode.
+    git(repo, ["add", "tests/FooTest.php"]);
+    const settled = hygiene({ cwd: repo, base, worktree: true });
+    expect(settled.counts.uncommitted).toBe(0);
+    expect(settled.warnings).toEqual([]);
   });
 
   it("reports a test file deleted in the working tree", () => {

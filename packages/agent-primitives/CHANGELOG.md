@@ -26,8 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `head_sha` `null`. It is a usage error with `--staged` or `--head`.
   Files are read from the working tree under the index path's safety rules
   (a symlink is read as its target text); untracked files that match a
-  test or backup pattern are named in a separate warning. The skill's
-  commit-hygiene section names the flag.
+  test or backup pattern are named in a separate warning, and tracked
+  files whose staged version differs from both `HEAD` and the working tree
+  (status `MM`) get their own warning, counted in `counts.uncommitted`.
+  The skill's commit-hygiene section names the flag.
+- `hygiene` leaves `.git/index` byte-identical in every mode: the status
+  query uses `git --no-optional-locks status` and `--worktree` compares
+  with `git diff-index`, neither of which refreshes and writes the index
+  (a stat-stale file may appear as modified in `--worktree` mode and
+  yields no finding).
 
 ## [0.20.0] - 2026-11-04
 

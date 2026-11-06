@@ -2725,7 +2725,7 @@ function renderHygieneText(result: HygieneResult): string {
 program
   .command("hygiene")
   .description(
-    "Refuse backup files (*.bak, *.orig, *~, and the BSD sed -i leftovers *-e, *-E, *-n, *-r, *-s) and flag wholesale rewrites of extend-only files and dropped test cases in a git range or the index",
+    "Refuse backup files (*.bak, *.orig, *~, and the BSD sed -i leftovers *-e, *-E, *-n, *-r, *-s) and flag wholesale rewrites of extend-only files and dropped test cases in a git range, the index (--staged) or the working tree (--worktree), and warn about uncommitted changes the comparison did not cover",
   )
   .requiredOption("--base <rev>", "base revision the task started from")
   .option(
