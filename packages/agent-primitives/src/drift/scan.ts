@@ -14,8 +14,10 @@ const HASH_COMMENT_EXTENSIONS = new Set(["py", "sh", "yml", "yaml"]);
  * line comments (like `HASH_COMMENT_EXTENSIONS`) -- PHP is the only
  * language this command recognizes that accepts both forms, so it gets
  * its own set and its own branch in `classifyLine` rather than being
- * folded into either existing set. */
-const PHP_EXTENSIONS = new Set(["php"]);
+ * folded into either existing set. Exported because `parseDiff.ts` runs
+ * the same classifier over removed PHP diff lines to skip comment lines
+ * before matching a declaration against them. */
+export const PHP_EXTENSIONS = new Set(["php"]);
 
 /** `git grep` pathspecs this command searches: docs, plus the source
  * extensions above. Anything outside this list is a known, documented

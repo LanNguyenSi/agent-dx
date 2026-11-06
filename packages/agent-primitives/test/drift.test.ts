@@ -8,6 +8,7 @@ import {
   LOCAL_BINDING_COMMENT_PREFIXES,
   NAME_CONTINUATION_CHARACTER,
   drift,
+  headDeclarationPattern,
   isLiveHeadDeclaration,
   type DriftResult,
 } from "../src/drift/index.js";
@@ -412,6 +413,249 @@ describe("parseRemovedIdentifiers", () => {
     const result = parseRemovedIdentifiers(diff);
     expect(result.movedNames).toEqual(["OldThing"]);
     expect(result.removed).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------
+// parseDiff.ts: PHP declaration lines, and the extensions that are
+// scanned for sites without having a declaration extractor.
+// ---------------------------------------------------------------------
+
+interface PhpDeclRow {
+  label: string;
+  line: string;
+  expect?: { name: string; exported: boolean; indented: boolean };
+}
+
+const PHP_DECL_ROWS: readonly PhpDeclRow[] = [
+  // top-level declarations, bare and with each legal modifier form
+  {
+    label: "top-level class",
+    line: "class Widget {}",
+    expect: { name: "Widget", exported: true, indented: false },
+  },
+  {
+    label: "abstract class",
+    line: "abstract class Widget {}",
+    expect: { name: "Widget", exported: true, indented: false },
+  },
+  {
+    label: "final class",
+    line: "final class Widget {}",
+    expect: { name: "Widget", exported: true, indented: false },
+  },
+  {
+    label: "final readonly class",
+    line: "final readonly class Widget {}",
+    expect: { name: "Widget", exported: true, indented: false },
+  },
+  {
+    label: "interface",
+    line: "interface Widget {}",
+    expect: { name: "Widget", exported: true, indented: false },
+  },
+  {
+    label: "trait",
+    line: "trait Widget {}",
+    expect: { name: "Widget", exported: true, indented: false },
+  },
+  {
+    label: "enum with a backing type",
+    line: "enum Widget: string {}",
+    expect: { name: "Widget", exported: true, indented: false },
+  },
+  // methods at indentation 4: each visibility, with and without static,
+  // and the unspecified (PHP-default-public) form
+  {
+    label: "public method",
+    line: "    public function doThing() {}",
+    expect: { name: "doThing", exported: true, indented: true },
+  },
+  {
+    label: "protected method",
+    line: "    protected function doThing() {}",
+    expect: { name: "doThing", exported: false, indented: true },
+  },
+  {
+    label: "private method",
+    line: "    private function doThing() {}",
+    expect: { name: "doThing", exported: false, indented: true },
+  },
+  {
+    label: "private static method",
+    line: "    private static function doThing() {}",
+    expect: { name: "doThing", exported: false, indented: true },
+  },
+  {
+    label: "public static method",
+    line: "    public static function doThing() {}",
+    expect: { name: "doThing", exported: true, indented: true },
+  },
+  {
+    label: "method with no visibility (PHP defaults to public)",
+    line: "    function doThing() {}",
+    expect: { name: "doThing", exported: true, indented: true },
+  },
+  {
+    label: "function at indentation 0",
+    line: "function doThing() {}",
+    expect: { name: "doThing", exported: true, indented: false },
+  },
+  {
+    label: "by-reference method",
+    line: "    private function &doThing() {}",
+    expect: { name: "doThing", exported: false, indented: true },
+  },
+  // constants: class constants with and without visibility, and top level
+  {
+    label: "class const, no visibility",
+    line: "    const MAX = 1;",
+    expect: { name: "MAX", exported: true, indented: true },
+  },
+  {
+    label: "private class const",
+    line: "    private const MAX = 1;",
+    expect: { name: "MAX", exported: false, indented: true },
+  },
+  {
+    label: "final public class const",
+    line: "    final public const MAX = 1;",
+    expect: { name: "MAX", exported: true, indented: true },
+  },
+  {
+    label: "top-level const",
+    line: "const MAX = 1;",
+    expect: { name: "MAX", exported: true, indented: false },
+  },
+  // PHP keywords are case-insensitive; the name keeps the line's case
+  {
+    label: "case-variant keywords keep the name's case",
+    line: "    PUBLIC FUNCTION DoThing() {}",
+    expect: { name: "DoThing", exported: true, indented: true },
+  },
+  {
+    label: "uppercase CLASS",
+    line: "CLASS Widget {}",
+    expect: { name: "Widget", exported: true, indented: false },
+  },
+  {
+    label: "case-variant Final and Class",
+    line: "Final Class Widget {}",
+    expect: { name: "Widget", exported: true, indented: false },
+  },
+  // a comment line that quotes a declaration is not one
+  { label: "// comment", line: "    // function widgetLoader() {" },
+  { label: "# comment", line: "# function widgetLoader() {" },
+  { label: "docblock continuation", line: " * function widgetLoader()" },
+  { label: "/* comment */", line: "/* function widgetLoader() */" },
+  // a string literal is not a declaration either (single-line case)
+  {
+    label: "string literal",
+    line: '    $code = "function widgetLoader() {";',
+  },
+  // anonymous shapes contribute nothing
+  {
+    label: "anonymous closure",
+    line: "    $cb = function ($x) { return $x; };",
+  },
+  { label: "inline new class", line: "    $obj = new class extends Base {};" },
+  // define() is not a const declaration (documented limitation)
+  { label: "define() call", line: "define('MAX_THING', 1);" },
+];
+
+describe("parseRemovedIdentifiers (PHP declarations)", () => {
+  it.each(PHP_DECL_ROWS)(
+    "removes $label only if it is a declaration",
+    (row) => {
+      const diff = [
+        "diff --git a/src/Foo.php b/src/Foo.php",
+        "index 1111111..2222222 100644",
+        "--- a/src/Foo.php",
+        "+++ b/src/Foo.php",
+        "@@ -1 +1 @@",
+        `-${row.line}`,
+        "+// replaced",
+        "",
+      ].join("\n");
+      const result = parseRemovedIdentifiers(diff);
+      if (row.expect === undefined) {
+        expect(result.removed).toEqual([]);
+        return;
+      }
+      expect(result.removed).toEqual([
+        {
+          name: row.expect.name,
+          kind: "declaration",
+          file: "src/Foo.php",
+          line: 1,
+          exported: row.expect.exported,
+          indented: row.expect.indented,
+        },
+      ]);
+      expect(result.movedNames).toEqual([]);
+    },
+  );
+});
+
+describe("parseRemovedIdentifiers (extractor gaps)", () => {
+  it("records one entry per scanned extension without an extractor, with the distinct removed-line file count, sorted by extension", () => {
+    const diff = [
+      "diff --git a/tools.py b/tools.py",
+      "index 1111111..2222222 100644",
+      "--- a/tools.py",
+      "+++ b/tools.py",
+      "@@ -1,2 +1 @@",
+      "-def helperThing():",
+      "-    return 1",
+      "+# rewritten",
+      "diff --git a/inner/more.py b/inner/more.py",
+      "index 1111111..2222222 100644",
+      "--- a/inner/more.py",
+      "+++ b/inner/more.py",
+      "@@ -1 +1 @@",
+      "-def otherThing(): ...",
+      "+# rewritten",
+      "diff --git a/run.sh b/run.sh",
+      "index 1111111..2222222 100644",
+      "--- a/run.sh",
+      "+++ b/run.sh",
+      "@@ -1,2 +1 @@",
+      "-run_thing() {",
+      "-  echo hi",
+      "+# rewritten",
+      "diff --git a/src/Foo.php b/src/Foo.php",
+      "index 1111111..2222222 100644",
+      "--- a/src/Foo.php",
+      "+++ b/src/Foo.php",
+      "@@ -1 +1 @@",
+      "-function legacyThing() {}",
+      "+// replaced",
+      "diff --git a/notes.md b/notes.md",
+      "index 1111111..2222222 100644",
+      "--- a/notes.md",
+      "+++ b/notes.md",
+      "@@ -1 +1 @@",
+      "-an old paragraph",
+      "+a new paragraph",
+      "diff --git a/exotic.rb b/exotic.rb",
+      "index 1111111..2222222 100644",
+      "--- a/exotic.rb",
+      "+++ b/exotic.rb",
+      "@@ -1 +1 @@",
+      "-def legacy_thing; end",
+      "+# rewritten",
+      "",
+    ].join("\n");
+    const result = parseRemovedIdentifiers(diff);
+    // .py and .sh are scanned for sites but have no declaration
+    // extractor; .php has one now, .md is a doc, and .rb is out of
+    // scope entirely (never scanned, so no gap to warn about).
+    expect(result.extractorGaps).toEqual([
+      { ext: "py", files: 2 },
+      { ext: "sh", files: 1 },
+    ]);
+    // and the extractor still collected the PHP declaration
+    expect(result.removed.map((r) => r.name)).toEqual(["legacyThing"]);
   });
 });
 
@@ -1121,6 +1365,231 @@ describe("drift (.php comment sites)", () => {
 });
 
 // ---------------------------------------------------------------------
+// drift(): a removed PHP declaration (the issue #619 repro: a public
+// method removed from src/Foo.php while README.md and a docblock still
+// name it), and the local-binding rule over PHP removals.
+// ---------------------------------------------------------------------
+
+const FOO_PHP_BASE = [
+  "<?php",
+  "",
+  "class Foo {",
+  "    /**",
+  "     * legacyName returns the legacy value.",
+  "     */",
+  "    public function legacyName() {",
+  "        return 1;",
+  "    }",
+  "}",
+  "",
+].join("\n");
+
+const FOO_PHP_HEAD = [
+  "<?php",
+  "",
+  "class Foo {",
+  "    /**",
+  "     * legacyName returns the legacy value.",
+  "     */",
+  "}",
+  "",
+].join("\n");
+
+/** The issue repro repo: `main` at base, `HEAD` with `legacyName()`
+ * removed from src/Foo.php, README.md line 2 and the docblock line in
+ * src/Foo.php (line 5) both still naming it. */
+function buildPhpReproRepo(): { repo: string; base: string; head: string } {
+  const repo = initRepo();
+  writeFile(repo, "src/Foo.php", FOO_PHP_BASE);
+  writeFile(
+    repo,
+    "README.md",
+    "# Readme\nCall legacyName() to get the value.\n",
+  );
+  const base = commit(repo, "base");
+  // `main` must stay at the base commit while HEAD moves: rename the
+  // (now existing) initial branch out of the way, then name the base.
+  git(repo, ["branch", "-m", "work"]);
+  git(repo, ["branch", "main", base]);
+  writeFile(repo, "src/Foo.php", FOO_PHP_HEAD);
+  const head = commit(repo, "head");
+  return { repo, base, head };
+}
+
+describe("drift (removed PHP declarations)", () => {
+  it("collects the removed public method and reports both remaining sites", async () => {
+    const { repo, base, head } = buildPhpReproRepo();
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.removedIdentifiers).toEqual([
+      {
+        name: "legacyName",
+        kind: "declaration",
+        file: "src/Foo.php",
+        line: 7,
+        exported: true,
+        indented: true,
+      },
+    ]);
+    expect(result.counts).toEqual({ removed: 1, sites: 2, allowlisted: 0 });
+    expect(findSite(result.sites, "README.md", 2)?.kind).toBe("doc");
+    expect(findSite(result.sites, "src/Foo.php", 5)?.kind).toBe("comment");
+    expect(result.status).toBe("fail");
+    expect(result.warnings).toEqual([]);
+  });
+});
+
+/** `src/A.php` loses its `private function legacyThing()` between base
+ * and head; `src/B.php` (unchanged across the range, so never a "moved"
+ * added line) declares the name in the row's shape at head. */
+const PHP_LOCAL_A_BASE = [
+  "<?php",
+  "",
+  "class A {",
+  "    private function legacyThing() {",
+  "        return 1;",
+  "    }",
+  "}",
+  "",
+].join("\n");
+
+const PHP_LOCAL_A_HEAD = "<?php\n\nclass A {\n}\n";
+
+const PHP_HEAD_DECL_ROWS: readonly {
+  label: string;
+  headDecl: string;
+  expect: "reported" | "suppressed";
+}[] = [
+  {
+    label: "re-declared as a method",
+    headDecl: "    private function legacyThing() {}",
+    expect: "suppressed",
+  },
+  {
+    label: "re-declared as a class constant",
+    headDecl: "    private const legacyThing = 1;",
+    expect: "suppressed",
+  },
+  {
+    label: "re-declared as an interface (PHP keyword in the derived grep)",
+    headDecl: "interface legacyThing {}",
+    expect: "suppressed",
+  },
+  {
+    label: "re-declared as a trait (PHP keyword in the derived grep)",
+    headDecl: "trait legacyThing {}",
+    expect: "suppressed",
+  },
+  {
+    label: "re-declared as an enum (PHP keyword in the derived grep)",
+    headDecl: "enum legacyThing: string {}",
+    expect: "suppressed",
+  },
+  {
+    label: "only mentioned at head (negative control)",
+    headDecl: "$x = legacyThing();",
+    expect: "reported",
+  },
+];
+
+describe("drift (local-binding rule, PHP)", () => {
+  it("the head grep pattern is derived from DECLARATION_KEYWORDS and carries the PHP keywords", () => {
+    const pattern = headDeclarationPattern("legacyName");
+    expect(pattern).toBe(`(${DECLARATION_KEYWORDS.join("|")}) legacyName`);
+    for (const keyword of ["interface", "trait", "enum"]) {
+      expect(DECLARATION_KEYWORDS).toContain(keyword);
+    }
+    expect(headDeclarationPattern("a$b")).toContain("\\$b");
+  });
+
+  it.each(PHP_HEAD_DECL_ROWS)(
+    "a private method removed in src/A.php is $expect when src/B.php $label",
+    async (row) => {
+      const repo = initRepo();
+      writeFile(repo, "src/A.php", PHP_LOCAL_A_BASE);
+      writeFile(repo, "src/B.php", `<?php\n\n${row.headDecl}\n`);
+      writeFile(
+        repo,
+        "notes.md",
+        "# Notes\n\nlegacyThing is the helper this module uses.\n",
+      );
+      const base = commit(repo, "base");
+      writeFile(repo, "src/A.php", PHP_LOCAL_A_HEAD);
+      const head = commit(repo, "head");
+
+      const result = await drift({ cwd: repo, base, head });
+      const localBinding = {
+        name: "legacyThing",
+        source: "local-binding",
+      } as const;
+      if (row.expect === "reported") {
+        expect(findSite(result.sites, "notes.md", 3)?.identifier).toBe(
+          "legacyThing",
+        );
+        expect(result.ignoredIdentifiers).not.toContainEqual(localBinding);
+      } else {
+        expect(result.sites.filter((s) => s.path === "notes.md")).toEqual([]);
+        expect(findSite(result.allowlisted, "notes.md", 3)).toMatchObject({
+          identifier: "legacyThing",
+          allowlisted: true,
+          allowlistReason: 'local binding "legacyThing" still declared at head',
+        });
+        expect(result.ignoredIdentifiers).toContainEqual(localBinding);
+      }
+    },
+  );
+});
+
+describe("drift (extractor-gap warning)", () => {
+  /** base: a `.py`, a second `.py` and a `.sh` each with content lines,
+   * plus a doc; head: all three rewritten (their lines all removed). */
+  function gapRepo(): { repo: string; base: string; head: string } {
+    const repo = initRepo();
+    writeFile(repo, "tools.py", "def helperThing():\n    return 1\n");
+    writeFile(repo, "inner/more.py", "def otherThing():\n    return 2\n");
+    writeFile(repo, "run.sh", "run_thing() {\n  echo hi\n}\n");
+    writeFile(repo, "docs/a.md", "# A\n\nNothing about helpers.\n");
+    const base = commit(repo, "base");
+    writeFile(repo, "tools.py", "# rewritten\n");
+    writeFile(repo, "inner/more.py", "# rewritten\n");
+    writeFile(repo, "run.sh", "# rewritten\n");
+    const head = commit(repo, "head");
+    return { repo, base, head };
+  }
+
+  it("warns once per extension, naming it and the file count, in extension order, with no other warning", async () => {
+    const { repo, base, head } = gapRepo();
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.warnings).toEqual([
+      "no declaration extractor for .py; removed identifiers from 2 files not collected",
+      "no declaration extractor for .sh; removed identifiers from 1 files not collected",
+    ]);
+  });
+
+  it("does not warn for a diff that only removed lines from .md files", async () => {
+    const repo = initRepo();
+    writeFile(repo, "docs/a.md", "# A\n\nAn old paragraph.\n");
+    const base = commit(repo, "base");
+    writeFile(repo, "docs/a.md", "# A\n\nA new paragraph.\n");
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("does not warn for a diff that removed lines from .php files (PHP has an extractor now)", async () => {
+    const repo = initRepo();
+    writeFile(repo, "src/Foo.php", FOO_PHP_BASE);
+    const base = commit(repo, "base");
+    writeFile(repo, "src/Foo.php", FOO_PHP_HEAD);
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.warnings).toEqual([]);
+    expect(result.removedIdentifiers.map((r) => r.name)).toEqual([
+      "legacyName",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------
 // drift(): every git call is resolved against the work tree's root, not
 // the caller's `cwd`, so running from a subdirectory still reports
 // root-relative paths and reads the right file for a heading/released-
@@ -1402,6 +1871,61 @@ describe("drift CLI", () => {
     const parsed = JSON.parse(run.stdout) as Record<string, unknown>;
     const warnings = parsed.warnings as string[];
     expect(warnings.some((w) => w.includes("MovedThing"))).toBe(true);
+  });
+
+  it("drift --base main --head HEAD --summary on the PHP repro: removed=1 sites=2, exit 1", async () => {
+    const { repo } = buildPhpReproRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      "main",
+      "--head",
+      "HEAD",
+      "--summary",
+    ]);
+    expect(run.code).toBe(1);
+    expect(run.stdout).toContain(
+      "README.md:2 | legacyName | doc | Call legacyName() to get the value.",
+    );
+    expect(run.stdout).toContain(
+      "src/Foo.php:5 | legacyName | comment | * legacyName returns the legacy value.",
+    );
+    expect(run.stdout).toMatch(
+      /totals: status=fail removed=1 sites=2 allowlisted=0 warnings=0 ignored=0/,
+    );
+  });
+
+  it("drift --summary counts extractor-gap warnings in warnings= and prints one line each", async () => {
+    const repo = initRepo();
+    writeFile(repo, "tools.py", "def helperThing():\n    return 1\n");
+    writeFile(repo, "run.sh", "run_thing() {\n  echo hi\n}\n");
+    writeFile(repo, "README.md", "# Readme\n\nAll current here.\n");
+    const base = commit(repo, "base");
+    writeFile(repo, "tools.py", "# rewritten\n");
+    writeFile(repo, "run.sh", "# rewritten\n");
+    const head = commit(repo, "head");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+      "--summary",
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain(
+      "warning: no declaration extractor for .py; removed identifiers from 1 files not collected",
+    );
+    expect(run.stdout).toContain(
+      "warning: no declaration extractor for .sh; removed identifiers from 1 files not collected",
+    );
+    expect(run.stdout).toMatch(
+      /totals: status=ok removed=0 sites=0 allowlisted=0 warnings=2 ignored=0/,
+    );
   });
 
   it("keeps counts whole under a tight --max-chars even though sites/allowlisted are cut", async () => {
@@ -2133,6 +2657,11 @@ describe("drift (local-binding rule)", () => {
     headLine: string;
     file?: string;
     keyword?: string;
+    /** Overrides the default base-side declaration of `err` for this
+     * row's keyword - needed where that keyword is not one the TS/JS
+     * extractor reads (PHP's `trait`), so the removal candidate still
+     * extracts. */
+    baseDecl?: string;
     prefix?: string;
     trailing?: string;
     rejectedBy?: "grep";
@@ -2241,6 +2770,34 @@ describe("drift (local-binding rule)", () => {
       keyword: "class",
       expect: "suppressed",
     },
+    // the keywords DECLARATION_KEYWORDS gained alongside PHP's: a head-side
+    // `type`, `interface` or `enum` declaration suppresses too, and `trait`
+    // (PHP's keyword, matched as a shape only) suppresses a TS removal
+    {
+      label: "type",
+      headLine: "  type err = string;",
+      keyword: "type",
+      expect: "suppressed",
+    },
+    {
+      label: "interface",
+      headLine: "  interface err { x: 1 }",
+      keyword: "interface",
+      expect: "suppressed",
+    },
+    {
+      label: "enum",
+      headLine: "  enum err { A }",
+      keyword: "enum",
+      expect: "suppressed",
+    },
+    {
+      label: "trait (base-side removal via a TS keyword)",
+      headLine: "  trait err;",
+      keyword: "trait",
+      baseDecl: "  interface err {}",
+      expect: "suppressed",
+    },
     // the character after the name: absent, or outside the continuation class
     {
       label: "type annotation after the name",
@@ -2301,11 +2858,12 @@ describe("drift (local-binding rule)", () => {
     async (row) => {
       const keyword = row.keyword ?? "const";
       const baseDecl =
-        keyword === "function"
+        row.baseDecl ??
+        (keyword === "function"
           ? "  function err() {}"
           : keyword === "class"
             ? "  class err {}"
-            : `  ${keyword} err = new Error("x");`;
+            : `  ${keyword} err = new Error("x");`);
       const repo = initRepo();
       writeFile(
         repo,

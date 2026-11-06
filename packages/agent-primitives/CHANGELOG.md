@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `drift` extracts removed identifiers from PHP:
+  `(public|protected|private|static|abstract|final|readonly)*
+  (function|const|class|interface|trait|enum) Name` at any indentation,
+  keywords matched
+  case-insensitively, a `private`/`protected` member reported
+  `exported: false` and everything else `exported: true`, comment
+  lines skipped and anonymous closures/`new class` contributing
+  nothing (`define()`, same-line `#[...]` attributes and string
+  literals are documented limits). The head-side local-binding grep
+  learns `interface`, `trait`, `enum` and `type`, and its pattern is
+  now derived from the one `DECLARATION_KEYWORDS` list, so a name
+  re-declared at head with any of these keywords suppresses the way a
+  `class` one always did. Independently of the language, when the diff
+  removes lines from a scanned file whose extension has no declaration
+  extractor (today `.py` and `.sh`), the envelope warns once per
+  extension, `no declaration extractor for .<ext>; removed identifiers
+  from N files not collected`, and `--summary` prints and counts it.
+  See docs/drift.md.
+
 ## [0.20.0] - 2026-11-04
 
 ### Added

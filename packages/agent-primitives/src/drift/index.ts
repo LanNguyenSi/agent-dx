@@ -1,13 +1,15 @@
 import { UsageError } from "../envelope.js";
+import { withoutPathspecEnv } from "../git-env.js";
 import { findGitRoot } from "../probe/containment.js";
 import {
   diffText,
-  grepHeadDeclarations,
   grepIdentifier,
   isShallowRepository,
   mergeBase,
   resolveCommit,
+  runGit,
   showFile,
+  type GitRunResult,
 } from "./git.js";
 import {
   parseRemovedIdentifiers,
@@ -159,15 +161,84 @@ function capSiteText(text: string): string {
   return `${text.slice(0, SITE_TEXT_MAX_CHARS)}...`;
 }
 
-/** The declaration keywords the head-side binding query greps for (see
- * `grepHeadDeclarations`). */
+/** The declaration keywords the head-side binding query greps for
+ * (`headDeclarationGrep`), in the order they appear in its pattern. The
+ * TS/JS set plus the keywords every other language this command extracts
+ * declarations from spells a declaration with: PHP declares with
+ * `interface`, `trait` and `enum` (its `function`/`const`/`class` are
+ * already listed), and a head-side `type`, `interface` or `enum`
+ * declaration now counts for the TS/JS local-binding rule the same way a
+ * `class` one does. Add a keyword HERE, never in the grep call, which is
+ * derived from this list. */
 export const DECLARATION_KEYWORDS = [
   "const",
   "let",
   "var",
   "function",
   "class",
+  "type",
+  "interface",
+  "enum",
+  "trait",
 ];
+
+/** Regex metacharacters, escaped before an identifier is put into an
+ * extended regular expression (a name can legally contain `$`). Same
+ * escape `git.ts` applies to its own fixed-keyword patterns. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
+}
+
+/** The `git grep -E` pattern of the head-side binding query: every
+ * declaration keyword followed by ` <name>`, built from
+ * `DECLARATION_KEYWORDS` so the keyword list lives exactly once. The
+ * trailing word boundary the shape needs is `-w`'s own (git's `-E` on a
+ * BSD regex build reads `\b` as a literal, which would silently match
+ * nothing); `-w` also supplies the boundary BEFORE the keyword, so
+ * `superclass err` never matches the query for `err`. */
+export function headDeclarationPattern(
+  name: string,
+  keywords: readonly string[] = DECLARATION_KEYWORDS,
+): string {
+  return `(${keywords.join("|")}) ${escapeRegExp(name)}`;
+}
+
+/** `git grep -n -w -E -e <headDeclarationPattern(name)> <rev> --
+ * <pathspecs>`: does `name` still have a declaration-shaped line at
+ * `rev` anywhere in the scanned source files (the head-side binding the
+ * local-binding rule of `drift()` looks for)? One call per name, never
+ * one per file. Two shapes that match here are not live declarations
+ * and are filtered after the grep, in the caller
+ * (`isLiveHeadDeclaration`): a comment line (`// const stamp = old
+ * approach`) and a longer name whose next character `-w` reads as a word
+ * boundary (`let retired$old`, because git treats `$` as a non-word
+ * character). A name bound by destructuring (`const { err } = ...`) and
+ * a function parameter are not declaration shapes and are not seen. */
+function headDeclarationGrep(
+  cwd: string,
+  rev: string,
+  name: string,
+  pathspecs: readonly string[],
+): GitRunResult {
+  return runGit(
+    cwd,
+    [
+      "grep",
+      "-n",
+      "-w",
+      "-E",
+      "-e",
+      headDeclarationPattern(name),
+      rev,
+      "--",
+      ...pathspecs,
+    ],
+    // The pathspecs are globs: an ambient GIT_*_PATHSPECS switch would
+    // make git grep match none of them and exit 1, which reads as "no
+    // head-side declaration".
+    withoutPathspecEnv(),
+  );
+}
 
 /** What a head-side hit's text before the keyword, trimmed, may start with
  * to count as a comment line (`isLiveHeadDeclaration` rejects it). */
@@ -180,7 +251,9 @@ export const NAME_CONTINUATION_CHARACTER = /[A-Za-z0-9_$]/;
 /**
  * Whether one head-side grep hit is a live declaration of `name` rather
  * than a mention grep's shape cannot tell apart. `git grep -w -E` matches
- * any line CARRYING `(const|let|var|function|class) <name>`, so two shapes
+ * any line CARRYING `(const|let|var|function|class|type|interface|enum|
+ * trait) <name>` (the pattern is derived from `DECLARATION_KEYWORDS`), so
+ * two shapes
  * reach the caller without being declarations: a comment line (`// const
  * stamp = old approach`) and a longer name whose next character git's `-w`
  * reads as a word boundary (`let retired$old` - git treats `$` as a
@@ -191,7 +264,7 @@ export const NAME_CONTINUATION_CHARACTER = /[A-Za-z0-9_$]/;
  * shape inside a string, a template literal, JSX text, or a comment that
  * does not start the line still counts as a declaration. The word boundary
  * BEFORE the keyword is not checked here either; it is `git grep -w`'s
- * (see `grepHeadDeclarations`). Behind `-w` the letter, digit and `_`
+ * (see `headDeclarationGrep`). Behind `-w` the letter, digit and `_`
  * parts of the trailing check are redundant (only `$` reaches it), kept as
  * a guard that does not depend on the grep flag.
  */
@@ -359,6 +432,18 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
       `deleted file basename skipped, not reported as a removed identifier (not a recognized source extension, or "${skipped.basename}" does not look like an identifier): ${skipped.path}`,
     );
   }
+  // The extractor gap, once per extension, in extension order (which
+  // `parseRemovedIdentifiers` already sorted): the diff removed lines
+  // from scanned source files whose language has no declaration
+  // extractor (today `.py` and `.sh`), so declarations may have been
+  // removed there and nothing was collected. An absence of removed
+  // identifiers from such a file is then a known blind spot, not a
+  // clean result.
+  for (const gap of parsed.extractorGaps) {
+    warnings.push(
+      `no declaration extractor for .${gap.ext}; removed identifiers from ${String(gap.files)} files not collected`,
+    );
+  }
 
   const uniqueNames = [...new Set(parsed.removed.map((r) => r.name))];
 
@@ -409,7 +494,7 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
           candidate.indented === true,
       );
     if (!everyCandidateLocal) continue;
-    const head = grepHeadDeclarations(gitRoot, headSha, name, SOURCE_PATHSPECS);
+    const head = headDeclarationGrep(gitRoot, headSha, name, SOURCE_PATHSPECS);
     if (head.error !== undefined || (head.status !== 0 && head.status !== 1)) {
       warnings.push(
         `git grep for a head-side declaration of "${name}" at ${headSha} failed: ${head.error ?? `git exited ${String(head.status)}: ${head.stderr.trim()}`}`,
