@@ -1209,7 +1209,70 @@ describe("drift CLI", () => {
     const parsed = JSON.parse(run.stdout) as Record<string, unknown>;
     expect(parsed.status).toBe("usage_error");
     expect(parsed.tool).toBe("agent-primitives");
-    expect(parsed.command).toBe("unknown");
+    // The refusal comes from inside the `drift` action (the library's
+    // own unresolvable-rev `UsageError`), so the envelope names the
+    // subcommand whose parsing was in flight.
+    expect(parsed.command).toBe("drift");
+  });
+
+  it("--head is optional and defaults to HEAD: without it the run resolves head to HEAD and says so", async () => {
+    const { repo, base, head } = buildSyntheticRepo();
+    const without = await spawnCli(["-C", repo, "drift", "--base", base]);
+    const given = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      "HEAD",
+    ]);
+    expect(without.code).toBe(given.code);
+    const parsedWithout = JSON.parse(without.stdout) as Record<string, unknown>;
+    const parsedGiven = JSON.parse(given.stdout) as Record<string, unknown>;
+    expect(parsedWithout.status).toBe("fail");
+    expect(parsedWithout.head).toBe("HEAD");
+    expect(parsedWithout.head_sha).toBe(head);
+    expect(parsedWithout.counts).toEqual(parsedGiven.counts);
+    // The `--summary` view runs the same way with `--head` absent.
+    const summary = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--summary",
+    ]);
+    expect(summary.code).toBe(without.code);
+    expect(summary.stdout).toContain("totals: status=fail");
+  });
+
+  it("a given --head wins over the HEAD default: a rev behind HEAD is the range that runs", async () => {
+    const { repo, base, head } = buildSyntheticRepo();
+    // A third commit on top: HEAD is now past the synthetic range's
+    // head, so `--base base` alone measures a different (larger) range.
+    fs.rmSync(path.join(repo, "notes2.md"));
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "later"], { cwd: repo });
+    const atHead = await spawnCli(["-C", repo, "drift", "--base", base]);
+    const atGiven = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+    ]);
+    const parsedHead = JSON.parse(atHead.stdout) as Record<string, unknown>;
+    const parsedGiven = JSON.parse(atGiven.stdout) as Record<string, unknown>;
+    expect(parsedGiven.head).toBe(head);
+    expect(parsedGiven.head_sha).toBe(head);
+    expect(parsedHead.head).toBe("HEAD");
+    expect(parsedHead.head_sha).not.toBe(head);
+    // The counts differ between the two ranges: the given rev, not the
+    // default, decided what ran.
+    expect(parsedGiven.counts).not.toEqual(parsedHead.counts);
   });
 
   it("exits 1 with status fail and the documented envelope shape when sites are found", async () => {

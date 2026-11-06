@@ -886,6 +886,46 @@ function installSignalHandlers(): void {
 
 const program = new Command();
 
+// The subcommand commander dispatched to, as recorded by the dispatch
+// hook below. Commander throws parse-level usage errors (unknown option,
+// missing required option) from the subcommand that was being parsed and
+// `UsageError`s from inside action handlers, in both cases without a
+// reference to the command on the error; this is the CLI's record of the
+// command path it had reached. It stays `undefined` when commander
+// failed before any subcommand was dispatched (unknown subcommand, a bad
+// global option), which is exactly when the usage-error envelope's
+// `command` must stay `unknown`.
+let dispatchedSubcommand: Command | undefined;
+program.hook("preSubcommand", (_thisCommand, subcommand) => {
+  dispatchedSubcommand = subcommand;
+});
+
+/** The subcommand the usage-error envelope reports, derived from the
+ * command path commander had parsed when the error unwound.
+ *
+ * A `UsageError` (or any error) from an action handler necessarily ran
+ * after the subcommand was chosen and fully parsed, so it names the
+ * dispatched subcommand. A `CommanderError` is subtler: commander checks
+ * the mandatory options only once the whole option set of the
+ * dispatched subcommand is parsed (those name it), but it fails on an
+ * option's own argument parser (InvalidArgumentError) or on an option
+ * name it cannot match (unknown option) while still parsing -- those
+ * stay top-level parser errors with no command. That also covers a bad
+ * GLOBAL option: with subcommands registered, commander defers the
+ * unmatched-name check into the dispatched subcommand, so an unknown
+ * option can only be reported as unknown if unknown options never name
+ * the subcommand at all. No subcommand dispatched (unknown subcommand,
+ * an error before dispatch) is always `unknown`. */
+function usageCommandName(err: unknown): string {
+  if (dispatchedSubcommand === undefined) return "unknown";
+  if (err instanceof CommanderError) {
+    return err.code === "commander.missingMandatoryOptionValue"
+      ? dispatchedSubcommand.name()
+      : "unknown";
+  }
+  return dispatchedSubcommand.name();
+}
+
 // Route commander's own usage errors (unknown option, missing required
 // option, bad argument, unknown subcommand, ...) through a thrown
 // CommanderError instead of an implicit process.exit(1), so they can be
@@ -1948,6 +1988,30 @@ function explicitlyGiven(command: Command, key: string): boolean {
   return source !== undefined && source !== "default";
 }
 
+/** Whether a `plan.results[i].mutant` is a fully computed mutant record
+ * rather than the line-only record a `mutant_not_applicable` row carries
+ * (see `PlanMutantResult.mutant`): only the former has the `before` /
+ * `after` excerpt `reconcileEnvelopeDiffTruncation` compares against. */
+function isComputedMutantRecord(
+  mutant:
+    | {
+        line: number;
+        file?: string;
+        before?: string;
+        after?: string;
+        form?: string;
+      }
+    | undefined,
+): mutant is { line: number; file: string; before: string; after: string } {
+  return (
+    mutant !== undefined &&
+    mutant.file !== undefined &&
+    mutant.before !== undefined &&
+    mutant.after !== undefined &&
+    mutant.form !== undefined
+  );
+}
+
 /**
  * Runs `probe --plan <path>`: read and validate the plan, reconcile the
  * run-shaping options with it, run every mutant against the baseline of
@@ -2126,7 +2190,15 @@ async function runProbePlanCommand(
   // back pushed the whole envelope past it.
   reconcileEnvelopeDiffTruncation(
     envelope,
-    { planResults: result.results },
+    {
+      // Only rows with a fully computed `mutant` record have an excerpt
+      // this correction can compare against; a `mutant_not_applicable`
+      // row's line-only record (see `PlanMutantResult.mutant`) never had
+      // one, and is passed as no original rather than half a one.
+      planResults: result.results.map((row) =>
+        isComputedMutantRecord(row.mutant) ? { mutant: row.mutant } : undefined,
+      ),
+    },
     global.maxChars,
   );
   emitProbe(
@@ -2416,6 +2488,7 @@ program
         mutation_probe: result.mutation_probe,
         test: result.test,
         baseline: result.baseline,
+        line_content: result.line_content,
       },
       envelopeInput,
     );
@@ -2507,7 +2580,7 @@ program
 
 interface DriftCliOptions {
   base: string;
-  head: string;
+  head?: string;
   allow: string[];
   ignoreIdentifier: string[];
   ignoreIdentifierFile?: string;
@@ -2587,7 +2660,7 @@ program
     "Report docs and comments that still describe an identifier a git range removed or renamed",
   )
   .requiredOption("--base <rev>", "base revision")
-  .requiredOption("--head <rev>", "head revision")
+  .option("--head <rev>", "head revision (default HEAD)")
   .option(
     "--allow <glob>",
     "glob to allowlist (repeatable)",
@@ -2633,7 +2706,8 @@ program
     const result = await drift({
       cwd: global.cwd,
       base: opts.base,
-      head: opts.head,
+      // An absent `--head` means HEAD, like `hygiene`; a given one wins.
+      head: opts.head ?? "HEAD",
       allow: opts.allow,
       ignoreIdentifiers,
       strict: Boolean(opts.strict),
@@ -3846,12 +3920,17 @@ export function withOptionHint(message: string): string {
  * a plain Error, a UsageError, and a CommanderError) instead of relying on
  * a process-env test seam to force a runtime error through the real CLI
  * entrypoint.
+ *
+ * `command` names the subcommand whose parsing was in flight when the
+ * error unwound (`hygiene`, `drift`, ...); it stays `"unknown"` when
+ * commander failed before a subcommand was dispatched.
  */
 export function mapTopLevelError(
   err: unknown,
   global: ResolvedGlobal,
   start: number,
   writeErrorLog = true,
+  command = "unknown",
 ): EnvelopeOutput {
   const durationMs = Date.now() - start;
   if (err instanceof CommanderError || err instanceof UsageError) {
@@ -3859,7 +3938,7 @@ export function mapTopLevelError(
       err instanceof CliReasonedUsageError ? err.reason : "usage_error";
     return buildEnvelope({
       version: VERSION,
-      command: "unknown",
+      command,
       status: "usage_error",
       durationMs,
       cwd: global.cwd,
@@ -3873,7 +3952,7 @@ export function mapTopLevelError(
   const message = err instanceof Error ? err.message : String(err);
   return buildEnvelope({
     version: VERSION,
-    command: "unknown",
+    command,
     status: "error",
     durationMs,
     cwd: global.cwd,
@@ -3883,6 +3962,42 @@ export function mapTopLevelError(
     maxChars: global.maxChars,
     logDir: writeErrorLog ? global.logDir : undefined,
   });
+}
+
+/** Whether a top-level usage error for this dispatched subcommand should
+ * print the one-line `--summary` view instead of the JSON envelope: the
+ * subcommand registered a `--summary` flag, `--summary` was actually
+ * given, and no competing view flag (`--print`, probe's `--report`) was
+ * -- with a second view requested the caller has not settled on one
+ * shape, and the exclusive-views error itself keeps the JSON envelope. */
+function wantsSummaryUsageView(command: Command | undefined): boolean {
+  if (command === undefined) return false;
+  if (!command.options.some((option) => option.long === "--summary")) {
+    return false;
+  }
+  const opts = command.opts() as {
+    summary?: boolean;
+    print?: unknown;
+    report?: unknown;
+  };
+  return (
+    opts.summary === true &&
+    opts.print === undefined &&
+    opts.report === undefined
+  );
+}
+
+/** The one line `--summary` prints for a top-level usage error, in the
+ * same `totals:` shape as the successful summary's: the message rides
+ * along collapsed onto the one line because a usage error has no other
+ * view to carry it. */
+export function renderUsageErrorSummaryLine(
+  command: string,
+  reason: string,
+  message: string,
+): string {
+  const oneLine = message.replace(/\s+/g, " ").trim();
+  return `totals: status=usage_error command=${command} reason=${reason} message=${oneLine}\n`;
 }
 
 // Only run the CLI (and its process.exit calls) when this file is executed
@@ -3922,6 +4037,7 @@ if (isMainModule) {
       return;
     }
     const global = bestEffortGlobal(program.opts<GlobalOptions>());
+    const command = usageCommandName(err);
     const { envelope, exitCode } = mapTopLevelError(
       err,
       global,
@@ -3929,7 +4045,24 @@ if (isMainModule) {
       !process.argv
         .slice(2)
         .some((arg) => arg === "snapshot" || arg === "delta"),
+      command,
     );
+    // A `--summary` run that never reached its view: the one-line totals
+    // form instead of the JSON envelope, same exit code.
+    if (
+      wantsSummaryUsageView(dispatchedSubcommand) &&
+      envelope.status === "usage_error"
+    ) {
+      writeAndExit(
+        renderUsageErrorSummaryLine(
+          command,
+          String(envelope.reason ?? "usage_error"),
+          String(envelope.message ?? ""),
+        ),
+        exitCode,
+      );
+      return;
+    }
     emit(envelope, exitCode, {
       format: global.format,
       maxChars: global.maxChars,

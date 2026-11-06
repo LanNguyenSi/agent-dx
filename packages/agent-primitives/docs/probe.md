@@ -2206,10 +2206,30 @@ What a run that stops early prints, by case:
   command: an unknown `--print` field, an unknown `--report` kind,
   `--summary` together with `--print`, `--report` together with either
   of them, `--replayed` without `--report`, an invalid value, an invalid
-  combination such as `--plan` with `--pre`.
+  combination such as `--plan` with `--pre`. The envelope's `command`
+  names the subcommand whose parsing failed (`probe` here), or `unknown`
+  when the failure happened before a subcommand was chosen (an unknown
+  subcommand, a bad global option). Given `--summary` alone (no
+  `--print`, no `--report`), a usage error of a command that supports
+  `--summary` prints instead of the envelope one summary line, exit `2`
+  unchanged:
+  `totals: status=usage_error command=<command> reason=<reason> message=<message>`,
+  with the message collapsed onto that one line. The same line stands in
+  for the JSON envelope of a `hygiene`, `drift` or `verify` usage error
+  given `--summary` alone; `patch` has no `--summary` and always gets
+  the envelope.
 - A refusal that names no mutant prints the `totals:` line (`total=0`)
   and a `note:` line with the first warning or message: an unreadable
   plan file, a single-probe `--file` outside the containment root.
+- A single-probe `mutant_not_applicable` refusal prints a `totals:` line
+  that counts the mutant (`total=1 inconclusive=1`) and a `note:` line
+  with the first warning, ending with `line=<the line's content>` when
+  the refusal carries `line_content`. In a `--plan` the same refusal is
+  an ordinary mutant line (`inconclusive(mutant_not_applicable)`) whose
+  id is `file:line` like every other line (the line is known even when
+  the target text was not found on it), with `log=-` when the dry run
+  left no log and a trailing `line=<the line's content>` column when the
+  refusal carries `line_content`.
 - A refusal or failure that concerns a mutant prints that mutant's
   `not_run(...)` line, or `not_run` with the reason in `totals:`, and the
   `totals:` line with `not_run=1`, and no `note:` line: a failing
@@ -2253,7 +2273,15 @@ mutant run's log, or the baseline's when no mutant run happened (for a
 `--plan` naming more than one test command, its own command's baseline;
 such a plan also ends every mutant line in a `test=<command>` column and
 prints one line per baseline above the `totals:` line, see [A test
-command per mutant](#a-test-command-per-mutant)). The cases above say what an early stop prints. `-m` is a character budget for the printed summary, not a line count: when
+command per mutant](#a-test-command-per-mutant)). A
+`mutant_not_applicable` row prints `log=-` instead of the baseline when
+its dry run left no log (a target text that matched nothing leaves
+none; a refused `git apply` leaves its own log, which is then named),
+and ends in a
+trailing `line=<the line's content>` column naming what the refusal's
+`line_content` quotes (a refusal that carries no `line_content` prints
+no `line=` part); the single form has no such row, so there the
+same `line=` rides at the end of the `note:` line. The cases above say what an early stop prints. `-m` is a character budget for the printed summary, not a line count: when
 the mutant lines do not fit, the last ones are replaced by a marker line
 naming how many were omitted and, when the run saved one, the path of the
 full result (`result-full-*.json`) if it fits within `-m` beside the totals
@@ -2518,8 +2546,11 @@ mutant, and `--print line_content` reads it. The status stays
 `inconclusive`, `reason` stays `mutant_not_applicable` and the exit code
 stays `2`; the other causes of that reason (an empty `-M`, a replacement
 identical to the matched text, a line out of range, a patch that does not
-apply) carry no `line_content`. `--summary` and `--report` do not print
-it. The line is repository content, the same class as the `mutant.before`
+apply) carry no `line_content`. `--report` does not print it;
+`--summary` prints it as the trailing `line=` column of a refused `--plan`
+row or, for a single probe, at the end of the `note:` line (see
+[Compact views](#compact-views---summary---print-and---report)). The line
+is repository content, the same class as the `mutant.before`
 the result already echoes for an applied mutant.
 
 `aborted` is itself a three-site reason, the mirror image of

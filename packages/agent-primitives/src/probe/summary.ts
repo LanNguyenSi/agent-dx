@@ -110,6 +110,10 @@ interface SummaryMutantLike {
   };
   test?: { stdoutTail?: string; stderrTail?: string; logPath?: string };
   logs?: string[];
+  /** The refused line's content, as `ProbeResult.line_content` carries
+   * it for a `mutant_not_applicable` dry-run refusal; the row ends in a
+   * `line=` column naming it. */
+  line_content?: string;
   /** A plan row's own baseline group (`plan.baselines[i]`) and the test
    * command it ran. */
   baseline_index?: number;
@@ -133,6 +137,10 @@ export interface SummaryInput {
   warnings?: string[];
   expectation?: string;
   mutant?: SummaryMutantLike["mutant"];
+  /** See `SummaryMutantLike.line_content`: the single form's own
+   * `line_content` (a `mutant_not_applicable` refusal prints no mutant
+   * line, so this rides onto the `note:` line instead). */
+  line_content?: string;
   mutation_probe?: SummaryMutantLike["mutation_probe"];
   test?: SummaryMutantLike["test"];
   baseline?: { logPath?: string };
@@ -204,12 +212,22 @@ function mutantLine(
   const probe = row.mutation_probe;
   const verdict = probe?.result ?? row.status ?? "inconclusive";
   const reason = probe?.reason ?? row.reason;
-  const log =
-    row.test?.logPath ??
-    (row.logs && row.logs.length > 0
-      ? row.logs[row.logs.length - 1]
-      : undefined) ??
-    baselineLog;
+  // A `mutant_not_applicable` mutant never applied and never ran, so it
+  // has no log of its own: print a dash rather than point at a baseline
+  // log as though it were the mutant's run. A dry run that did produce
+  // a log (a refused `git apply`) still names it, and every other
+  // never-ran reason keeps the baseline fallback -- there the baseline
+  // log is the evidence the row is about.
+  const neverRan =
+    (row.logs === undefined || row.logs.length === 0) &&
+    reason === MUTANT_NOT_APPLICABLE;
+  const log = neverRan
+    ? "-"
+    : (row.test?.logPath ??
+      (row.logs && row.logs.length > 0
+        ? row.logs[row.logs.length - 1]
+        : undefined) ??
+      baselineLog);
   const parts = [
     id,
     reason !== undefined && verdict !== "killed" && verdict !== "survived"
@@ -222,6 +240,11 @@ function mutantLine(
     `failing=${verdict === "killed" ? firstFailingLine(row.test) : "-"}`,
     `log=${log || "-"}`,
     ...(testCommand !== undefined ? [`test=${oneLine(testCommand)}`] : []),
+    // Last, after `test=`: the line a refused mutant's `-M` target was
+    // looked for on, which the refusal's `line_content` quotes.
+    ...(row.line_content !== undefined
+      ? [`line=${oneLine(row.line_content)}`]
+      : []),
   ];
   return parts.join(" | ");
 }
@@ -315,12 +338,19 @@ export function renderProbeSummary(
       );
     }
     const result = input.mutation_probe?.result;
+    // A single probe refused as `mutant_not_applicable` carries neither
+    // a `mutant` nor a `mutation_probe` record (the refusal-shape rule
+    // in `session.ts`), so the record test above misses it -- but a
+    // mutant was named and refused, and the plan form counts its row:
+    // the single form counts it too, as `total=1 inconclusive=1`.
+    const refusedNotApplicable =
+      !hasMutant && input.reason === MUTANT_NOT_APPLICABLE;
     counts = {
-      total: hasMutant ? 1 : 0,
+      total: hasMutant || refusedNotApplicable ? 1 : 0,
       killed: result === "killed" ? 1 : 0,
       survived: result === "survived" ? 1 : 0,
       inconclusive:
-        hasMutant &&
+        (hasMutant || refusedNotApplicable) &&
         result !== "killed" &&
         result !== "survived" &&
         result !== "not_run"
@@ -335,8 +365,24 @@ export function renderProbeSummary(
   const totals = `totals: ${head} total=${counts.total} killed=${counts.killed} survived=${counts.survived} inconclusive=${counts.inconclusive} not_run=${counts.not_run} met=${counts.met} violated=${counts.violated}`;
   const tail: string[] = [...baselineLines, totals];
   const note = input.message ?? input.warnings?.[0];
-  if (counts.total === 0 && note !== undefined) {
-    tail.push(`note: ${oneLine(note)}`);
+  // The refused line's content rides on the note (the single form prints
+  // no mutant line for a refusal, so this is where `line=` appears); a
+  // note carrying it survives even with a mutant counted, unlike a bare
+  // warning note that only explains a zero-mutant run.
+  const linePart =
+    input.line_content !== undefined
+      ? `line=${oneLine(input.line_content)}`
+      : undefined;
+  const noteText = [note !== undefined ? oneLine(note) : undefined, linePart]
+    .filter((part): part is string => part !== undefined)
+    .join(" ");
+  if (
+    noteText !== "" &&
+    (counts.total === 0 ||
+      linePart !== undefined ||
+      input.reason === MUTANT_NOT_APPLICABLE)
+  ) {
+    tail.push(`note: ${noteText}`);
   }
   const size = (rows: string[]): number =>
     rows.reduce((n, r) => n + r.length + 1, 0);

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Three output lows, none of them verdicts. `probe --summary` of a
+  `mutant_not_applicable` refusal now counts the mutant in the single
+  form (`total=1 inconclusive=1`, like the plan form), names the refused
+  line as `line=<content>` (on the `note:` line for a single probe, as a
+  trailing column on the `--plan` row), keeps the plan row's id
+  `file:line` (the line is known when the target text is not found on
+  it) and prints `log=-` for a mutant that never ran instead of the
+  baseline's log. A usage error's envelope now names the subcommand
+  whose parsing was in flight (`hygiene`, `drift`, ...) instead of
+  `unknown` (which it stays when no subcommand was resolved), and given
+  `--summary` alone such an error prints the one line `totals:
+  status=usage_error command=<cmd> reason=<reason> message=<message>`
+  instead of the JSON envelope, exit `2` unchanged. `drift --head` is
+  optional and defaults to `HEAD`, like `hygiene`; the envelope still
+  reports the resolved `head_sha`.
+
 ## [0.20.0] - 2026-11-04
 
 ### Added
