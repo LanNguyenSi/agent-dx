@@ -38,6 +38,7 @@ export const HYGIENE_PRINTABLE_FIELDS: readonly string[] = [
   "intended_declarations",
   "intended_deletions",
   "findings",
+  "uncommitted_files",
   "counts",
 ];
 
@@ -150,7 +151,7 @@ export function renderHygieneSummary(
   ];
   const c = result.counts;
   const totals = withFullResult(
-    `totals: status=${result.status} files=${c.files} findings=${result.findings.length} backup_files=${c.backupFiles} extend_only_rewrites=${c.extendOnlyRewrites} test_case_drops=${c.testCaseDrops} warnings=${result.warnings.length} intended_deletions=${c.intendedDeletions}`,
+    `totals: status=${result.status} files=${c.files} findings=${result.findings.length} backup_files=${c.backupFiles} extend_only_rewrites=${c.extendOnlyRewrites} test_case_drops=${c.testCaseDrops} warnings=${result.warnings.length} uncommitted=${c.uncommitted} intended_deletions=${c.intendedDeletions}`,
     fullResult,
   );
   return fitSummary(rows, [totals], maxChars, "line", fullResult);

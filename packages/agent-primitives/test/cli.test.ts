@@ -413,6 +413,30 @@ describe("cli", () => {
     expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
 
+  it.each([
+    ["--staged", ["--staged"]],
+    ["--head", ["--head", "HEAD"]],
+  ])(
+    "hygiene --worktree with %s is a usage_error naming both flags, exit 2",
+    async (other, extra) => {
+      const dir = makeTmpDir();
+      const run = await spawnCli([
+        "-C",
+        dir,
+        "hygiene",
+        "--base",
+        "HEAD",
+        "--worktree",
+        ...extra,
+      ]);
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.message).toContain("--worktree");
+      expect(parsed.message).toContain(other);
+    },
+  );
+
   it("reports a missing required tool as status: missing with exit 1", async () => {
     const run = await spawnCli([
       "doctor",

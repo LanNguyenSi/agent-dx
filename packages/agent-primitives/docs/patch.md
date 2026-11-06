@@ -362,7 +362,7 @@ tools, so `patch` guards the branch itself: it refuses to write while any
 repository that holds a target sits on a protected branch.
 
 ```bash
-agent-primitives patch --plan edits.json                       # refused on main
+agent-primitives patch --plan edits.json                       # tracked target refused on main
 agent-primitives patch --plan edits.json --allow-protected     # writes anyway, recorded
 agent-primitives patch --plan edits.json --protected release --protected develop
 agent-primitives patch --plan edits.json --protect-detached
@@ -379,6 +379,71 @@ second repository, a nested repository and a submodule are judged by their
 own branch, besides the one at `-C`. The plan is refused when any of them
 is protected or cannot be resolved; one repository on a task branch does
 not outweigh another on `main`. Nothing is written in either.
+
+**Per target.** On a protected branch (or a detached HEAD under
+`--protect-detached`) the guard decides for each target, because no edit to
+a file that git ignores or does not track can reach the branch through this
+command: `git add` of such a file is a separate, deliberate action the guard
+does not police. In the repository root, with the root-relative path of the
+file, it asks tracked first and tells ignored from untracked only for a file
+that is not tracked. Tracked first, because the on-disk spelling of a file
+need not be the index's: on a case-insensitive volume `Bar.md` can be
+`bar.md` on disk with `git status` clean, and a file stored as NFC can sit
+on disk as NFD. Two steps. The fast path is `git ls-files -z --full-name`
+with literal pathspecs of the path in its spelling, its NFC form and its NFD form (a
+prefix directory included), each pathspec `icase` when `core.ignorecase` is
+true for the repository (read once per repository, only to choose `icase`;
+unset is false, a failed read counts as true); any entry listed is a tracked
+file. When it lists nothing, the guard compares files instead of spellings:
+it lists the index entries that sit directly in the target's directory
+(`:(glob,icase)` of the directory in its spelling, NFC and NFD; for a
+root-level target the top-level entries), and an entry whose `lstat`
+`dev:ino` equals the target's is the same file, so the target is tracked.
+This does not trust the configuration: a case or Unicode variant of a
+tracked file is refused on any volume where it is the same file, with
+`core.ignorecase` false or unset too, for a letter outside ASCII that
+differs only in case, and for a partly decomposed index entry. A variant
+that is a different file on the volume (a case-sensitive one) is untracked.
+The listing is bounded like the other calls (3 s, 64 KiB): a directory
+whose own entries do not fit the output cap, or any git or stat failure in
+the fallback, is `unknown` (fail closed, a warning). Limit: the directory
+itself is looked up by its spelling, NFC, NFD and ASCII case, so a
+directory component that differs from the index only by a non-ASCII case
+letter or a partly decomposed form is not found by the fallback (the file
+is then called untracked, and on a folding volume the edit lands on the
+tracked file). A file that shares its inode with a tracked file
+(a hard link, which `patch` refuses unless `--break-hard-links`) counts as
+tracked. Only a file that neither step finds goes on to `git check-ignore
+-q`, which says ignored (exit 0) or untracked (exit 1). Pathspecs are literal (a name with
+`[` or `*` is that name) and git's own pathspec switches in the environment
+(`GIT_ICASE_PATHSPECS` and the others) are removed from the guard's git
+environment. So a run file such as `.ai/runs/<run>/notes.md` in a checkout
+that stays on `master` can be edited without `--allow-protected`, and a
+tracked file of the same plan cannot. A target that does not exist is
+refused as `missing` by the path checks, before the guard classifies
+anything.
+
+| Target | Status in `targets` |
+| --- | --- |
+| no index entry, ignored (`check-ignore` exit 0) | `allowed_ignored` |
+| no index entry, not ignored | `allowed_untracked` |
+| an index entry, whatever the ignore rules say | the repository's refusal: `refused`, `would_refuse` or `allowed_protected` |
+| classification failed (git failed, timed out, answered unexpectedly) | counted as tracked (fail closed), `tracking: "unknown"`, and a warning `branch guard: could not tell whether "<file>" is tracked (<why>); treated as tracked` |
+
+The plan stays atomic: one tracked target in a protected repository refuses
+the whole plan, the untracked and ignored files of it included (nothing is
+written, their edits are `refused` with `the plan is refused as a whole`),
+and the refusal's detail names the tracked targets. `--allow-protected`
+lifts the tracked targets only; the others keep `allowed_untracked` or
+`allowed_ignored`, and `allowed_protected` is set only when a tracked target
+needed the override. Under `--dry-run` a tracked target reads `would_refuse`.
+A repository with no classifiable target (every file of it already refused
+by a path check, or `-C` in a repository none of the targets lie in) is
+judged as a whole, as before, and so is a branch that cannot be resolved
+(`protected_branch_unresolved`): no per-target allowance there. On an
+unprotected branch nothing is classified and `targets` is absent. Each
+classified target costs up to two git calls, each bounded like the branch
+read.
 
 **Protected names.** The set is the union of three sources, compared
 without regard to letter case (`Master` is `master`); each repository's
@@ -412,17 +477,23 @@ first, so the answer is the one for the repository.
 this table's order that any repository has, and `branch_guard.repos` has one
 entry per repository (`root`, `status`, `branch`, `protected`, `sources`,
 `reason` for a `refused`, `would_refuse` or `allowed_protected` entry, not
-for `allowed`, `detached` or `not_a_repo`) with its own status from the
-same list. The
+for the others, and `targets` where the per-target rule applied) with its
+own status from the same list; a repository's status is the first of that
+order that any of its targets has. Each `targets` entry is `path` (as the
+edits name it), `status`, `tracking` (`tracked`, `untracked`, `ignored` or
+`unknown`) and, for a refused, would-refuse or overridden one, the `reason`.
+The
 guard carries no free text: the wording is in `message` and in the edits'
 `detail`, which name the repository's root.
 
 | Status | When | Effect |
 | --- | --- | --- |
-| `refused` | a repository is on a protected branch, or under `--protect-detached` on a detached HEAD (`branch: "HEAD"`) | `status: "usage_error"`, `reason: "protected_branch"`, exit `2`; every edit and file `refused`, nothing written |
+| `refused` | a repository is on a protected branch, or under `--protect-detached` on a detached HEAD (`branch: "HEAD"`), and holds a tracked target (or, with no classified target, any) | `status: "usage_error"`, `reason: "protected_branch"`, exit `2`; every edit and file `refused`, nothing written |
 | `would_refuse` | the same, under `--dry-run` | the dry run as without the guard (edits `would_write`, the diff), plus a warning; exit `0` |
-| `allowed_protected` | `--allow-protected` overrode a refusal | writes; `allowed_protected: true` at the top level of the envelope too |
+| `allowed_protected` | `--allow-protected` overrode a refusal of a tracked (or unclassifiable) target, or of the whole repository | writes; `allowed_protected: true` at the top level of the envelope too |
 | `detached` | HEAD is detached, without `--protect-detached` | writes |
+| `allowed_untracked` | a protected branch (or a detached HEAD under `--protect-detached`), and every target of the repository is untracked or ignored, at least one untracked | writes; each target in `targets` |
+| `allowed_ignored` | the same, and every target is ignored | writes; each target in `targets` |
 | `allowed` | HEAD is on an unprotected branch | writes |
 | `not_a_repo` | a target lies in no work tree: no `.git` entry at or above its directory (this includes a bare repository, or a git directory outside any work tree). `-C` inside a work tree's own `.git` is judged as that work tree | writes, as before the guard existed; one entry without a `root` stands for all such targets |
 

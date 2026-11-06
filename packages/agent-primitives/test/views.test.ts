@@ -370,7 +370,7 @@ describe("hygiene --summary", () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^backup_file \| notes\.bak \| /);
     expect(lines[1]).toBe(
-      "totals: status=fail files=1 findings=1 backup_files=1 extend_only_rewrites=0 test_case_drops=0 warnings=0 intended_deletions=0",
+      "totals: status=fail files=1 findings=1 backup_files=1 extend_only_rewrites=0 test_case_drops=0 warnings=0 uncommitted=0 intended_deletions=0",
     );
   });
 
@@ -386,7 +386,7 @@ describe("hygiene --summary", () => {
     ]);
     expect(run.code).toBe(0);
     expect(run.stdout.trimEnd().split("\n")).toEqual([
-      "totals: status=ok files=0 findings=0 backup_files=0 extend_only_rewrites=0 test_case_drops=0 warnings=0 intended_deletions=0",
+      "totals: status=ok files=0 findings=0 backup_files=0 extend_only_rewrites=0 test_case_drops=0 warnings=0 uncommitted=0 intended_deletions=0",
     ]);
   });
 
@@ -414,7 +414,7 @@ describe("hygiene --summary", () => {
     ]);
     const lines = run.stdout.trimEnd().split("\n");
     expect(lines[lines.length - 1]).toBe(
-      "totals: status=ok files=1 findings=0 backup_files=0 extend_only_rewrites=0 test_case_drops=0 warnings=0 intended_deletions=1",
+      "totals: status=ok files=1 findings=0 backup_files=0 extend_only_rewrites=0 test_case_drops=0 warnings=0 uncommitted=0 intended_deletions=1",
     );
   });
 });
@@ -667,12 +667,14 @@ describe("view renderers: -m bound", () => {
       path: `f${i}.bak`,
       detail: "leftover",
     })),
+    uncommittedFiles: [],
     counts: {
       files: n,
       backupFiles: n,
       extendOnlyRewrites: 0,
       testCaseDrops: 0,
       intendedDeletions: 0,
+      uncommitted: 0,
     },
     warnings: [],
   });

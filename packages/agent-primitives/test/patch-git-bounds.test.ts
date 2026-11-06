@@ -651,11 +651,20 @@ describe.skipIf(process.platform === "win32")(
     }
 
     it("protects the branch origin/HEAD names when it is a plain refs/remotes/origin/<name>", async () => {
+      // The target is tracked as far as this git is concerned, so the
+      // branch is what decides.
       const stand = fakeGit(
-        standIn(
-          "echo refs/heads/trunk; exit 0",
-          "echo refs/remotes/origin/trunk; exit 0",
-        ),
+        [
+          'case "$*" in',
+          "  *check-ignore*) exit 1 ;;",
+          "  *config*) exit 1 ;;",
+          "  *ls-files*) echo a.txt; exit 0 ;;",
+          "esac",
+          standIn(
+            "echo refs/heads/trunk; exit 0",
+            "echo refs/remotes/origin/trunk; exit 0",
+          ),
+        ].join("\n"),
       );
       const dir = tmpDir();
       fs.mkdirSync(path.join(dir, ".git"));

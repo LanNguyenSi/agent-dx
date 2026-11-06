@@ -50,7 +50,10 @@ for teams shipping with AI agents.
   deleted or renamed.
 - `hygiene`: refuses staged or committed backup files (`*.bak`, `*.orig`,
   `*~`, and the BSD `sed -i` leftovers `*-e`, `*-E`, `*-n`, `*-r`, `*-s`)
-  and flags rewrites of extend-only files and dropped test cases.
+  and flags rewrites of extend-only files and dropped test cases, in a git
+  range, the index (`--staged`) or the working tree (`--worktree`); it warns
+  about uncommitted changes to tracked files that the comparison did not
+  cover.
 - `guard`: runs a command under a wall-clock timeout and a memory cap in its
   own process group, kills the whole group at either limit, then finds, kills
   and reports anything the command left running, with a distinct exit code

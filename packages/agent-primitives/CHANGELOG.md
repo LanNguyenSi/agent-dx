@@ -7,8 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `hygiene` no longer reports a silent ok while tracked files have changes
+  its comparison did not look at (agent-dx#618). Without `--staged`, staged
+  or unstaged changes to tracked files (`git status --porcelain -z
+  --untracked-files=no`; untracked files never count) add a warning naming
+  the count, up to five paths and the remedy (`commit them, or use --staged
+  / --worktree`); with `--staged` the same holds for unstaged changes only.
+  The warning changes neither `status` nor the exit code. The `--summary`
+  totals line gains `uncommitted=N` after `warnings=`, `counts` gains
+  `uncommitted`, and the envelope lists the paths as `uncommitted_files`
+  (capped at 50, accepted by `--print`). A failing `git status` is a
+  warning only.
+- `hygiene --worktree` compares the merge-base of `--base` and `HEAD` with
+  the working tree (tracked files, staged and unstaged changes alike), for
+  a handback with uncommitted changes; `head` is `(worktree)` and
+  `head_sha` `null`. It is a usage error with `--staged` or `--head`.
+  Files are read from the working tree under the index path's safety rules
+  (a symlink is read as its target text); untracked files that match a
+  test or backup pattern are named in a separate warning, and tracked
+  files whose staged version differs from both `HEAD` and the working tree
+  (status `MM`) get their own warning, counted in `counts.uncommitted`.
+  The skill's commit-hygiene section names the flag.
+- `hygiene` leaves `.git/index` byte-identical in every mode: the status
+  query uses `git --no-optional-locks status` and `--worktree` compares
+  with `git diff-index`, neither of which refreshes and writes the index
+  (a stat-stale file may appear as modified in `--worktree` mode and
+  yields no finding).
+
 ### Fixed
 
+- `patch`: the branch guard decides per target on a protected branch (or a
+  detached HEAD under `--protect-detached`). A target that has no
+  index entry (untracked, or ignored per `git check-ignore -q`) is
+  allowed, because no edit to it can reach the protected branch
+  through the command; a tracked target is refused as before, and one tracked
+  target still refuses the whole plan, the untracked files of it included, with
+  a detail that names the tracked targets. Before, an untracked run file
+  (`.ai/runs/<run>/...`) or an ignored cache file on `main` was refused with
+  `protected_branch` and only the blanket `--allow-protected` helped. The
+  decision is recorded per target in `branch_guard.repos[].targets`
+  (`path`, `status`, `tracking`, `reason`) with the new statuses
+  `allowed_untracked` and `allowed_ignored`; a repository's status is the most
+  severe of its targets, and `combineGuards` ranks the two new statuses
+  between `detached` and `allowed`. Tracked is asked first
+  and tolerates another spelling of the file: letter case when
+  `core.ignorecase` is true, NFC against NFD, and, when no index entry is
+  found that way, a comparison of file identity (`dev:ino`) against the index
+  entries of the target's directory, so a case or Unicode variant that is the
+  same file on the volume is refused whatever `core.ignorecase` says. The guard's
+  git calls also drop git's `GIT_*_PATHSPECS` switches. A git failure while
+  classifying a target counts as tracked (fail closed) and adds a warning. `--allow-protected`
+  lifts the tracked targets only; a branch that cannot be resolved is refused
+  whole as before. No new flag; the exit codes are unchanged. The skill's
+  `patch` section names the rule.
 - Three output lows, none of them verdicts. `probe --summary` of a
   `mutant_not_applicable` refusal now counts the mutant in the single
   form (`total=1 inconclusive=1`, like the plan form), names the refused
