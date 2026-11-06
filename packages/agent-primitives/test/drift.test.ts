@@ -425,6 +425,10 @@ interface PhpDeclRow {
   label: string;
   line: string;
   expect?: { name: string; exported: boolean; indented: boolean };
+  /** The line declares a name that does not clear the identifier bar:
+   * nothing is extracted, and the name is recorded in
+   * `skippedPhpNames` instead. */
+  skipBar?: string;
 }
 
 const PHP_DECL_ROWS: readonly PhpDeclRow[] = [
@@ -507,25 +511,27 @@ const PHP_DECL_ROWS: readonly PhpDeclRow[] = [
     expect: { name: "doThing", exported: false, indented: true },
   },
   // constants: class constants with and without visibility, and top level
+  // (the names clear the identifier bar; a name that does not is a
+  // `skipBar` row below)
   {
     label: "class const, no visibility",
-    line: "    const MAX = 1;",
-    expect: { name: "MAX", exported: true, indented: true },
+    line: "    const MAX_SIZE = 1;",
+    expect: { name: "MAX_SIZE", exported: true, indented: true },
   },
   {
     label: "private class const",
-    line: "    private const MAX = 1;",
-    expect: { name: "MAX", exported: false, indented: true },
+    line: "    private const MAX_SIZE = 1;",
+    expect: { name: "MAX_SIZE", exported: false, indented: true },
   },
   {
     label: "final public class const",
-    line: "    final public const MAX = 1;",
-    expect: { name: "MAX", exported: true, indented: true },
+    line: "    final public const MAX_SIZE = 1;",
+    expect: { name: "MAX_SIZE", exported: true, indented: true },
   },
   {
     label: "top-level const",
-    line: "const MAX = 1;",
-    expect: { name: "MAX", exported: true, indented: false },
+    line: "const MAX_SIZE = 1;",
+    expect: { name: "MAX_SIZE", exported: true, indented: false },
   },
   // PHP keywords are case-insensitive; the name keeps the line's case
   {
@@ -553,6 +559,46 @@ const PHP_DECL_ROWS: readonly PhpDeclRow[] = [
     label: "string literal",
     line: '    $code = "function widgetLoader() {";',
   },
+  // a name that does not clear the identifier bar (4+ characters with an
+  // uppercase letter, hyphen or underscore - the bar a deleted file's
+  // basename faces) is recorded, not extracted: a framework method name
+  // is an ordinary prose word that would be scanned against every doc
+  {
+    label: "framework method up (identifier bar)",
+    line: "    public function up() {}",
+    skipBar: "up",
+  },
+  {
+    label: "framework method down (identifier bar)",
+    line: "    public function down() {}",
+    skipBar: "down",
+  },
+  {
+    label: "framework method show (identifier bar)",
+    line: "    public function show()",
+    skipBar: "show",
+  },
+  {
+    label: "reserved word method function (identifier bar)",
+    line: "    public function function() {}",
+    skipBar: "function",
+  },
+  {
+    label: "lowercase class name widget (identifier bar)",
+    line: "class widget {}",
+    skipBar: "widget",
+  },
+  {
+    label: "three-letter const MAX (identifier bar)",
+    line: "const MAX = 1;",
+    skipBar: "MAX",
+  },
+  // a name that does clear the bar still extracts (positive control)
+  {
+    label: "framework-shaped method with a bar-clearing name",
+    line: "    public function createUsersTable() {}",
+    expect: { name: "createUsersTable", exported: true, indented: true },
+  },
   // anonymous shapes contribute nothing
   {
     label: "anonymous closure",
@@ -578,8 +624,14 @@ describe("parseRemovedIdentifiers (PHP declarations)", () => {
         "",
       ].join("\n");
       const result = parseRemovedIdentifiers(diff);
+      if (row.skipBar !== undefined) {
+        expect(result.removed).toEqual([]);
+        expect(result.skippedPhpNames).toEqual([row.skipBar]);
+        return;
+      }
       if (row.expect === undefined) {
         expect(result.removed).toEqual([]);
+        expect(result.skippedPhpNames).toEqual([]);
         return;
       }
       expect(result.removed).toEqual([
@@ -592,6 +644,7 @@ describe("parseRemovedIdentifiers (PHP declarations)", () => {
           indented: row.expect.indented,
         },
       ]);
+      expect(result.skippedPhpNames).toEqual([]);
       expect(result.movedNames).toEqual([]);
     },
   );
@@ -1438,6 +1491,169 @@ describe("drift (removed PHP declarations)", () => {
   });
 });
 
+// ---------------------------------------------------------------------
+// The PHP identifier bar: a removed PHP declaration name that does not
+// clear `looksLikeIdentifier` (the bar a deleted file's basename faces)
+// is not scanned. Repro (issue #619 review): a deleted Laravel-style
+// migration declaring `public function up()` / `public function down()`,
+// with README/docs prose using those very words ("set up", "scroll
+// down", "look up") - without the bar every "up"/"down" in the repo
+// reads as a stale mention of a removed declaration.
+// ---------------------------------------------------------------------
+
+describe("drift (PHP identifier bar)", () => {
+  const MIGRATION_PHP = [
+    "<?php",
+    "",
+    "return new class extends Migration {",
+    "    public function up(): void",
+    "    {",
+    "        Schema::create('users', function (Blueprint $table) {});",
+    "    }",
+    "",
+    "    public function down(): void",
+    "    {",
+    "        Schema::dropIfExists('users');",
+    "    }",
+    "};",
+    "",
+  ].join("\n");
+
+  function migrationRepo(): { repo: string; base: string; head: string } {
+    const repo = initRepo();
+    writeFile(repo, "database/migrations/2024_create_users.php", MIGRATION_PHP);
+    writeFile(
+      repo,
+      "README.md",
+      "# App\n\nTo set up the app, run make.\nScroll down for the rest.\n",
+    );
+    writeFile(
+      repo,
+      "docs/guide.md",
+      "# Guide\n\nLook up the config file first.\n",
+    );
+    const base = commit(repo, "base");
+    fs.rmSync(path.join(repo, "database/migrations/2024_create_users.php"));
+    const head = commit(repo, "head");
+    return { repo, base, head };
+  }
+
+  it("scans nothing for up/down from a deleted migration, warns once per name, reports no site", async () => {
+    const { repo, base, head } = migrationRepo();
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.removedIdentifiers).toEqual([]);
+    expect(result.sites).toEqual([]);
+    expect(result.counts).toMatchObject({ removed: 0, sites: 0 });
+    expect(result.status).toBe("ok");
+    expect(result.warnings.filter((w) => w.includes(" not scanned: "))).toEqual(
+      [
+        'removed PHP declaration "up" not scanned: does not look like an identifier',
+        'removed PHP declaration "down" not scanned: does not look like an identifier',
+      ],
+    );
+  });
+
+  it("--summary on the migration repro: removed=0 sites=0, both bar warnings, exit 0", async () => {
+    const { repo, base, head } = migrationRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+      "--summary",
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain(
+      'warning: removed PHP declaration "up" not scanned: does not look like an identifier',
+    );
+    expect(run.stdout).toContain(
+      'warning: removed PHP declaration "down" not scanned: does not look like an identifier',
+    );
+    // The third warning is the pre-existing deleted-file basename rule:
+    // `2024_create_users.php` is deleted, so its basename is a skipped
+    // candidate too.
+    expect(run.stdout).toMatch(
+      /totals: status=ok removed=0 sites=0 allowlisted=0 warnings=3 ignored=0/,
+    );
+  });
+
+  it("extracts nothing and warns for `public function function()` (a PHP 8 method name)", async () => {
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/Callable.php",
+      [
+        "<?php",
+        "",
+        "class Callable_ {",
+        "    public function function() {}",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const base = commit(repo, "base");
+    writeFile(
+      repo,
+      "src/Callable.php",
+      ["<?php", "", "class Callable_ {", "}", ""].join("\n"),
+    );
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.removedIdentifiers).toEqual([]);
+    expect(result.warnings).toEqual([
+      'removed PHP declaration "function" not scanned: does not look like an identifier',
+    ]);
+    expect(result.status).toBe("ok");
+  });
+
+  it("still extracts and reports a method name that clears the bar (createUsersTable)", async () => {
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "src/Schema.php",
+      [
+        "<?php",
+        "",
+        "class Schema {",
+        "    public function createUsersTable() {}",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFile(
+      repo,
+      "README.md",
+      "# Readme\n\ncreateUsersTable builds the users table.\n",
+    );
+    const base = commit(repo, "base");
+    writeFile(
+      repo,
+      "src/Schema.php",
+      ["<?php", "", "class Schema {", "}", ""].join("\n"),
+    );
+    const head = commit(repo, "head");
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.removedIdentifiers).toEqual([
+      {
+        name: "createUsersTable",
+        kind: "declaration",
+        file: "src/Schema.php",
+        line: 4,
+        exported: true,
+        indented: true,
+      },
+    ]);
+    expect(findSite(result.sites, "README.md", 3)?.identifier).toBe(
+      "createUsersTable",
+    );
+    expect(result.status).toBe("fail");
+    expect(result.warnings).toEqual([]);
+  });
+});
+
 /** `src/A.php` loses its `private function legacyThing()` between base
  * and head; `src/B.php` (unchanged across the range, so never a "moved"
  * added line) declares the name in the row's shape at head. */
@@ -1467,6 +1683,12 @@ const PHP_HEAD_DECL_ROWS: readonly {
   {
     label: "re-declared as a class constant",
     headDecl: "    private const legacyThing = 1;",
+    expect: "suppressed",
+  },
+  {
+    label:
+      "re-declared with case-variant keywords (case-insensitive PHP head grep)",
+    headDecl: "    PRIVATE FUNCTION legacyThing() {}",
     expect: "suppressed",
   },
   {
@@ -2648,10 +2870,13 @@ describe("drift (local-binding rule)", () => {
   // `suppressed` allowlists it as a local binding. Rows are derived from
   // `isLiveHeadDeclaration` (each comment prefix, each trailing character
   // class, each declaration keyword, the "no character after the name"
-  // case, the scan past a rejected first occurrence) and from the `-w` of
-  // `grepHeadDeclarations` (the boundary BEFORE the keyword). `rejectedBy:
+  // case, the keyword anchor and its modifiers, and the case-insensitive
+  // judgment for a `.php` hit) and from the `-w` of
+  // `headDeclarationGrep` (the boundary BEFORE the keyword). `rejectedBy:
   // "grep"` marks a row only the grep flag can reject: the filter alone
-  // would accept its text, so the direct filter table skips it.
+  // would accept its text, so the direct filter table skips it. A row whose
+  // `file` ends in `.php` is judged case-insensitively by the filter alone
+  // (it is what the `.php`-only case-insensitive grep passes to it).
   interface HeadLineRow {
     label: string;
     headLine: string;
@@ -2814,21 +3039,45 @@ describe("drift (local-binding rule)", () => {
       headLine: "  const err",
       expect: "suppressed",
     },
-    // the scan goes past a rejected occurrence to a later live one
+    // the scan goes past a rejected occurrence; the anchor then rejects a
+    // second occurrence that stands behind other code
     {
-      label: "longer name first, live declaration later",
+      label: "longer name first, second occurrence behind code",
       headLine: "  const errFoo = 1; const err = 2;",
-      expect: "suppressed",
+      expect: "reported",
     },
-    // documented limits: only the line start and the next character count
+    // the keyword anchor: the keyword must be the line's first token after
+    // optional whitespace and optional modifiers, so a keyword behind
+    // other code or inside a string never counts
     {
-      label: "comment that does not start the line",
+      label: "comment that does not start the line (anchor)",
       headLine: "  const x = 1; // const err = 1",
-      expect: "suppressed",
+      expect: "reported",
     },
     {
-      label: "shape inside a string",
+      label: "shape inside a string (anchor)",
       headLine: '  const s = "const err";',
+      expect: "reported",
+    },
+    {
+      label: "type inside a string literal (anchor)",
+      headLine: '  throw new Error("unexpected type err payload");',
+      keyword: "type",
+      expect: "reported",
+    },
+    // ...and a modifier standing before the keyword keeps it anchored
+    {
+      label: "export type (modifier before the keyword)",
+      headLine: "  export type err = string;",
+      keyword: "type",
+      expect: "suppressed",
+    },
+    // the `.php`-only case-insensitive head grep: PHP keywords are
+    // case-insensitive, so the filter must match them case-insensitively
+    {
+      label: "case-variant PHP keyword (.php)",
+      headLine: "    PRIVATE FUNCTION err() {}",
+      file: "src/b.php",
       expect: "suppressed",
     },
   ];
@@ -2908,9 +3157,15 @@ describe("drift (local-binding rule)", () => {
   it.each(HEAD_LINE_ROWS.filter((r) => r.rejectedBy !== "grep"))(
     "the head-line filter alone judges `$headLine` $expect ($label)",
     (row) => {
-      expect(isLiveHeadDeclaration(row.headLine, "err")).toBe(
-        row.expect === "suppressed",
-      );
+      // A `.php` hit reaches the filter through the `.php`-only
+      // case-insensitive grep, which is what its third argument says.
+      expect(
+        isLiveHeadDeclaration(
+          row.headLine,
+          "err",
+          (row.file ?? "").endsWith(".php"),
+        ),
+      ).toBe(row.expect === "suppressed");
     },
   );
 });

@@ -42,9 +42,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-insensitively, a `private`/`protected` member reported
   `exported: false` and everything else `exported: true`, comment
   lines skipped and anonymous closures/`new class` contributing
-  nothing (`define()`, same-line `#[...]` attributes and string
-  literals are documented limits). The head-side local-binding grep
-  learns `interface`, `trait`, `enum` and `type`, and its pattern is
+  nothing (`define()`, same-line `#[...]` attributes and
+  heredoc/nowdoc or multi-line-string body lines are documented
+  limits). A PHP declaration name must clear the same identifier bar a
+  deleted file's basename faces, so framework method names (a
+  migration's `up`/`down`, a controller's `index`/`show`/`handle`) are
+  not scanned word by word across the docs, and each such name warns
+  `removed PHP declaration "<name>" not scanned: does not look like an
+  identifier`. The head-side local-binding grep
+  learns `interface`, `trait`, `enum` and `type`, runs a second
+  case-insensitive pass over the `.php` pathspecs only (PHP keywords
+  are case-insensitive, so a `PRIVATE FUNCTION helperThing()` at head
+  suppresses like a lowercase one), and its filter now requires the
+  keyword to be the line's first token after optional whitespace and
+  modifiers (`export`, `default`, `declare`, `abstract`, `final`,
+  `readonly`, `static`, visibility), so a keyword inside a string or
+  behind other code no longer counts; its pattern is
   now derived from the one `DECLARATION_KEYWORDS` list, so a name
   re-declared at head with any of these keywords suppresses the way a
   `class` one always did. Independently of the language, when the diff

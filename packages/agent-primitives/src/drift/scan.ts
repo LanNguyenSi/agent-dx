@@ -47,6 +47,16 @@ export const SOURCE_PATHSPECS: readonly string[] = SCAN_PATHSPECS.filter(
   (spec) => !DOC_EXTENSIONS.has(spec.replace(/^\*\./, "")),
 );
 
+/** The `.php` part of `SOURCE_PATHSPECS`: PHP keywords are case-
+ * insensitive, so `drift()`'s head-side binding grep runs a second,
+ * case-insensitive pass over just these pathspecs (`PRIVATE FUNCTION
+ * helperThing()` at head is as live as the lowercase spelling); no other
+ * scanned language has case-insensitive keywords, so no other pathspec
+ * joins the pass. */
+export const PHP_SOURCE_PATHSPECS: readonly string[] = SOURCE_PATHSPECS.filter(
+  (spec) => PHP_EXTENSIONS.has(spec.replace(/^\*\./, "")),
+);
+
 function extOf(filePath: string): string {
   const base = filePath.split("/").pop() ?? filePath;
   const dot = base.lastIndexOf(".");

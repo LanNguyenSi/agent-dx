@@ -25,6 +25,7 @@ import {
 import {
   classifyLine,
   parseGrepOutput,
+  PHP_SOURCE_PATHSPECS,
   SCAN_PATHSPECS,
   SOURCE_PATHSPECS,
 } from "./scan.js";
@@ -168,7 +169,10 @@ function capSiteText(text: string): string {
  * `interface`, `trait` and `enum` (its `function`/`const`/`class` are
  * already listed), and a head-side `type`, `interface` or `enum`
  * declaration now counts for the TS/JS local-binding rule the same way a
- * `class` one does. Add a keyword HERE, never in the grep call, which is
+ * `class` one does. Several of these are common English words, which is
+ * safe only because `isLiveHeadDeclaration` anchors the keyword to the
+ * line's first token: one appearing inside a string or after other code
+ * does not count. Add a keyword HERE, never in the grep call, which is
  * derived from this list. */
 export const DECLARATION_KEYWORDS = [
   "const",
@@ -181,6 +185,33 @@ export const DECLARATION_KEYWORDS = [
   "enum",
   "trait",
 ];
+
+/** The words that may stand between a head-side line's start and its
+ * declaration keyword and still leave the keyword the line's first
+ * token (the anchor `isLiveHeadDeclaration` requires): TS/JS's
+ * `export`/`default`/`declare` plus the modifiers PHP spells ahead of a
+ * declaration (`abstract`, `final`, `readonly`, `static`, visibility).
+ * Derived into the anchor regex below; add a modifier HERE, never in the
+ * regex. */
+export const HEAD_KEYWORD_MODIFIERS = [
+  "export",
+  "default",
+  "declare",
+  "abstract",
+  "final",
+  "readonly",
+  "static",
+  "public",
+  "protected",
+  "private",
+];
+
+/** Tests the text before a head-side keyword occurrence: only whitespace
+ * and `HEAD_KEYWORD_MODIFIERS` may stand there (the anchor); a keyword
+ * reached through code, a string or a mid-line comment fails it. */
+const HEAD_KEYWORD_ANCHOR_RE = new RegExp(
+  `^\\s*(?:(?:${HEAD_KEYWORD_MODIFIERS.join("|")})\\s+)*$`,
+);
 
 /** Regex metacharacters, escaped before an identifier is put into an
  * extended regular expression (a name can legally contain `$`). Same
@@ -203,22 +234,29 @@ export function headDeclarationPattern(
   return `(${keywords.join("|")}) ${escapeRegExp(name)}`;
 }
 
-/** `git grep -n -w -E -e <headDeclarationPattern(name)> <rev> --
+/** `git grep -n -w -E [-i] -e <headDeclarationPattern(name)> <rev> --
  * <pathspecs>`: does `name` still have a declaration-shaped line at
  * `rev` anywhere in the scanned source files (the head-side binding the
- * local-binding rule of `drift()` looks for)? One call per name, never
- * one per file. Two shapes that match here are not live declarations
+ * local-binding rule of `drift()` looks for)? One call per name and
+ * pathspec group, never one per file; `ignoreCase` is set only for the
+ * second, `.php`-only pass (`PHP_SOURCE_PATHSPECS`), because PHP is the
+ * one scanned language whose keywords are case-insensitive and the
+ * filter would otherwise never see a `FUNCTION`-spelled declaration for
+ * grep to return. Three shapes that match here are not live declarations
  * and are filtered after the grep, in the caller
  * (`isLiveHeadDeclaration`): a comment line (`// const stamp = old
- * approach`) and a longer name whose next character `-w` reads as a word
+ * approach`), a longer name whose next character `-w` reads as a word
  * boundary (`let retired$old`, because git treats `$` as a non-word
- * character). A name bound by destructuring (`const { err } = ...`) and
- * a function parameter are not declaration shapes and are not seen. */
+ * character), and a keyword that is not the line's first token
+ * (`throw new Error("unexpected type payload")`). A name bound by
+ * destructuring (`const { err } = ...`) and a function parameter are not
+ * declaration shapes and are not seen. */
 function headDeclarationGrep(
   cwd: string,
   rev: string,
   name: string,
   pathspecs: readonly string[],
+  ignoreCase = false,
 ): GitRunResult {
   return runGit(
     cwd,
@@ -227,6 +265,7 @@ function headDeclarationGrep(
       "-n",
       "-w",
       "-E",
+      ...(ignoreCase ? ["-i"] : []),
       "-e",
       headDeclarationPattern(name),
       rev,
@@ -241,7 +280,9 @@ function headDeclarationGrep(
 }
 
 /** What a head-side hit's text before the keyword, trimmed, may start with
- * to count as a comment line (`isLiveHeadDeclaration` rejects it). */
+ * to count as a comment line (`isLiveHeadDeclaration` rejects it; the
+ * modifier anchor already rejects a line-start comment, this is the
+ * guard that does not depend on the anchor regex). */
 export const LOCAL_BINDING_COMMENT_PREFIXES = ["//", "/*", "*", "#"];
 
 /** A character that continues an identifier: right after the name it means
@@ -253,31 +294,59 @@ export const NAME_CONTINUATION_CHARACTER = /[A-Za-z0-9_$]/;
  * than a mention grep's shape cannot tell apart. `git grep -w -E` matches
  * any line CARRYING `(const|let|var|function|class|type|interface|enum|
  * trait) <name>` (the pattern is derived from `DECLARATION_KEYWORDS`), so
- * two shapes
- * reach the caller without being declarations: a comment line (`// const
- * stamp = old approach`) and a longer name whose next character git's `-w`
- * reads as a word boundary (`let retired$old` - git treats `$` as a
- * non-word character). A hit counts only when (i) the text before the
- * keyword, trimmed, names no comment (`//`, `*`, `/*` or `#`) and (ii) the
- * character right after `name` is absent or outside `[A-Za-z0-9_$]`; a
- * real declaration satisfies both. Only those two facts are checked: the
- * shape inside a string, a template literal, JSX text, or a comment that
- * does not start the line still counts as a declaration. The word boundary
- * BEFORE the keyword is not checked here either; it is `git grep -w`'s
- * (see `headDeclarationGrep`). Behind `-w` the letter, digit and `_`
- * parts of the trailing check are redundant (only `$` reaches it), kept as
- * a guard that does not depend on the grep flag.
+ * three shapes reach the caller without being declarations: a keyword
+ * that is not the line's first token (`throw new Error("unexpected type
+ * payload")`), a comment line (`// const stamp = old approach`), and a
+ * longer name whose next character `-w` reads as a word boundary
+ * (`let retired$old` - git treats `$` as a non-word character). A hit
+ * counts only when (i) the text before the keyword is only whitespace and
+ * `HEAD_KEYWORD_MODIFIERS` - the keyword is the line's first token after
+ * optional modifiers, so a keyword inside a string or after other code
+ * never counts - (ii) it names no comment (`//`, `*`, `/*` or `#`; the
+ * anchor already rejects a line-start comment, this is kept as a guard
+ * that does not depend on the anchor), and (iii) the character right
+ * after `name` is absent or outside `[A-Za-z0-9_$]`; a real declaration
+ * satisfies all three. `ignoreCase` is the PHP pass (the `.php`-only
+ * case-insensitive grep, see `headDeclarationGrep`): keyword, comment
+ * prefixes and modifier anchor are then matched case-insensitively (PHP
+ * keywords are), the NAME still must match its exact case, and the
+ * caller passes it only for hits that can only come from `.php` files.
+ * The word boundary BEFORE the keyword is not checked here either; it is
+ * `git grep -w`'s (see `headDeclarationGrep`). Behind `-w` the letter,
+ * digit and `_` parts of the trailing check are redundant (only `$`
+ * reaches it), kept as a guard that does not depend on the grep flag.
  */
-export function isLiveHeadDeclaration(text: string, name: string): boolean {
+export function isLiveHeadDeclaration(
+  text: string,
+  name: string,
+  ignoreCase = false,
+): boolean {
+  const haystack = ignoreCase ? text.toLowerCase() : text;
   for (const keyword of DECLARATION_KEYWORDS) {
-    const needle = `${keyword} ${name}`;
+    const needle = ignoreCase
+      ? `${keyword} ${name.toLowerCase()}`
+      : `${keyword} ${name}`;
     for (
-      let at = text.indexOf(needle);
+      let at = haystack.indexOf(needle);
       at !== -1;
-      at = text.indexOf(needle, at + 1)
+      at = haystack.indexOf(needle, at + 1)
     ) {
-      const before = text.slice(0, at).trim();
-      if (LOCAL_BINDING_COMMENT_PREFIXES.some((p) => before.startsWith(p))) {
+      if (
+        ignoreCase &&
+        text.slice(at + keyword.length + 1, at + needle.length) !== name
+      ) {
+        continue;
+      }
+      const before = text.slice(0, at);
+      if (
+        !HEAD_KEYWORD_ANCHOR_RE.test(ignoreCase ? before.toLowerCase() : before)
+      ) {
+        continue;
+      }
+      const trimmedBefore = before.trim();
+      if (
+        LOCAL_BINDING_COMMENT_PREFIXES.some((p) => trimmedBefore.startsWith(p))
+      ) {
         continue;
       }
       const after =
@@ -432,6 +501,16 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
       `deleted file basename skipped, not reported as a removed identifier (not a recognized source extension, or "${skipped.basename}" does not look like an identifier): ${skipped.path}`,
     );
   }
+  // The PHP identifier bar, once per distinct name: a removed PHP
+  // declaration whose name is an ordinary prose word (a migration's
+  // `up`/`down`, a controller's `index`) was not scanned word by word
+  // across every doc; the removal is still named here so the operator
+  // sees the blind spot rather than a silent zero.
+  for (const name of parsed.skippedPhpNames) {
+    warnings.push(
+      `removed PHP declaration "${name}" not scanned: does not look like an identifier`,
+    );
+  }
   // The extractor gap, once per extension, in extension order (which
   // `parseRemovedIdentifiers` already sorted): the diff removed lines
   // from scanned source files whose language has no declaration
@@ -465,9 +544,12 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
   // The local-binding rule, on by default and never opt-in: a candidate
   // that was an indented, non-exported declaration was bound inside some
   // enclosing scope (a function body, a method, a block), so removing that
-  // line says nothing about whether the name is gone. Ask head ONCE per
-  // candidate name whether a declaration shape of that name survives in the
-  // scanned source; where one does, the name is still alive under a local
+  // line says nothing about whether the name is gone. Ask head per
+  // candidate name whether a declaration shape of that name survives in
+  // the scanned source: one case-sensitive `git grep` over every scanned
+  // source pathspec, plus a case-insensitive pass over just the `.php`
+  // pathspecs (PHP keywords are case-insensitive; no other scanned
+  // language's are). Where one does, the name is still alive under a local
   // binding of its own and a doc or comment that mentions it is not drift.
   // A name whose candidates include an exported, column-0 or non-
   // declaration one is never touched (the removal was of something public
@@ -495,20 +577,37 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
       );
     if (!everyCandidateLocal) continue;
     const head = headDeclarationGrep(gitRoot, headSha, name, SOURCE_PATHSPECS);
-    if (head.error !== undefined || (head.status !== 0 && head.status !== 1)) {
+    // A second pass over the `.php` pathspecs only, case-insensitively:
+    // PHP keywords are case-insensitive, so a `PRIVATE FUNCTION
+    // helperThing()` at head is as live a binding as the lowercase
+    // spelling - and the case-sensitive grep above would never even
+    // return its line for the filter to judge.
+    const phpHead = headDeclarationGrep(
+      gitRoot,
+      headSha,
+      name,
+      PHP_SOURCE_PATHSPECS,
+      true,
+    );
+    const failed = [head, phpHead].find(
+      (r) => r.error !== undefined || (r.status !== 0 && r.status !== 1),
+    );
+    if (failed !== undefined) {
       warnings.push(
-        `git grep for a head-side declaration of "${name}" at ${headSha} failed: ${head.error ?? `git exited ${String(head.status)}: ${head.stderr.trim()}`}`,
+        `git grep for a head-side declaration of "${name}" at ${headSha} failed: ${failed.error ?? `git exited ${String(failed.status)}: ${failed.stderr.trim()}`}`,
       );
       continue;
     }
-    if (
-      head.status === 0 &&
-      parseGrepOutput(head.stdout, headSha).some((hit) =>
-        isLiveHeadDeclaration(hit.text, name),
-      )
-    ) {
-      localBindings.add(name);
-    }
+    const liveAtHead =
+      (head.status === 0 &&
+        parseGrepOutput(head.stdout, headSha).some((hit) =>
+          isLiveHeadDeclaration(hit.text, name),
+        )) ||
+      (phpHead.status === 0 &&
+        parseGrepOutput(phpHead.stdout, headSha).some((hit) =>
+          isLiveHeadDeclaration(hit.text, name, true),
+        ));
+    if (liveAtHead) localBindings.add(name);
   }
 
   const ignoredIdentifiers: IgnoredIdentifier[] = [
