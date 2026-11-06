@@ -2095,6 +2095,19 @@ describe("hygiene: uncommitted changes outside the comparison", () => {
     expect(staged2.uncommittedFiles).toEqual(["src/a b.ts"]);
   });
 
+  it("does not read the source path of a rename as an entry of its own", () => {
+    // A source path whose third character is a space looks like a status
+    // line ("ab cd.ts" reads as XY "ab", path "cd.ts") if it is not skipped.
+    const repo = initRepo();
+    write(repo, "ab cd.ts", "export const x = 1;\n");
+    commitAll(repo, "spaced name");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["mv", "ab cd.ts", "renamed.ts"]);
+    const r = hygiene({ cwd: repo, base });
+    expect(r.counts.uncommitted).toBe(1);
+    expect(r.uncommittedFiles).toEqual(["renamed.ts"]);
+  });
+
   it("lists at most the cap, with the exact count, and names five paths in the warning", () => {
     const { repo, base } = phpRepo();
     const total = UNCOMMITTED_FILES_CAP + 5;
