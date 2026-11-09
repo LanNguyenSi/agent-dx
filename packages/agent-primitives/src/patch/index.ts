@@ -289,8 +289,8 @@ export interface PatchOptions {
   /** Test seam: how long git's identity lookup may run before it is
    * stopped (default `GIT_LOOKUP_TIMEOUT_MS`). */
   gitTimeoutMs?: number;
-  /** Test seam: the time all of the branch guard's git calls of the plan
-   * may take together (default `BRANCH_GUARD_BUDGET_FACTOR` times the
+  /** Test seam: the time the branch guard's branch-resolution git calls
+   * of the plan may take together (default `BRANCH_GUARD_BUDGET_FACTOR` times the
    * per-call bound, `gitTimeoutMs` when set). */
   gitBudgetMs?: number;
 }
@@ -1286,8 +1286,8 @@ export function patch(options: PatchOptions): PatchResult {
       targetsOf.set(holder, list);
     }
   }
-  // One budget for the git calls of every repository of the plan, started
-  // when the first of them is judged.
+  // One budget for the branch-resolution calls of every repository of the
+  // plan (the target classification is not part of it).
   const guardTimeoutMs = options.gitTimeoutMs ?? BRANCH_GUARD_TIMEOUT_MS;
   let guardBudget: GuardBudget | undefined;
   const judge = (repoRoot: string): BranchGuardVerdict => {

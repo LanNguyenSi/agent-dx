@@ -17,13 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged, including the documented refusal when NFKC grows a prefix
   past the matched text; a run of characters that are no boundary (combining
   marks, Hangul jamo, emoji) still costs time quadratic in the run.
-- The branch guard of `patch` caps the time of all its git calls in one
-  plan: twice the per-call bound (6 s with the 3 s bound). A call gets the
-  per-call bound or the remaining budget, whichever is less, and a
-  repository reached after the budget is used up is not asked and is
+- The branch guard of `patch` caps the time its branch-resolution git calls
+  (HEAD and `origin/HEAD`) take in one plan: twice the per-call bound (6 s
+  with the 3 s bound) in total, charged with the time those calls take. A
+  call gets the per-call bound or the remaining budget, whichever is less,
+  and a repository reached after the budget is used up is not asked and is
   refused as `protected_branch_unresolved`, naming the budget in the
-  edit's detail. Before, every call of every repository could wait the
-  whole per-call bound.
+  edit's detail. The calls that classify targets on a protected branch are
+  not charged to it, so a healthy git still classifies a plan of hundreds
+  of untracked targets in full; the first classification call of a
+  repository that times out marks that repository's remaining targets
+  unknown (treated as tracked) without running git again. Before, every
+  call of every repository could wait the whole per-call bound.
 
 ## [0.21.0] - 2026-11-06
 

@@ -37,12 +37,16 @@ import {
  * full ref name and the `refs/heads/` prefix is cut off here: `--short`
  * would answer `heads/main` when a tag `main` exists too, and that spelling
  * matches no protected name. Anything that is not a clear answer fails
- * closed: the guard refuses with `protected_branch_unresolved`. All the
- * git calls of one plan also share an overall budget (`GuardBudget`,
- * `BRANCH_GUARD_BUDGET_FACTOR` times the per-call bound): a call gets the
- * per-call bound or what is left of the budget, whichever is less, and a
- * repository reached after the budget is used up is not asked at all and
- * is refused the same way.
+ * closed: the guard refuses with `protected_branch_unresolved`. The two
+ * calls per repository that resolve the branch (HEAD and origin/HEAD) also
+ * share an overall budget (`GuardBudget`, `BRANCH_GUARD_BUDGET_FACTOR`
+ * times the per-call bound, charged with the time those calls take): a
+ * call gets the per-call bound or what is left of the budget, whichever is
+ * less, and a repository reached after the budget is used up is not asked
+ * at all and is refused the same way. The calls that classify the targets
+ * of a protected-branch repository are not charged to it; they have the
+ * per-call bound, and the first one of a repository that times out marks
+ * the rest of that repository's targets unknown without running git again.
  */
 
 /** The names that are protected whatever the repository says. */
@@ -52,14 +56,16 @@ export const BUILTIN_PROTECTED = ["main", "master"] as const;
 export const BRANCH_GUARD_TIMEOUT_MS = 3_000;
 
 /**
- * The time all of the guard's git calls of one plan may take together, as
- * a multiple of the per-call bound: twice. Each repository costs at least
- * two calls and a hanging git costs the whole bound per call, so without a
- * cap a plan over many repositories waits three seconds per call per
- * repository. Twice the bound lets two calls hang in full (one hung
- * repository, or a flaky one) and still leaves room for the rest of a
- * healthy plan, whose calls take milliseconds; every repository that is
- * not resolved by then is refused as `protected_branch_unresolved`.
+ * The time the guard's branch-resolution calls of one plan may take
+ * together, as a multiple of the per-call bound: twice. Each repository
+ * costs two such calls and a hanging git costs the whole bound per call,
+ * so without a cap a plan over many repositories waits three seconds per
+ * call per repository. Twice the bound lets two calls hang in full (one
+ * hung repository, or a flaky one) and still leaves room for the rest of
+ * a healthy plan, whose calls take milliseconds; every repository that is
+ * not resolved by then is refused as `protected_branch_unresolved`. The
+ * calls that classify targets are not part of it: with a healthy git their
+ * number grows with the plan, not with the number of repositories.
  */
 export const BRANCH_GUARD_BUDGET_FACTOR = 2;
 
@@ -155,8 +161,9 @@ export interface BranchGuardInput {
   hazard: string | undefined;
   /** How long one git call may run. */
   timeoutMs: number;
-  /** The time all calls of the plan may take together (shared by every
-   * repository of the plan); a call gets at most what is left of it. */
+  /** The time the branch-resolution calls (HEAD, origin/HEAD) of the plan
+   * may take together (shared by every repository of the plan); such a
+   * call gets at most what is left of it. */
   budget?: GuardBudget;
   flagNames: readonly string[];
   protectDetached: boolean;
@@ -267,33 +274,47 @@ export function branchGuardEnv(
   return env;
 }
 
-/** The time the guard's git calls of one plan may take together. Started
- * when the first repository is judged; `remainingMs` reads a monotone
- * clock. */
+/** The time the guard's branch-resolution calls of one plan may take
+ * together. It is charged with the time those calls take (`runGit` does
+ * that), not with the wall clock, so the time a repository spends on
+ * classifying its targets does not reduce what the next repository's
+ * resolution gets. */
 export class GuardBudget {
-  private readonly deadline: number;
-  constructor(readonly totalMs: number) {
-    this.deadline = performance.now() + totalMs;
-  }
+  private spentMs = 0;
+  constructor(readonly totalMs: number) {}
   remainingMs(): number {
-    return this.deadline - performance.now();
+    return this.totalMs - this.spentMs;
+  }
+  charge(ms: number): void {
+    this.spentMs += ms;
   }
 }
 
-/** What bounds one of the guard's git calls: the per-call bound and, when
- * the plan has one, the shared budget. */
+/** The state of a repository's classification calls: set by the first one
+ * that times out, after which no further git call is run for it. */
+interface HangState {
+  /** Why the repository's classification calls are no longer run; the
+   * wording names the call that timed out. */
+  why?: string;
+}
+
+/** What bounds one of the guard's git calls: the per-call bound and,
+ * for a resolution call, the shared budget, or, for a classification
+ * call, the repository's `HangState`. */
 interface GitLimit {
   timeoutMs: number;
   budget?: GuardBudget;
+  hang?: HangState;
 }
 
+/** The limit of a branch-resolution call (HEAD, origin/HEAD). */
 function limitOf(input: BranchGuardInput): GitLimit {
   return { timeoutMs: input.timeoutMs, budget: input.budget };
 }
 
 type GitAnswer =
   | { kind: "exit"; status: number; stdout: string }
-  | { kind: "failed"; why: string };
+  | { kind: "failed"; why: string; timedOut?: true };
 
 function runGit(
   root: string,
@@ -301,8 +322,14 @@ function runGit(
   limit: GitLimit,
 ): GitAnswer {
   const name = `git ${args.join(" ")}`;
-  // Each call gets the per-call bound or what is left of the plan's
-  // budget, whichever is less; with nothing left it is not run at all.
+  // A classification call of a repository whose earlier call timed out is
+  // not run: that git is taken to hang.
+  if (limit.hang?.why !== undefined) {
+    return { kind: "failed", why: `${name} was not run: ${limit.hang.why}` };
+  }
+  // A resolution call gets the per-call bound or what is left of the
+  // plan's budget, whichever is less; with nothing left it is not run at
+  // all.
   const left = limit.budget?.remainingMs();
   if (left !== undefined && left <= 0) {
     return {
@@ -323,16 +350,19 @@ function runGit(
     ...boundedSpawnOptions(timeoutMs),
   };
   const run = boundedCommand("git", [...args]);
+  const startedAt = performance.now();
   const res = spawnSync(run.command, run.args, options);
+  limit.budget?.charge(performance.now() - startedAt);
   endGroupIfAbnormal(res);
   const e = res.error as NodeJS.ErrnoException | undefined;
   if (isTimeoutError(e)) {
-    return {
-      kind: "failed",
-      why: budgetBound
-        ? `${name} did not finish within the ${String(timeoutMs)} ms left of the branch guard's overall time budget of ${String(limit.budget?.totalMs)} ms for the whole plan and was stopped`
-        : `${name} did not finish within ${String(timeoutMs)} ms and was stopped`,
-    };
+    const why = budgetBound
+      ? `${name} did not finish within the ${String(timeoutMs)} ms left of the branch guard's overall time budget of ${String(limit.budget?.totalMs)} ms for the whole plan and was stopped`
+      : `${name} did not finish within ${String(timeoutMs)} ms and was stopped`;
+    if (limit.hang !== undefined) {
+      limit.hang.why = `an earlier git call of this repository did not finish within ${String(timeoutMs)} ms (${name}), so git is taken to hang here and is not asked again for its remaining targets`;
+    }
+    return { kind: "failed", why, timedOut: true };
   }
   if (e?.code === "ENOBUFS") {
     return {
@@ -615,7 +645,8 @@ function trackedByIdentity(
 
 /** Whether git folds letter case for this repository (`core.ignorecase`,
  * set by `git init` on a case-insensitive volume). Read once per
- * repository, only to choose `icase` for the fast lookup of
+ * repository, with the classification calls' bound (not the plan's
+ * budget), only to choose `icase` for the fast lookup of
  * `classifyTarget`. Unset is false; anything but a clear answer counts as
  * true (fail closed: the lookup then also matches other spellings, which
  * can only refuse more). */
@@ -724,10 +755,14 @@ function judgeTargets(
 ): BranchGuardVerdict {
   const targets = input.targets ?? [];
   if (targets.length === 0) return settle(refused, describe([]), input);
-  const ignoreCase = readIgnoreCase(input.root, limitOf(input));
+  // The classification calls have the per-call bound and are not charged
+  // to the plan's budget; the first of them that times out ends them for
+  // this repository (`readIgnoreCase` is one of them).
+  const limit: GitLimit = { timeoutMs: input.timeoutMs, hang: {} };
+  const ignoreCase = readIgnoreCase(input.root, limit);
   const listings: DirListings = new Map();
   const classified = targets.map((t) =>
-    classifyTarget(input.root, t, ignoreCase, limitOf(input), listings),
+    classifyTarget(input.root, t, ignoreCase, limit, listings),
   );
   const classifyFailures = classified
     .filter((c) => c.tracking === "unknown")

@@ -256,7 +256,7 @@ describe("patch: adjacent fuzzy edits on one line (equivalence at the slice end)
 
 describe("patch: a long single line with two adjacent unicode-tier edits", () => {
   it("is not quadratic in the line length", () => {
-    const n = 100_000;
+    const n = 200_000;
     const half = "x".repeat(n / 2);
     const content = `a\uFF3A${half}\uFF3Ab${"y".repeat(n / 2 - 4)}\n`;
     const dir = tmpDir();
@@ -275,8 +275,10 @@ describe("patch: a long single line with two adjacent unicode-tier edits", () =>
     expect(fs.readFileSync(path.join(dir, "f.txt"), "utf8")).toBe(
       `QR${"y".repeat(n / 2 - 4)}\n`,
     );
-    // The quadratic search took about six seconds for this plan; the linear
-    // one takes a few tens of milliseconds.
-    expect(ms).toBeLessThan(1500);
+    // Normalizing the whole slice again for every candidate end is
+    // quadratic in n: at this length that takes more than a hundred times
+    // as long as the linear search. The bound sits far below the former and
+    // well above the latter.
+    expect(ms).toBeLessThan(500);
   }, 60_000);
 });

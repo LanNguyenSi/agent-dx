@@ -2685,3 +2685,178 @@ describe("patch branch guard: the overall time budget of a plan", () => {
     for (const dir of dirs) expect(read(dir, "a.txt")).toBe("b\n");
   }, 30_000);
 });
+
+describe("patch branch guard: classification is not charged to the plan's budget", () => {
+  /** A work tree on `main` with a tracked `a.txt` and `count` untracked
+   * files `d<i % dirs>/<prefix><i>.txt`; the edits name the untracked ones. */
+  function untrackedRepo(
+    dir: string,
+    count: number,
+    dirs: number,
+    prefix = "u",
+  ): { dir: string; edits: { file: string; old: string; new: string }[] } {
+    repoOn("main", dir);
+    const edits: { file: string; old: string; new: string }[] = [];
+    const rel = path.relative(path.dirname(dir), dir);
+    for (let i = 0; i < count; i++) {
+      const sub = path.join(dir, `d${String(i % dirs)}`);
+      fs.mkdirSync(sub, { recursive: true });
+      const name = `${prefix}${String(i)}.txt`;
+      fs.writeFileSync(path.join(sub, name), "a\n");
+      edits.push({
+        file: `${rel}/d${String(i % dirs)}/${name}`,
+        old: "a",
+        new: "b",
+      });
+    }
+    return { dir, edits };
+  }
+
+  /** A git that records each classification call (`ls-files`,
+   * `check-ignore`, `config`) it is asked for, one line each with the
+   * working directory, and hangs on the calls named by `hangOn`. */
+  function classifyShim(hangOn: string): {
+    body: string;
+    calls: () => string[];
+  } {
+    const log = path.join(tmpDir(), "calls");
+    const body = [
+      'case "$1" in ls-files|check-ignore|config)',
+      `  echo "$1 $PWD" >> '${log}'`,
+      `  case "$1 $PWD" in ${hangOn}) exec sleep 30 ;; esac`,
+      "esac",
+    ].join("\n");
+    return {
+      body,
+      calls: () =>
+        fs.existsSync(log)
+          ? fs
+              .readFileSync(log, "utf8")
+              .split("\n")
+              .filter((l) => l !== "")
+          : [],
+    };
+  }
+
+  it("a healthy git on a protected branch: some hundreds of untracked targets stay allowed", () => {
+    const base = tmpDir();
+    const { dir, edits } = untrackedRepo(path.join(base, "r"), 400, 40);
+    const r = patch({ cwd: base, edits });
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.status).toBe("allowed_untracked");
+    const targets = r.branchGuard.repos[0]?.targets ?? [];
+    expect(targets).toHaveLength(400);
+    expect(targets.filter((t) => t.tracking !== "untracked")).toEqual([]);
+    expect(r.warnings.filter((w) => w.includes("could not tell"))).toEqual([]);
+    expect(read(dir, "d0/u0.txt")).toBe("b\n");
+  }, 240_000);
+
+  it("the time one repository spends classifying does not reduce what the next repository's resolution gets", () => {
+    const base = tmpDir();
+    // Classifying 150 targets takes much longer than the 1 s budget.
+    const one = untrackedRepo(path.join(base, "r1"), 150, 15);
+    const two = untrackedRepo(path.join(base, "r2"), 1, 1);
+    const started = Date.now();
+    const r = patch({
+      cwd: base,
+      edits: [...one.edits, ...two.edits],
+      gitBudgetMs: 1000,
+    });
+    expect(Date.now() - started).toBeGreaterThan(1000);
+    expect(r.status).toBe("written");
+    expect(r.branchGuard.repos.map((x) => [x.root, x.status])).toEqual([
+      [one.dir, "allowed_untracked"],
+      [two.dir, "allowed_untracked"],
+    ]);
+  }, 240_000);
+
+  it("a classification call that times out ends the classification of its repository: the rest of its targets are unknown, git is not asked again, other repositories are unaffected", () => {
+    const base = tmpDir();
+    const one = untrackedRepo(path.join(base, "r1"), 6, 2);
+    const two = untrackedRepo(path.join(base, "r2"), 6, 2);
+    const shim = classifyShim("'ls-files '*/r1");
+    const started = Date.now();
+    const r = withGitShim(shim.body, () =>
+      patch({
+        cwd: base,
+        edits: [...one.edits, ...two.edits],
+        gitTimeoutMs: 600,
+      }),
+    );
+    // One timeout of 600 ms for the repository, not one per target.
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch");
+    const calls = shim.calls();
+    expect(
+      calls.filter((c) => c.endsWith("/r1") && c.startsWith("ls-files")),
+    ).toHaveLength(1);
+    expect(
+      calls.filter((c) => c.endsWith("/r1") && c.startsWith("check-ignore")),
+    ).toEqual([]);
+    // r2 classified all six of its targets (one check-ignore each).
+    expect(
+      calls.filter((c) => c.endsWith("/r2") && c.startsWith("check-ignore")),
+    ).toHaveLength(6);
+    const [first, second] = r.branchGuard.repos;
+    expect(first?.root).toBe(one.dir);
+    expect(first?.targets?.map((t) => t.tracking)).toEqual(
+      Array<string>(6).fill("unknown"),
+    );
+    expect(second?.root).toBe(two.dir);
+    expect(second?.targets?.map((t) => t.tracking)).toEqual(
+      Array<string>(6).fill("untracked"),
+    );
+    // The repository was resolved: no budget wording anywhere.
+    const warned = r.warnings.filter((w) => w.includes("could not tell"));
+    expect(warned).toHaveLength(6);
+    expect(warned[0]).toContain("did not finish within 600 ms");
+    for (const w of warned.slice(1)) {
+      expect(w).toContain("was not run");
+      expect(w).toContain("is taken to hang here");
+      expect(w).toContain("treated as tracked");
+    }
+    for (const w of warned) expect(w).not.toContain("overall time budget");
+    // Nothing was written: the plan is refused as a whole.
+    expect(read(two.dir, "d0/u0.txt")).toBe("a\n");
+  }, 60_000);
+
+  it("a hang while reading core.ignorecase ends the classification of its repository the same way", () => {
+    const base = tmpDir();
+    const one = untrackedRepo(path.join(base, "r1"), 4, 2);
+    const shim = classifyShim("'config '*/r1");
+    const r = withGitShim(shim.body, () =>
+      patch({ cwd: base, edits: one.edits, gitTimeoutMs: 600 }),
+    );
+    expect(r.reason).toBe("protected_branch");
+    expect(shim.calls()).toEqual([`config ${one.dir}`]);
+    expect(r.branchGuard.repos[0]?.targets?.map((t) => t.tracking)).toEqual(
+      Array<string>(4).fill("unknown"),
+    );
+  }, 60_000);
+
+  it("a hang in the resolution still counts against the budget while the classification's does not", () => {
+    // Repository r1 hangs in symbolic-ref (a resolution call): it takes the
+    // whole 500 ms budget, so r2 is not asked, whatever its targets are.
+    const base = tmpDir();
+    const one = untrackedRepo(path.join(base, "r1"), 2, 1);
+    const two = untrackedRepo(path.join(base, "r2"), 2, 1);
+    const hang = [
+      'if [ "$1" = symbolic-ref ]; then',
+      '  case "$PWD" in */r1) exec sleep 30 ;; esac',
+      "fi",
+    ].join("\n");
+    const r = withGitShim(hang, () =>
+      patch({
+        cwd: base,
+        edits: [...one.edits, ...two.edits],
+        gitTimeoutMs: 3000,
+        gitBudgetMs: 500,
+      }),
+    );
+    expect(r.reason).toBe("protected_branch_unresolved");
+    expect(
+      r.edits.map((e) => (e.detail ?? "").includes("overall time budget")),
+    ).toEqual([true, true, true, true]);
+  }, 60_000);
+});
