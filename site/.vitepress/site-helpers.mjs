@@ -145,6 +145,24 @@ function isLink(p) {
   }
 }
 
+// The rewrites below serve site/index.md as the home page and refuseIncludes
+// reads it as a page, so it must be a file that can be read: a directory
+// (holding, say, a dynamic route) would only fail later inside refuseIncludes
+// with a bare EISDIR that names nothing. The test is an lstat, so a symbolic
+// link is refused whatever it points at, like every other entry here (see
+// refuseBuildTimeCode).
+function refuseNonRegularHomePage(repoRoot) {
+  const p = path.join(repoRoot, 'site', 'index.md')
+  let found
+  try {
+    const stat = fs.lstatSync(p)
+    found = stat.isFile() ? null : stat.isDirectory() ? 'a directory' : stat.isSymbolicLink() ? 'a symbolic link' : 'another entry type'
+  } catch {
+    found = 'missing'
+  }
+  if (found) throw new Error(`site/index.md must be a regular file: ${found}`)
+}
+
 // The pages are the Markdown under the two playbook directories plus
 // site/index.md, and nothing else. VitePress takes every Markdown file under
 // srcDir that no srcExclude pattern ignores, and loads a `[name].paths.*` file
@@ -244,6 +262,9 @@ export function createSite(repoRoot, readTitle) {
   if (typeof readTitle !== 'function') throw new TypeError('createSite needs a readTitle function')
   // First, so that a refused entry is named before anything else reads the tree.
   refuseBuildTimeCode(repoRoot)
+  // After it, so a refused build-time code entry is still the first thing
+  // named: this guard only lstats one path and runs no code.
+  refuseNonRegularHomePage(repoRoot)
   const pages = playbooks.flatMap((pb) => {
     const dir = path.join(repoRoot, 'packages', pb)
     return fs.existsSync(dir)
