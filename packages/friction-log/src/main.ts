@@ -21,7 +21,7 @@ import { runSearch } from "./commands/search.js";
 import { runSyncExport } from "./commands/sync-export.js";
 import { runUpdate } from "./commands/update.js";
 import { parseSinkOpts } from "./config.js";
-import { installEpipeGuard } from "./epipe.js";
+import { installEpipeGuard, installEpipeSilencer } from "./epipe.js";
 import type { DigestGroupBy } from "./db.js";
 import { availableSinks } from "./sinks/index.js";
 import type { FrictionSource, FrictionStatus, Severity } from "./types.js";
@@ -52,6 +52,7 @@ const EXPORT_FORMAT_CHOICES = ["json", "csv", "md"] as const;
 const IMPORT_FORMAT_CHOICES = ["markdown-frontmatter"] as const;
 
 installEpipeGuard(process.stdout);
+installEpipeSilencer(process.stderr);
 
 const program = new Command();
 

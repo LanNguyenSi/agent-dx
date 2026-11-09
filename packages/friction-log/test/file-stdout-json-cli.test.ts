@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FrictionDb } from "../src/db.js";
-import { installEpipeGuard } from "../src/epipe.js";
+import { installEpipeGuard, installEpipeSilencer } from "../src/epipe.js";
 
 const PKG = join(import.meta.dirname, "..");
 // Real-process tests spawn tsx; give them more than vitest's 5 s default and
@@ -106,6 +106,131 @@ describe("file --sink stdout-json (real process)", () => {
     },
     REAL_PROCESS_TEST_MS,
   );
+
+  it(
+    "exits 0 with no EPIPE text when a combined stdout+stderr reader closes after 1 byte",
+    () => {
+      const logged = cli([
+        "log",
+        "--title",
+        "epipe combined sample",
+        "--db",
+        dbPath,
+      ]);
+      expect(logged.status).toBe(0);
+      const before = new FrictionDb(dbPath);
+      const id = before
+        .listFrictions({})
+        .find((f) => f.title === "epipe combined sample")!.id;
+      before.close();
+      // The real scenario: `friction-log file <id> --sink stdout-json 2>&1 |
+      // head -c 1`. The pipeline's exit code is the CLI's own, not head's.
+      const script =
+        `${JSON.stringify(process.execPath)} --import tsx ` +
+        `${JSON.stringify(join(PKG, "src", "cli.ts"))} file ${id} --sink ` +
+        `stdout-json --db ${JSON.stringify(dbPath)} 2>&1 | head -c 1; ` +
+        "exit ${PIPESTATUS[0]}";
+      const r = spawnSync("bash", ["-c", script], {
+        cwd: PKG,
+        env,
+        encoding: "utf8",
+        timeout: CHILD_KILL_MS,
+      });
+      expect(r.error).toBeUndefined();
+      expect(r.stderr).toBe("");
+      expect(r.stdout).not.toMatch(/EPIPE|at .*\.(ts|js):\d+/);
+      expect(r.stdout.length).toBeLessThanOrEqual(1);
+      expect(r.status).toBe(0);
+    },
+    REAL_PROCESS_TEST_MS,
+  );
+
+  it(
+    "exits 0 and keeps the stdout record when only the stderr reader is closed",
+    async () => {
+      const logged = cli([
+        "log",
+        "--title",
+        "epipe stderr sample",
+        "--db",
+        dbPath,
+      ]);
+      expect(logged.status).toBe(0);
+      const before = new FrictionDb(dbPath);
+      const id = before
+        .listFrictions({})
+        .find((f) => f.title === "epipe stderr sample")!.id;
+      before.close();
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          join(PKG, "src", "cli.ts"),
+          "file",
+          String(id),
+          "--sink",
+          "stdout-json",
+          "--db",
+          dbPath,
+        ],
+        { cwd: PKG, env, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      // Close only the stderr read end before the child writes: the status
+      // line hits a broken pipe, while stdout stays readable and must still
+      // carry the full JSON record.
+      child.stderr.destroy();
+      let stdout = "";
+      child.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
+      const timer = setTimeout(() => child.kill("SIGKILL"), CHILD_KILL_MS);
+      const code = await new Promise<number | null>((res) =>
+        child.on("close", (c) => res(c)),
+      );
+      clearTimeout(timer);
+      expect(code).toBe(0);
+      const lines = stdout.split("\n").filter((l) => l.length > 0);
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0])).toMatchObject({
+        sink: "stdout-json",
+        friction: { id },
+      });
+    },
+    REAL_PROCESS_TEST_MS,
+  );
+
+  it(
+    "keeps the non-zero exit code of a failing command whose stderr reader closed",
+    async () => {
+      // `file` on a missing id writes its error to stderr and exits 1; a
+      // closed stderr reader must not turn that into a successful run.
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          join(PKG, "src", "cli.ts"),
+          "file",
+          "999999",
+          "--sink",
+          "stdout-json",
+          "--db",
+          dbPath,
+        ],
+        { cwd: PKG, env, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      child.stderr.destroy();
+      let stdout = "";
+      child.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
+      const timer = setTimeout(() => child.kill("SIGKILL"), CHILD_KILL_MS);
+      const code = await new Promise<number | null>((res) =>
+        child.on("close", (c) => res(c)),
+      );
+      clearTimeout(timer);
+      expect(code).toBe(1);
+      expect(stdout).toBe("");
+    },
+    REAL_PROCESS_TEST_MS,
+  );
 });
 
 describe("installEpipeGuard", () => {
@@ -124,5 +249,37 @@ describe("installEpipeGuard", () => {
       handlers[0](Object.assign(new Error("boom"), { code: "EIO" })),
     ).toThrow("boom");
     expect(exits).toEqual([0]);
+  });
+});
+
+describe("installEpipeSilencer", () => {
+  it("swallows EPIPE without exiting, marks the stream closed, rethrows other errors", () => {
+    const handlers: Array<(e: NodeJS.ErrnoException) => void> = [];
+    const stream = {
+      on: (_: string, h: (e: NodeJS.ErrnoException) => void) => {
+        handlers.push(h);
+      },
+      write: () => {
+        throw new Error("real write");
+      },
+      end: () => {
+        throw new Error("real end");
+      },
+    } as unknown as NodeJS.WritableStream;
+    // No exit callback exists at all: a closed stderr reader must never
+    // decide the exit code, so the handler only marks the stream closed.
+    installEpipeSilencer(stream);
+    expect(() =>
+      handlers[0](Object.assign(new Error("x"), { code: "EPIPE" })),
+    ).not.toThrow();
+    const closed = stream as unknown as {
+      write: (c: string) => boolean;
+      end: () => unknown;
+    };
+    expect(closed.write("later status line")).toBe(true);
+    expect(() => closed.end()).not.toThrow();
+    expect(() =>
+      handlers[0](Object.assign(new Error("boom"), { code: "EIO" })),
+    ).toThrow("boom");
   });
 });

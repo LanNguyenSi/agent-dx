@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { pageExclude } from '../.vitepress/site-helpers.mjs'
+import { createSite, pageExclude } from '../.vitepress/site-helpers.mjs'
 
 const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const AE = 'packages/agent-engineering-playbook'
@@ -158,4 +158,60 @@ test('pageExclude does not depend on the order the file system lists entries in'
 test('pageExclude of a tree with no entries at all is empty', () => {
   const tree = fs.mkdtempSync(path.join(work, 'bare-'))
   assert.deepEqual(pageExclude(tree), [])
+})
+
+// createSite adds 'site/index.md' to the rewrites and reads it as a page, so
+// a non-regular home page fails the config load. The guard must name the path
+// and what it is, not let the load die in an EISDIR from refuseIncludes.
+
+test('createSite refuses a site/index.md that is a directory, naming it as one', () => {
+  const tree = fs.mkdtempSync(path.join(work, 'home-dir-'))
+  fs.mkdirSync(path.join(tree, 'site/index.md'), { recursive: true })
+  fs.writeFileSync(path.join(tree, 'site/index.md/[x].md'), '# T\n')
+  fs.writeFileSync(path.join(tree, 'site/index.md/[x].paths.mjs'), 'export default { paths: () => [] }\n')
+  assert.throws(
+    () => createSite(tree, () => ''),
+    (err) =>
+      /site\/index\.md must be a regular file: a directory/.test(err.message) &&
+      !/EISDIR/.test(err.message)
+  )
+})
+
+test('createSite refuses a site/index.md that is a symbolic link, whatever it points at', () => {
+  const tree = fs.mkdtempSync(path.join(work, 'home-link-'))
+  fs.mkdirSync(path.join(tree, 'site'), { recursive: true })
+  fs.writeFileSync(path.join(tree, 'site/home.md'), '# T\n')
+  fs.symlinkSync('home.md', path.join(tree, 'site/index.md'))
+  assert.throws(() => createSite(tree, () => ''), /site\/index\.md must be a regular file: a symbolic link/)
+})
+
+test('createSite refuses a missing site/index.md, naming it as missing', () => {
+  const tree = fs.mkdtempSync(path.join(work, 'home-missing-'))
+  assert.throws(() => createSite(tree, () => ''), /site\/index\.md must be a regular file: missing/)
+})
+
+test('createSite refuses a site/index.md that is neither file nor directory nor link', () => {
+  // A device or socket file cannot be created portably at a deep temp path,
+  // so the entry type is stubbed at the fs boundary (as the readdirSync test
+  // above stubs readdirSync): lstat answers with all three flags false.
+  const tree = fs.mkdtempSync(path.join(work, 'home-other-'))
+  fs.mkdirSync(path.join(tree, 'site'), { recursive: true })
+  const target = path.join(tree, 'site', 'index.md')
+  const lstatSync = fs.lstatSync
+  fs.lstatSync = (p, ...rest) =>
+    p === target ? { isFile: () => false, isDirectory: () => false, isSymbolicLink: () => false } : lstatSync.call(fs, p, ...rest)
+  try {
+    assert.throws(() => createSite(tree, () => ''), /site\/index\.md must be a regular file: another entry type/)
+  } finally {
+    fs.lstatSync = lstatSync
+  }
+})
+
+test('a regular site/index.md loads as before', () => {
+  const tree = fs.mkdtempSync(path.join(work, 'home-file-'))
+  fs.mkdirSync(path.join(tree, 'site'), { recursive: true })
+  fs.writeFileSync(path.join(tree, 'site/index.md'), '# Home\n')
+  const s = createSite(tree, () => '')
+  assert.equal(s.rewrites['site/index.md'], 'index.md')
+  assert.deepEqual(s.pages, [])
 })

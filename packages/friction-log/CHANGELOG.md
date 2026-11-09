@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `file --sink stdout-json` now writes its two status lines to stderr, so stdout carries only the JSON record and `| jq .` parses. Other sinks still print the status lines to stdout.
 - The CLI exits 0 without a stack trace when the reader of its stdout closes the pipe early (`EPIPE`), for example `friction-log file 7 --sink stdout-json | head -c 1`.
+- The CLI also survives a closed stderr reader, for example `friction-log file 7 --sink stdout-json 2>&1 | head -c 1`: writes to a closed stderr are dropped instead of crashing the process, and the run ends with the exit code it would have had anyway (0 when it succeeded, the error code when it failed).
 - `rm` no longer fails with `FOREIGN KEY constraint failed` when other frictions record the removed one as their `recurrence_of_id`. Those frictions are kept and their `recurrence_of_id` is cleared (they become roots) instead of being re-pointed or deleted.
 
 ## [0.6.1] - 2026-10-10
