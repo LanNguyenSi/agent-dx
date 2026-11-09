@@ -37,7 +37,12 @@ import {
  * full ref name and the `refs/heads/` prefix is cut off here: `--short`
  * would answer `heads/main` when a tag `main` exists too, and that spelling
  * matches no protected name. Anything that is not a clear answer fails
- * closed: the guard refuses with `protected_branch_unresolved`.
+ * closed: the guard refuses with `protected_branch_unresolved`. All the
+ * git calls of one plan also share an overall budget (`GuardBudget`,
+ * `BRANCH_GUARD_BUDGET_FACTOR` times the per-call bound): a call gets the
+ * per-call bound or what is left of the budget, whichever is less, and a
+ * repository reached after the budget is used up is not asked at all and
+ * is refused the same way.
  */
 
 /** The names that are protected whatever the repository says. */
@@ -45,6 +50,18 @@ export const BUILTIN_PROTECTED = ["main", "master"] as const;
 
 /** How long one of the guard's git calls may run. */
 export const BRANCH_GUARD_TIMEOUT_MS = 3_000;
+
+/**
+ * The time all of the guard's git calls of one plan may take together, as
+ * a multiple of the per-call bound: twice. Each repository costs at least
+ * two calls and a hanging git costs the whole bound per call, so without a
+ * cap a plan over many repositories waits three seconds per call per
+ * repository. Twice the bound lets two calls hang in full (one hung
+ * repository, or a flaky one) and still leaves room for the rest of a
+ * healthy plan, whose calls take milliseconds; every repository that is
+ * not resolved by then is refused as `protected_branch_unresolved`.
+ */
+export const BRANCH_GUARD_BUDGET_FACTOR = 2;
 
 /** The most output taken from one of the guard's git calls. */
 const BRANCH_GUARD_MAX_OUTPUT = 64 * 1024;
@@ -136,7 +153,11 @@ export interface BranchGuardInput {
   targets?: readonly GuardTarget[];
   /** Why git must not be run in `root` (`gitDiscoveryHazard`), if so. */
   hazard: string | undefined;
+  /** How long one git call may run. */
   timeoutMs: number;
+  /** The time all calls of the plan may take together (shared by every
+   * repository of the plan); a call gets at most what is left of it. */
+  budget?: GuardBudget;
   flagNames: readonly string[];
   protectDetached: boolean;
   allowProtected: boolean;
@@ -246,6 +267,30 @@ export function branchGuardEnv(
   return env;
 }
 
+/** The time the guard's git calls of one plan may take together. Started
+ * when the first repository is judged; `remainingMs` reads a monotone
+ * clock. */
+export class GuardBudget {
+  private readonly deadline: number;
+  constructor(readonly totalMs: number) {
+    this.deadline = performance.now() + totalMs;
+  }
+  remainingMs(): number {
+    return this.deadline - performance.now();
+  }
+}
+
+/** What bounds one of the guard's git calls: the per-call bound and, when
+ * the plan has one, the shared budget. */
+interface GitLimit {
+  timeoutMs: number;
+  budget?: GuardBudget;
+}
+
+function limitOf(input: BranchGuardInput): GitLimit {
+  return { timeoutMs: input.timeoutMs, budget: input.budget };
+}
+
 type GitAnswer =
   | { kind: "exit"; status: number; stdout: string }
   | { kind: "failed"; why: string };
@@ -253,8 +298,23 @@ type GitAnswer =
 function runGit(
   root: string,
   args: readonly string[],
-  timeoutMs: number,
+  limit: GitLimit,
 ): GitAnswer {
+  const name = `git ${args.join(" ")}`;
+  // Each call gets the per-call bound or what is left of the plan's
+  // budget, whichever is less; with nothing left it is not run at all.
+  const left = limit.budget?.remainingMs();
+  if (left !== undefined && left <= 0) {
+    return {
+      kind: "failed",
+      why: `${name} was not run: the branch guard's overall time budget of ${String(limit.budget?.totalMs)} ms for the whole plan is used up`,
+    };
+  }
+  const timeoutMs =
+    left === undefined
+      ? limit.timeoutMs
+      : Math.min(limit.timeoutMs, Math.ceil(left));
+  const budgetBound = timeoutMs < limit.timeoutMs;
   const options: SpawnSyncOptionsWithStringEncoding = {
     cwd: root,
     env: branchGuardEnv(),
@@ -265,12 +325,13 @@ function runGit(
   const run = boundedCommand("git", [...args]);
   const res = spawnSync(run.command, run.args, options);
   endGroupIfAbnormal(res);
-  const name = `git ${args.join(" ")}`;
   const e = res.error as NodeJS.ErrnoException | undefined;
   if (isTimeoutError(e)) {
     return {
       kind: "failed",
-      why: `${name} did not finish within ${String(timeoutMs)} ms and was stopped`,
+      why: budgetBound
+        ? `${name} did not finish within the ${String(timeoutMs)} ms left of the branch guard's overall time budget of ${String(limit.budget?.totalMs)} ms for the whole plan and was stopped`
+        : `${name} did not finish within ${String(timeoutMs)} ms and was stopped`,
     };
   }
   if (e?.code === "ENOBUFS") {
@@ -370,7 +431,7 @@ export function evaluateBranchGuard(
   const head = runGit(
     input.root,
     ["symbolic-ref", "--quiet", "HEAD"],
-    input.timeoutMs,
+    limitOf(input),
   );
   if (head.kind === "failed") return unresolved(head.why, withBuiltin(names));
   let branch: string | undefined;
@@ -395,7 +456,7 @@ export function evaluateBranchGuard(
   const origin = runGit(
     input.root,
     ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
-    input.timeoutMs,
+    limitOf(input),
   );
   if (origin.kind === "failed") {
     return unresolved(origin.why, withBuiltin(names));
@@ -473,7 +534,7 @@ type DirListings = Map<string, string[] | { unknown: string }>;
 function listDirectoryEntries(
   root: string,
   parent: string,
-  timeoutMs: number,
+  limit: GitLimit,
 ): string[] | { unknown: string } {
   const specs =
     parent === "."
@@ -488,7 +549,7 @@ function listDirectoryEntries(
   const listed = runGit(
     root,
     ["ls-files", "-z", "--full-name", "--", ...specs],
-    timeoutMs,
+    limit,
   );
   if (listed.kind === "failed") return { unknown: listed.why };
   if (listed.status !== 0) {
@@ -519,7 +580,7 @@ function trackedByIdentity(
   root: string,
   target: GuardTarget,
   rel: string,
-  timeoutMs: number,
+  limit: GitLimit,
   listings: DirListings,
 ): "tracked" | "other" | { unknown: string } {
   let own: fs.Stats;
@@ -532,7 +593,7 @@ function trackedByIdentity(
   const parent = path.posix.dirname(rel);
   let entries = listings.get(parent);
   if (entries === undefined) {
-    entries = listDirectoryEntries(root, parent, timeoutMs);
+    entries = listDirectoryEntries(root, parent, limit);
     listings.set(parent, entries);
   }
   if (!Array.isArray(entries)) return entries;
@@ -558,12 +619,8 @@ function trackedByIdentity(
  * `classifyTarget`. Unset is false; anything but a clear answer counts as
  * true (fail closed: the lookup then also matches other spellings, which
  * can only refuse more). */
-function readIgnoreCase(root: string, timeoutMs: number): boolean {
-  const res = runGit(
-    root,
-    ["config", "--type=bool", "core.ignorecase"],
-    timeoutMs,
-  );
+function readIgnoreCase(root: string, limit: GitLimit): boolean {
+  const res = runGit(root, ["config", "--type=bool", "core.ignorecase"], limit);
   if (res.kind === "failed") return true;
   if (res.status === 1) return false;
   if (res.status !== 0) return true;
@@ -596,7 +653,7 @@ function classifyTarget(
   root: string,
   target: GuardTarget,
   ignoreCase: boolean,
-  timeoutMs: number,
+  limit: GitLimit,
   listings: DirListings,
 ): Classified {
   const unknown = (why: string): Classified => ({
@@ -626,7 +683,7 @@ function classifyTarget(
       "--",
       ...spellings.map((spelling) => `:(${magic})${spelling}`),
     ],
-    timeoutMs,
+    limit,
   );
   if (listed.kind === "failed") return unknown(listed.why);
   if (listed.status !== 0) {
@@ -635,13 +692,13 @@ function classifyTarget(
     );
   }
   if (listed.stdout !== "") return { target, tracking: "tracked" };
-  const same = trackedByIdentity(root, target, rel, timeoutMs, listings);
+  const same = trackedByIdentity(root, target, rel, limit, listings);
   if (typeof same === "object") return unknown(same.unknown);
   if (same === "tracked") return { target, tracking: "tracked" };
   const ignored = runGit(
     root,
     ["check-ignore", "-q", "--", target.path],
-    timeoutMs,
+    limit,
   );
   if (ignored.kind === "failed") return unknown(ignored.why);
   if (ignored.status === 0) return { target, tracking: "ignored" };
@@ -667,10 +724,10 @@ function judgeTargets(
 ): BranchGuardVerdict {
   const targets = input.targets ?? [];
   if (targets.length === 0) return settle(refused, describe([]), input);
-  const ignoreCase = readIgnoreCase(input.root, input.timeoutMs);
+  const ignoreCase = readIgnoreCase(input.root, limitOf(input));
   const listings: DirListings = new Map();
   const classified = targets.map((t) =>
-    classifyTarget(input.root, t, ignoreCase, input.timeoutMs, listings),
+    classifyTarget(input.root, t, ignoreCase, limitOf(input), listings),
   );
   const classifyFailures = classified
     .filter((c) => c.tracking === "unknown")

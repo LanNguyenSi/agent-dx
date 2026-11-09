@@ -33,7 +33,9 @@ import {
 } from "./hint.js";
 import { unifiedDiff } from "./diff.js";
 import {
+  BRANCH_GUARD_BUDGET_FACTOR,
   BRANCH_GUARD_TIMEOUT_MS,
+  GuardBudget,
   combineGuards,
   evaluateBranchGuard,
   notARepoGuard,
@@ -287,6 +289,10 @@ export interface PatchOptions {
   /** Test seam: how long git's identity lookup may run before it is
    * stopped (default `GIT_LOOKUP_TIMEOUT_MS`). */
   gitTimeoutMs?: number;
+  /** Test seam: the time all of the branch guard's git calls of the plan
+   * may take together (default `BRANCH_GUARD_BUDGET_FACTOR` times the
+   * per-call bound, `gitTimeoutMs` when set). */
+  gitBudgetMs?: number;
 }
 
 interface FileState {
@@ -1280,14 +1286,22 @@ export function patch(options: PatchOptions): PatchResult {
       targetsOf.set(holder, list);
     }
   }
+  // One budget for the git calls of every repository of the plan, started
+  // when the first of them is judged.
+  const guardTimeoutMs = options.gitTimeoutMs ?? BRANCH_GUARD_TIMEOUT_MS;
+  let guardBudget: GuardBudget | undefined;
   const judge = (repoRoot: string): BranchGuardVerdict => {
     let v = judged.get(repoRoot);
     if (v === undefined) {
+      guardBudget ??= new GuardBudget(
+        options.gitBudgetMs ?? BRANCH_GUARD_BUDGET_FACTOR * guardTimeoutMs,
+      );
       v = evaluateBranchGuard({
         root: repoRoot,
         targets: targetsOf.get(repoRoot) ?? [],
         hazard: gitDiscoveryHazard(repoRoot),
-        timeoutMs: options.gitTimeoutMs ?? BRANCH_GUARD_TIMEOUT_MS,
+        timeoutMs: guardTimeoutMs,
+        budget: guardBudget,
         flagNames: options.protectedBranches ?? [],
         protectDetached: options.protectDetached === true,
         allowProtected: options.allowProtected === true,

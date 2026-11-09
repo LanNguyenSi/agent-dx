@@ -85,8 +85,17 @@ export function stripTrailingWhitespace(text: string): string {
  * spaces to a plain space.
  */
 export function normalizeForFuzzyMatch(text: string): string {
+  return foldTypographic(stripTrailingWhitespace(text.normalize("NFKC")));
+}
+
+/** The character-for-character part of the `unicode` tier, applied after
+ * NFKC and the trailing-whitespace strip: typographic quotes and dashes to
+ * ASCII, special spaces to a plain space. Every replacement maps one
+ * character to one character, so it commutes with concatenation and with
+ * the strip (a space-like character stays whitespace). */
+function foldTypographic(text: string): string {
   return (
-    stripTrailingWhitespace(text.normalize("NFKC"))
+    text
       // Smart single quotes to '
       .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
       // Smart double quotes to "
@@ -243,12 +252,141 @@ function trailingInlineWhitespace(text: string): string {
 }
 
 /**
+ * Whether a normalization boundary lies directly before the UTF-16 unit
+ * `code`: NFKC of `a + b` is NFKC of `a` plus NFKC of `b` when `b` starts
+ * with such a character. Only characters that are starters (canonical
+ * combining class 0), keep their form under NFKC and can never be the
+ * second character of a composition qualify: ASCII, the CJK unified
+ * ideographs (U+3400-U+4DBF, U+4E00-U+9FFF), Hangul syllables
+ * (U+AC00-U+D7A3), Hiragana (U+3041-U+3096) and Katakana (U+30A1-U+30FA).
+ * Everything else (combining marks, Hangul jamo, surrogate halves, letters
+ * with a compatibility form) is not a boundary, which only makes the
+ * normalized tail of a probe longer, never wrong.
+ */
+export function isNormalizationBoundary(code: number): boolean {
+  return (
+    code < 0x80 ||
+    (code >= 0x3400 && code <= 0x4dbf) ||
+    (code >= 0x4e00 && code <= 0x9fff) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0x3041 && code <= 0x3096) ||
+    (code >= 0x30a1 && code <= 0x30fa)
+  );
+}
+
+/** What a `PrefixProbe` knows about the normalized text it has read: its
+ * length, whether it equals the target so far, and the whitespace at the
+ * end of the last line that the line strip has not yet decided on. */
+interface ProbeState {
+  len: number;
+  ok: boolean;
+  pending: string;
+}
+
+/**
+ * `normalizeForTier(original.slice(from, e), tier)` for a growing `e`,
+ * without normalizing the whole slice again at each `e`. Answers, for the
+ * end `e` given to `at`, whether that text equals `target` and how long it
+ * is; the answer is the one a fresh normalization gives, at every `e`.
+ *
+ * How: the slice is cut before each normalization boundary
+ * (`isNormalizationBoundary`; every position for the tiers that do not
+ * apply NFKC). The text before the last boundary below `e` is final: it is
+ * normalized once, in one piece, and folded into a small state (length,
+ * equality with `target`, and the trailing whitespace of the last line that
+ * is still undecided, because the strip drops it only at the end of a line
+ * or of the text). The part after that boundary is normalized fresh and
+ * read into a copy of the state, so a combining mark that reorders or
+ * composes with what precedes it inside that part is handled exactly as
+ * before. The work is linear in the slice plus, for each `e`, the length
+ * of the part after the last boundary (one character in ASCII text).
+ */
+export class PrefixProbe {
+  private readonly nfkc: boolean;
+  private readonly strip: boolean;
+  private readonly fold: boolean;
+  private readonly stable: ProbeState = { len: 0, ok: true, pending: "" };
+  /** Start of the part that is not final yet. */
+  private open: number;
+  /** Where the scan for boundaries has got to. */
+  private scanned: number;
+
+  constructor(
+    private readonly original: string,
+    from: number,
+    tier: MatchTier,
+    private readonly target: string,
+  ) {
+    this.nfkc = tier === "unicode";
+    this.strip = tier !== "exact";
+    this.fold = tier === "unicode";
+    this.open = from;
+    this.scanned = from;
+  }
+
+  at(e: number): { equals: boolean; length: number } {
+    let cut = this.open;
+    if (this.nfkc) {
+      for (let k = this.scanned; k < e; k++) {
+        if (k > cut && isNormalizationBoundary(this.original.charCodeAt(k))) {
+          cut = k;
+        }
+      }
+    } else {
+      cut = e;
+    }
+    if (e > this.scanned) this.scanned = e;
+    if (cut > this.open) {
+      this.read(this.stable, this.original.slice(this.open, cut));
+      this.open = cut;
+    }
+    const state: ProbeState = { ...this.stable };
+    this.read(state, this.original.slice(this.open, e));
+    return {
+      equals: state.ok && state.len === this.target.length,
+      length: state.len,
+    };
+  }
+
+  /** Reads `text` (a part of the slice, normalized here) into `state`. */
+  private read(state: ProbeState, text: string): void {
+    let t = this.nfkc ? text.normalize("NFKC") : text;
+    if (this.fold) t = foldTypographic(t);
+    const target = this.target;
+    const emit = (code: number): void => {
+      if (
+        state.ok &&
+        (state.len >= target.length || target.charCodeAt(state.len) !== code)
+      ) {
+        state.ok = false;
+      }
+      state.len += 1;
+    };
+    for (let i = 0; i < t.length; i++) {
+      const ch = t[i];
+      if (this.strip && ch === "\n") {
+        state.pending = "";
+        emit(10);
+      } else if (this.strip && ch.trim() === "") {
+        state.pending += ch;
+      } else {
+        for (let j = 0; j < state.pending.length; j++) {
+          emit(state.pending.charCodeAt(j));
+        }
+        state.pending = "";
+        emit(t.charCodeAt(i));
+      }
+    }
+  }
+}
+
+/**
  * Where the matches of a group lie in its original text. A split reads
  * `original` as `pre`, the original text of match 1, the literal gap to
  * match 2, and so on, ending in the literal text after the last match,
  * where `pre`, every gap and the text after are the normalized text
- * itself, and the original text of each match normalizes (`normalize`,
- * the normalisation of the tier the matches were found in) to exactly the
+ * itself, and the original text of each match normalizes (with the
+ * normalisation of `tier`, the tier the matches were found in) to exactly the
  * text it matched. Returns the replacement of each matched original text
  * (offsets into `original`), or undefined when there is no such split, so
  * writing would change characters outside the matched text.
@@ -275,7 +413,7 @@ function matchesInOriginal(
   base: string,
   sorted: readonly FuzzyReplacement[],
   offset: number,
-  normalize: (text: string) => string,
+  tier: MatchTier,
 ): Array<{ start: number; end: number; text: string }> | undefined {
   const n = sorted.length;
   const targets: string[] = [];
@@ -315,14 +453,26 @@ function matchesInOriginal(
     const gap = gaps[i];
     const last = i === n - 1;
     let e = last ? lastEnd : from;
+    if (last) {
+      // One candidate only: normalize it directly.
+      return e >= from &&
+        e <= original.length - gap.length &&
+        normalizeForTier(original.slice(s, e), tier) === target
+        ? e
+        : -1;
+    }
+    // Each candidate end is read through a probe that normalizes the
+    // original incrementally, so scanning the ends of one match costs
+    // linear time instead of one normalization of the whole slice per end.
+    const probe = new PrefixProbe(original, s, tier, target);
     while (e >= from && e <= original.length - gap.length) {
-      if (!last && gap.length > 0) {
+      if (gap.length > 0) {
         e = original.indexOf(gap, e);
         if (e === -1) return -1;
       }
-      const normalized = normalize(original.slice(s, e));
-      if (normalized === target) return e;
-      if (last || normalized.length > target.length) return -1;
+      const seen = probe.at(e);
+      if (seen.equals) return e;
+      if (seen.length > target.length) return -1;
       e += 1;
     }
     return -1;
@@ -420,7 +570,7 @@ export function lineRegionsPreservingUnchangedLines(
       base,
       group.replacements,
       groupStartOffset,
-      (text) => normalizeForTier(text, tier),
+      tier,
     );
     if (parts !== undefined) {
       return {

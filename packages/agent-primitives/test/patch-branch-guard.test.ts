@@ -2510,3 +2510,178 @@ describe("patch branch guard: the CLI", () => {
     ]);
   });
 });
+
+describe("patch branch guard: the overall time budget of a plan", () => {
+  /** A directory that is no repository, holding `count` repositories on
+   * task branches (`r1` ... `rN`), and a plan with one edit in each. */
+  function many(count: number): {
+    base: string;
+    dirs: string[];
+    edits: { file: string; old: string; new: string }[];
+  } {
+    const base = tmpDir();
+    const dirs: string[] = [];
+    const edits: { file: string; old: string; new: string }[] = [];
+    for (let i = 1; i <= count; i++) {
+      dirs.push(repoOn("task/x", path.join(base, `r${String(i)}`)));
+      edits.push({ file: `r${String(i)}/a.txt`, old: "a", new: "b" });
+    }
+    return { base, dirs, edits };
+  }
+
+  /** A git that records each `symbolic-ref` it is asked for (one line in
+   * the returned file) and hangs when `when` holds for the working
+   * directory; every other call is the real git's. */
+  function hangingShim(when: string): { body: string; calls: () => number } {
+    const log = path.join(tmpDir(), "calls");
+    const body = [
+      'if [ "$1" = symbolic-ref ]; then',
+      `  echo "$PWD" >> '${log}'`,
+      `  case "$PWD" in ${when}) exec sleep 30 ;; esac`,
+      "fi",
+    ].join("\n");
+    return {
+      body,
+      calls: () =>
+        fs.existsSync(log)
+          ? fs
+              .readFileSync(log, "utf8")
+              .split("\n")
+              .filter((l) => l !== "").length
+          : 0,
+    };
+  }
+
+  /** The detail of each edit, which carries the guard's wording. */
+  const details = (r: ReturnType<typeof patch>): string[] =>
+    r.edits.map((e) => e.detail ?? "");
+
+  it("the remaining budget wins over a longer per-call bound: later repositories are not asked, and the whole plan ends near the budget", () => {
+    const { base, dirs, edits } = many(4);
+    const hang = hangingShim("*");
+    const started = Date.now();
+    const r = withGitShim(hang.body, () =>
+      patch({
+        cwd: base,
+        edits,
+        gitTimeoutMs: 3000,
+        gitBudgetMs: 600,
+      }),
+    );
+    const ms = Date.now() - started;
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch_unresolved");
+    // One repository took the whole budget; four hanging calls of 3 s each
+    // would have taken 12 s.
+    expect(ms).toBeLessThan(3000);
+    expect(hang.calls()).toBe(1);
+    expect(
+      r.branchGuard.repos.map((x) => [x.root, x.status, x.reason]),
+    ).toEqual(dirs.map((d) => [d, "refused", "protected_branch_unresolved"]));
+    const d = details(r);
+    expect(d[0]).toContain(
+      "left of the branch guard's overall time budget of 600 ms",
+    );
+    for (const later of d.slice(1)) {
+      expect(later).toContain("was not run");
+      expect(later).toContain("overall time budget of 600 ms");
+    }
+  }, 30_000);
+
+  it("a shorter per-call bound wins over the remaining budget: every repository is asked, each stopped at the per-call bound", () => {
+    const { base, edits } = many(3);
+    const hang = hangingShim("*");
+    const r = withGitShim(hang.body, () =>
+      patch({
+        cwd: base,
+        edits,
+        gitTimeoutMs: 300,
+        gitBudgetMs: 60_000,
+      }),
+    );
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("protected_branch_unresolved");
+    expect(hang.calls()).toBe(3);
+    for (const detail of details(r)) {
+      expect(detail).toContain("did not finish within 300 ms and was stopped");
+      expect(detail).not.toContain("overall time budget");
+    }
+  }, 30_000);
+
+  it("a per-call bound equal to the budget: the first repository is asked once, the others not at all", () => {
+    const { base, edits } = many(3);
+    const hang = hangingShim("*");
+    const r = withGitShim(hang.body, () =>
+      patch({ cwd: base, edits, gitTimeoutMs: 400, gitBudgetMs: 400 }),
+    );
+    expect(r.reason).toBe("protected_branch_unresolved");
+    expect(hang.calls()).toBe(1);
+    const d = details(r);
+    expect(d[0]).toContain("did not finish within");
+    expect(d[1]).toContain("was not run");
+    expect(d[2]).toContain("was not run");
+  }, 30_000);
+
+  it("the budget defaults to twice the per-call bound", () => {
+    const { base, edits } = many(4);
+    const hang = hangingShim("*");
+    const started = Date.now();
+    const r = withGitShim(hang.body, () =>
+      patch({ cwd: base, edits, gitTimeoutMs: 400 }),
+    );
+    const ms = Date.now() - started;
+    expect(r.reason).toBe("protected_branch_unresolved");
+    // Two hanging calls fit; the other two repositories are not asked.
+    expect(hang.calls()).toBe(2);
+    expect(ms).toBeLessThan(1600);
+    const d = details(r);
+    expect(d[2]).toContain("was not run");
+    expect(d[3]).toContain("overall time budget of 800 ms");
+  }, 30_000);
+
+  it("repositories resolved before the budget ran out are unaffected", () => {
+    const { base, dirs, edits } = many(4);
+    const hang = hangingShim("*/r3");
+    const r = withGitShim(hang.body, () =>
+      patch({ cwd: base, edits, gitTimeoutMs: 5000, gitBudgetMs: 2500 }),
+    );
+    expect(r.status).toBe("usage_error");
+    expect(
+      r.branchGuard.repos.map((x) => [x.root, x.status, x.reason]),
+    ).toEqual([
+      [dirs[0], "allowed", undefined],
+      [dirs[1], "allowed", undefined],
+      [dirs[2], "refused", "protected_branch_unresolved"],
+      [dirs[3], "refused", "protected_branch_unresolved"],
+    ]);
+    // Two calls each for r1 and r2, the hanging one of r3, none for r4
+    // (its calls would have answered at once).
+    expect(hang.calls()).toBe(5);
+    // The plan is atomic: the resolved repositories' files are untouched.
+    for (const dir of dirs) expect(read(dir, "a.txt")).toBe("a\n");
+    const d = details(r);
+    expect(d[2]).toContain("left of the branch guard's overall time budget");
+    expect(d[3]).toContain("was not run");
+  }, 30_000);
+
+  it("--allow-protected lifts the refusal of a repository the budget cut off, and says so", () => {
+    const { base, dirs, edits } = many(2);
+    const hang = hangingShim("*");
+    const r = withGitShim(hang.body, () =>
+      patch({
+        cwd: base,
+        edits,
+        gitTimeoutMs: 3000,
+        gitBudgetMs: 300,
+        allowProtected: true,
+      }),
+    );
+    expect(r.status).toBe("written");
+    expect(r.allowedProtected).toBe(true);
+    expect(r.branchGuard.repos.map((x) => x.reason)).toEqual([
+      "protected_branch_unresolved",
+      "protected_branch_unresolved",
+    ]);
+    for (const dir of dirs) expect(read(dir, "a.txt")).toBe("b\n");
+  }, 30_000);
+});

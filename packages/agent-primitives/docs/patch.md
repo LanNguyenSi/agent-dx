@@ -473,6 +473,25 @@ repository-selecting variables (`GIT_DIR`, `GIT_WORK_TREE`,
 the ones the identity lookup drops) are removed from git's environment
 first, so the answer is the one for the repository.
 
+**Time budget.** All of the guard's git calls of one plan share an overall
+budget of twice the per-call bound (6 s with the 3 s bound), started when
+the first repository is judged. Each call gets the per-call bound or what
+is left of the budget, whichever is less: with a longer bound the
+remaining budget wins and stops the call (the edit's `detail` names the
+budget), with a shorter one the per-call bound wins and the budget is
+spent as the calls take it. A repository reached when nothing is left is
+not asked at all: it is refused with `reason: "protected_branch_unresolved"`
+like one whose branch could not be read, and the edit's `detail` says that
+git was not run because the overall budget is used up. Repositories
+resolved before that, and repositories whose check needs no git call (a
+discovery hazard), are unaffected, and the plan stays atomic as always. A
+classification of a target that runs into the budget is `unknown` and
+counts as tracked, like any other classification that fails; with a
+healthy git a protected-branch plan reaches the budget only at some hundreds
+of classified targets (each costs a few git calls of a few milliseconds).
+Without the cap a plan over many repositories behind a hanging git waited
+the whole bound for each call of each repository.
+
 **Outcomes.** `branch_guard.status` is the overall outcome, the first of
 this table's order that any repository has, and `branch_guard.repos` has one
 entry per repository (`root`, `status`, `branch`, `protected`, `sources`,
