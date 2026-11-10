@@ -64,7 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fable` at effort xhigh. The effort is no longer always the tier name. A
   fourth model class above `large` maps to the new Claude alias `fable`
   (accepted by `--models`, rejected in a Codex leaf, resolved on opencode
-  through the `claude-fable` family).
+  through the `claude-fable` family). The exported `DEFAULT_MODELS`
+  changes with it, and so do the default agent files of a fresh install:
+  task-slicer `sonnet` to `opus`, advisor `opus` to `fable`; explorer,
+  implementer and reviewer are unchanged.
 - Codex defaults: explorer low and implementer low run the small model at
   effort high, implementer xhigh runs the strong model at effort high; all
   other leaves are unchanged. The defaults follow the vendor's model guidance
@@ -95,12 +98,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The `TIER_DEFS` export. Use `ROLE_TIER_DEFS` and `tierDef(role, tier)`.
 
-Background for the model choices: Anthropic's model selection guide
-(https://claude.dev/blog/which-claude-model-should-you-build-with/) and the
+Background for the model choices: the model selection guide at
+https://claude.dev/blog/which-claude-model-should-you-build-with/ and the
 Codex model and subagent documentation linked in the routing reference.
 Observed on Claude Code 2.1.322 on 2026-11-10: a model and effort passed at
-spawn time win over the values pinned in the agent file, and the small model
-receives the effort value.
+spawn time win over the values pinned in the agent file (an agent file pinned
+to the small model at effort low, spawned with the medium model and effort
+high, ran on the medium model at effort high), and a run of that agent
+without an override sent effort low on the small model.
 
 ## [0.50.0] - 2026-11-04
 
