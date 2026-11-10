@@ -13171,3 +13171,21 @@ run-state-lifecycle-and-markers.md and subagent-contracts-superset.md list
 CHANGELOG.md as a source; all their CHANGELOG citations are heading-anchored
 (`#[x.y.z]`), none cites `[Unreleased]`, so no claim changed; re-stamped all
 three at 2026-11-02T13:29:59Z after confirming that.
+
+## 2026-11-10T10:48:18Z (per-role default routing, re-stamp after the change)
+
+The per-role default routing change (`ROLE_TIER_DEFS`, the `fable` alias and
+the `xlarge` class, the per-leaf Codex efforts, the opencode class fallback
+with a floor for reviewer and advisor variants, and the materialization of
+manifests that record no routing, for every harness) touched sources of six
+docs. model-preselection.md was rewritten where its claims changed (default
+table, alias and class prose, Codex defaults, materialization at both manifest
+readers including the frozen Codex table, fallback, warning threshold, floor);
+install-fence-mechanics.md had its advisor default and the `variant: max`
+range updated; operator-install-and-registry.md gained the operator
+materialization clause. In subagent-contracts-superset.md,
+run-state-lifecycle-and-markers.md and review-gate-and-waivers.md only line
+citations moved and were re-pointed; no claim of theirs depends on the changed
+code. Each changed claim was read against the code at the head of the change
+by the implementing round and one claim per touched doc again by the review
+rounds; the citation tests pass. Re-stamped all six at 2026-11-10T10:48:18Z after that.
