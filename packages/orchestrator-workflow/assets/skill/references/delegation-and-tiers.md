@@ -62,7 +62,7 @@ briefing, before spawning the advisor, and before changing a model.
   choice. Where the installed definition wins over a spawn value, there is no
   such override: the choice is then between the installed variants, or a
   routing patch (shipped harnesses differ: in Claude Code the spawn value
-  wins, in Codex the agent file wins).
+  wins, in Codex a value set in the agent file wins over a spawn value).
 
 ### Review method and reviewer tier by risk class
 
