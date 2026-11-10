@@ -171,7 +171,10 @@ object with a `models` array. Each model has a unique `slug` and may list
 selections for installed roles and tiers are checked: a selected model that is
 not in the catalog, or an effort it does not list, stops the install before any
 kit file is written; a model without `supported_reasoning_levels` only produces
-a warning. The bundled `assets/codex-models.json` alias map is not a catalog.
+a warning. For a missing model the error lists the substitutes that
+`--codex-fallback degrade` would use (see
+[When the catalog lacks a selected model](#when-the-catalog-lacks-a-selected-model)).
+The bundled `assets/codex-models.json` alias map is not a catalog.
 Without a supplied catalog the CLI performs no online entitlement check;
 offline or account-specific availability remains unknown.
 Use the harness's native capability commands, such as `codex debug models`, to
@@ -187,6 +190,107 @@ file through `--codex-models <json-file>`, for example
 matching leaf's default effort from the table above; it does not alter omitted aliases or a plain
 reinstall. An explicit `--routing` leaf is applied afterward and has highest
 precedence, including when a custom effort must be retained.
+
+An alias value is a model id or an array of model ids, in
+`assets/codex-models.json` and in `--codex-models` alike, for example
+`{"strong":["gpt-first","gpt-second"]}`. The first entry is the intended model
+of the class and is the only one the routing uses; a single id is a list of
+one. The later entries are candidates: models the installer may substitute for
+the intended one, and only in the case the next section describes. A list must
+not be empty or name a model twice. `--codex-models` replaces the bundled list
+of each alias it names as a whole.
+
+### When the catalog lacks a selected model
+
+An account may not offer a model the routing names. In Codex the model in the
+agent file wins over a value passed at spawn, so the file itself has to name a
+model the account offers. `--codex-fallback <stop|degrade>` decides what an
+install with `--codex-catalog` does about an installed Codex leaf whose model
+the catalog lacks. `init`, `apply`, and `setup` accept it. Without a catalog
+the option has no effect: nothing is checked.
+
+- `stop` (the default) ends the install before any file is written. The error
+  prints the substitution table: one line per affected leaf with role, tier,
+  intended model and effort, and the model and effort `degrade` would use, or
+  `no substitute` with the reason.
+- `degrade` applies that table. It still ends the install before any file is
+  written when one affected leaf has no substitute.
+
+The substitute of a leaf is chosen by a fixed rule, in this order:
+
+1. The first later candidate of the leaf's own alias class that the catalog
+   offers. Candidates listed before the leaf's model are not considered.
+2. Otherwise the first candidate, in list order, that the catalog offers in
+   the next lower class: `strong`, then `balanced`, then `small`.
+3. Otherwise the leaf has no substitute. The installer never drops the model
+   line to let the leaf inherit the session model.
+
+A leaf belongs to the class whose candidate list contains its model. When
+several lists contain it, the list that names it earliest decides, and among
+those the stronger class. A leaf whose model is in no candidate list, such as
+one set through `--routing`, is never substituted: explicit input is not
+replaced, and the install stops and names the leaf.
+
+Floors: a reviewer or advisor leaf is never substituted with a model of a
+class below `balanced`. When only the `small` class is available for such a
+leaf, it has no substitute.
+
+Effort of a substituted leaf: a leaf that dropped to a lower class runs at
+`high` at least. The result is then clamped to the levels the catalog lists
+for the chosen model: the level itself when listed, otherwise the next lower
+listed level, otherwise the lowest listed one. A model without
+`supported_reasoning_levels` keeps the effort and produces the warning above.
+A lower-class candidate that lists no level of `high` or above is not used.
+
+The record. `routing` in `.ai/workflow/manifest.json` stays the intended
+routing; a substitution never changes it. The substituted leaves are recorded
+under `routingResolution`, and the agent files are rendered from the `used`
+values:
+
+```json
+{
+  "routingResolution": {
+    "codex": {
+      "reviewer": {
+        "high": {
+          "intended": { "model": "gpt-6-astra", "effort": "high" },
+          "used": { "model": "gpt-6.1-sol", "effort": "high" },
+          "reason": "lower-class"
+        }
+      }
+    }
+  }
+}
+```
+
+`reason` is `class-candidate` (rule 1) or `lower-class` (rule 2). The key holds
+only substituted leaves and is absent when there is none, so an install that
+never substitutes keeps the manifest it had. A malformed `routingResolution`
+is a read error, like a malformed `routing`. Every substitution is printed
+with role, tier, intended and used model.
+
+Re-install. The intended routing is sticky as described above.
+
+- Without a catalog the record is kept and the files do not change; each kept
+  substitute is printed.
+- With a catalog every installed Codex leaf is resolved again from its
+  intended selection. A leaf whose intended model the catalog offers returns
+  to it, its record is removed, and a note says so. A leaf whose model is
+  still missing needs `--codex-fallback degrade` again; otherwise the install
+  stops with the table. Candidate lists are not stored in the manifest: a
+  re-install that should choose among the same substitutes passes the same
+  `--codex-models` file again, otherwise the bundled lists apply.
+- A record is dropped, with a note, when the intended selection of its leaf
+  changed. The record of a leaf that is not installed in a run (its tier
+  variants are off, or Codex is not among the harnesses) is carried unchanged.
+
+`doctor` and `apply --sync` compare and project the intended routing, so a
+substitution alone is not a divergence; drift detection and `uninstall` use
+the file hashes of what was rendered. The operator manifest holds the intended
+routing and never a `routingResolution`: `setup --codex-fallback degrade`
+saves defaults whose models the catalog lacks, prints the substitute an
+install would use, and leaves the substitution to each `init` or `apply` that
+passes a catalog and `degrade`.
 
 ## opencode model resolution
 

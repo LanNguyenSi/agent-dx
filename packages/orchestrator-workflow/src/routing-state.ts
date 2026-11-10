@@ -16,11 +16,24 @@ import {
   tierDef,
 } from "./models.js";
 import {
+  DEFAULT_CODEX_FALLBACK,
+  buildRoutingResolution,
+  codexFallbackError,
+  formatCodexFallbackRow,
+  planCodexFallback,
+  resolutionEntries,
+} from "./codex-fallback.js";
+import type {
+  CodexFallbackMode,
+  CodexFallbackPlan,
+  RoutingResolution,
+} from "./codex-fallback.js";
+import {
+  codexModelCandidates,
   defaultCodexRouting,
   mergeRouting,
   parseRouting,
   preRoutingCodexRouting,
-  validateCodexCatalog,
 } from "./routing.js";
 import type { HarnessRouting } from "./routing.js";
 
@@ -154,22 +167,167 @@ export function selectedRouting(
   return result;
 }
 
-/** One shared, offline catalog check for setup and installation. */
+const NO_CODEX_CATALOG_NOTE =
+  "Codex model availability and reasoning-effort support were not validated: no capability catalog supplied. The requested selections are used without capability validation.";
+
+export interface CodexFallbackOptions {
+  /** Defaults to `stop`. Has no effect without a catalog. */
+  fallback?: CodexFallbackMode;
+  /** Sparse alias map replacing bundled candidate lists, as `--codex-models`. */
+  candidates?: unknown;
+}
+
+/**
+ * Plans the installed Codex leaves against a catalog and throws the
+ * substitution table unless every affected leaf may be substituted: the mode
+ * is `degrade` and each has a substitute.
+ */
+function plannedCodexFallback(
+  routing: HarnessRouting,
+  scope: RoutingScope,
+  catalog: unknown,
+  options: CodexFallbackOptions,
+): CodexFallbackPlan {
+  const mode = options.fallback ?? DEFAULT_CODEX_FALLBACK;
+  const plan = planCodexFallback(
+    selectedRouting(routing, { ...scope, harnesses: ["codex"] }),
+    catalog,
+    codexModelCandidates(options.candidates),
+  );
+  if (
+    plan.rows.length > 0 &&
+    (mode !== "degrade" || plan.rows.some((row) => row.used === undefined))
+  ) {
+    throw codexFallbackError(plan.rows, mode);
+  }
+  return plan;
+}
+
+/**
+ * One shared, offline catalog check for stored defaults (`setup`). Defaults
+ * hold the intended routing and no resolution, so under `degrade` a missing
+ * model is only announced with the substitute an install would use.
+ */
 export function codexCatalogWarnings(
   routing: HarnessRouting,
   scope: RoutingScope,
   catalog?: unknown,
+  options: CodexFallbackOptions = {},
 ): string[] {
   if (!scope.harnesses.includes("codex")) return [];
-  if (catalog === undefined) {
-    return [
-      "Codex model availability and reasoning-effort support were not validated: no capability catalog supplied. The requested selections are used without capability validation.",
-    ];
+  if (catalog === undefined) return [NO_CODEX_CATALOG_NOTE];
+  const plan = plannedCodexFallback(routing, scope, catalog, options);
+  return [
+    ...plan.warnings,
+    ...plan.rows.map(
+      (row) =>
+        `Codex fallback: ${formatCodexFallbackRow(row)}. The stored defaults keep the intended model ${row.intended.model}; an install substitutes ${row.used!.model} only with a catalog and --codex-fallback degrade.`,
+    ),
+  ];
+}
+
+export interface CodexInstallResolution {
+  /** The routing to render: the intended routing with each substitute applied. */
+  rendered: HarnessRouting;
+  /** The record to store; absent when no leaf is substituted. */
+  resolution?: RoutingResolution;
+  /** Lines to print: every substitution, return and dropped record, then warnings. */
+  notes: string[];
+}
+
+/**
+ * Resolves what an install renders for Codex. `routing` is the intended
+ * routing and is never changed. A recorded substitution is carried only while
+ * its leaf's intended selection is unchanged. Without a catalog (or without
+ * Codex among the harnesses) nothing is checked and the carried record is
+ * applied as it is. With a catalog every installed Codex leaf is resolved
+ * anew from its intended selection: a leaf whose intended model is offered
+ * returns to it and loses its record; a leaf whose model is missing is
+ * substituted under `degrade`, and otherwise stops the install with the
+ * substitution table before anything is written.
+ */
+export function resolveCodexInstall(
+  routing: HarnessRouting,
+  scope: RoutingScope,
+  catalog: unknown,
+  previous: RoutingResolution | undefined,
+  options: CodexFallbackOptions = {},
+): CodexInstallResolution {
+  const notes: string[] = [];
+  const describe = (selection: { model: string; effort: Tier }) =>
+    `${selection.model} (${selection.effort})`;
+  const installsCodex = scope.harnesses.includes("codex");
+  const installed = selectedRouting(routing, {
+    ...scope,
+    harnesses: ["codex"],
+  });
+  const isInstalled = (role: Role, tier: Tier) =>
+    installsCodex && installed.codex?.[role]?.[tier] !== undefined;
+
+  let entries = resolutionEntries(previous).filter(({ role, tier, entry }) => {
+    const intended = routing.codex?.[role]?.[tier];
+    if (
+      intended !== undefined &&
+      intended.model === entry.intended.model &&
+      intended.effort === entry.intended.effort
+    ) {
+      return true;
+    }
+    notes.push(
+      `Codex fallback: the recorded substitution of ${role}/${tier} (${describe(entry.used)} for intended ${describe(entry.intended)}) is dropped, because the intended routing of that leaf changed${intended === undefined ? "" : ` to ${describe(intended)}`}.`,
+    );
+    return false;
+  });
+
+  if (!installsCodex || catalog === undefined) {
+    for (const { role, tier, entry } of entries) {
+      if (!isInstalled(role, tier)) continue;
+      notes.push(
+        `Codex fallback: ${role}/${tier} keeps the recorded substitute ${describe(entry.used)} for intended ${describe(entry.intended)} [${entry.reason}]; no catalog was supplied, so availability was not checked again.`,
+      );
+    }
+    if (installsCodex) notes.push(`Codex catalog: ${NO_CODEX_CATALOG_NOTE}`);
+  } else {
+    const plan = plannedCodexFallback(routing, scope, catalog, options);
+    for (const { role, tier, entry } of entries) {
+      if (
+        isInstalled(role, tier) &&
+        !plan.rows.some((row) => row.role === role && row.tier === tier)
+      ) {
+        notes.push(
+          `Codex fallback: ${role}/${tier} returns to its intended model ${describe(entry.intended)}, which the catalog offers again; the substitute ${describe(entry.used)} is no longer used.`,
+        );
+      }
+    }
+    // Every installed leaf was resolved anew; a leaf that is not installed
+    // keeps its carried record.
+    entries = entries.filter(({ role, tier }) => !isInstalled(role, tier));
+    for (const row of plan.rows) {
+      notes.push(
+        `Codex fallback: ${row.role}/${row.tier} uses ${describe(row.used!)} instead of intended ${describe(row.intended)} [${row.reason!}].`,
+      );
+      entries.push({
+        role: row.role,
+        tier: row.tier,
+        entry: { intended: row.intended, used: row.used!, reason: row.reason! },
+      });
+    }
+    for (const warning of plan.warnings) {
+      notes.push(`Codex catalog: ${warning}`);
+    }
   }
-  return validateCodexCatalog(
-    selectedRouting(routing, { ...scope, harnesses: ["codex"] }),
-    catalog,
-  );
+
+  const resolution = buildRoutingResolution(entries);
+  const rendered = mergeRouting(routing);
+  for (const { role, tier, entry } of resolutionEntries(resolution)) {
+    if (rendered.codex?.[role]?.[tier] === undefined) continue;
+    rendered.codex[role]![tier] = { ...entry.used };
+  }
+  return {
+    rendered,
+    ...(resolution !== undefined ? { resolution } : {}),
+    notes,
+  };
 }
 
 /**
@@ -200,8 +358,8 @@ export function materializePreRoutingRouting(
   harnesses: Harness[],
   models: Partial<Record<Role, string>>,
   maps: OpencodeModelMaps,
-): HarnessRouting | undefined {
-  const materialized = persistableRouting(
+): HarnessRouting {
+  return persistableRouting(
     mergeRouting(
       preRoutingCodexRouting(),
       legacyRouting(
@@ -213,7 +371,6 @@ export function materializePreRoutingRouting(
       ),
     ),
   );
-  return Object.keys(materialized).length > 0 ? materialized : undefined;
 }
 
 /**

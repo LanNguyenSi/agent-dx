@@ -94,7 +94,7 @@ manifest on every run. The rules:
   instead of overwriting them; `--force` overwrites those too.
 - `.ai/workflow/manifest.json` is the kit's state file. It records the kit
   name and applied version, harnesses, role profile, legacy models, the
-  effective `routing` map, the `--tiers` flag, the optional kit-version pin,
+  effective `routing` map, the Codex substitutions under `routingResolution` when there are any, the `--tiers` flag, the optional kit-version pin,
   the optional `knowledge` list, the opencode compatibility maps
   (`opencodeModels`, `opencodeClassModels`) when present, file hashes, and the
   first install time, and is rewritten whenever that state changes. Apart from
@@ -104,11 +104,11 @@ manifest on every run. The rules:
 
 `init`, `setup`, and `apply` exit `2` when an option file (`--routing`,
 `--codex-models`, `--codex-catalog`) cannot be read or parsed as JSON, or
-when a `--routing` or `--codex-models` file fails validation; `apply` also
+when a `--routing` or `--codex-models` file fails validation, or when `--codex-fallback` is neither `stop` nor `degrade`; `apply` also
 exits `2` for `--pin` combined with `--unpin`, or for a `--pin` value that is
 empty or contains whitespace. When Codex is a selected harness, a
 `--codex-catalog` file with an invalid shape, or one missing a selected Codex
-model or effort, exits `2` for `setup` and `1` for `init` and `apply`; without
+model or effort, exits `2` for `setup` and `1` for `init` and `apply` (a missing model does not end the run when `--codex-fallback degrade` finds a substitute for every affected leaf); without
 Codex the catalog is parsed but not checked. Any other failure exits
 `1`, for example a missing target directory, an unknown harness or profile,
 a missing or unreadable operator manifest for `apply`, or `uninstall` without

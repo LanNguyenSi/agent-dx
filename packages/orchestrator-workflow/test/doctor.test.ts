@@ -1175,6 +1175,34 @@ describe("doctor routing normalization", () => {
     expect(target.status).toBe("clean");
   });
 
+  it("reports routing divergence for a target installed by this version against an operator manifest that records no routing", () => {
+    const repo = mkdtempSync(join(tmpdir(), "ow-doctor-repo-"));
+    repos.push(repo);
+    // The target records the current per-role routing of its tier variants.
+    runInit({
+      targetDir: repo,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      tiers: true,
+    });
+    expect(readInstalledManifest(repo)?.routing).toBeDefined();
+    // The operator manifest predates routing, so it reads as the
+    // tier-uniform table of that time.
+    registerHome(defaults({ tiers: true }), [realpathSync(repo)]);
+    expect(
+      JSON.parse(readFileSync(join(home, "manifest.json"), "utf8")).defaults
+        .routing,
+    ).toBeUndefined();
+    const target = runDoctor(home, {}).targets[0];
+    expect(target.divergence).toEqual({
+      profile: false,
+      tiers: false,
+      models: false,
+      routing: true,
+    });
+    expect(target.status).toBe("divergent");
+  });
+
   it("ignores routing outside the installed harness, profile, and tier scope", () => {
     const repo = makeRepo({ profile: "minimal" });
     registerHome(

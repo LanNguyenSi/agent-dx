@@ -166,7 +166,7 @@ steps in the repository you were asked to install into.
      --profile <minimal|full> \
      [--models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>,advisor=<model>"] [--codex-models <codex-model-aliases.json>] \
      [--routing <routing.json>] \
-     [--codex-catalog <codex-catalog.json>] \
+     [--codex-catalog <codex-catalog.json>] [--codex-fallback <stop|degrade>] \
      [--tiers | --no-tiers]
    ```
 
@@ -328,7 +328,9 @@ steps in the repository you were asked to install into.
 `--codex-models` accepts a sparse object keyed by the internal Codex aliases
 `small`, `balanced`, and `strong`. It deliberately replaces both model and
 tier-standard effort on matching leaves, so use `--routing` to preserve or
-select a custom effort; omitted aliases preserve existing selections.
+select a custom effort; omitted aliases preserve existing selections. A value
+is a model id or an ordered array of ids: the first is the model the routing
+uses, the later ones are substitutes for `--codex-fallback degrade`.
 
 ### Choosing models
 
@@ -390,12 +392,24 @@ install includes Codex, refresh the listing (`codex debug models`) and pass it
 with `--codex-catalog`; when the listing cannot be fetched, follow step 1 and
 report the gap instead of claiming validation. The installer stops before it
 writes anything when a selected model is missing from the supplied catalog, so
-settle the substitution first: show the operator which leaves the missing
-model affects and which available model you propose per alias class, ask, and
-then pass the agreed models through `--codex-models` or a `--routing` patch.
+settle the substitution first. Run the installer once with the default
+(`--codex-fallback stop`): its error is the substitution table, one line per
+affected leaf with the intended model and effort and the model and effort the
+installer would use instead, or `no substitute` with the reason. Show that
+table to the operator and ask. Pass `--codex-fallback degrade` only after the
+operator agreed; it applies exactly that table. When the operator wants other
+models, or a leaf has no substitute, pass the agreed models through
+`--codex-models` (a model id per alias class, or an ordered array whose later
+entries are the substitutes to try first) or a `--routing` patch instead. A
+leaf set through `--routing` is never substituted.
 Do not move a reviewer or advisor leaf below the balanced class unless the
-operator says so. Record the intended routing next to the applied one in the
-handoff, so the install can return to it.
+operator says so; `degrade` never does. Record the intended routing next to
+the applied one in the handoff, so the install can return to it. With
+`degrade` the manifest does this as well: `routing` keeps the intended
+routing, `routingResolution` lists each substituted leaf with its intended and
+used selection, and a later install with a catalog that offers the intended
+model again returns to it by itself. A re-install without a catalog keeps the
+substitutes.
 
 This subsection applies to the automated installer (step 3). The manual
 fallback in step 4 renders neither tier variants nor Codex agent files, so

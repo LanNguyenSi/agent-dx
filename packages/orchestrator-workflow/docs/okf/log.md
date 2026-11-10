@@ -3904,7 +3904,7 @@
   time elsewhere in the same doc under a different path spelling"). The
   historical lines 423 paragraph's citation of that range is re-pointed to its own,
   different evidence
-  (`packages/orchestrator-workflow/src/init.ts:1162-1164#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`,
+  (`packages/orchestrator-workflow/src/init.ts:1214-1216#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`,
   the effort-line pass-in the sentence actually describes), so the entry
   now covers historical lines 156 only.
   (L1) The "states a falsifiable claim" sanity check tested only
@@ -3925,7 +3925,7 @@
   uncited line 1827 "asserts the absence of the codex-only
   effort field". It does not: `reasoningEffort` (asserted absent at 1827)
   is opencode's own field for a non-Claude-family, non-Ollama provider
-  (`packages/orchestrator-workflow/src/init.ts:684#"reasoningEffort: ${effort}"`);
+  (`packages/orchestrator-workflow/src/init.ts:722#"reasoningEffort: ${effort}"`);
   codex's own equivalent field is `model_reasoning_effort`
   (`packages/orchestrator-workflow/src/codex.ts:50#"model_reasoning_effort = ${tomlString(selection.effort)}"`).
   No compliant anchor exists to widen the citation to cover 1827: the
@@ -3940,10 +3940,10 @@
   sentence about the base-file note cited the sub-loop's own gate/note
   (init.ts at historical lines 630-635). Re-pointed, citation-only: the sub-loop sentence
   now cites
-  `packages/orchestrator-workflow/src/init.ts:859-868#"variantPath}: now untracked after the full"`
+  `packages/orchestrator-workflow/src/init.ts:906-915#"variantPath}: now untracked after the full"`
   (already used for the same sub-loop elsewhere in this doc and in
   `model-preselection.md`); the base-file-note sentence now cites
-  `packages/orchestrator-workflow/src/init.ts:848-850#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run"`.
+  `packages/orchestrator-workflow/src/init.ts:895-897#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run"`.
   Known limit, unclosed this round (also recorded in the CHANGELOG
   `[Unreleased]` entry): neither rule catches a citation that resolves
   and anchors cleanly but simply names the WRONG target -- no duplication
@@ -4018,7 +4018,7 @@
   `model-preselection.md` both cited the enclosing per-dropped-role note
   range for a sentence about the tier-variant SUB-loop, whose own note
   sits below it
-  (`packages/orchestrator-workflow/src/init.ts:859-868#"variantPath}: now untracked after the full"`,
+  (`packages/orchestrator-workflow/src/init.ts:906-915#"variantPath}: now untracked after the full"`,
   unique file-wide, anchor on the range's last content line); both entries
   dropped. Then re-ran the guard over the corrected bundle with the
   allowlist bypassed and read every raw hit against its target file and
@@ -12653,7 +12653,7 @@ or the suite noticing, because rule (b) only looks WITHIN the window and
 only when the same paragraph already cites a sibling range of the same
 file (`hasSibling`). Neither precondition holds for the real example the
 tracker named: `model-preselection.md`'s
-`init.ts:1092-1095#"composeClaudeAgentVariant("` citation, a lone citation
+`init.ts:1139-1142#"composeClaudeAgentVariant("` citation, a lone citation
 in its own paragraph, whose anchor text also matches
 `composeClaudeAgentVariant`'s own function definition 471 lines away at
 `init.ts:592`.
@@ -12667,8 +12667,8 @@ target line. "Claimed" stays PARAGRAPH-scoped, exactly like rule (b)'s own
 definition; a doc-wide claiming design was tried first and rejected: it let
 an unrelated, same-file citation elsewhere in the document silently absorb
 a genuine re-point (measured against the real
-`init.ts:1092-1095#"composeClaudeAgentVariant("` citation and the
-`init.ts:621-636#"disallowedTools: Edit, Write, NotebookEdit"` citation
+`init.ts:1139-1142#"composeClaudeAgentVariant("` citation and the
+`init.ts:659-674#"disallowedTools: Edit, Write, NotebookEdit"` citation
 that happens to cover the same target line for an unrelated reason). The
 finding shape, allowlist entry shape, matching, geometry re-check and
 claim-falsifiability machinery are all reused unchanged from rule (b): a
@@ -12716,7 +12716,7 @@ module docs (the tracker's own audit had counted 82 anchored full citations
 plus four path-less continuations by a different, unmeasured method; this
 guard's own paragraph-scoped, doc-independent claiming counts 70 real hits,
 including the tracker's own named example and its path-less continuation
-sibling at `init.ts:1095-1095#"composeClaudeAgentVariant("`). All 70 are
+sibling at `init.ts:1142-1142#"composeClaudeAgentVariant("`). All 70 are
 independently reviewed and allowlisted below (kind `distant-duplicate-
 anchor`), each with a geometry-checked, falsifiable claim naming the
 enclosing function/`it`/`describe` block at both the cited and the uncited

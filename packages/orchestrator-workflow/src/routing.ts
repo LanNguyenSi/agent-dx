@@ -12,11 +12,19 @@ export interface ModelSelection {
 
 export type CodexModelAlias = "small" | "balanced" | "strong";
 
-const CODEX_MODEL_ALIASES: readonly CodexModelAlias[] = [
+/** The Codex alias classes, ordered from the weakest to the strongest. */
+export const CODEX_MODEL_ALIASES: readonly CodexModelAlias[] = [
   "small",
   "balanced",
   "strong",
 ];
+
+/**
+ * The ordered model ids of each Codex alias class. The first entry is the
+ * intended model of the class; the later entries are only ever used as
+ * substitutes for it (see `codex-fallback.ts`).
+ */
+export type CodexModelCandidates = Record<CodexModelAlias, string[]>;
 
 /**
  * A sparse harness-specific model-routing patch. Later layers supplied to
@@ -123,7 +131,29 @@ function assertConcreteCodexModelId(model: unknown, location: string): string {
   return value;
 }
 
-function loadBundledCodexModels(): Record<CodexModelAlias, string> {
+/**
+ * One alias value: a model id (a list of one) or a non-empty array of
+ * distinct model ids, the first being the intended model of the class.
+ */
+function parseCodexAliasCandidates(value: unknown, location: string): string[] {
+  if (!Array.isArray(value)) {
+    return [assertConcreteCodexModelId(value, location)];
+  }
+  if (value.length === 0) {
+    throw new Error(`${location} must list at least one model id`);
+  }
+  const candidates: string[] = [];
+  for (const [index, entry] of value.entries()) {
+    const model = assertConcreteCodexModelId(entry, `${location}[${index}]`);
+    if (candidates.includes(model)) {
+      throw new Error(`${location} lists "${model}" more than once`);
+    }
+    candidates.push(model);
+  }
+  return candidates;
+}
+
+function loadBundledCodexModelCandidates(): CodexModelCandidates {
   let value: unknown;
   try {
     value = JSON.parse(readAsset("codex-models.json"));
@@ -135,12 +165,12 @@ function loadBundledCodexModels(): Record<CodexModelAlias, string> {
     throw new Error("Bundled Codex model aliases must be an object");
   }
   assertSafeKeys(value, "bundled Codex model aliases");
-  const result = {} as Record<CodexModelAlias, string>;
+  const result = {} as CodexModelCandidates;
   for (const alias of CODEX_MODEL_ALIASES) {
     if (!(alias in value)) {
       throw new Error(`Bundled Codex model aliases must contain "${alias}"`);
     }
-    result[alias] = assertConcreteCodexModelId(
+    result[alias] = parseCodexAliasCandidates(
       value[alias],
       `bundled Codex model alias "${alias}"`,
     );
@@ -151,22 +181,62 @@ function loadBundledCodexModels(): Record<CodexModelAlias, string> {
   return result;
 }
 
-export function parseCodexModels(
+/** The first candidate of each list: the intended model of the class. */
+function intendedCodexModels<Models extends Partial<CodexModelCandidates>>(
+  candidates: Models,
+): { [Alias in keyof Models]: string } {
+  return Object.fromEntries(
+    Object.entries(candidates).map(([alias, models]) => [
+      alias,
+      (models as string[])[0],
+    ]),
+  ) as { [Alias in keyof Models]: string };
+}
+
+function loadBundledCodexModels(): Record<CodexModelAlias, string> {
+  return intendedCodexModels(loadBundledCodexModelCandidates());
+}
+
+/**
+ * Parses a sparse Codex alias map into the ordered candidate list of each
+ * supplied alias. A string value is a list of one.
+ */
+export function parseCodexModelCandidates(
   value: unknown,
-): Partial<Record<CodexModelAlias, string>> {
+): Partial<CodexModelCandidates> {
   if (!isRecord(value)) {
     throw new Error("Codex model aliases must be an object");
   }
   assertSafeKeys(value, "Codex model aliases");
-  const result: Partial<Record<CodexModelAlias, string>> = {};
-  for (const [alias, model] of Object.entries(value)) {
+  const result: Partial<CodexModelCandidates> = {};
+  for (const [alias, models] of Object.entries(value)) {
     assertKnownKey(alias, CODEX_MODEL_ALIASES, "Codex model alias");
-    result[alias] = assertConcreteCodexModelId(
-      model,
+    result[alias] = parseCodexAliasCandidates(
+      models,
       `Codex model alias "${alias}"`,
     );
   }
   return result;
+}
+
+/** The intended model (the first candidate) of each supplied alias. */
+export function parseCodexModels(
+  value: unknown,
+): Partial<Record<CodexModelAlias, string>> {
+  return intendedCodexModels(parseCodexModelCandidates(value));
+}
+
+/**
+ * The complete candidate lists a substitution works with: the bundled list of
+ * each alias, replaced whole by a supplied list for that alias.
+ */
+export function codexModelCandidates(
+  overrides: unknown = {},
+): CodexModelCandidates {
+  return {
+    ...loadBundledCodexModelCandidates(),
+    ...parseCodexModelCandidates(overrides),
+  };
 }
 
 function parseSelection(
@@ -411,13 +481,15 @@ export function defaultCodexRouting(): CodexDefaultRouting {
   ) as CodexDefaultRouting;
 }
 
-interface CatalogModel {
+export interface CatalogModel {
   slug: string;
   supportedEfforts?: Set<string>;
   supportWarning?: string;
 }
 
-function normalizeCodexCatalog(catalog: unknown): Map<string, CatalogModel> {
+export function normalizeCodexCatalog(
+  catalog: unknown,
+): Map<string, CatalogModel> {
   const modelsValue = Array.isArray(catalog)
     ? catalog
     : isRecord(catalog)
@@ -502,14 +574,29 @@ export function validateCodexCatalog(
           `Codex model "${selection.model}" selected for ${role}/${tier} is unavailable in the supplied catalog`,
         );
       }
-      if (model.supportWarning !== undefined) {
-        warnings.add(model.supportWarning);
-      } else if (!model.supportedEfforts?.has(selection.effort)) {
-        throw new Error(
-          `Codex model "${selection.model}" does not support reasoning effort "${selection.effort}" selected for ${role}/${tier}`,
-        );
-      }
+      const warning = codexLeafEffortWarning(model, selection, role, tier);
+      if (warning !== undefined) warnings.add(warning);
     }
   }
   return [...warnings];
+}
+
+/**
+ * Checks the effort of a leaf whose model the catalog offers: the warning of
+ * a model without effort data, or `undefined`; an effort the model does not
+ * list throws.
+ */
+export function codexLeafEffortWarning(
+  model: CatalogModel,
+  selection: ModelSelection,
+  role: Role,
+  tier: Tier,
+): string | undefined {
+  if (model.supportWarning !== undefined) return model.supportWarning;
+  if (!model.supportedEfforts?.has(selection.effort)) {
+    throw new Error(
+      `Codex model "${selection.model}" does not support reasoning effort "${selection.effort}" selected for ${role}/${tier}`,
+    );
+  }
+  return undefined;
 }

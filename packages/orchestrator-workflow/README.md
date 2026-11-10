@@ -184,7 +184,7 @@ override and uninstall-cleanliness rules.
 Routing is a harness-specific map from role and tier to a complete
 `{model, effort}` selection, set with `--routing <json-file>` and deep-merged
 into `.ai/workflow/manifest.json`; `--models` is the backward-compatible,
-per-role input for Claude Code and opencode only (never Codex); `--codex-models <json-file>` is a sparse Codex-only alias map whose supplied aliases update their role/tier leaves below any explicit `--routing` leaf. Every
+per-role input for Claude Code and opencode only (never Codex); `--codex-models <json-file>` is a sparse Codex-only alias map whose supplied aliases update their role/tier leaves below any explicit `--routing` leaf, each alias a model id or an ordered array whose later entries are substitutes; `--codex-catalog <json-file>` validates the installed Codex leaves against a supplied model listing before writing, and `--codex-fallback <stop|degrade>` decides what happens when that listing lacks a selected model: `stop` (default) ends the install and prints the substitution table, `degrade` applies it and records each substitute under `routingResolution` while `routing` keeps the intended selection (see [When the catalog lacks a selected model](docs/model-routing-reference.md#when-the-catalog-lacks-a-selected-model)). Every
 installed agent file carries its own pinned effort regardless of `--tiers`;
 `--tiers` additionally renders one `<role>-<tier>.md`/`.toml` variant file
 per non-default tier. See [Model routing reference](docs/model-routing-reference.md)

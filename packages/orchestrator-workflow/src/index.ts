@@ -43,13 +43,21 @@ export {
   defaultCodexRouting,
   codexModelsRoutingPatch,
   mergeRouting,
+  parseCodexModelCandidates,
   parseCodexModels,
   parseRouting,
   validateCodexCatalog,
 } from "./routing.js";
 export type {
   CodexModelAlias,
+  CodexModelCandidates,
   HarnessRouting,
   ModelSelection,
 } from "./routing.js";
+export type {
+  CodexFallbackMode,
+  CodexFallbackReason,
+  CodexLeafResolution,
+  RoutingResolution,
+} from "./codex-fallback.js";
 export { composeCodexAgent } from "./codex.js";
