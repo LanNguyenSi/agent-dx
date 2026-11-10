@@ -22,7 +22,7 @@ import {
   tierDef,
 } from "../src/models.js";
 import type { Role, Tier } from "../src/models.js";
-import { defaultCodexRouting } from "../src/routing.js";
+import { codexDefault, defaultCodexRouting } from "../src/routing.js";
 import { readAsset as readRawAsset } from "../src/assets.js";
 import {
   HAND_APPLIED_MUTANT_IS_A_FINDING,
@@ -10095,5 +10095,97 @@ describe("safety core: the review method and tier class list stays pinned at the
 
   it("does not restate the old rule that an instruction-file round keeps the general default", () => {
     expect(section).not.toContain("keeps the general default");
+  });
+});
+
+/**
+ * INSTALL-AGENT.md is fetched alone by URL, so its "Choosing models"
+ * subsection carries its own copy of the shipped defaults: one table for
+ * Claude Code and opencode and one for Codex, a row per role and a column per
+ * tier. Both are pinned against the code tables (`ROLE_TIER_DEFS` through
+ * `tierDef`, `CLASS_MODELS`, `codexDefault` and `defaultCodexRouting()`),
+ * never against hand-written copies. The prose around the tables is not
+ * pinned beyond naming every role.
+ */
+describe("INSTALL-AGENT.md Choosing models subsection matches the shipped defaults", () => {
+  const installAgentMd = readDoc("INSTALL-AGENT.md");
+  const headingIdx = installAgentMd.indexOf("\n### Choosing models\n");
+  const subsection = installAgentMd.slice(headingIdx);
+  const tierColumns: Tier[] = ["low", "medium", "high", "xhigh"];
+
+  function tableRows(header: string): string[][] {
+    const headerIdx = subsection.indexOf(header);
+    expect(
+      headerIdx,
+      `table header ${header} not found`,
+    ).toBeGreaterThanOrEqual(0);
+    const afterHeader = subsection.slice(headerIdx);
+    const endIdx = afterHeader.indexOf("\n\n");
+    expect(
+      endIdx,
+      "table did not terminate before a blank line",
+    ).toBeGreaterThan(0);
+    return afterHeader
+      .slice(0, endIdx)
+      .split("\n")
+      .slice(2)
+      .map((line) =>
+        line
+          .split("|")
+          .slice(1, -1)
+          .map((cell) => cell.replace(/`/g, "").replace(/\s+/g, " ").trim()),
+      );
+  }
+
+  function expectedRows(
+    cell: (role: Role, tier: Tier) => string[] | undefined,
+  ): string[][] {
+    return ROLES.map((role) => [
+      role,
+      ...tierColumns.map((tier) => {
+        if (!ROLE_TIERS[role].includes(tier)) return "-";
+        const parts = cell(role, tier);
+        expect(parts, `${role}/${tier}`).toBeDefined();
+        return [...parts!, ...(tier === DEFAULT_TIER[role] ? ["*"] : [])].join(
+          " ",
+        );
+      }),
+    ]);
+  }
+
+  it("is present", () => {
+    expect(headingIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  it("names every role", () => {
+    for (const role of ROLES) {
+      expect(subsection, role).toMatch(new RegExp(`^- ${role}: `, "m"));
+    }
+  });
+
+  it("lists the Claude Code and opencode defaults exactly as ROLE_TIER_DEFS and CLASS_MODELS resolve them", () => {
+    expect(
+      tableRows("| Claude Code and opencode | low | medium | high | xhigh |"),
+    ).toEqual(
+      expectedRows((role, tier) => {
+        const def = tierDef(role, tier);
+        return [def.modelClass, CLASS_MODELS[def.modelClass], def.effort];
+      }),
+    );
+  });
+
+  it("lists the Codex defaults exactly as codexDefault() and defaultCodexRouting() resolve them", () => {
+    const routing = defaultCodexRouting().codex as Record<
+      string,
+      Partial<Record<Tier, { model: string; effort: string }>>
+    >;
+    expect(tableRows("| Codex | low | medium | high | xhigh |")).toEqual(
+      expectedRows((role, tier) => {
+        const entry = codexDefault(role, tier);
+        const leaf = routing[role]?.[tier];
+        if (entry === undefined || leaf === undefined) return undefined;
+        return [entry.alias, leaf.model, leaf.effort];
+      }),
+    );
   });
 });

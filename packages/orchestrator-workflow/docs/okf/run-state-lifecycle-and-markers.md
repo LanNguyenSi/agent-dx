@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-11-10T10:48:18Z
+timestamp: 2026-11-10T11:14:06Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -29,7 +29,7 @@ One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:76#"  05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:81-82#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:119#"one directory per unit of work, newest = active";
-packages/orchestrator-workflow/INSTALL-AGENT.md:67-68#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:185-190#"instead: it sources its defaults from the operator"). The newest run
+packages/orchestrator-workflow/INSTALL-AGENT.md:67-68#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:188-193#"instead: it sources its defaults from the operator"). The newest run
 directory is the active one unless a `.ai/run` pointer names one
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:82-83#"pointer names one (see below);", see the pointer section below); older
 directories are the auditable history and
@@ -164,7 +164,7 @@ tracked run file, not gitignored: the README and the manual-install doc both
 note the pointer is machine-local and add it to `.gitignore`
 (packages/orchestrator-workflow/README.md:125#"it to the repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:68-71#"repository's";
-packages/orchestrator-workflow/INSTALL-AGENT.md:215-217#"repository's").
+packages/orchestrator-workflow/INSTALL-AGENT.md:218-220#"repository's").
 
 The template-markers.test.ts property test that checks the shipped keyed
 line against the consumer's shape no longer mirrors a tightened subset of
@@ -443,7 +443,7 @@ each, and ends by pointing to the run-state and harness reference, which
 defines the modes. The charter no longer lists run state or the keyed
 run-base marker.
 The README has a short "Run modes" section
-(packages/orchestrator-workflow/README.md:209#"## Run modes")
+(packages/orchestrator-workflow/README.md:211#"## Run modes")
 that links the reference. Both sites only name the modes and point to the
 section; no test pins that they stay free of a definition. A policy-section change
 reaches an existing install only with its next `init` or `apply`.

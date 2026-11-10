@@ -11808,7 +11808,7 @@ parsed as citations by the grammar at all, since none match
 check) were each split into a second full, independently anchored
 citation instead: `run-state-lifecycle-and-markers.md`'s INSTALL-AGENT.md
 reference (line 27, `,173-178` re-anchored to its own
-`INSTALL-AGENT.md:185-190#"instead: it sources its defaults"`), its
+`INSTALL-AGENT.md:188-193#"instead: it sources its defaults"`), its
 template-markers.test.ts reference (line 66, `,33-37` re-anchored to
 `template-markers.test.ts:49#"00-goal.md has exactly one run-base marker, defaulting to TODO"`,
 the run-base exactly-one-marker `it` block's own description, chosen over
@@ -13189,3 +13189,22 @@ citations moved and were re-pointed; no claim of theirs depends on the changed
 code. Each changed claim was read against the code at the head of the change
 by the implementing round and one claim per touched doc again by the review
 rounds; the citation tests pass. Re-stamped all six at 2026-11-10T10:48:18Z after that.
+
+## 2026-11-10T11:14:06Z (model-selection aid for the install agent, re-stamp)
+
+INSTALL-AGENT.md gained the subsection "Choosing models" (role demands, the
+default tables for Claude Code and opencode and for Codex, when to move a
+leaf, Codex catalog and substitution handling, two operator questions) with a
+pointer in step 2 and a reporting duty in step 5;
+docs/model-routing-reference.md gained "Choosing a different leaf" and a
+reworded "Why" column; README.md gained one pointer sentence;
+test/docs-consistency.test.ts gained a describe block at the end of the file
+that derives the two INSTALL-AGENT.md tables from the code. In
+model-preselection.md the rationale table was updated to the new "Why" column
+and three citations into the reference doc were re-pointed; in
+run-state-lifecycle-and-markers.md three line citations into INSTALL-AGENT.md
+and README.md were re-pointed. install-fence-mechanics.md cites the write
+surface of INSTALL-AGENT.md and the README, neither of which changed;
+review-gate-and-waivers.md and subagent-contracts-superset.md cite lines of
+the test file above the appended block, which did not move. The citation
+tests pass. Re-stamped the docs listed as stale (install-fence-mechanics.md model-preselection.md review-gate-and-waivers.md run-state-lifecycle-and-markers.md subagent-contracts-superset.md) at 2026-11-10T11:14:06Z after that.

@@ -153,7 +153,10 @@ steps in the repository you were asked to install into.
    configures the unsuffixed file. Preserve every omitted leaf. Keep the prior
    routing in the handoff as the rollback input. Never upgrade a model merely
    because a newer one exists, and ask the operator only when a material
-   preference, authority boundary, or conflict remains unresolved.
+   preference, authority boundary, or conflict remains unresolved. Choose
+   models by "Choosing models" below: on a fresh install ask its two
+   questions, keep the shipped defaults unless they give a reason to move a
+   leaf, and note the reason for every leaf you move.
 
 3. Run the non-interactive installer with the reviewed configuration:
 
@@ -316,11 +319,103 @@ steps in the repository you were asked to install into.
 
 5. Verify the expected files and manifest entries, then report back: which
    harnesses and roles were installed; the exact model and effort per routed
-   role/tier; whether variants were rendered; the prior routing to use for a
-   rollback; the commands actually run; any offline capability or entitlement
-   gap; and conflicts left in place.
+   role/tier, as a table; the reason for every leaf that differs from the
+   shipped default and, for Codex, every substituted model together with the
+   model it replaces; whether variants were rendered; the prior routing to use
+   for a rollback; the commands actually run; any offline capability or
+   entitlement gap; and conflicts left in place.
 
 `--codex-models` accepts a sparse object keyed by the internal Codex aliases
 `small`, `balanced`, and `strong`. It deliberately replaces both model and
 tier-standard effort on matching leaves, so use `--routing` to preserve or
 select a custom effort; omitted aliases preserve existing selections.
+
+### Choosing models
+
+What each role's work demands:
+
+- explorer: broad reading; a mistake is cheap to notice.
+- task-slicer: decomposition judgment; a bad cut surfaces late and costs whole
+  rounds.
+- implementer: a narrow, pre-sliced task with tests; the tests catch mistakes.
+- reviewer: skeptical judgment; the last check before acceptance.
+- advisor: a second opinion at escalation; only useful when at least as strong
+  as the model the orchestrator session runs on.
+
+The shipped defaults. Claude Code and opencode: each cell is model class,
+Claude alias and effort; `*` marks the role's default tier (the unsuffixed
+file), `-` a tier the role does not have. opencode resolves the alias to the
+matching model of its provider when a provider is detected; when none is, or
+the provider does not offer a class, the opencode model resolution section of
+`docs/model-routing-reference.md` says what is written instead (a lower class,
+never below the medium class for reviewer and advisor variants, or no model
+line).
+
+| Claude Code and opencode | low | medium | high | xhigh |
+|---|---|---|---|---|
+| explorer | small `haiku` low | medium `sonnet` medium * | medium `sonnet` high | - |
+| task-slicer | medium `sonnet` low | large `opus` medium * | large `opus` high | - |
+| implementer | medium `sonnet` low | medium `sonnet` medium * | medium `sonnet` high | xlarge `fable` high |
+| reviewer | - | medium `sonnet` medium | large `opus` high * | xlarge `fable` high |
+| advisor | - | - | xlarge `fable` high * | xlarge `fable` xhigh |
+
+Codex: each cell is alias class, bundled model id and effort, marked the same
+way.
+
+| Codex | low | medium | high | xhigh |
+|---|---|---|---|---|
+| explorer | small `gpt-6-luna` high | balanced `gpt-6.1-sol` medium * | balanced `gpt-6.1-sol` high | - |
+| task-slicer | balanced `gpt-6.1-sol` low | balanced `gpt-6.1-sol` medium * | balanced `gpt-6.1-sol` high | - |
+| implementer | small `gpt-6-luna` high | balanced `gpt-6.1-sol` medium * | balanced `gpt-6.1-sol` high | strong `gpt-6-astra` high |
+| reviewer | - | balanced `gpt-6.1-sol` medium | strong `gpt-6-astra` high * | strong `gpt-6-astra` xhigh |
+| advisor | - | - | strong `gpt-6-astra` high * | strong `gpt-6-astra` xhigh |
+
+When to move a leaf:
+
+- Adjust effort before the model. Beyond `high`, prefer the stronger model at
+  lower effort, as the shipped `xhigh` implementer and reviewer do.
+- Go down a class only for work whose mistakes are cheap to notice. Small
+  models are not the place for code edits without a test, slicing, review or
+  advice.
+- Go up for long unattended runs, large migrations, or when the next effort
+  step no longer helps.
+- Compare by the cost of the finished task including fix rounds, not by the
+  price per token. When unsure, keep the default.
+
+Codex specifics: there is no class above `strong`. The small class runs at
+effort `high` for narrow tasks. The routing stays pinned in the installed
+agent file: the leaf in the file is what runs, and a value passed at spawn
+does not replace it. An account may not offer a bundled model. When the
+install includes Codex, refresh the listing (`codex debug models`) and pass it
+with `--codex-catalog`; when the listing cannot be fetched, follow step 1 and
+report the gap instead of claiming validation. The installer stops before it
+writes anything when a selected model is missing from the supplied catalog, so
+settle the substitution first: show the operator which leaves the missing
+model affects and which available model you propose per alias class, ask, and
+then pass the agreed models through `--codex-models` or a `--routing` patch.
+Do not move a reviewer or advisor leaf below the balanced class unless the
+operator says so. Record the intended routing next to the applied one in the
+handoff, so the install can return to it.
+
+This subsection applies to the automated installer (step 3). The manual
+fallback in step 4 renders neither tier variants nor Codex agent files, so
+there is no leaf to choose there beyond the default model per role.
+
+Before an install that has no recorded routing to preserve (a fresh `init`, or
+an `apply` to a target without one) ask the operator these two questions, and
+only these unless a conflict remains. Ask the first only when the advisor is
+installed (the `full` profile):
+
+1. Which model does the orchestrator session run on? That decides whether the
+   default advisor leaf is strong enough. If the advisor would be weaker than
+   the orchestrator, propose the stronger leaf or say that the advisor adds
+   little.
+2. Does cost or quality have priority for implementation work? That decides
+   whether you propose any deviation at all. Without a stated priority, keep
+   the defaults.
+
+Change one leaf at a time, keep the prior routing as the rollback input, never
+move a model merely because a newer one exists, and let an existing install
+keep its recorded routing. Background:
+https://claude.dev/blog/which-claude-model-should-you-build-with/ (this file
+does not depend on it).
