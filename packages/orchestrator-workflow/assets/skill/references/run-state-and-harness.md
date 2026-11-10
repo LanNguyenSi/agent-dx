@@ -206,6 +206,11 @@ marker's shape.
   remain possible, but its prompt still prohibits source edits. Only
   the orchestrator spawns agents, and every route produces the same run files.
   The `.ai/run` pointer rule from Run state applies unchanged.
+- **Model listing**: where a harness can list the models an account offers
+  (Codex: its model listing command), compare the installed definitions with
+  that listing at the start of a run, before the first spawn; a missing model
+  is handled by the Unavailable model section of
+  [review and recovery](review-and-recovery.md) before work starts.
 
 
 ## Run mode

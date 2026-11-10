@@ -42,6 +42,21 @@ existing incident decision by its D-ID, not as a new incident decision. The
 round's return is still evaluated on its own merits, so the re-flag alone is
 no reason to resume or respawn the subagent.
 
+## Unavailable model
+
+A spawn that fails because the account or catalog does not offer the routed
+model is an environment fault. It is not a subagent misfire and not a failed
+attempt of the task: it does not count as a negative round or toward the
+escalation budget. The orchestrator does not retry the same definition. In
+this order: re-resolve the routing against a fresh model catalog when the
+operator has already agreed to a substitution; otherwise use the same role's
+next lower installed tier variant whose model is available, recorded as a
+tier decision; otherwise run the role inline with the same contract. A
+reviewer for a change of the `adversarial` class and the advisor are not
+degraded below the model class their default leaf uses without the operator:
+hold the merge and ask. Each use is one row in `03-decisions.md` (role and
+tier, intended model, used model, reason) and one line in the handoff.
+
 ## Round-2 halt rule
 
 The signal: a review round finds a new defect of the same class a previous

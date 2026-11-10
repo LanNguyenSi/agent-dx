@@ -15,6 +15,13 @@ briefing, before spawning the advisor, and before changing a model.
   non-default tier choice with a one-line reason in `03-decisions.md` when
   the task is non-trivial. The reviewer's default tier per change class comes
   from the Review method and reviewer tier by risk class section below.
+- A tier is a named routing leaf of one role: a model class plus an effort.
+  It is not one model per tier name, and the effort is not always the one the
+  name suggests: a `-low` leaf may run a stronger model class than another
+  role's `-low` leaf, and a higher leaf may run at the same effort as a lower
+  one on a stronger model. The installed agent definitions and
+  `.ai/workflow/manifest.json` say what each leaf is; read them instead of
+  inferring it from the tier name.
 - For the implementer specifically, `-low` is spawned only when none of the
   following hold: an acceptance criterion demands a test, typecheck, lint, or
   build run; the task assignment names mutation probes to run; or the task
@@ -25,10 +32,12 @@ briefing, before spawning the advisor, and before changing a model.
   bugfix included); when it is unclear whether a criterion demands a run,
   exclude `implementer-low`. This rule is anchored by an A/B measurement; the
   data and the model caveat are recorded in the orchestrator-workflow
-  CHANGELOG (0.23.0).
-- For the explorer and the task-slicer, a `-low` variant still suits
-  narrowly scoped, mechanical work; no equivalent measurement exists for those
-  two roles, so their rule is unchanged.
+  CHANGELOG (0.23.0). The measurement was taken on a `-low` leaf that ran a
+  small model; the rule stays in force for the current `-low` leaf, whatever
+  model class it runs.
+- For the explorer and the task-slicer, the `-low` leaf still suits narrowly
+  scoped, mechanical work whatever model class it runs; no equivalent
+  measurement exists for those two roles, so their rule is unchanged.
 - Not every role gets every tier: `-xhigh` exists only for the implementer,
   the reviewer, and the advisor. The reviewer's downshift is `-medium` rather
   than `-low`, since its default already sits at high. The advisor has no
@@ -40,6 +49,20 @@ briefing, before spawning the advisor, and before changing a model.
   medium for the explorer, the task-slicer, and the implementer; high for
   the reviewer and the advisor. This holds whether or not tier variants are
   installed; it is not gated on `--tiers`.
+- When a result is not good enough, escalate in this order. First let the
+  role verify its own work: a test, a build, or a script that exercises the
+  result. Then raise the effort one step. Then move to the next stronger
+  model, at a lower effort than the smaller model had. Beyond `high`, prefer
+  the stronger model over more effort. More effort buys more checking and more
+  tool use; it does not supply knowledge or ability the model lacks.
+- Where the harness lets the orchestrator set model or effort at spawn time
+  and that value wins over the installed definition, a spawn value is the way
+  to take a step that no tier names, for example the model class between an
+  implementer's `high` and `xhigh` leaf. Record it like any non-default tier
+  choice. Where the installed definition wins over a spawn value, there is no
+  such override: the choice is then between the installed variants, or a
+  routing patch (shipped harnesses differ: in Claude Code the spawn value
+  wins, in Codex the agent file wins).
 
 ### Review method and reviewer tier by risk class
 
@@ -107,6 +130,12 @@ operator. When tier variants are installed, pick the advisor tier by the
 same complexity-and-risk judgment, defaulting to the unsuffixed subagent
 (already effort `high`) when unsure.
 
+The advisor's model should be at least as strong as the model the
+orchestrator session runs on; an advisor weaker than the orchestrator is a
+second opinion from below. When the installed advisor is weaker, the
+orchestrator says so in the decision record, or takes the question to the
+operator instead.
+
 ### Models
 
 - The orchestrator runs on the session's main model. Use the strongest
@@ -116,6 +145,11 @@ same complexity-and-risk judgment, defaulting to the unsuffixed subagent
   `.ai/workflow/manifest.json` and in the harness subagent definitions. The
   manifest also records the installed kit version, the chosen harnesses, and
   the legacy model preferences.
+- Small models fit work where a mistake is cheap to notice: search, reading
+  logs, summaries, and narrow well-specified edits with a test. Slicing, code
+  edits without a discriminating test, review, and advice are not that work.
+- Judge a model choice by the cost of the finished task, fix rounds
+  included, not by the price per token.
 - Preserve recorded routing choices across re-installs. Change a model only
   through a deliberate role/tier override; never treat a newer model as an
   automatic upgrade. The prior routing is the rollback input.
