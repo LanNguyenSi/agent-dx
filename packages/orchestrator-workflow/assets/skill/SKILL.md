@@ -29,7 +29,7 @@ role definitions where available rather than improvising prompts.
 - **Create or resume a run; choose its run mode; select a harness:** read
   [run-state and harness](references/run-state-and-harness.md). For a misfire,
   inconclusive probe, interrupted, blocked, or partial run, repeated finding,
-  halt, or escalation also read
+  halt, escalation, or unavailable model also read
   [review and recovery](references/review-and-recovery.md).
 - **Slice/delegate a task; validate a role return:** read
   [contracts](references/contracts.md).
@@ -38,7 +38,7 @@ role definitions where available rather than improvising prompts.
   [detailed workflow and probe evidence](references/evidence-and-probes.md).
   For recovery, invalid
   returns, inconclusive probes, interrupted, blocked, or partial runs,
-  repeated findings, misfires, halts, and escalation, also read
+  repeated findings, misfires, halts, escalation, and unavailable models, also read
   [review and recovery](references/review-and-recovery.md).
 - **Name a `verification_set` (a non-empty `verification_set.reference`) in an
   implementer or reviewer briefing:** also

@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-11-10T11:14:06Z
+timestamp: 2026-11-10T11:40:11Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -191,11 +191,11 @@ one (template-markers.test.ts:99-100#"goalTemplate.matchAll(runBaseRe)"). In
 `docs-consistency.test.ts`, one `describe` block pins the skill's Run state
 section as the one site that specifies the pointer and the keyed marker:
 the `.ai/run` contract with its own specific phrases
-(docs-consistency.test.ts:485-491#"make sure it is ignored"), the keyed
+(docs-consistency.test.ts:490-496#"make sure it is ignored"), the keyed
 example verbatim
-(docs-consistency.test.ts:494-495#"run-base[<repo-basename>] = <sha>"), and the
+(docs-consistency.test.ts:499-500#"run-base[<repo-basename>] = <sha>"), and the
 keyed-marker grammar rule with both deviation outcomes
-(docs-consistency.test.ts:498-501#"either rejected (it blocks the run) or not recognised at all"). The other
+(docs-consistency.test.ts:503-506#"either rejected (it blocks the run) or not recognised at all"). The other
 places that mention the pointer (step 1, the harness notes, the policy
 section's Run state bullet, the README, and the INSTALL-AGENT.md write-surface
 listings) are copies of that section and carry no sentence pin.
@@ -341,7 +341,7 @@ the loop-closer and cites the motivating evidence: four upkeep sweeps on
 (`CHANGELOG.md:#[0.12.0]`). The hook's sentences carry no sentence pin; the
 template side is the contract and stays pinned: the optional Knowledge Bundle
 section of `06-handoff.md` and its outcome vocabulary
-(docs-consistency.test.ts:458-461#"Outcome: updated | not affected | follow-up filed.",
+(docs-consistency.test.ts:463-466#"Outcome: updated | not affected | follow-up filed.",
 checked as `## Knowledge Bundle` plus `Outcome: updated | not affected |
 follow-up filed.`).
 
@@ -364,7 +364,7 @@ anything inside it.
 (role enumeration, the safety core, task-slicer/subagent-contract field
 superset); only its Run state `describe` block above and its
 `06-handoff.md template carries the Knowledge Bundle section`
-(docs-consistency.test.ts:455-461#"Outcome: updated | not affected | follow-up filed.") `describe` block are this doc's topic.
+(docs-consistency.test.ts:460-466#"Outcome: updated | not affected | follow-up filed.") `describe` block are this doc's topic.
 The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see
@@ -407,19 +407,19 @@ run-base lines, shipped with its default value instead of a `TODO`
 (packages/orchestrator-workflow/assets/templates/00-goal.md:5#"<!-- solution-acceptance: mode = delegated -->").
 The value is `single`, `delegated`, or `batch`, and a missing or unrecognised
 value means `delegated`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:216#"The marker is a record for the orchestrator, the reviewer,"),
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:221#"The marker is a record for the orchestrator, the reviewer,"),
 so a run created from an older template is a `delegated` run without any
 edit. No reader enforces the marker
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:217#"and the operator; no reader enforces it."):
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:222#"and the operator; no reader enforces it."):
 it tells the reviewer and the operator who implemented, and it is what a
 briefing quotes. The three definitions, the selection rule by the shape of
 the work, the run files each mode requires, and the rule that a mode switch
 is a D-ID row and never a new run are stated once, in the reference's last
 section
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:211#"## Run mode");
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:216#"## Run mode");
 `SKILL.md` and the reference's Intent only point there. `single` makes
 `01-plan.md` and `02-tasks.md` optional (it records its runbook selection in `03-decisions.md` instead of `01-plan.md`'s `## Runbooks` section) and keeps `04-implementation-summary.md`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:241#"Run files per mode:"),
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:246#"Run files per mode:"),
 because the verification set, the mutation probes, and the run's own runbook consultation record
 (packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:87#"## Runbooks Consulted")
 live there; `batch` adds an Integration section to the same template
