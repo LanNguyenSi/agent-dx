@@ -11808,7 +11808,7 @@ parsed as citations by the grammar at all, since none match
 check) were each split into a second full, independently anchored
 citation instead: `run-state-lifecycle-and-markers.md`'s INSTALL-AGENT.md
 reference (line 27, `,173-178` re-anchored to its own
-`INSTALL-AGENT.md:185-190#"instead: it sources its defaults"`), its
+`INSTALL-AGENT.md:188-193#"instead: it sources its defaults"`), its
 template-markers.test.ts reference (line 66, `,33-37` re-anchored to
 `template-markers.test.ts:49#"00-goal.md has exactly one run-base marker, defaulting to TODO"`,
 the run-base exactly-one-marker `it` block's own description, chosen over

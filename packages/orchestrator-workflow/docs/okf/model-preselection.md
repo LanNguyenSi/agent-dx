@@ -44,15 +44,15 @@ for how `--profile` scopes which roles get an actual subagent file: since
 (`src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
 
 Defaults (`src/models.ts:289-294#"as Record<Role, string>;"`, derived from the class of each role's default tier in `ROLE_TIER_DEFS`, documented in
-`packages/orchestrator-workflow/docs/model-routing-reference.md:24#"escalations happen precisely when the situation is hard, so it gets the strongest model"`):
+`packages/orchestrator-workflow/docs/model-routing-reference.md:24#"a second opinion at escalation, only useful when at least as strong"`):
 
 | Role | Default | Rationale (docs/model-routing-reference.md) |
 |---|---|---|
-| explorer | `sonnet` | read-only terrain mapping is broad reading, not deep reasoning |
-| task-slicer | `opus` | decomposition decides the quality of every later step |
-| implementer | `sonnet` | fast, cheap, good enough for narrow pre-sliced tasks |
-| reviewer | `opus` | skeptical review benefits from a strong model |
-| advisor | `fable` | escalations happen precisely when the situation is hard, so it gets the strongest model |
+| explorer | `sonnet` | broad reading, and a mistake is cheap to notice |
+| task-slicer | `opus` | decomposition judgment, and a bad cut surfaces late and costs whole rounds |
+| implementer | `sonnet` | a narrow pre-sliced task with tests, and the tests catch mistakes |
+| reviewer | `opus` | skeptical judgment, and the last check before acceptance |
+| advisor | `fable` | a second opinion at escalation, only useful when at least as strong as the model the orchestrator session runs on |
 
 `ModelAlias` is `"sonnet" | "opus" | "haiku" | "fable"` (`src/models.ts:72-74#"export const MODEL_ALIASES: ModelAlias[] = ["`); a
 role's value may also be a full model id or, for opencode, a fully-qualified
@@ -159,7 +159,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:200#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:223#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:500-523#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2182-2190#"${role}.md must not contain model:"`,
@@ -450,7 +450,7 @@ that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `docs/model-routing-reference.md`'s "Effort tiers" section
 (moved from README.md) gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:226#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:249#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. the skill's
 `references/delegation-and-tiers.md` states it once, in a dedicated bullet
