@@ -153,28 +153,6 @@ function parseCodexAliasCandidates(value: unknown, location: string): string[] {
   return candidates;
 }
 
-/**
- * A model id belongs to exactly one candidate list, so the class of a model is
- * the class of the list that names it. A model named by two lists throws.
- */
-function assertDisjointCodexCandidates(
-  lists: Partial<CodexModelCandidates>,
-  location: string,
-): void {
-  const owner = new Map<string, CodexModelAlias>();
-  for (const alias of CODEX_MODEL_ALIASES) {
-    for (const model of lists[alias] ?? []) {
-      const first = owner.get(model);
-      if (first !== undefined) {
-        throw new Error(
-          `${location} lists "${model}" for both the "${first}" and the "${alias}" alias; a model belongs to exactly one candidate list`,
-        );
-      }
-      owner.set(model, alias);
-    }
-  }
-}
-
 function loadBundledCodexModelCandidates(): CodexModelCandidates {
   let value: unknown;
   try {
@@ -200,7 +178,6 @@ function loadBundledCodexModelCandidates(): CodexModelCandidates {
   for (const key of Object.keys(value)) {
     assertKnownKey(key, CODEX_MODEL_ALIASES, "bundled Codex model alias");
   }
-  assertDisjointCodexCandidates(result, "Bundled Codex model aliases");
   return result;
 }
 
@@ -239,7 +216,6 @@ export function parseCodexModelCandidates(
       `Codex model alias "${alias}"`,
     );
   }
-  assertDisjointCodexCandidates(result, "Codex model aliases");
   return result;
 }
 
@@ -252,22 +228,18 @@ export function parseCodexModels(
 
 /**
  * The complete candidate lists a substitution works with: the bundled list of
- * each alias, replaced whole by a supplied list for that alias. The combined
- * lists must name every model once, so a supplied list may not name a model
- * that the bundled list of another alias keeps.
+ * each alias, replaced whole by a supplied list for that alias. Several lists
+ * may name the same model (an account with fewer models than classes maps
+ * several aliases to one id); the class of such a model is decided in one
+ * place, `modelAliasClass` in `codex-fallback.ts`.
  */
 export function codexModelCandidates(
   overrides: unknown = {},
 ): CodexModelCandidates {
-  const merged = {
+  return {
     ...loadBundledCodexModelCandidates(),
     ...parseCodexModelCandidates(overrides),
   };
-  assertDisjointCodexCandidates(
-    merged,
-    "The supplied Codex model aliases with the bundled ones of the other aliases",
-  );
-  return merged;
 }
 
 function parseSelection(

@@ -17,6 +17,7 @@ import { parse } from "@iarna/toml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  formatCodexFallbackRow,
   parseCodexFallbackMode,
   parseRoutingResolution,
   planCodexFallback,
@@ -24,15 +25,18 @@ import {
 import { runDoctor } from "../src/doctor.js";
 import { MANIFEST_PATH, readInstalledManifest, runInit } from "../src/init.js";
 import type { InitOptions } from "../src/init.js";
-import { DEFAULT_MODELS } from "../src/models.js";
+import { DEFAULT_MODELS, ROLES, ROLE_TIERS } from "../src/models.js";
+import type { Role, Tier } from "../src/models.js";
 import { OPERATOR_HOME_ENV } from "../src/operator-manifest.js";
 import {
   codexModelCandidates,
   codexModelsRoutingPatch,
   defaultCodexRouting,
+  mergeRouting,
   parseCodexModelCandidates,
   parseCodexModels,
 } from "../src/routing.js";
+import type { HarnessRouting, ModelSelection } from "../src/routing.js";
 import { runUninstall } from "../src/uninstall.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -154,76 +158,61 @@ describe("Codex alias candidates", () => {
     expect(() => parseCodexModelCandidates(value)).toThrow(message);
   });
 
-  describe("a model belongs to exactly one candidate list", () => {
+  it("rejects one list that names a model twice, in every reader", () => {
+    const value = { balanced: ["gpt-x", "gpt-y", "gpt-x"] };
+    const message = /lists "gpt-x" more than once/;
+    expect(() => parseCodexModelCandidates(value)).toThrow(message);
+    expect(() => parseCodexModels(value)).toThrow(message);
+    expect(() => codexModelsRoutingPatch(value)).toThrow(message);
+    expect(() => codexModelCandidates(value)).toThrow(message);
+  });
+
+  describe("several lists may name the same model", () => {
     it.each([
-      [
-        "strong and small",
-        { strong: ["gpt-a", "gpt-x"], small: ["gpt-x"] },
-        /"gpt-x" for both the "small" and the "strong" alias/,
-      ],
+      ["strong and small", { strong: ["gpt-a", "gpt-x"], small: ["gpt-x"] }],
       [
         "balanced and small",
         { balanced: ["gpt-a", "gpt-x"], small: ["gpt-x", "gpt-b"] },
-        /"gpt-x" for both the "small" and the "balanced" alias/,
       ],
       [
         "strong and balanced, as plain model ids",
         { strong: "gpt-x", balanced: "gpt-x" },
-        /"gpt-x" for both the "balanced" and the "strong" alias/,
       ],
       [
-        "one list naming a model twice",
-        { balanced: ["gpt-x", "gpt-y", "gpt-x"] },
-        /lists "gpt-x" more than once/,
+        "all three lists, first entries coinciding",
+        { small: "gpt-x", balanced: ["gpt-x", "gpt-a"], strong: ["gpt-x"] },
       ],
-    ])("rejects %s", (_name, value, message) => {
-      expect(() => parseCodexModelCandidates(value)).toThrow(message);
-      expect(() => parseCodexModels(value)).toThrow(message);
-      expect(() => codexModelsRoutingPatch(value)).toThrow(message);
-      expect(() => codexModelCandidates(value)).toThrow(message);
-    });
-
-    it("rejects a supplied list that names a model the bundled list of another alias keeps", () => {
-      expect(() => codexModelCandidates({ small: [SMALL, BALANCED] })).toThrow(
-        new RegExp(`"${BALANCED}" for both the "small" and the "balanced"`),
+    ])("accepts %s in every reader", (_name, value) => {
+      const lists = Object.fromEntries(
+        Object.entries(value).map(([alias, models]) => [
+          alias,
+          Array.isArray(models) ? models : [models],
+        ]),
       );
-      expect(() => codexModelCandidates({ strong: [SMALL] })).toThrow(
-        new RegExp(`"${SMALL}" for both the "small" and the "strong"`),
+      expect(parseCodexModelCandidates(value)).toEqual(lists);
+      expect(parseCodexModels(value)).toEqual(
+        Object.fromEntries(
+          Object.entries(lists).map(([alias, models]) => [alias, models[0]]),
+        ),
       );
-    });
-
-    it("accepts lists that share no model, and the bundled file", () => {
-      expect(() => codexModelCandidates()).not.toThrow();
-      expect(
-        codexModelCandidates({
-          small: ["gpt-a", "gpt-b"],
-          balanced: ["gpt-c"],
-          strong: ["gpt-d", "gpt-e"],
-        }),
-      ).toEqual({
-        small: ["gpt-a", "gpt-b"],
-        balanced: ["gpt-c"],
-        strong: ["gpt-d", "gpt-e"],
+      expect(() => codexModelsRoutingPatch(value)).not.toThrow();
+      expect(codexModelCandidates(value)).toEqual({
+        ...codexModelCandidates(),
+        ...lists,
       });
     });
 
-    it("stops runInit before anything is written", () => {
-      const message = thrown(() =>
-        runInit(
-          options({
-            codexFallback: "degrade",
-            codexCatalog: catalog(model(SMALL)),
-            codexModelCandidates: {
-              small: [SMALL, "gpt-x"],
-              strong: ["gpt-x"],
-            },
-          }),
-        ),
-      );
-      expect(message).toContain(
-        '"gpt-x" for both the "small" and the "strong"',
-      );
-      expect(readdirSync(target)).toEqual([]);
+    it("accepts a supplied list that names a model the bundled list of another alias keeps", () => {
+      expect(codexModelCandidates({ small: [SMALL, BALANCED] })).toEqual({
+        small: [SMALL, BALANCED],
+        balanced: [BALANCED],
+        strong: [STRONG],
+      });
+      expect(codexModelCandidates({ strong: [SMALL] })).toEqual({
+        small: [SMALL],
+        balanced: [BALANCED],
+        strong: [SMALL],
+      });
     });
   });
 
@@ -860,6 +849,592 @@ describe("degrade: leaves that are never substituted", () => {
   });
 });
 
+describe("the class of a model is the lowest list that names it", () => {
+  const onlySmall = catalog(model(SMALL));
+  const counts = `${SMALL} counts as small, the lowest class that lists it`;
+  const outcome = (lists: Record<string, string[]>, offered = onlySmall) =>
+    Object.fromEntries(
+      planCodexFallback(
+        defaultCodexRouting(),
+        offered,
+        codexModelCandidates(lists),
+      ).rows.map((row) => [`${row.role}/${row.tier}`, row]),
+    );
+
+  it("a small model repeated in the balanced list never reaches a reviewer or advisor, and drops other leaves as lower-class at high", () => {
+    const rows = outcome({ small: [SMALL], balanced: [BALANCED, SMALL] });
+    expect(rows["reviewer/medium"]).toEqual({
+      role: "reviewer",
+      tier: "medium",
+      intended: { model: BALANCED, effort: "medium" },
+      problem: `the catalog offers no usable candidate of the balanced class (the reviewer is never substituted below the balanced class); ${counts}`,
+    });
+    for (const leaf of [
+      "reviewer/high",
+      "reviewer/xhigh",
+      "advisor/high",
+      "advisor/xhigh",
+    ]) {
+      expect(rows[leaf].used, leaf).toBeUndefined();
+      expect(rows[leaf].reason, leaf).toBeUndefined();
+      expect(rows[leaf].problem, leaf).toBe(
+        `the catalog offers no usable candidate of the strong or balanced class (the ${leaf.split("/")[0]} is never substituted below the balanced class); ${counts}`,
+      );
+    }
+    // The balanced list offered it, but it counts as small: the leaf dropped
+    // a class, so it runs at high and is marked lower-class.
+    expect(rows["task-slicer/low"]).toEqual({
+      role: "task-slicer",
+      tier: "low",
+      intended: { model: BALANCED, effort: "low" },
+      used: { model: SMALL, effort: "high" },
+      reason: "lower-class",
+    });
+    expect(rows["implementer/medium"].used).toEqual({
+      model: SMALL,
+      effort: "high",
+    });
+    expect(rows["implementer/medium"].reason).toBe("lower-class");
+  });
+
+  it("a small model repeated in the strong list is a lower-class substitute for a strong leaf", () => {
+    const rows = outcome({
+      balanced: [BALANCED],
+      strong: [STRONG, SMALL],
+      small: [SMALL],
+    });
+    expect(rows["implementer/xhigh"]).toEqual({
+      role: "implementer",
+      tier: "xhigh",
+      intended: { model: STRONG, effort: "high" },
+      used: { model: SMALL, effort: "high" },
+      reason: "lower-class",
+    });
+    expect(rows["reviewer/xhigh"].used).toBeUndefined();
+    expect(rows["reviewer/xhigh"].problem).toContain(counts);
+  });
+
+  it("goes on to the next entry of a list after one that counts as a lower class", () => {
+    const rows = outcome(
+      { small: [SMALL], balanced: [BALANCED, SMALL, "gpt-bal-b"] },
+      catalog(model(SMALL), model("gpt-bal-b")),
+    );
+    expect(rows["reviewer/medium"].used).toEqual({
+      model: "gpt-bal-b",
+      effort: "medium",
+    });
+    expect(rows["reviewer/medium"].reason).toBe("class-candidate");
+    expect(rows["advisor/high"].used).toEqual({
+      model: "gpt-bal-b",
+      effort: "high",
+    });
+    expect(rows["advisor/high"].reason).toBe("lower-class");
+  });
+
+  it("a leaf whose model a lower list names too does not reach the later entries of the higher list", () => {
+    const lists = { small: ["gpt-shared"], balanced: ["gpt-shared", "gpt-b"] };
+    const plan = planCodexFallback(
+      codexModelsRoutingPatch(lists),
+      catalog(model("gpt-b"), model(STRONG)),
+      codexModelCandidates(lists),
+    );
+    // Every leaf on the shared model counts as small, where nothing follows it.
+    expect(plan.rows.map((row) => row.used)).toEqual(
+      plan.rows.map(() => undefined),
+    );
+    expect(plan.rows.map((row) => `${row.role}/${row.tier}`)).toContain(
+      "explorer/medium",
+    );
+    expect(
+      plan.rows.find((row) => row.role === "explorer" && row.tier === "medium")
+        ?.problem,
+    ).toBe("the catalog offers no usable candidate of the small class");
+    expect(
+      plan.rows.find((row) => row.role === "reviewer" && row.tier === "medium")
+        ?.problem,
+    ).toBe(
+      "the small class is below the balanced class, and the reviewer is never substituted below it",
+    );
+  });
+
+  it("stops an install whose reviewer has only a model that counts as small, names it, and writes nothing", () => {
+    const message = thrown(() =>
+      runInit(
+        options({
+          codexFallback: "degrade",
+          codexModelCandidates: { balanced: [BALANCED, SMALL] },
+          codexCatalog: onlySmall,
+        }),
+      ),
+    );
+    expect(message).toContain(
+      `  reviewer/medium: ${BALANCED} (medium) -> no substitute: the catalog offers no usable candidate of the balanced class (the reviewer is never substituted below the balanced class); ${counts}`,
+    );
+    expect(message).toContain(
+      `  task-slicer/low: ${BALANCED} (low) -> ${SMALL} (high) [lower-class]`,
+    );
+    expect(readdirSync(target)).toEqual([]);
+  });
+});
+
+describe("generated: overlapping candidate lists, catalogs and leaves", () => {
+  const UNIVERSE = ["gpt-a", "gpt-b", "gpt-c", "gpt-d", "gpt-e"];
+  const CLASSES = ["small", "balanced", "strong"] as const;
+  type Class = (typeof CLASSES)[number];
+  type Lists = Record<Class, string[]>;
+  type Levels = readonly Tier[] | null;
+  const LEVELS: readonly Tier[] = ["low", "medium", "high", "xhigh"];
+  const level = (effort: Tier) => LEVELS.indexOf(effort);
+  const HIGH = level("high");
+  /** The levels a `limited` catalog lists for a model no leaf intends. */
+  const LIMITED: Record<string, readonly Tier[]> = {
+    "gpt-a": ["low", "medium"],
+    "gpt-b": ["medium", "high"],
+    "gpt-c": ["low", "xhigh"],
+    "gpt-d": ["high"],
+    "gpt-e": LEVELS,
+  };
+  const FLOORED: readonly Role[] = ["reviewer", "advisor"];
+
+  /** Every ordered list of distinct ids with one to `length` entries. */
+  function listsUpTo(length: number): string[][] {
+    const all: string[][] = [];
+    let grown: string[][] = [[]];
+    for (let size = 1; size <= length; size += 1) {
+      grown = grown.flatMap((list) =>
+        UNIVERSE.filter((id) => !list.includes(id)).map((id) => [...list, id]),
+      );
+      all.push(...grown);
+    }
+    return all;
+  }
+
+  /** Every subset of the universe, as the ids a catalog offers. */
+  const SUBSETS = Array.from({ length: 2 ** UNIVERSE.length }, (_, mask) =>
+    UNIVERSE.filter((_id, bit) => (mask & (1 << bit)) !== 0),
+  );
+
+  // The class of a model, written out here on its own: the lowest list.
+  const classOf = (id: string, lists: Lists): number =>
+    CLASSES.findIndex((name) => lists[name].includes(id));
+
+  const clamp = (wanted: Tier, levels: Levels): Tier | undefined => {
+    if (levels === null) return wanted;
+    const atOrBelow = levels.filter((entry) => level(entry) <= level(wanted));
+    return atOrBelow.at(-1) ?? levels[0];
+  };
+
+  /**
+   * The rule as a statement instead of a walk: of the offered models that
+   * may serve the leaf, the one of the highest class, and in that class the
+   * one its list names first.
+   */
+  function expected(
+    lists: Lists,
+    role: Role,
+    intended: ModelSelection,
+    offered: Map<string, Levels>,
+  ): { model: string; effort: Tier; reason: string } | undefined {
+    const leafClass = classOf(intended.model, lists);
+    const floor = FLOORED.includes(role) ? 1 : 0;
+    let best:
+      | { model: string; effort: Tier; reason: string; key: number }
+      | undefined;
+    for (const [id, levels] of offered) {
+      const own = classOf(id, lists);
+      if (own === -1 || own > leafClass || own < floor) continue;
+      const position = lists[CLASSES[own]].indexOf(id);
+      const lower = own < leafClass;
+      if (!lower && position <= lists[CLASSES[own]].indexOf(intended.model)) {
+        continue;
+      }
+      const wanted =
+        lower && level(intended.effort) < HIGH ? "high" : intended.effort;
+      const effort = clamp(wanted, levels);
+      if (effort === undefined || (lower && level(effort) < HIGH)) continue;
+      const key = own * 100 - position;
+      if (best === undefined || key > best.key) {
+        best = {
+          model: id,
+          effort,
+          reason: lower ? "lower-class" : "class-candidate",
+          key,
+        };
+      }
+    }
+    return (
+      best && { model: best.model, effort: best.effort, reason: best.reason }
+    );
+  }
+
+  interface Tally {
+    plans: number;
+    rows: number;
+    substituted: number;
+    sameClass: number;
+    lowerClass: number;
+    violations: string[];
+  }
+
+  /** Plans one routing against one catalog and checks every row. */
+  function check(
+    tally: Tally,
+    lists: Lists,
+    routing: HarnessRouting,
+    offered: Map<string, Levels>,
+  ): void {
+    const fail = (leaf: string, what: string) => {
+      if (tally.violations.length < 5) {
+        tally.violations.push(
+          `${what}: ${leaf} with lists ${JSON.stringify(lists)} and catalog ${JSON.stringify([...offered])}`,
+        );
+      }
+    };
+    let plan: ReturnType<typeof planCodexFallback>;
+    try {
+      plan = planCodexFallback(
+        routing,
+        catalog(
+          ...[...offered].map(([id, levels]) =>
+            model(id, levels === null ? null : [...levels]),
+          ),
+        ),
+        lists,
+      );
+    } catch (error) {
+      fail("the plan", `threw ${String(error)}`);
+      return;
+    }
+    tally.plans += 1;
+    let next = 0;
+    for (const role of ROLES) {
+      for (const tier of ROLE_TIERS[role]) {
+        const intended = routing.codex?.[role]?.[tier];
+        if (intended === undefined || offered.has(intended.model)) continue;
+        const leaf = `${role}/${tier} on ${intended.model} (${intended.effort})`;
+        const row = plan.rows[next];
+        next += 1;
+        if (row?.role !== role || row.tier !== tier) {
+          fail(leaf, "no row for a leaf whose model the catalog lacks");
+          continue;
+        }
+        tally.rows += 1;
+        const want = expected(lists, role, intended, offered);
+        if (row.used === undefined) {
+          if (row.reason !== undefined || !row.problem) {
+            fail(leaf, "a row without a substitute lacks its problem");
+          }
+          if (
+            !formatCodexFallbackRow(row).endsWith(
+              `-> no substitute: ${row.problem}`,
+            )
+          ) {
+            fail(leaf, "a row without a substitute renders a model");
+          }
+          if (want !== undefined) {
+            fail(leaf, `no substitute although ${want.model} may serve`);
+          }
+          continue;
+        }
+        tally.substituted += 1;
+        const usedClass = classOf(row.used.model, lists);
+        const intendedClass = classOf(intended.model, lists);
+        if (row.problem !== undefined || !offered.has(row.used.model)) {
+          fail(leaf, "a substitute the catalog lacks, or with a problem");
+          continue;
+        }
+        if (usedClass === -1 || usedClass > intendedClass) {
+          fail(leaf, `class of ${row.used.model} is above the intended class`);
+        }
+        const lower = usedClass !== intendedClass;
+        if (lower) tally.lowerClass += 1;
+        else tally.sameClass += 1;
+        if (row.reason !== (lower ? "lower-class" : "class-candidate")) {
+          fail(leaf, `reason ${row.reason} for ${row.used.model}`);
+        }
+        const wanted =
+          lower && level(intended.effort) < HIGH ? "high" : intended.effort;
+        if (
+          row.used.effort !== clamp(wanted, offered.get(row.used.model)!) ||
+          (lower && level(row.used.effort) < HIGH)
+        ) {
+          fail(leaf, `effort ${row.used.effort} on ${row.used.model}`);
+        }
+        if (FLOORED.includes(role) && usedClass < 1) {
+          fail(leaf, `${row.used.model} is below the balanced class`);
+        }
+        if (
+          want?.model !== row.used.model ||
+          want.effort !== row.used.effort ||
+          want.reason !== row.reason
+        ) {
+          fail(
+            leaf,
+            `used ${row.used.model} (${row.used.effort}) [${row.reason}], the rule gives ${JSON.stringify(want)}`,
+          );
+        }
+      }
+    }
+    if (next !== plan.rows.length) fail("the plan", "rows for offered leaves");
+  }
+
+  const tally = (): Tally => ({
+    plans: 0,
+    rows: 0,
+    substituted: 0,
+    sameClass: 0,
+    lowerClass: 0,
+    violations: [],
+  });
+
+  /** The default table with the first entry of each list as its model. */
+  const tableRouting = (lists: Lists) => codexModelsRoutingPatch(lists);
+
+  /** The catalogs of one subset: all levels, no level data, limited levels. */
+  function catalogsOf(subset: string[], lists: Lists): Map<string, Levels>[] {
+    const intended = new Set(CLASSES.map((name) => lists[name][0]));
+    return [
+      new Map(subset.map((id) => [id, LEVELS])),
+      new Map(subset.map((id) => [id, null])),
+      // A leaf whose own model is offered must find its effort listed, so
+      // only the models no leaf intends get the limited levels.
+      new Map(
+        subset.map((id) => [id, intended.has(id) ? LEVELS : LIMITED[id]]),
+      ),
+    ];
+  }
+
+  it("has one Codex leaf per role and tier in the table routing", () => {
+    const routing = tableRouting({
+      small: ["gpt-a"],
+      balanced: ["gpt-b"],
+      strong: ["gpt-c"],
+    });
+    expect(
+      ROLES.flatMap((role) =>
+        ROLE_TIERS[role].map((tier) => routing.codex?.[role]?.[tier]?.model),
+      ),
+    ).toEqual([
+      ...["gpt-a", "gpt-b", "gpt-b"],
+      ...["gpt-b", "gpt-b", "gpt-b"],
+      ...["gpt-a", "gpt-b", "gpt-b", "gpt-c"],
+      ...["gpt-b", "gpt-c", "gpt-c"],
+      ...["gpt-c", "gpt-c"],
+    ]);
+  });
+
+  it("every list assignment up to two entries, every catalog subset, every leaf of the table: the invariant holds and no plan throws", () => {
+    const lists = listsUpTo(2);
+    const result = tally();
+    let assignments = 0;
+    for (const small of lists) {
+      for (const balanced of lists) {
+        for (const strong of lists) {
+          const assignment = { small, balanced, strong };
+          const routing = tableRouting(assignment);
+          // Every leaf pinned to one model of the universe, as --routing
+          // can do: also models that are not a first entry, or in no list.
+          const pinned: HarnessRouting = { codex: {} };
+          let leafIndex = assignments;
+          for (const role of ROLES) {
+            pinned.codex![role] = {};
+            for (const tier of ROLE_TIERS[role]) {
+              pinned.codex![role]![tier] = {
+                model: UNIVERSE[leafIndex % UNIVERSE.length],
+                effort: routing.codex![role]![tier]!.effort,
+              };
+              leafIndex += 1;
+            }
+          }
+          assignments += 1;
+          for (const subset of SUBSETS) {
+            for (const offered of catalogsOf(subset, assignment)) {
+              check(result, assignment, routing, offered);
+            }
+            check(
+              result,
+              assignment,
+              pinned,
+              new Map(subset.map((id) => [id, LEVELS])),
+            );
+          }
+        }
+      }
+    }
+    expect(result.violations).toEqual([]);
+    expect({
+      lists: lists.length,
+      assignments,
+      catalogs: SUBSETS.length,
+    }).toEqual({ lists: 25, assignments: 15_625, catalogs: 32 });
+    expect(result.plans).toBe(assignments * SUBSETS.length * 4);
+    expect(result.substituted).toBeGreaterThan(0);
+    expect(result.sameClass).toBeGreaterThan(0);
+    expect(result.lowerClass).toBeGreaterThan(0);
+    expect(result.rows).toBeGreaterThan(result.substituted);
+  }, 120_000);
+
+  it("a seeded sample of list assignments up to three entries: the invariant holds and no plan throws", () => {
+    const lists = listsUpTo(3);
+    const result = tally();
+    let seed = 20_231;
+    const pick = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return lists[seed % lists.length];
+    };
+    const SAMPLE = 3000;
+    for (let index = 0; index < SAMPLE; index += 1) {
+      const assignment = { small: pick(), balanced: pick(), strong: pick() };
+      const routing = tableRouting(assignment);
+      for (const subset of SUBSETS) {
+        for (const offered of catalogsOf(subset, assignment)) {
+          check(result, assignment, routing, offered);
+        }
+      }
+    }
+    expect(result.violations).toEqual([]);
+    expect(lists).toHaveLength(85);
+    expect(result.plans).toBe(SAMPLE * SUBSETS.length * 3);
+    expect(result.sameClass).toBeGreaterThan(0);
+    expect(result.lowerClass).toBeGreaterThan(0);
+  }, 120_000);
+});
+
+describe("alias maps that name one model for several classes", () => {
+  const A = "gpt-acct-a";
+  const B = "gpt-acct-b";
+  const SHAPES: [string, Record<string, string>, Record<string, string>][] = [
+    [
+      "balanced and strong share a model",
+      { small: A, balanced: B, strong: B },
+      { small: A, balanced: B, strong: B },
+    ],
+    [
+      "small and balanced share a model",
+      { small: A, balanced: A, strong: B },
+      { small: A, balanced: A, strong: B },
+    ],
+    [
+      "one model for every class",
+      { small: A, balanced: A, strong: A },
+      { small: A, balanced: A, strong: A },
+    ],
+    [
+      "a sparse map naming the bundled small model as balanced",
+      { balanced: SMALL },
+      { small: SMALL, balanced: SMALL, strong: STRONG },
+    ],
+  ];
+
+  const rendered = (dir = target) => ({
+    small: agent("explorer-low", dir).model,
+    balanced: agent("implementer", dir).model,
+    strong: agent("reviewer", dir).model,
+  });
+
+  it.each(SHAPES)(
+    "installs %s without a catalog and renders the given models",
+    (_name, aliases, models) => {
+      const report = runInit(
+        options({
+          routing: codexModelsRoutingPatch(aliases),
+          codexModelCandidates: aliases,
+        }),
+      );
+      expect(rendered()).toEqual(models);
+      expect(agent("advisor-xhigh").model).toBe(models.strong);
+      expect("routingResolution" in rawManifest()).toBe(false);
+      expect(fallbackNotes(report.notes)).toEqual([]);
+    },
+  );
+
+  it.each(SHAPES)(
+    "installs %s with a catalog that offers the named models, without a substitution or a record",
+    (_name, aliases, models) => {
+      for (const codexFallback of ["stop", "degrade"] as const) {
+        const dir = join(directory, codexFallback);
+        mkdirSync(dir);
+        const report = runInit(
+          options({
+            targetDir: dir,
+            routing: codexModelsRoutingPatch(aliases),
+            codexModelCandidates: aliases,
+            codexFallback,
+            codexCatalog: catalog(
+              ...[...new Set(Object.values(models))].map((id) => model(id)),
+            ),
+          }),
+        );
+        expect(rendered(dir)).toEqual(models);
+        expect("routingResolution" in rawManifest(dir)).toBe(false);
+        expect(fallbackNotes(report.notes)).toEqual([]);
+      }
+    },
+  );
+
+  const table = (aliases: Record<string, string>, ...offered: string[]) =>
+    planCodexFallback(
+      mergeRouting(defaultCodexRouting(), codexModelsRoutingPatch(aliases)),
+      catalog(...offered.map((id) => model(id))),
+      codexModelCandidates(aliases),
+    ).rows.map(formatCodexFallbackRow);
+
+  it("balanced and strong share a model the catalog lacks: the leaves count as balanced, drop to small where the role allows it", () => {
+    const none = `no substitute: the catalog offers no usable candidate of the balanced class`;
+    expect(table({ small: A, balanced: B, strong: B }, A)).toEqual([
+      `explorer/medium: ${B} (medium) -> ${A} (high) [lower-class]`,
+      `explorer/high: ${B} (high) -> ${A} (high) [lower-class]`,
+      `task-slicer/low: ${B} (low) -> ${A} (high) [lower-class]`,
+      `task-slicer/medium: ${B} (medium) -> ${A} (high) [lower-class]`,
+      `task-slicer/high: ${B} (high) -> ${A} (high) [lower-class]`,
+      `implementer/medium: ${B} (medium) -> ${A} (high) [lower-class]`,
+      `implementer/high: ${B} (high) -> ${A} (high) [lower-class]`,
+      `implementer/xhigh: ${B} (high) -> ${A} (high) [lower-class]`,
+      `reviewer/medium: ${B} (medium) -> ${none} (the reviewer is never substituted below the balanced class)`,
+      `reviewer/high: ${B} (high) -> ${none} (the reviewer is never substituted below the balanced class)`,
+      `reviewer/xhigh: ${B} (xhigh) -> ${none} (the reviewer is never substituted below the balanced class)`,
+      `advisor/high: ${B} (high) -> ${none} (the advisor is never substituted below the balanced class)`,
+      `advisor/xhigh: ${B} (xhigh) -> ${none} (the advisor is never substituted below the balanced class)`,
+    ]);
+  });
+
+  it("small and balanced share a model: its leaves count as small and have no substitute, and it serves a strong leaf only as a small model", () => {
+    const aliases = { small: A, balanced: A, strong: B };
+    const lacksShared = table(aliases, B);
+    expect(lacksShared).toHaveLength(10);
+    expect(
+      lacksShared.filter((line) => !line.includes("-> no substitute: ")),
+    ).toEqual([]);
+    expect(lacksShared).toContain(
+      `implementer/medium: ${A} (medium) -> no substitute: the catalog offers no usable candidate of the small class`,
+    );
+    expect(lacksShared).toContain(
+      `reviewer/medium: ${A} (medium) -> no substitute: the small class is below the balanced class, and the reviewer is never substituted below it`,
+    );
+    const counts = `${A} counts as small, the lowest class that lists it`;
+    expect(table(aliases, A)).toEqual([
+      `implementer/xhigh: ${B} (high) -> ${A} (high) [lower-class]`,
+      ...[
+        "reviewer/high",
+        "reviewer/xhigh",
+        "advisor/high",
+        "advisor/xhigh",
+      ].map(
+        (leaf) =>
+          `${leaf}: ${B} (${leaf.split("/")[1]}) -> no substitute: the catalog offers no usable candidate of the strong or balanced class (the ${leaf.split("/")[0]} is never substituted below the balanced class); ${counts}`,
+      ),
+    ]);
+  });
+
+  it("one model for every class that the catalog lacks: no leaf has a substitute", () => {
+    const lines = table({ small: A, balanced: A, strong: A }, B);
+    expect(lines).toHaveLength(15);
+    expect(
+      lines.filter((line) => !line.includes("-> no substitute: ")),
+    ).toEqual([]);
+  });
+});
+
 describe("the routingResolution record", () => {
   const lacksStrong = catalog(model(SMALL), model(BALANCED));
   const complete = catalog(model(SMALL), model(BALANCED), model(STRONG));
@@ -1394,9 +1969,10 @@ describe("--codex-fallback on the command line", () => {
   );
 
   it.each(["init", "setup", "apply"])(
-    "%s rejects --codex-models lists that overlap before doing anything",
+    "%s rejects a --codex-models list that names a model twice before doing anything",
     (command) => {
-      const args = [
+      const result = run(
+        command,
         ...(command === "init"
           ? [target]
           : command === "apply"
@@ -1405,38 +1981,124 @@ describe("--codex-fallback on the command line", () => {
         "--yes",
         "--harness",
         "codex",
-      ];
-      const overlapping: [string, unknown, string][] = [
-        [
-          "strong-small",
-          { strong: [STRONG, SMALL], small: [SMALL] },
-          `"${SMALL}" for both the "small" and the "strong" alias`,
-        ],
-        [
-          "balanced-small",
-          { balanced: [BALANCED, "gpt-x"], small: ["gpt-x"] },
-          '"gpt-x" for both the "small" and the "balanced" alias',
-        ],
-        [
-          "twice",
-          { balanced: [BALANCED, "gpt-x", "gpt-x"] },
-          'lists "gpt-x" more than once',
-        ],
-      ];
-      for (const [name, value, message] of overlapping) {
-        const result = run(
-          command,
-          ...args,
-          "--codex-models",
-          jsonFile(name, value),
-        );
-        expect(result.status, name).toBe(2);
-        expect(result.stderr, name).toContain(message);
-        expect(readdirSync(target), name).toEqual([]);
-        expect(existsSync(home), name).toBe(false);
-      }
+        "--codex-models",
+        jsonFile("twice", { balanced: [BALANCED, "gpt-x", "gpt-x"] }),
+      );
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain('lists "gpt-x" more than once');
+      expect(readdirSync(target)).toEqual([]);
+      expect(existsSync(home)).toBe(false);
     },
   );
+
+  describe("alias maps that name one model for several classes", () => {
+    const A = "gpt-acct-a";
+    const B = "gpt-acct-b";
+    const leaves = (dir: string) => ({
+      small: agent("explorer-low", dir).model,
+      balanced: agent("implementer", dir).model,
+      strong: agent("reviewer", dir).model,
+    });
+
+    it.each([
+      [
+        "balanced and strong share a model",
+        { small: A, balanced: B, strong: B },
+        { small: A, balanced: B, strong: B },
+      ],
+      [
+        "small and balanced share a model",
+        { small: A, balanced: A, strong: B },
+        { small: A, balanced: A, strong: B },
+      ],
+      [
+        "one model for every class",
+        { small: A, balanced: A, strong: A },
+        { small: A, balanced: A, strong: A },
+      ],
+      [
+        "a sparse map naming the bundled small model as balanced",
+        { balanced: SMALL },
+        { small: SMALL, balanced: SMALL, strong: STRONG },
+      ],
+    ])(
+      "init, setup and apply accept %s, with and without a catalog that offers the models",
+      (_name, aliases, models) => {
+        const file = jsonFile("aliases", aliases);
+        const offered = jsonFile(
+          "offered",
+          catalog(
+            ...[...new Set(Object.values(models))].map((id) => model(id)),
+          ),
+        );
+        const variants = [[], ["--codex-catalog", offered]];
+        const fresh = (name: string) => {
+          const dir = join(directory, name);
+          mkdirSync(dir);
+          return dir;
+        };
+
+        for (const [index, withCatalog] of variants.entries()) {
+          const dir = fresh(`init-${index}`);
+          const result = run(
+            "init",
+            dir,
+            ...codexInit,
+            "--codex-models",
+            file,
+            ...withCatalog,
+          );
+          expect(result.status, result.stderr).toBe(0);
+          expect(leaves(dir)).toEqual(models);
+          expect("routingResolution" in rawManifest(dir)).toBe(false);
+          expect(result.stdout).not.toContain("Codex fallback:");
+        }
+
+        for (const [index, withCatalog] of variants.entries()) {
+          home = join(directory, `operator-setup-${index}`);
+          const result = run(
+            "setup",
+            ...codexInit,
+            "--codex-models",
+            file,
+            ...withCatalog,
+          );
+          expect(result.status, result.stderr).toBe(0);
+          expect(result.stderr).not.toContain("Codex fallback:");
+          const stored = JSON.parse(
+            readFileSync(join(home, "manifest.json"), "utf8"),
+          );
+          const codex = stored.defaults.routing.codex;
+          expect({
+            small: codex.explorer.low.model,
+            balanced: codex.implementer.medium.model,
+            strong: codex.reviewer.high.model,
+          }).toEqual(models);
+          expect(JSON.stringify(stored)).not.toContain("routingResolution");
+        }
+
+        home = join(directory, "operator-apply");
+        expect(run("setup", ...codexInit).status).toBe(0);
+        for (const [index, withCatalog] of variants.entries()) {
+          const dir = fresh(`apply-${index}`);
+          const result = run(
+            "apply",
+            "--target",
+            dir,
+            "--yes",
+            "--codex-models",
+            file,
+            ...withCatalog,
+          );
+          expect(result.status, result.stderr).toBe(0);
+          expect(leaves(dir)).toEqual(models);
+          expect("routingResolution" in rawManifest(dir)).toBe(false);
+          expect(result.stdout).not.toContain("Codex fallback:");
+        }
+      },
+      120_000,
+    );
+  });
 
   it("setup stops by default and, with degrade, stores the intended routing without a resolution", () => {
     const lacking = jsonFile("lacking", lacksStrong);

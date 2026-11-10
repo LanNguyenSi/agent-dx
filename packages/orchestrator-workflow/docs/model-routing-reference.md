@@ -197,13 +197,12 @@ An alias value is a model id or an array of model ids, in
 of the class and is the only one the routing uses; a single id is a list of
 one. The later entries are candidates: models the installer may substitute for
 the intended one, and only in the case the next section describes. A list must
-not be empty. A model belongs to exactly one candidate list: an id may appear
-in at most one of the three lists and once in it. A file that names a model in
-two lists, or twice in one, is rejected by `init`, `apply`, and `setup` with an
-error that names the model and the aliases, before anything is resolved or
-written. `--codex-models` replaces the bundled list of each alias it names as
-a whole, and the supplied lists together with the bundled lists of the
-aliases it leaves out must follow the same rule.
+not be empty or name a model twice; a file that does is rejected by `init`,
+`apply`, and `setup` before anything is resolved or written. Several lists may
+name the same model: an alias map that gives one model id to two or three
+aliases is valid, with and without a catalog, also when a supplied list names
+a model that the bundled list of another alias keeps. `--codex-models`
+replaces the bundled list of each alias it names as a whole.
 
 ### When the catalog lacks a selected model
 
@@ -223,27 +222,43 @@ the option has no effect: nothing is checked.
 
 The substitute of a leaf is chosen by a fixed rule, in this order:
 
-1. The first later candidate of the leaf's own alias class that the catalog
-   offers. Candidates listed before the leaf's model are not considered.
+1. The first later candidate in the list of the leaf's own alias class that
+   the catalog offers and that counts as that class. Candidates listed before
+   the leaf's model are not considered.
 2. Otherwise the first candidate, in list order, that the catalog offers in
-   the next lower class: `strong`, then `balanced`, then `small`.
+   the list of the next lower class and that counts as that class: `strong`,
+   then `balanced`, then `small`.
 3. Otherwise the leaf has no substitute. The installer never drops the model
    line to let the leaf inherit the session model.
 
-A leaf belongs to the class whose candidate list contains its model, and a
-substitute found in a list is of that list's class. A leaf whose model is in
-no candidate list is never substituted: an explicitly chosen model outside the lists is not replaced, and
-the install stops and names the leaf. The source of a leaf does not matter: a
-leaf set through `--routing` that names a listed model is treated like any
-leaf of that class.
+The class of a model is the lowest alias class whose candidate list names it,
+with `small` below `balanced` below `strong`. This one rule gives the class of
+a leaf, through its intended model, and the class of every candidate. A model
+named by several lists belongs to the lowest of them, as intended model and
+as substitute: an entry of a higher list that a lower list names too is
+skipped in the higher list and is taken only from the lower one, as a
+`lower-class` substitute. Later entries of a higher list are not reached by a
+leaf whose intended model also sits in a lower list, because that leaf counts
+as the lower class. The row of a leaf that ends without a substitute names
+each offered entry that was skipped this way and the class it counts as.
+
+A leaf whose model is in no candidate list is never substituted: an
+explicitly chosen model outside the lists is not replaced, and the install
+stops and names the leaf. The source of a leaf does not matter: a leaf set
+through `--routing` that names a listed model is treated like any leaf of
+that class.
 
 Floors: a reviewer or advisor leaf is never substituted with a model of a
-class below `balanced`; the walk down the classes stops there. When only
-`small` models are available for such a leaf, it has no substitute.
+class below `balanced`; the walk down the classes stops there. A model that
+the `small` list names counts as `small` wherever else it is listed, so it
+never becomes the substitute of such a leaf. When only `small` models are
+available for such a leaf, it has no substitute. An operator who wants a
+lower-listed model on a reviewer or advisor leaf sets that leaf with
+`--routing`.
 
-Operator note: to let strong leaves fall back to the balanced model, list
-nothing twice. Do not repeat the balanced model in the `strong` list; rule 2
-already offers the `balanced` list to a strong leaf.
+Operator note: a strong leaf already falls back to the `balanced` list by
+rule 2. Repeating the balanced model in the `strong` list is allowed and
+changes nothing: the model still counts as `balanced`.
 
 Effort of a substituted leaf: a leaf that dropped to a lower class runs at
 `high` at least. The result is then clamped to the levels the catalog lists
