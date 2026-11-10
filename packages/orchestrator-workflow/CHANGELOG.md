@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-11-10
+
+### Added
+
+- `--codex-fallback <stop|degrade>` for `init`, `apply` and `setup`. With
+  `--codex-catalog`, `stop` (the default) ends the install before anything is
+  written when the catalog lacks a selected Codex model and prints the
+  substitution table, one line per affected leaf; `degrade` applies it. The
+  substitute is the first later candidate of the leaf's alias class that the
+  catalog offers, else the first offered candidate of the next lower class.
+  The class of a model is the lowest alias class whose candidate list names
+  it, as intended model and as substitute. A reviewer or advisor leaf is never
+  substituted below `balanced`, so a model that the small list names never
+  becomes its substitute. A leaf whose model is in no candidate list is never
+  substituted. A lower-class substitute runs at effort `high` at least, and
+  the effort is clamped to the levels the catalog lists. A leaf without a
+  substitute names the offered entries that were skipped because they count as
+  a lower class.
+- `assets/codex-models.json` and `--codex-models` accept an ordered array of
+  model ids per alias; the first entry is the intended model. Several aliases
+  may name the same model, so an alias map that gives one model id to several
+  aliases installs as before; a list that names a model twice is rejected. The
+  lists are not stored: the table to agree on is the one the installing run
+  prints, and `setup --codex-fallback degrade` names that condition.
+- The manifest keeps the intended routing in `routing` and records each
+  substituted leaf under the new optional `routingResolution` key (intended,
+  used, reason). A re-install without a catalog keeps the substitutes; with a
+  catalog each leaf returns to its intended model when it is offered again.
+  The record of a leaf that is not installed in a run is dropped with a note
+  when that run's catalog offers its intended model, and carried with a note
+  otherwise. A kit version older than this one ignores the record and discards
+  it on re-install, rendering the intended models again.
+- `INSTALL-AGENT.md` carries a "Choosing models" subsection for the installing
+  agent: what each role's work demands, the shipped defaults per harness
+  family as tables checked against the code, when to move a leaf, Codex
+  catalog and substitution handling, and two questions for the operator before
+  an install without recorded routing. The install report states the applied
+  routing with a reason for every changed leaf.
+  `docs/model-routing-reference.md` gains "Choosing a different leaf".
+- Skill reference `review-and-recovery.md`, section "Unavailable model": a
+  spawn that fails because the account or catalog does not offer the routed
+  model is an environment fault, not a misfire. The only way to continue
+  without the operator is a re-resolve the operator already agreed to; the
+  orchestrator does not pick another variant on its own, no role is moved to a
+  weaker leaf or run inline for that reason. Four sentences are pinned as
+  safety core.
+
+### Changed
+
+- Default routing is set per role and tier instead of one tier-uniform table.
+  Claude Code and opencode: explorer low `haiku`, medium and high `sonnet`;
+  task-slicer low `sonnet`, medium and high `opus`; implementer low, medium
+  and high `sonnet`, xhigh `fable` at effort high; reviewer medium `sonnet`,
+  high `opus`, xhigh `fable` at effort high; advisor high `fable`, xhigh
+  `fable` at effort xhigh. The effort is no longer always the tier name. A
+  fourth model class above `large` maps to the new Claude alias `fable`
+  (accepted by `--models`, rejected in a Codex leaf, resolved on opencode
+  through the `claude-fable` family). The exported `DEFAULT_MODELS`
+  changes with it, and so do the default agent files of a fresh install:
+  task-slicer `sonnet` to `opus`, advisor `opus` to `fable`; explorer,
+  implementer and reviewer are unchanged.
+- Codex defaults: explorer low and implementer low run the small model at
+  effort high, implementer xhigh runs the strong model at effort high; all
+  other leaves are unchanged. The defaults follow the vendor's model guidance
+  linked in `docs/model-routing-reference.md`.
+- opencode: a tier variant whose class has no model in the catalog uses the
+  next lower class that resolved (a Note for one class, a Warning for more).
+  Reviewer and advisor variants never use a class below medium; such a variant
+  is not rendered, with a Warning. A default-tier alias that does not resolve
+  omits `model:` with a Warning, as before, and is never replaced.
+- Existing installs keep their routing. A recorded leaf is kept; a leaf that
+  was never recorded takes the current default. A manifest that records no
+  `routing` (repository or operator manifest) is read as the table of that
+  time for every harness. To adopt the new defaults, patch the leaves with
+  `--routing`, for example
+  `{"claude": {"task-slicer": {"medium": {"model": "opus", "effort": "medium"}, "high": {"model": "opus", "effort": "high"}}, "advisor": {"high": {"model": "fable", "effort": "high"}}}}`.
+- Skill reference `delegation-and-tiers.md`: a tier is a routing leaf of one
+  role (model class plus effort); the escalation order when a result is not
+  good enough (self-verification, one effort step, then the stronger model at
+  lower effort); the per-spawn override where a spawn value wins over the
+  installed definition; the advisor at least as strong as the orchestrator's
+  model; small models only where a mistake is cheap to notice. The
+  `implementer-low` exclusion stays in force; its measurement (0.23.0) was
+  taken on a small-model `-low` leaf.
+- The catalog error for a missing Codex model lists every affected leaf with
+  its substitute instead of naming only the first leaf.
+
+### Removed
+
+- The `TIER_DEFS` export. Use `ROLE_TIER_DEFS` and `tierDef(role, tier)`.
+
+Background for the model choices: the model selection guide at
+https://claude.dev/blog/which-claude-model-should-you-build-with/ and the
+Codex model and subagent documentation linked in the routing reference.
+Observed on Claude Code 2.1.322 on 2026-11-10: a model and effort passed at
+spawn time win over the values pinned in the agent file (an agent file pinned
+to the small model at effort low, spawned with the medium model and effort
+high, ran on the medium model at effort high), and a run of that agent
+without an override sent effort low on the small model.
+
 ## [0.50.0] - 2026-11-04
 
 ### Changed
