@@ -424,6 +424,7 @@ describe("routing command flags", () => {
         small: "provider/claude-haiku-pinned",
         medium: "provider/claude-sonnet-pinned",
         large: "provider/claude-opus-pinned",
+        xlarge: "provider/claude-fable-pinned",
       },
     });
     const routing = readInstalledManifest(target)?.routing;
@@ -590,6 +591,7 @@ describe("legacy routing compatibility across commands", () => {
       small: "local-small",
       medium: "local-medium",
       large: "local-large",
+      xlarge: "local-xlarge",
     };
     runInit({
       targetDir: target,
@@ -627,7 +629,7 @@ describe("legacy routing compatibility across commands", () => {
         join(target, ".opencode/agents/implementer-xhigh.md"),
         "utf8",
       ),
-    ).toContain("model: local-large");
+    ).toContain("model: local-xlarge");
     expect(runUninstall({ targetDir: target }).kept).toEqual([]);
     expect(existsSync(join(target, MANIFEST_PATH))).toBe(false);
   });
@@ -642,6 +644,7 @@ describe("adopt bootstrap routing compatibility", () => {
       small: "local-small-pinned",
       medium: "local-medium-pinned",
       large: "local-large-pinned",
+      xlarge: "local-xlarge-pinned",
     };
     runInit({
       targetDir: target,
@@ -818,6 +821,7 @@ describe("dormant recorded opencode choices", () => {
         small: "local-small",
         medium: "local-medium",
         large: "local-large",
+        xlarge: "local-xlarge",
       };
       runInit({
         targetDir: target,
@@ -853,7 +857,7 @@ describe("dormant recorded opencode choices", () => {
       ).toContain("model: local-explorer");
       expect(
         readFileSync(join(target, ".opencode/agents/advisor-xhigh.md"), "utf8"),
-      ).toContain("model: local-large");
+      ).toContain("model: local-xlarge");
       expect(existsSync(catalogCalls)).toBe(false);
     },
     30_000,
@@ -880,6 +884,7 @@ describe("dormant choices over a different operator layer", () => {
             small: "local-upper-small",
             medium: "local-upper-medium",
             large: "local-upper-large",
+            xlarge: "local-upper-xlarge",
           };
       runInit({
         targetDir: target,
@@ -911,6 +916,7 @@ describe("dormant choices over a different operator layer", () => {
             small: "local-lower-small",
             medium: "local-lower-medium",
             large: "local-lower-large",
+            xlarge: "local-lower-xlarge",
           },
         }),
       );
@@ -957,7 +963,7 @@ describe("dormant choices over a different operator layer", () => {
             join(target, ".opencode/agents/implementer-xhigh.md"),
             "utf8",
           ),
-        ).toContain("model: local-upper-large");
+        ).toContain("model: local-upper-xlarge");
       expect(existsSync(catalogCalls)).toBe(false);
     },
   );

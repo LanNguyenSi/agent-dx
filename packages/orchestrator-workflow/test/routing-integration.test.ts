@@ -66,7 +66,7 @@ describe("routing installer integration", () => {
     expect(tierAgent).toMatchObject({
       name: "implementer-xhigh",
       model: "gpt-6-astra",
-      model_reasoning_effort: "xhigh",
+      model_reasoning_effort: "high",
     });
 
     const manifest = JSON.parse(
@@ -227,6 +227,7 @@ describe("routing persistence and validation", () => {
       small: "provider/claude-haiku-pinned",
       medium: "provider/claude-sonnet-pinned",
       large: "provider/claude-opus-pinned",
+      xlarge: "provider/claude-fable-pinned",
     };
     runInit({ ...options, opencodeModels, opencodeClassModels });
     const manifest = readFileSync(join(directory, MANIFEST_PATH), "utf8");
@@ -252,7 +253,7 @@ describe("routing persistence and validation", () => {
     expect(
       readInstalledManifest(directory)?.routing?.opencode?.implementer?.xhigh
         ?.model,
-    ).toBe(opencodeClassModels.large);
+    ).toBe(opencodeClassModels.xlarge);
     runInit({
       ...options,
       models: { ...DEFAULT_MODELS, implementer: "provider/new-model" },
@@ -264,7 +265,7 @@ describe("routing persistence and validation", () => {
     expect(
       readInstalledManifest(directory)?.routing?.opencode?.implementer?.xhigh
         ?.model,
-    ).toBe(opencodeClassModels.large);
+    ).toBe(opencodeClassModels.xlarge);
   });
 
   it("honors explicit API resolved-id updates and routing patches over legacy model changes", () => {
@@ -366,6 +367,7 @@ describe("legacy opencode API lifecycle", () => {
       small: "local-model",
       medium: "local-model",
       large: "local-model",
+      xlarge: "local-model-xlarge",
     };
     runInit({ ...options, opencodeClassModels });
     const installed = readInstalledManifest(directory);
@@ -396,7 +398,7 @@ describe("legacy opencode API lifecycle", () => {
     };
     runInit({
       ...options,
-      opencodeClassModels: { large: "local-model" },
+      opencodeClassModels: { xlarge: "local-model" },
       routing: {
         opencode: {
           implementer: { xhigh: { model: "provider/pinned", effort: "xhigh" } },

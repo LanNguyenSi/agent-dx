@@ -51,6 +51,7 @@ describe("rendered role prompts carry the asset body in every harness and tier",
           small: "anthropic/claude-haiku-4-5",
           medium: "anthropic/claude-sonnet-4-6",
           large: "anthropic/claude-opus-4-8",
+          xlarge: "anthropic/claude-fable-5",
         },
       });
       const agentsDir = join(target, dir, "agents");
@@ -96,4 +97,35 @@ describe("rendered role prompts carry the asset body in every harness and tier",
       expect(checked).toBeGreaterThan(ROLES.length);
     },
   );
+});
+
+describe("rendered effort follows the per-role table, not the tier name", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("claude: the xhigh variants of implementer and reviewer run fable at high effort, the advisor's at xhigh", () => {
+    const target = mkdtempSync(join(tmpdir(), "ow-rendered-effort-"));
+    dirs.push(target);
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+    });
+    const read = (file: string) =>
+      readFileSync(join(target, ".claude", "agents", file), "utf8");
+    for (const file of ["implementer-xhigh.md", "reviewer-xhigh.md"]) {
+      expect(read(file), file).toContain("model: fable\n");
+      expect(read(file), file).toContain("effort: high\n");
+      expect(read(file), file).not.toContain("effort: xhigh");
+    }
+    expect(read("advisor-xhigh.md")).toContain("effort: xhigh\n");
+    expect(read("task-slicer-low.md")).toContain("model: sonnet\n");
+    expect(read("task-slicer-low.md")).toContain("effort: low\n");
+  });
 });

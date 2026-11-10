@@ -14,12 +14,14 @@ import { HARNESSES } from "./detect.js";
 import type { ModelClass, Profile, Role, Tier } from "./models.js";
 import {
   CLASS_MODELS,
+  DEFAULT_MODELS,
   DEFAULT_PROFILE,
   DEFAULT_TIER,
+  PRE_ROLE_TIER_DEFS,
   READ_ONLY_ROLES,
   ROLES,
   ROLE_TIERS,
-  TIER_DEFS,
+  tierDef,
   assertValidModelId,
   claudeModelValue,
   isProfile,
@@ -31,9 +33,11 @@ import { parseRouting } from "./routing.js";
 import type { HarnessRouting, ModelSelection } from "./routing.js";
 import {
   codexCatalogWarnings,
-  normalizeRoutingState,
   legacyOpencodeFallbacks,
+  legacyRouting,
+  normalizeRoutingState,
   parseOpencodeModelMaps,
+  persistableRouting,
 } from "./routing-state.js";
 import type { OpencodeModelMaps } from "./routing-state.js";
 import type { Report } from "./writers.js";
@@ -75,11 +79,11 @@ export interface InitOptions {
   tiers?: boolean;
   /**
    * Resolved fully-qualified opencode model ids per tier's model class
-   * (`small`/`medium`/`large`), or `undefined` to omit the `model:` line for
-   * that variant. Only consulted when `tiers` is true and the `opencode`
-   * harness is selected; mirrors `opencodeModels` but keyed by model class
-   * instead of role, since a tier variant's model is chosen by class, not
-   * by the role's own preselected model. Resolved ids are persisted per tier
+   * (`small`/`medium`/`large`/`xlarge`), or `undefined` to omit the `model:`
+   * line for that variant. Only consulted when `tiers` is true and the
+   * `opencode` harness is selected; mirrors `opencodeModels` but keyed by
+   * model class instead of role, since a tier variant's model is chosen by
+   * class (per role and tier), not by the role's own preselected model. Resolved ids are persisted per tier
    * and retained on a later install that omits this field. Legacy bare IDs
    * persist in the manifest compatibility map of the same name.
    */
@@ -464,6 +468,22 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   let routing: HarnessRouting | undefined;
   if ("routing" in candidate) {
     routing = parseRouting(candidate.routing);
+  } else {
+    // An install recorded before routing existed carries only `models`. Its
+    // effective routing was derived from the tier-uniform table of that time,
+    // so materialize it with that table: a re-install then keeps the routing
+    // that install was running instead of adopting the current per-role
+    // defaults for its non-default tiers.
+    const materialized = persistableRouting(
+      legacyRouting(
+        harnesses,
+        { ...DEFAULT_MODELS, ...models },
+        opencodeMaps.opencodeModels,
+        opencodeMaps.opencodeClassModels,
+        PRE_ROLE_TIER_DEFS,
+      ),
+    );
+    if (Object.keys(materialized).length > 0) routing = materialized;
   }
   const knowledge = parseKnowledgeBundles(candidate);
   const knowledgeProblems = knowledgeEntryProblems(candidate.knowledge);
@@ -518,7 +538,7 @@ function yamlModelScalar(value: string): string {
 
 /**
  * Composes the unsuffixed default agent file. It carries a pinned
- * `effort: <TIER_DEFS[DEFAULT_TIER[role]].effort>` line unconditionally
+ * `effort: <tierDef(role, DEFAULT_TIER[role]).effort>` line unconditionally
  * (medium for explorer/task-slicer/implementer, high for reviewer/advisor),
  * regardless of whether `--tiers` is on: this is the deterministic tier
  * ladder's floor, not a tier-variant feature, so a default spawn no longer
@@ -527,7 +547,7 @@ function yamlModelScalar(value: string): string {
  * byte-identical whether or not tier variants are also rendered, the same
  * invariant `composeClaudeAgentVariant`'s own doc comment below describes.
  * Computed inline here rather than passed in like `composeOpencodeAgent`'s
- * `effortLine`: `TIER_DEFS[DEFAULT_TIER[role]].effort` is a pure function of
+ * `effortLine`: `tierDef(role, DEFAULT_TIER[role]).effort` is a pure function of
  * `role` alone, with no model-dependent dispatch on Claude Code the way
  * opencode's family-based `opencodeEffortLine` has, so there is no second,
  * potentially-diverging computation here to guard against.
@@ -543,7 +563,7 @@ function composeClaudeAgent(
     `name: ${asset.name}`,
     `description: ${yamlQuote(asset.description)}`,
     `model: ${selection ? yamlModelScalar(selection.model) : claudeModelValue(model)}`,
-    `effort: ${selection?.effort ?? TIER_DEFS[DEFAULT_TIER[role]].effort}`,
+    `effort: ${selection?.effort ?? tierDef(role, DEFAULT_TIER[role]).effort}`,
   ];
   // Read-only roles keep every read/search tool but cannot mutate files.
   if (READ_ONLY_ROLES.has(role)) {
@@ -615,7 +635,7 @@ function composeClaudeAgentVariant(
   selection?: ModelSelection,
 ): string {
   const asset = readAgentAsset(role);
-  const def = TIER_DEFS[tier];
+  const def = tierDef(role, tier);
   const frontmatter = [
     "---",
     `name: ${asset.name}-${tier}`,
@@ -649,30 +669,30 @@ function isClaudeFamilyModel(modelValue: string): boolean {
 /**
  * The opencode effort surface is keyed by model family, not provider id:
  * Claude-family models' `variant:` option only distinguishes `high` and
- * `max` (mapped from the `high`/`xhigh` tiers; `low`/`medium` collapse to no
+ * `max` (mapped from the `high`/`xhigh` efforts; `low`/`medium` collapse to no
  * effort field), Ollama and ids without a provider prefix have no known
  * effort passthrough, and every other model accepts a plain
  * `reasoningEffort:` value. An unresolved (`undefined`) model gets no
  * effort field either, since there is then no model to key the decision on.
- * Shared by both the default (unsuffixed) agent file, keyed by the role's
- * own `DEFAULT_TIER`, and the tier-variant files, keyed by the variant's own
- * suffix tier: the dispatch rule is identical either way, only which tier
- * gets passed in differs.
+ * Shared by both the default (unsuffixed) agent file and the tier-variant
+ * files: the dispatch rule is identical either way, only the effort passed
+ * in differs. The effort is the leaf's own effort, not the tier name (the
+ * implementer and reviewer `xhigh` variants run at `high`).
  */
 function opencodeEffortLine(
-  tier: Tier,
+  effort: Tier,
   modelValue: string | undefined,
 ): string | undefined {
   if (!modelValue) return undefined;
   if (isClaudeFamilyModel(modelValue)) {
-    if (tier === "high") return "variant: high";
-    if (tier === "xhigh") return "variant: max";
+    if (effort === "high") return "variant: high";
+    if (effort === "xhigh") return "variant: max";
     return undefined;
   }
   const slash = modelValue.indexOf("/");
   const provider = slash === -1 ? undefined : modelValue.slice(0, slash);
   if (provider === undefined || provider === "ollama") return undefined;
-  return `reasoningEffort: ${TIER_DEFS[tier].effort}`;
+  return `reasoningEffort: ${effort}`;
 }
 
 /**
@@ -1147,7 +1167,7 @@ export function runInit(options: InitOptions): Report {
           : opencodeModelValue(options.models[role]));
       const defaultEffortLine = opencodeEffortLine(
         routingSelection(routing, "opencode", role, DEFAULT_TIER[role])
-          ?.effort ?? DEFAULT_TIER[role],
+          ?.effort ?? tierDef(role, DEFAULT_TIER[role]).effort,
         modelValue,
       );
       installKitFile(
@@ -1158,7 +1178,8 @@ export function runInit(options: InitOptions): Report {
         for (const tier of ROLE_TIERS[role]) {
           if (tier === DEFAULT_TIER[role]) continue;
           const selection = routingSelection(routing, "opencode", role, tier);
-          const modelClass = TIER_DEFS[tier].modelClass;
+          const def = tierDef(role, tier);
+          const modelClass = def.modelClass;
           const variantModelValue =
             selection?.model ?? opencodeClassModels?.[modelClass];
           if (variantModelValue === undefined) {
@@ -1177,7 +1198,7 @@ export function runInit(options: InitOptions): Report {
             continue;
           }
           const effortLine = opencodeEffortLine(
-            selection?.effort ?? tier,
+            selection?.effort ?? def.effort,
             variantModelValue,
           );
           installKitFile(

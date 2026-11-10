@@ -13,13 +13,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   CLASS_MODELS,
+  DEFAULT_MODELS,
   DEFAULT_TIER,
+  MODEL_CLASSES,
   READ_ONLY_ROLES,
   ROLES,
   ROLE_TIERS,
-  TIER_DEFS,
+  tierDef,
 } from "../src/models.js";
 import type { Role, Tier } from "../src/models.js";
+import { defaultCodexRouting } from "../src/routing.js";
 import { readAsset as readRawAsset } from "../src/assets.js";
 import {
   HAND_APPLIED_MUTANT_IS_A_FINDING,
@@ -1187,80 +1190,128 @@ describe("model-routing-reference.md tier table enumerates ROLE_TIERS and DEFAUL
 });
 
 /**
- * L4 (review round 1 on 0.19.0): the "Effort tiers" section carries a
- * second table, Tier -> model class -> model alias -> requested effort
- * (`TIER_DEFS`/`CLASS_MODELS` in `src/models.ts`), that the tier-table guard
- * above does not touch (it only pins the Role/Tiers-available/Default-tier
- * table). Nothing previously guarded this second table against drifting
- * from its source maps, so this mirrors the same source-of-truth discipline
- * for it: located by its own header text and sliced off at the next blank
- * line, so it is never confused with either of the two other same-shaped
- * tables earlier in the file.
+ * The "Effort tiers" section carries a per-role table, Role -> Tier -> model
+ * class -> model alias -> requested effort (`ROLE_TIER_DEFS`/`CLASS_MODELS`
+ * in `src/models.ts`), and a model-class table. Both are pinned against the
+ * code tables, never against hand-written copies. Each table is located by
+ * its own header text and sliced off at the next blank line, so it is never
+ * confused with the other same-shaped tables in the file.
  */
-describe("model-routing-reference.md tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS exactly", () => {
-  const modelRoutingDoc = readDoc("docs/model-routing-reference.md"); // moved from README.md's Effort tiers
-  const tiersInOrder = Object.keys(TIER_DEFS) as Tier[];
+describe("model-routing-reference.md tier-to-model-class tables enumerate ROLE_TIER_DEFS and CLASS_MODELS exactly", () => {
+  const modelRoutingDoc = readDoc("docs/model-routing-reference.md");
 
-  function tierModelClassTableSection(): string {
-    const headerIdx = modelRoutingDoc.indexOf(
-      "| Tier | Model class | Model alias | Effort requested |",
-    );
+  function tableSection(header: string): string {
+    const headerIdx = modelRoutingDoc.indexOf(header);
     expect(
       headerIdx,
-      "tier-to-model-class table header not found",
+      `table header ${header} not found`,
     ).toBeGreaterThanOrEqual(0);
     const afterHeader = modelRoutingDoc.slice(headerIdx);
     const endIdx = afterHeader.indexOf("\n\n");
     expect(
       endIdx,
-      "model-routing-reference.md tier-to-model-class table did not terminate before a blank line",
+      "table did not terminate before a blank line",
     ).toBeGreaterThan(0);
-    return afterHeader.slice(0, endIdx);
+    return afterHeader.slice(0, endIdx).trimStart();
   }
 
-  function tierModelClassRow(tier: Tier): {
-    modelClass: string;
-    alias: string;
-    effort: string;
-  } {
-    const match = tierModelClassTableSection().match(
-      new RegExp(`^\\| ${tier} \\| ([^|]+) \\| ([^|]+) \\| ([^|]+) \\|$`, "m"),
+  function dataRows(section: string): string[][] {
+    return section
+      .split("\n")
+      .slice(2)
+      .map((line) =>
+        line
+          .split("|")
+          .slice(1, -1)
+          .map((cell) => cell.replace(/`/g, "").trim()),
+      );
+  }
+
+  const roleTierRows = dataRows(
+    tableSection(
+      "| Role | Tier | Model class | Model alias | Effort requested |",
+    ),
+  );
+  const expectedRoleTierRows = ROLES.flatMap((role) =>
+    ROLE_TIERS[role].map((tier) => {
+      const def = tierDef(role, tier);
+      return [
+        role,
+        tier,
+        def.modelClass,
+        CLASS_MODELS[def.modelClass],
+        def.effort,
+      ];
+    }),
+  );
+
+  it("lists exactly one row per role and tier, in ROLES and ROLE_TIERS order, with the class, alias and effort derived from the code tables", () => {
+    expect(roleTierRows).toEqual(expectedRoleTierRows);
+  });
+
+  it("lists every model class with its alias, weakest first", () => {
+    expect(dataRows(tableSection("\n| Model class | Model alias |"))).toEqual(
+      MODEL_CLASSES.map((modelClass) => [modelClass, CLASS_MODELS[modelClass]]),
     );
+  });
+
+  it("states a default model per role that equals DEFAULT_MODELS", () => {
     expect(
-      match,
-      `model-routing-reference.md tier-to-model-class row for "${tier}" not found`,
-    ).toBeTruthy();
-    const [, modelClassCell, aliasCell, effortCell] = match as RegExpMatchArray;
-    return {
-      modelClass: modelClassCell.trim(),
-      alias: aliasCell.replace(/`/g, "").trim(),
-      effort: effortCell.replace(/`/g, "").trim(),
-    };
-  }
-
-  for (const tier of tiersInOrder) {
-    const def = TIER_DEFS[tier];
-
-    it(`lists TIER_DEFS["${tier}"]'s model class and effort in the "${tier}" row`, () => {
-      const row = tierModelClassRow(tier);
-      expect(row.modelClass).toBe(def.modelClass);
-      expect(row.effort).toBe(def.effort);
-    });
-
-    it(`lists CLASS_MODELS["${def.modelClass}"] as the "${tier}" row's model alias`, () => {
-      expect(tierModelClassRow(tier).alias).toBe(CLASS_MODELS[def.modelClass]);
-    });
-  }
-
-  it("has exactly one row per tier, no extra or missing rows", () => {
-    const dataRows = [
-      ...tierModelClassTableSection().matchAll(
-        /^\| ([\w-]+) \| [^|]+ \| [^|]+ \| [^|]+ \|$/gm,
+      dataRows(tableSection("| Role | Default | Why |")).map(
+        ([role, model]) => [role, model],
       ),
-    ]
-      .map((m) => m[1])
-      .filter((cell) => cell !== "Tier" && !/^-+$/.test(cell));
-    expect(dataRows.sort()).toEqual([...tiersInOrder].sort());
+    ).toEqual(ROLES.map((role) => [role, DEFAULT_MODELS[role]]));
+  });
+
+  it("derives each default model from the alias of the role's default-tier class", () => {
+    for (const role of ROLES) {
+      expect(DEFAULT_MODELS[role]).toBe(
+        CLASS_MODELS[tierDef(role, DEFAULT_TIER[role]).modelClass],
+      );
+    }
+  });
+
+  it("lists the Codex default routing exactly as defaultCodexRouting() resolves it", () => {
+    const routing = defaultCodexRouting().codex as Record<
+      string,
+      Partial<Record<Tier, { model: string; effort: string }>>
+    >;
+    const expected = ROLES.flatMap((role) =>
+      ROLE_TIERS[role].map((tier) => {
+        const leaf = routing[role]?.[tier];
+        expect(leaf, `${role}/${tier}`).toBeDefined();
+        return [
+          role,
+          tier === DEFAULT_TIER[role] ? `${tier} (default)` : tier,
+          leaf!.model,
+          leaf!.effort,
+        ];
+      }),
+    );
+    expect(dataRows(tableSection("| Role | Tier | Model | Effort |"))).toEqual(
+      expected,
+    );
+  });
+
+  it("shows the same default models in the manual-install manifest example of INSTALL-AGENT.md", () => {
+    const installAgent = readDoc("INSTALL-AGENT.md");
+    const match = installAgent.match(/"models": (\{[^}]*\})/);
+    expect(match, "models example not found").toBeTruthy();
+    expect(JSON.parse(match![1])).toEqual(DEFAULT_MODELS);
+  });
+
+  it("names the default models in the README's Effort tiers section", () => {
+    const readme = readDoc("README.md");
+    const section = readme.slice(readme.indexOf("### Effort tiers"));
+    for (const role of ROLES) {
+      const roles = ROLES.filter(
+        (other) => DEFAULT_MODELS[other] === DEFAULT_MODELS[role],
+      );
+      expect(section.slice(0, section.indexOf("\n## ")), role).toContain(
+        `\`${DEFAULT_MODELS[role]}\` for`,
+      );
+      expect(roles).toContain(role);
+    }
   });
 });
 
@@ -4993,13 +5044,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 990,
-    end: 990,
+    start: 1010,
+    end: 1010,
     anchorKey: "3a4a026f",
     paragraphLine: 63,
-    uncitedLines: [1010],
+    uncitedLines: [1030],
     claim:
-      "the sentence describes the per-template asset read driven by `listTemplateNames()`; line 990 is the read of a templates-directory asset, while uncited 1010 reads the skill asset for a different install step the sentence never mentions.",
+      "the sentence describes the per-template asset read driven by `listTemplateNames()`; line 1010 is the read of a templates-directory asset, while uncited 1030 reads the skill asset for a different install step the sentence never mentions.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5017,13 +5068,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 971,
-    end: 976,
+    start: 991,
+    end: 996,
     anchorKey: "33e8e25a",
     paragraphLine: 360,
-    uncitedLines: [984],
+    uncitedLines: [1004],
     claim:
-      "the sentence is explicitly about the path-exists-and-unedited branch; line 976 records the hash inside that branch's own `if`, while uncited 984 is the path-does-not-exist branch's record, which the sentence's own wording excludes.",
+      "the sentence is explicitly about the path-exists-and-unedited branch; line 996 records the hash inside that branch's own `if`, while uncited 1004 is the path-does-not-exist branch's record, which the sentence's own wording excludes.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5053,13 +5104,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "model-preselection.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1147,
-    end: 1151,
+    start: 1167,
+    end: 1171,
     anchorKey: "8cd81eb8",
     paragraphLine: 158,
-    uncitedLines: [1155],
+    uncitedLines: [1175],
     claim:
-      "the :158 sentence names the effort-line computation call and the model argument it is computed from; line 1151 is that argument, while uncited 1155 passes the computed local into the agent-composition call that the separately cited `init.ts:1153-1155` sentence describes.",
+      "the :158 sentence names the effort-line computation call and the model argument it is computed from; line 1171 is that argument, while uncited 1175 passes the computed local into the agent-composition call that the separately cited `init.ts:1153-1175` sentence describes.",
   },
   {
     doc: "model-preselection.md",
@@ -5078,12 +5129,12 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
     start: 1768,
-    end: 1801,
+    end: 1812,
     anchorKey: "d90f95bc",
     paragraphLine: 396,
-    uncitedLines: [1802],
+    uncitedLines: [1813],
     claim:
-      "the sentence names only the Claude-family variant-suffix outcomes; line 1801 asserts the low tier gets no `variant:` line, which is what the sentence needs, while uncited 1802 asserts the absence of `reasoningEffort`, opencode's own field for a non-Claude-family, non-Ollama provider (`src/init.ts:540`), not a codex field (codex's own equivalent is `model_reasoning_effort`, `src/codex.ts:50`) -- not part of what this sentence claims (the Ollama-side outcome it does name is cited separately, at a different range).",
+      "the sentence names only the Claude-family variant-suffix outcomes; line 1812 asserts the low tier gets no `variant:` line, which is what the sentence needs, while uncited 1813 asserts the absence of `reasoningEffort`, opencode's own field for a non-Claude-family, non-Ollama provider (`src/init.ts:540`), not a codex field (codex's own equivalent is `model_reasoning_effort`, `src/codex.ts:50`) -- not part of what this sentence claims (the Ollama-side outcome it does name is cited separately, at a different range).",
   },
   {
     doc: "operator-install-and-registry.md",
@@ -5101,61 +5152,61 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 990,
-    end: 990,
+    start: 1010,
+    end: 1010,
     anchorKey: "3a4a026f",
     paragraphLine: 63,
-    uncitedLines: [1013],
+    uncitedLines: [1033],
     claim:
-      'line 990 cites `readAsset(join("templates", name)),`; uncited 1013 is instead line 1013 in `content: readAsset(join("skill", "references", name)),`, a different site the citing sentence never names.',
+      'line 1010 cites `readAsset(join("templates", name)),`; uncited 1033 is instead line 1033 in `content: readAsset(join("skill", "references", name)),`, a different site the citing sentence never names.',
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1084,
-    end: 1086,
+    start: 1104,
+    end: 1106,
     anchorKey: "d89da8cc",
     paragraphLine: 79,
-    uncitedLines: [612],
+    uncitedLines: [632],
     claim:
-      "line 1086 cites `composeClaudeAgentVariant(`; uncited 612 is instead line 612 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
+      "line 1106 cites `composeClaudeAgentVariant(`; uncited 632 is instead line 632 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 685,
-    end: 701,
+    start: 705,
+    end: 721,
     anchorKey: "c0c3cd7c",
     paragraphLine: 103,
-    uncitedLines: [581],
+    uncitedLines: [601],
     claim:
-      "the sentence describes `effortLine` being passed into `composeOpencodeAgentVariant` as a parameter; line 701 is that function's own effortLine push, while uncited 581 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer the sentence does not name.",
+      "the sentence describes `effortLine` being passed into `composeOpencodeAgentVariant` as a parameter; line 721 is that function's own effortLine push, while uncited 601 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer the sentence does not name.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/cli-inputs.ts",
-    start: 292,
-    end: 292,
+    start: 294,
+    end: 294,
     anchorKey: "23db3722",
     paragraphLine: 212,
-    uncitedLines: [172],
+    uncitedLines: [174],
     claim:
-      "line 292 cites `previous.harnessesRecordedEmpty`; uncited 172 is instead line 172 in `* together with `previous.harnessesRecordedEmpty` (which `apply`'s`, a different site the citing sentence never names.",
+      "line 294 cites `previous.harnessesRecordedEmpty`; uncited 174 is instead line 174 in `* together with `previous.harnessesRecordedEmpty` (which `apply`'s`, a different site the citing sentence never names.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 2500,
-    end: 2533,
+    start: 2522,
+    end: 2555,
     anchorKey: "08402497",
     paragraphLine: 224,
-    uncitedLines: [1123, 2104],
+    uncitedLines: [1123, 2126],
     claim:
-      'line 2533 cites the `harnesses-stickiness gate is immune to an all-unknown-names…` test (`expect(result.stdout).toContain("installed for: claude");`); uncited 1123 and 2104 is instead line 1123 in the `init --yes runs non-interactively and installs` test (`expect(result.stdout).toContain("installed for: claude");`); and line 2104 in the `prints the tiers status in both the \'Found existing install…` test (`expect(second.stdout).toMatch(/installed for: claude.*tiers: true/);`), a different site the citing sentence never names.',
+      'line 2555 cites the `harnesses-stickiness gate is immune to an all-unknown-names…` test (`expect(result.stdout).toContain("installed for: claude");`); uncited 1123 and 2126 is instead line 1123 in the `init --yes runs non-interactively and installs` test (`expect(result.stdout).toContain("installed for: claude");`); and line 2126 in the `prints the tiers status in both the \'Found existing install…` test (`expect(second.stdout).toMatch(/installed for: claude.*tiers: true/);`), a different site the citing sentence never names.',
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5173,13 +5224,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 146,
-    end: 156,
+    start: 150,
+    end: 160,
     anchorKey: "3e9881f8",
     paragraphLine: 338,
-    uncitedLines: [92],
+    uncitedLines: [96],
     claim:
-      "the sentence describes `Manifest`'s own persisted `routing` field; line 156 is that field's declaration inside the `Manifest` interface, while uncited 92 is the byte-identical declaration inside `InitOptions`, the install-input type the sentence does not name.",
+      "the sentence describes `Manifest`'s own persisted `routing` field; line 160 is that field's declaration inside the `Manifest` interface, while uncited 96 is the byte-identical declaration inside `InitOptions`, the install-input type the sentence does not name.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5197,13 +5248,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 977,
-    end: 979,
+    start: 997,
+    end: 999,
     anchorKey: "eeab560e",
     paragraphLine: 361,
-    uncitedLines: [1042],
+    uncitedLines: [1062],
     claim:
-      "line 979 cites `installedFiles[relativePath] = recorded;`; uncited 1042 is instead line 1042 in `if (recorded !== undefined) installedFiles[relativePath] = recorded;`, a different site the citing sentence never names.",
+      "line 999 cites `installedFiles[relativePath] = recorded;`; uncited 1062 is instead line 1062 in `if (recorded !== undefined) installedFiles[relativePath] = recorded;`, a different site the citing sentence never names.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5213,9 +5264,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 341,
     anchorKey: "1c10d762",
     paragraphLine: 361,
-    uncitedLines: [2263],
+    uncitedLines: [2285],
     claim:
-      'line 341 cites the `keeps a user-edited kit file as a conflict and preserves th…` test (`createHash("sha256").update("user edit\\n", "utf8").digest("hex"),`); uncited 2263 is instead line 2263 in the `repo kit-version pin (operator apply support)` test (`createHash("sha256").update(content, "utf8").digest("hex");`), a different site the citing sentence never names.',
+      'line 341 cites the `keeps a user-edited kit file as a conflict and preserves th…` test (`createHash("sha256").update("user edit\\n", "utf8").digest("hex"),`); uncited 2285 is instead line 2285 in the `repo kit-version pin (operator apply support)` test (`createHash("sha256").update(content, "utf8").digest("hex");`), a different site the citing sentence never names.',
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5225,33 +5276,33 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 146,
     anchorKey: "6b912d8f",
     paragraphLine: 362,
-    uncitedLines: [1990],
+    uncitedLines: [2012],
     claim:
-      "the sentence's first clause describes the plain (non-tiers) second run's no-op, correctly anchored at the `a second run changes no file` test's own `report.updated` assertion (line 146); uncited 1990 is the byte-identical assertion inside the `a second run with tiers=true changes no file (idempotent)` test, which the same bullet's second clause already cites separately, by its own anchor, at test/init.test.ts:2027-2038.",
+      "the sentence's first clause describes the plain (non-tiers) second run's no-op, correctly anchored at the `a second run changes no file` test's own `report.updated` assertion (line 146); uncited 2012 is the byte-identical assertion inside the `a second run with tiers=true changes no file (idempotent)` test, which the same bullet's second clause already cites separately, by its own anchor, at test/init.test.ts:2027-2038.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 1974,
-    end: 1985,
+    start: 1996,
+    end: 2007,
     anchorKey: "d6e57f7c",
     paragraphLine: 362,
-    uncitedLines: [2306],
+    uncitedLines: [2328],
     claim:
-      "the sentence describes the `tiers: true` second-run no-op; line 1985 is that assertion inside the `a second run with tiers=true changes no file (idempotent)` test, while uncited 2306 is the byte-identical assertion inside the separate `sets a pin, is a byte-for-byte no-op on repeat...` test, which covers the `pin` option, not tiers, and the sentence does not name.",
+      "the sentence describes the `tiers: true` second-run no-op; line 2007 is that assertion inside the `a second run with tiers=true changes no file (idempotent)` test, while uncited 2328 is the byte-identical assertion inside the separate `sets a pin, is a byte-for-byte no-op on repeat...` test, which covers the `pin` option, not tiers, and the sentence does not name.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
     start: 1433,
-    end: 1990,
+    end: 2012,
     anchorKey: "6b912d8f",
     paragraphLine: 379,
     uncitedLines: [122, 146],
     claim:
-      "line 1990 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 122 and 146 is instead line 122 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 146 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
+      "line 2012 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 122 and 146 is instead line 122 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 146 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5261,33 +5312,33 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1487,
     anchorKey: "13baa7b3",
     paragraphLine: 379,
-    uncitedLines: [113, 359],
+    uncitedLines: [359],
     claim:
-      'line 1487 cites the `a legacy manifest with no tiers field defaults to false and…` test (`"model: sonnet",`); uncited 113 and 359 is instead line 113 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(slicer).toContain("model: sonnet");`); and line 359 in the `installs the explorer with a read-only posture on both harn…` test (`expect(claudeExplorer).toContain("model: sonnet");`), a different site the citing sentence never names.',
+      'line 1487 cites the `a legacy manifest with no tiers field defaults to false and…` test (`"model: sonnet",`); uncited 359 is instead line 359 in the `installs the explorer with a read-only posture on both harn…` test (`expect(claudeExplorer).toContain("model: sonnet");`), a different site the citing sentence never names.',
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 1878,
-    end: 1897,
+    start: 1896,
+    end: 1915,
     anchorKey: "49a539a9",
     paragraphLine: 379,
     uncitedLines: [575],
     claim:
-      'line 1897 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 575 is instead line 575 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
+      'line 1915 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 575 is instead line 575 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 1974,
-    end: 1990,
+    start: 1996,
+    end: 2012,
     anchorKey: "6b912d8f",
     paragraphLine: 379,
     uncitedLines: [122, 146],
     claim:
-      "line 1990 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 122 and 146 is instead line 122 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 146 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
+      "line 2012 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 122 and 146 is instead line 122 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 146 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5317,157 +5368,121 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 2500,
-    end: 2533,
+    start: 2522,
+    end: 2555,
     anchorKey: "08402497",
     paragraphLine: 379,
     uncitedLines: [1123],
     claim:
-      "the sentence describes the harnesses-stickiness F1 regression test asserting a live claude install is not stuck to templates-only; line 2533 is that test's own stdout assertion, while uncited 1123 is the byte-identical assertion inside the unrelated `init --yes runs non-interactively and installs` smoke test in the `cli smoke` describe block, which the sentence does not name.",
-  },
-  {
-    doc: "model-preselection.md",
-    kind: "distant-duplicate-anchor",
-    real: "packages/orchestrator-workflow/src/models.ts",
-    start: 80,
-    end: 85,
-    anchorKey: "5633dd3c",
-    paragraphLine: 46,
-    uncitedLines: [174, 187],
-    claim:
-      'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
+      "the sentence describes the harnesses-stickiness F1 regression test asserting a live claude install is not stuck to templates-only; line 2555 is that test's own stdout assertion, while uncited 1123 is the byte-identical assertion inside the unrelated `init --yes runs non-interactively and installs` smoke test in the `cli smoke` describe block, which the sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 539,
-    end: 550,
+    start: 559,
+    end: 570,
     anchorKey: "58938c96",
     paragraphLine: 125,
-    uncitedLines: [627],
+    uncitedLines: [647],
     claim:
-      "the sentence describes `composeClaudeAgent`'s read-only-roles push; line 550 is that function's own push, while uncited 627 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
+      "the sentence describes `composeClaudeAgent`'s read-only-roles push; line 570 is that function's own push, while uncited 647 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 549,
-    end: 550,
+    start: 569,
+    end: 570,
     anchorKey: "58938c96",
     paragraphLine: 134,
-    uncitedLines: [627],
+    uncitedLines: [647],
     claim:
-      "the sentence names the read-only roles getting `disallowedTools:` right after `effort:` inside `composeClaudeAgent`; line 550 is that function's own push, while uncited 627 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
-  },
-  {
-    doc: "model-preselection.md",
-    kind: "distant-duplicate-anchor",
-    real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 108,
-    end: 113,
-    anchorKey: "13baa7b3",
-    paragraphLine: 135,
-    uncitedLines: [359, 1487],
-    claim:
-      'line 113 cites the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(slicer).toContain("model: sonnet");`); uncited 359 and 1487 is instead line 359 in the `installs the explorer with a read-only posture on both harn…` test (`expect(claudeExplorer).toContain("model: sonnet");`); and line 1487 in the `a legacy manifest with no tiers field defaults to false and…` test (`"model: sonnet",`), a different site the citing sentence never names.',
+      "the sentence names the read-only roles getting `disallowedTools:` right after `effort:` inside `composeClaudeAgent`; line 570 is that function's own push, while uncited 647 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 564,
-    end: 584,
+    start: 584,
+    end: 604,
     anchorKey: "efde4d0d",
     paragraphLine: 156,
-    uncitedLines: [704],
+    uncitedLines: [724],
     claim:
-      "the sentence describes `composeOpencodeAgent`'s read-only-roles push (`permission:`/`edit: deny`); line 584 is that function's own push, while uncited 704 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
+      "the sentence describes `composeOpencodeAgent`'s read-only-roles push (`permission:`/`edit: deny`); line 604 is that function's own push, while uncited 724 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 2174,
-    end: 2180,
+    start: 2196,
+    end: 2202,
     anchorKey: "10aeb3a5",
     paragraphLine: 170,
-    uncitedLines: [1369, 2210],
+    uncitedLines: [1369, 2232],
     claim:
-      'line 2180 cites the `writes the --opencode-provider hint to STDERR (not stdout) …` test (`expect(result.stdout).not.toContain("--opencode-provider");`); uncited 1369 and 2210 is instead line 1369 in the `a subsequent run with harnesses: [] over a claude install l…` test (`expect(result.stdout).not.toContain("installed for: ");`); and line 2210 in the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(result.stdout).not.toContain(`Tier model class`);`), a different site the citing sentence never names.',
-  },
-  {
-    doc: "model-preselection.md",
-    kind: "distant-duplicate-anchor",
-    real: "packages/orchestrator-workflow/src/models.ts",
-    start: 182,
-    end: 187,
-    anchorKey: "5633dd3c",
-    paragraphLine: 252,
-    uncitedLines: [85],
-    claim:
-      'line 187 cites `advisor: "high",`; uncited 85 is instead line 85 in `advisor: "opus",`, a different site the citing sentence never names.',
+      'line 2202 cites the `writes the --opencode-provider hint to STDERR (not stdout) …` test (`expect(result.stdout).not.toContain("--opencode-provider");`); uncited 1369 and 2232 is instead line 1369 in the `a subsequent run with harnesses: [] over a claude install l…` test (`expect(result.stdout).not.toContain("installed for: ");`); and line 2232 in the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(result.stdout).not.toContain(`Tier model class`);`), a different site the citing sentence never names.',
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1083,
-    end: 1086,
+    start: 1103,
+    end: 1106,
     anchorKey: "d89da8cc",
     paragraphLine: 256,
-    uncitedLines: [612],
+    uncitedLines: [632],
     claim:
-      "line 1086 cites `composeClaudeAgentVariant(`; uncited 612 is instead line 612 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
+      "line 1106 cites `composeClaudeAgentVariant(`; uncited 632 is instead line 632 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 612,
-    end: 627,
+    start: 632,
+    end: 647,
     anchorKey: "58938c96",
     paragraphLine: 271,
-    uncitedLines: [550],
+    uncitedLines: [570],
     claim:
-      "the sentence describes `composeClaudeAgentVariant`'s own read-only-roles push; line 627 is that function's own push, while uncited 550 is the byte-identical push inside `composeClaudeAgent`, the default (non-variant) composer covered separately under \"Per-harness frontmatter behavior\" above, which this sentence does not name.",
+      "the sentence describes `composeClaudeAgentVariant`'s own read-only-roles push; line 647 is that function's own push, while uncited 570 is the byte-identical push inside `composeClaudeAgent`, the default (non-variant) composer covered separately under \"Per-harness frontmatter behavior\" above, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 685,
-    end: 704,
+    start: 705,
+    end: 724,
     anchorKey: "efde4d0d",
     paragraphLine: 275,
-    uncitedLines: [584],
+    uncitedLines: [604],
     claim:
-      "the sentence describes `composeOpencodeAgentVariant`'s own read-only-roles push; line 704 is that function's own push, while uncited 584 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer this sentence does not name.",
+      "the sentence describes `composeOpencodeAgentVariant`'s own read-only-roles push; line 724 is that function's own push, while uncited 604 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 2193,
-    end: 2214,
+    start: 2215,
+    end: 2236,
     anchorKey: "bd75126a",
     paragraphLine: 355,
-    uncitedLines: [1944, 2247],
+    uncitedLines: [1966, 2269],
     claim:
-      "line 2214 cites the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(agents.sort()).toEqual([`); uncited 1944 and 2247 is instead line 1944 in the `opencode: an unresolved class model (undefined) renders no …` test (`expect(agents.sort()).toEqual([`); and line 2247 in the `--tiers with fully-qualified --models but still no live cat…` test (`expect(agents.sort()).toEqual([`), a different site the citing sentence never names.",
+      "line 2236 cites the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(agents.sort()).toEqual([`); uncited 1966 and 2269 is instead line 1966 in the `opencode: an unresolved class model (undefined) renders no …` test (`expect(agents.sort()).toEqual([`); and line 2269 in the `--tiers with fully-qualified --models but still no live cat…` test (`expect(agents.sort()).toEqual([`), a different site the citing sentence never names.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1086,
-    end: 1086,
+    start: 1106,
+    end: 1106,
     anchorKey: "d89da8cc",
     paragraphLine: 371,
-    uncitedLines: [612],
+    uncitedLines: [632],
     claim:
-      "line 1086 cites `composeClaudeAgentVariant(`; uncited 612 is instead line 612 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
+      "line 1106 cites `composeClaudeAgentVariant(`; uncited 632 is instead line 632 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
   },
   {
     doc: "model-preselection.md",
@@ -5484,74 +5499,62 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
-    real: "packages/orchestrator-workflow/src/cli-inputs.ts",
-    start: 463,
-    end: 463,
-    anchorKey: "7b68d8ec",
-    paragraphLine: 395,
-    uncitedLines: [429],
-    claim:
-      "line 463 cites `warnings.push(`; uncited 429 is instead line 429 in `warnings.push(`Warning: ${w}`);`, a different site the citing sentence never names.",
-  },
-  {
-    doc: "model-preselection.md",
-    kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 1805,
-    end: 1823,
+    start: 1823,
+    end: 1841,
     anchorKey: "c4142751",
     paragraphLine: 396,
     uncitedLines: [1752],
     claim:
-      'line 1823 cites the `opencode: an ollama-resolved class id gets no effort field` test (`expect(implementerHigh).toContain("model: ollama/llama3");`); uncited 1752 is instead line 1752 in the `opencode default files: an Ollama or provider-less resolved…` test (`expect(rendered).toContain("model: ollama/llama3");`), a different site the citing sentence never names.',
+      'line 1841 cites the `opencode: an ollama-resolved class id gets no effort field` test (`expect(implementerHigh).toContain("model: ollama/llama3");`); uncited 1752 is instead line 1752 in the `opencode default files: an Ollama or provider-less resolved…` test (`expect(rendered).toContain("model: ollama/llama3");`), a different site the citing sentence never names.',
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 1856,
-    end: 1874,
+    start: 1874,
+    end: 1892,
     anchorKey: "e3586735",
     paragraphLine: 403,
     uncitedLines: [1721],
     claim:
-      'line 1874 cites the `opencode: a non-anthropic, non-ollama resolved class id get…` test (`expect(implementerHigh).toContain("reasoningEffort: high");`); uncited 1721 is instead line 1721 in the `opencode default files: a non-Claude-family provider-qualif…` test (`expect(rendered).toContain("reasoningEffort: high");`), a different site the citing sentence never names.',
+      'line 1892 cites the `opencode: a non-anthropic, non-ollama resolved class id get…` test (`expect(implementerHigh).toContain("reasoningEffort: high");`); uncited 1721 is instead line 1721 in the `opencode default files: a non-Claude-family provider-qualif…` test (`expect(rendered).toContain("reasoningEffort: high");`), a different site the citing sentence never names.',
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 1878,
-    end: 1897,
+    start: 1896,
+    end: 1915,
     anchorKey: "49a539a9",
     paragraphLine: 406,
     uncitedLines: [575],
     claim:
-      'line 1897 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 575 is instead line 575 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
+      'line 1915 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 575 is instead line 575 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 539,
-    end: 550,
+    start: 559,
+    end: 570,
     anchorKey: "58938c96",
     paragraphLine: 422,
-    uncitedLines: [627],
+    uncitedLines: [647],
     claim:
-      "the sentence names `composeClaudeAgent` as the function 0.22.0 gave a pinned `effort:` line; line 550 is that function's own read-only-roles push, included in the cited range, while uncited 627 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
+      "the sentence names `composeClaudeAgent` as the function 0.22.0 gave a pinned `effort:` line; line 570 is that function's own read-only-roles push, included in the cited range, while uncited 647 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 564,
-    end: 584,
+    start: 584,
+    end: 604,
     anchorKey: "efde4d0d",
     paragraphLine: 423,
-    uncitedLines: [704],
+    uncitedLines: [724],
     claim:
-      "the sentence names `composeOpencodeAgent` as the function 0.22.0 gave a pinned effort line; line 584 is that function's own read-only-roles push, included in the cited range, while uncited 704 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling this sentence does not name.",
+      "the sentence names `composeOpencodeAgent` as the function 0.22.0 gave a pinned effort line; line 604 is that function's own read-only-roles push, included in the cited range, while uncited 724 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -5581,25 +5584,25 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 130,
-    end: 130,
+    start: 133,
+    end: 133,
     anchorKey: "1429a7e8",
     paragraphLine: 614,
-    uncitedLines: [100],
+    uncitedLines: [103],
     claim:
-      "line 130 cites the 'delegation-and-tiers per-role routing bullet lists every role' test; uncited 100 is the same array-equality pattern inside the separate 'INSTALL-AGENT.md write-surface brace lists name every role' test, which this sentence does not name.",
+      "line 133 cites the 'delegation-and-tiers per-role routing bullet lists every role' test; uncited 103 is the same array-equality pattern inside the separate 'INSTALL-AGENT.md write-surface brace lists name every role' test, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 100,
-    end: 100,
+    start: 103,
+    end: 103,
     anchorKey: "1429a7e8",
     paragraphLine: 618,
-    uncitedLines: [130],
+    uncitedLines: [133],
     claim:
-      "line 100 cites the 'INSTALL-AGENT.md write-surface brace lists name every role' test; uncited 130 is the same array-equality pattern inside the separate 'delegation-and-tiers per-role routing bullet lists every role' test, which this sentence does not name.",
+      "line 103 cites the 'INSTALL-AGENT.md write-surface brace lists name every role' test; uncited 133 is the same array-equality pattern inside the separate 'delegation-and-tiers per-role routing bullet lists every role' test, which this sentence does not name.",
   },
   {
     doc: "operator-install-and-registry.md",
@@ -5772,26 +5775,14 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
-    real: "packages/orchestrator-workflow/src/models.ts",
-    start: 80,
-    end: 85,
-    anchorKey: "5633dd3c",
-    paragraphLine: 77,
-    uncitedLines: [174, 187],
-    claim:
-      'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
-  },
-  {
-    doc: "subagent-contracts-superset.md",
-    kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 663,
-    end: 663,
+    start: 666,
+    end: 666,
     anchorKey: "9e1acc22",
     paragraphLine: 261,
-    uncitedLines: [556, 627],
+    uncitedLines: [559, 630],
     claim:
-      "line 663 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 556 is the list-shape helper's own field regex, and uncited 627 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
+      "line 666 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 559 is the list-shape helper's own field regex, and uncited 630 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
   },
 ];
 

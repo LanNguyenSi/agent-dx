@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 
-import type { ModelAlias, Role } from "./models.js";
-import { isModelAlias } from "./models.js";
+import type { ModelAlias, ModelClass, Role } from "./models.js";
+import {
+  CLASS_MODELS,
+  DEFAULT_TIER,
+  MODEL_CLASSES,
+  isModelAlias,
+  lowerModelClass,
+} from "./models.js";
 
 // ---------------------------------------------------------------------------
 // Pure catalog helpers (unit-testable without shell access)
@@ -97,6 +103,7 @@ const FAMILY_TOKENS: Record<ModelAlias, string> = {
   sonnet: "claude-sonnet",
   opus: "claude-opus",
   haiku: "claude-haiku",
+  fable: "claude-fable",
 };
 
 /**
@@ -149,12 +156,37 @@ export function resolveAlias(
 }
 
 /**
+ * Resolves a model class to a fully-qualified id. When the class's own alias
+ * has no model in the catalog, the next lower class that has one is used and
+ * `usedClass` names it; `undefined` means no class at or below resolved.
+ */
+export function resolveClassWithFallback(
+  provider: string,
+  modelClass: ModelClass,
+  catalog: string[],
+): { model: string; usedClass: ModelClass } | undefined {
+  for (
+    let current: ModelClass | undefined = modelClass;
+    current !== undefined;
+    current = lowerModelClass(current)
+  ) {
+    const model = resolveAlias(provider, CLASS_MODELS[current], catalog);
+    if (model !== undefined) return { model, usedClass: current };
+  }
+  return undefined;
+}
+
+/**
  * Resolves each role's model string to a fully-qualified opencode id or
  * `undefined` (meaning: omit `model:` and inherit the session model).
  *
  * - Already fully-qualified values (contain `/`) pass through unchanged.
  * - Known aliases are resolved via the live catalog + provider detection.
  * - Unknown bare strings (not an alias, no `/`) → `undefined` + warning.
+ * - When the alias's model class has no model in the catalog, the next lower
+ *   class that has one is used and a note names the role, its default tier and
+ *   the class used (`notes`, not `warnings`). Only when no class at or below
+ *   resolves is `model:` omitted, with a warning.
  * - When provider detection is ambiguous or yields nothing → `undefined` +
  *   one combined warning asking the user to pass `--opencode-provider <id>`
  *   or fully-qualified `--models`.
@@ -162,10 +194,15 @@ export function resolveAlias(
 export function resolveOpencodeModels(
   roleModels: Record<Role, string>,
   opts: { catalog: string[]; explicitProvider?: string },
-): { resolved: Record<Role, string | undefined>; warnings: string[] } {
+): {
+  resolved: Record<Role, string | undefined>;
+  warnings: string[];
+  notes: string[];
+} {
   const { catalog, explicitProvider } = opts;
   const resolved = {} as Record<Role, string | undefined>;
   const warnings: string[] = [];
+  const notes: string[] = [];
 
   // Lazily detect provider once, shared across all roles.
   let providerResult: { provider?: string; ambiguous: boolean } | undefined;
@@ -199,18 +236,29 @@ export function resolveOpencodeModels(
       continue;
     }
 
-    const fq = resolveAlias(
-      providerResult.provider,
-      model as ModelAlias,
-      catalog,
+    const modelClass = MODEL_CLASSES.find(
+      (candidate) => CLASS_MODELS[candidate] === model,
     );
-    if (fq === undefined) {
+    const fallback =
+      modelClass === undefined
+        ? undefined
+        : resolveClassWithFallback(
+            providerResult.provider,
+            modelClass,
+            catalog,
+          );
+    if (fallback === undefined) {
       resolved[role] = undefined;
       warnings.push(
         `Role "${role}": provider "${providerResult.provider}" has no "${model}" model in the catalog; model: will be omitted.`,
       );
     } else {
-      resolved[role] = fq;
+      resolved[role] = fallback.model;
+      if (fallback.usedClass !== modelClass) {
+        notes.push(
+          `${role}/${DEFAULT_TIER[role]}: provider "${providerResult.provider}" has no "${model}" model in the catalog; using the "${fallback.usedClass}" class model ${fallback.model}.`,
+        );
+      }
     }
   }
 
@@ -222,7 +270,7 @@ export function resolveOpencodeModels(
     warnings.push(msg);
   }
 
-  return { resolved, warnings };
+  return { resolved, warnings, notes };
 }
 
 // ---------------------------------------------------------------------------

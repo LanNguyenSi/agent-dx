@@ -5,6 +5,7 @@ import {
   parseOpencodeCatalog,
   providerOf,
   resolveAlias,
+  resolveClassWithFallback,
   resolveOpencodeModels,
 } from "../src/opencode.js";
 import { DEFAULT_MODELS } from "../src/models.js";
@@ -306,5 +307,98 @@ describe("resolveOpencodeModels — empty catalog (opencode not available)", () 
       expect(v).toBeUndefined();
     }
     expect(warnings).toHaveLength(1);
+  });
+});
+
+describe("fable alias and class fallback", () => {
+  const FABLE_CATALOG = [
+    "github-copilot/claude-haiku-4.5",
+    "github-copilot/claude-sonnet-4.6",
+    "github-copilot/claude-opus-4.8",
+    "github-copilot/claude-fable-5",
+  ];
+
+  it("resolveAlias matches the claude-fable family token", () => {
+    expect(resolveAlias("github-copilot", "fable", FABLE_CATALOG)).toBe(
+      "github-copilot/claude-fable-5",
+    );
+    expect(
+      resolveAlias("github-copilot", "fable", [
+        "github-copilot/claude-fable-4",
+        "github-copilot/claude-fable-5",
+        "github-copilot/claude-opus-4.8",
+      ]),
+    ).toBe("github-copilot/claude-fable-5");
+    expect(resolveAlias("github-copilot", "fable", GH_CATALOG)).toBeUndefined();
+  });
+
+  it("detectProvider counts a fable-only provider as a Claude provider", () => {
+    expect(
+      detectProvider({ catalog: ["github-copilot/claude-fable-5"] }),
+    ).toEqual({ provider: "github-copilot", ambiguous: false });
+  });
+
+  it("resolveClassWithFallback: class resolved uses its own model", () => {
+    expect(
+      resolveClassWithFallback("github-copilot", "xlarge", FABLE_CATALOG),
+    ).toEqual({ model: "github-copilot/claude-fable-5", usedClass: "xlarge" });
+  });
+
+  it("resolveClassWithFallback: class missing uses the next lower class that resolved", () => {
+    expect(
+      resolveClassWithFallback("github-copilot", "xlarge", GH_CATALOG),
+    ).toEqual({ model: "github-copilot/claude-opus-4.8", usedClass: "large" });
+    expect(
+      resolveClassWithFallback("github-copilot", "xlarge", [
+        "github-copilot/claude-haiku-4.5",
+      ]),
+    ).toEqual({ model: "github-copilot/claude-haiku-4.5", usedClass: "small" });
+  });
+
+  it("resolveClassWithFallback: nothing at or below resolves", () => {
+    expect(
+      resolveClassWithFallback("github-copilot", "xlarge", ["other/model"]),
+    ).toBeUndefined();
+    expect(
+      resolveClassWithFallback("github-copilot", "small", [
+        "github-copilot/claude-sonnet-4.6",
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("resolveOpencodeModels: the advisor default resolves to fable when the catalog has it, with no note", () => {
+    const { resolved, warnings, notes } = resolveOpencodeModels(
+      DEFAULT_MODELS,
+      { catalog: FABLE_CATALOG },
+    );
+    expect(resolved.advisor).toBe("github-copilot/claude-fable-5");
+    expect(resolved["task-slicer"]).toBe("github-copilot/claude-opus-4.8");
+    expect(warnings).toEqual([]);
+    expect(notes).toEqual([]);
+  });
+
+  it("resolveOpencodeModels: a missing fable uses the large class and the note names role, tier and class", () => {
+    const { resolved, warnings, notes } = resolveOpencodeModels(
+      DEFAULT_MODELS,
+      { catalog: GH_CATALOG },
+    );
+    expect(resolved.advisor).toBe("github-copilot/claude-opus-4.8");
+    expect(warnings).toEqual([]);
+    expect(notes).toEqual([
+      'advisor/high: provider "github-copilot" has no "fable" model in the catalog; using the "large" class model github-copilot/claude-opus-4.8.',
+    ]);
+  });
+
+  it("resolveOpencodeModels: nothing resolves for the class or below keeps the omitted-model warning", () => {
+    const { resolved, warnings, notes } = resolveOpencodeModels(
+      { ...DEFAULT_MODELS, advisor: "fable" },
+      {
+        catalog: ["github-copilot/claude-opus-4.8"],
+        explicitProvider: "other-provider",
+      },
+    );
+    expect(resolved.advisor).toBeUndefined();
+    expect(notes).toEqual([]);
+    expect(warnings.some((w) => w.includes('"fable"'))).toBe(true);
   });
 });

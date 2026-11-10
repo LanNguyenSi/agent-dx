@@ -11,10 +11,12 @@ import {
   DEFAULT_PROFILE,
   MODEL_ALIASES,
   MODEL_CLASSES,
+  ROLE_TIERS,
   assertValidModelId,
   parseModelsSpec,
   parseProfile,
   rolesForProfile,
+  tierDef,
 } from "./models.js";
 import { mergeRouting, parseRouting } from "./routing.js";
 import {
@@ -29,7 +31,7 @@ import type { HarnessRouting } from "./routing.js";
 import {
   detectProvider,
   loadOpencodeCatalog,
-  resolveAlias,
+  resolveClassWithFallback,
   resolveOpencodeModels,
 } from "./opencode.js";
 
@@ -229,7 +231,7 @@ export interface ResolvedInitInputs extends OpencodeModelMaps {
   tiers: boolean;
   routing: HarnessRouting;
   /**
-   * Warning lines to print, in order, exactly as `init` printed them to
+   * Warning and note lines to print, in order, exactly as `init` printed them to
    * stderr before this extraction (each written as `${line}\n`). Returned
    * as data rather than printed here so the caller decides where/whether to
    * print them.
@@ -412,13 +414,14 @@ export async function resolveInitInputs(
       ));
   if (needsOpencodeResolution) {
     const catalog = loadOpencodeCatalog();
-    const { resolved, warnings: modelWarnings } = resolveOpencodeModels(
-      models,
-      {
-        catalog,
-        explicitProvider: opts.opencodeProvider,
-      },
-    );
+    const {
+      resolved,
+      warnings: modelWarnings,
+      notes: modelNotes,
+    } = resolveOpencodeModels(models, {
+      catalog,
+      explicitProvider: opts.opencodeProvider,
+    });
     opencodeModels =
       previousMaps.opencodeModels !== undefined && !opts.opencodeProvider
         ? { ...previousMaps.opencodeModels }
@@ -427,6 +430,9 @@ export async function resolveInitInputs(
       opencodeModels[role] = resolved[role];
     for (const w of modelWarnings) {
       warnings.push(`Warning: ${w}`);
+    }
+    for (const n of modelNotes) {
+      warnings.push(`Note: ${n}`);
     }
     if (tiers) {
       const providerResult = detectProvider({
@@ -439,12 +445,38 @@ export async function resolveInitInputs(
         const recordedClass =
           previousMaps.opencodeClassModels !== undefined &&
           !opts.opencodeProvider;
+        // A class without a model of its own uses the next lower class that
+        // resolved; a recorded class keeps its recorded value untouched.
+        const resolution =
+          recordedClass || !providerResult.provider
+            ? undefined
+            : resolveClassWithFallback(
+                providerResult.provider,
+                modelClass,
+                catalog,
+              );
         const resolvedModel = recordedClass
           ? previousMaps.opencodeClassModels?.[modelClass]
-          : providerResult.provider
-            ? resolveAlias(providerResult.provider, alias, catalog)
-            : undefined;
+          : resolution?.model;
         opencodeClassModels[modelClass] = resolvedModel;
+        if (resolution !== undefined && resolution.usedClass !== modelClass) {
+          for (const role of rolesForProfile(profile)) {
+            for (const tier of ROLE_TIERS[role]) {
+              if (tier === DEFAULT_TIER[role]) continue;
+              if (tierDef(role, tier).modelClass !== modelClass) continue;
+              // A leaf that already exists is kept (unless the provider is
+              // being changed), so it is not newly assigned this run.
+              if (
+                availableRouting.opencode?.[role]?.[tier] &&
+                opts.opencodeProvider === undefined
+              )
+                continue;
+              warnings.push(
+                `Note: ${role}/${tier}: provider "${providerResult.provider}" has no "${alias}" model in the catalog; using the "${resolution.usedClass}" class model ${resolution.model}.`,
+              );
+            }
+          }
+        }
         if (resolvedModel !== undefined || recordedClass) continue;
         // One warning per unresolved model class: without it, every
         // effort-tier variant keyed to this class is silently skipped

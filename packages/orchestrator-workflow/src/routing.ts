@@ -1,6 +1,6 @@
 import { HARNESSES } from "./detect.js";
 import { readAsset } from "./assets.js";
-import { ROLE_TIERS, ROLES } from "./models.js";
+import { MODEL_ALIASES, ROLE_TIERS, ROLES } from "./models.js";
 
 import type { Harness } from "./detect.js";
 import type { Role, Tier } from "./models.js";
@@ -28,7 +28,7 @@ export type HarnessRouting = Partial<
 
 const TIERS: readonly Tier[] = ["low", "medium", "high", "xhigh"];
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
-const CLAUDE_ALIASES = new Set(["sonnet", "opus", "haiku"]);
+const CLAUDE_ALIASES = new Set<string>(MODEL_ALIASES);
 const YAML_IMPLICIT_SCALARS = new Set([
   "true",
   "false",
@@ -276,33 +276,51 @@ export function mergeRouting(
   return result;
 }
 
+interface CodexDefault {
+  alias: CodexModelAlias;
+  effort: Tier;
+}
+
+/**
+ * Default Codex routing: per role and tier, the internal model alias and the
+ * effort. The effort is not always the tier name: the small model runs the
+ * narrow low tiers at `high`, and the implementer's `xhigh` variant runs the
+ * strong model at `high`.
+ */
 const CODEX_DEFAULT_ALIASES = {
   explorer: {
-    low: "small",
-    medium: "balanced",
-    high: "balanced",
+    low: { alias: "small", effort: "high" },
+    medium: { alias: "balanced", effort: "medium" },
+    high: { alias: "balanced", effort: "high" },
   },
   "task-slicer": {
-    low: "balanced",
-    medium: "balanced",
-    high: "balanced",
+    low: { alias: "balanced", effort: "low" },
+    medium: { alias: "balanced", effort: "medium" },
+    high: { alias: "balanced", effort: "high" },
   },
   implementer: {
-    low: "small",
-    medium: "balanced",
-    high: "balanced",
-    xhigh: "strong",
+    low: { alias: "small", effort: "high" },
+    medium: { alias: "balanced", effort: "medium" },
+    high: { alias: "balanced", effort: "high" },
+    xhigh: { alias: "strong", effort: "high" },
   },
   reviewer: {
-    medium: "balanced",
-    high: "strong",
-    xhigh: "strong",
+    medium: { alias: "balanced", effort: "medium" },
+    high: { alias: "strong", effort: "high" },
+    xhigh: { alias: "strong", effort: "xhigh" },
   },
   advisor: {
-    high: "strong",
-    xhigh: "strong",
+    high: { alias: "strong", effort: "high" },
+    xhigh: { alias: "strong", effort: "xhigh" },
   },
-} satisfies Record<Role, Partial<Record<Tier, CodexModelAlias>>>;
+} satisfies Record<Role, Partial<Record<Tier, CodexDefault>>>;
+
+/** The default Codex model alias and effort of one role and tier. */
+export function codexDefault(role: Role, tier: Tier): CodexDefault | undefined {
+  return (CODEX_DEFAULT_ALIASES[role] as Partial<Record<Tier, CodexDefault>>)[
+    tier
+  ];
+}
 
 function codexRoutingForAliases(
   models: Partial<Record<CodexModelAlias, string>>,
@@ -310,14 +328,12 @@ function codexRoutingForAliases(
   const routing: HarnessRouting = { codex: {} };
   for (const role of ROLES) {
     for (const tier of ROLE_TIERS[role]) {
-      const alias = (
-        CODEX_DEFAULT_ALIASES[role] as Partial<Record<Tier, CodexModelAlias>>
-      )[tier];
-      if (alias === undefined) continue;
-      const model = models[alias];
+      const entry = codexDefault(role, tier);
+      if (entry === undefined) continue;
+      const model = models[entry.alias];
       if (model === undefined) continue;
       routing.codex![role] ??= {};
-      routing.codex![role]![tier] = { model, effort: tier };
+      routing.codex![role]![tier] = { model, effort: entry.effort };
     }
   }
   return routing;
@@ -328,10 +344,13 @@ export function codexModelsRoutingPatch(value: unknown): HarnessRouting {
 }
 
 type CodexDefaultRoleRouting<
-  AliasRouting extends Partial<Record<Tier, CodexModelAlias>>,
+  AliasRouting extends Partial<Record<Tier, CodexDefault>>,
 > = {
   [TierName in keyof AliasRouting]: TierName extends Tier
-    ? { model: string; effort: TierName }
+    ? {
+        model: string;
+        effort: AliasRouting[TierName] extends { effort: infer E } ? E : never;
+      }
     : never;
 };
 

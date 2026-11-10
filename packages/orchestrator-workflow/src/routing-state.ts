@@ -1,16 +1,17 @@
 import type { Harness } from "./detect.js";
 import { HARNESSES } from "./detect.js";
-import type { ModelClass, Profile, Role, Tier } from "./models.js";
+import type { ModelClass, Profile, Role, Tier, TierDef } from "./models.js";
 import {
   CLASS_MODELS,
   DEFAULT_MODELS,
   DEFAULT_TIER,
   MODEL_CLASSES,
   ROLE_TIERS,
+  ROLE_TIER_DEFS,
   ROLES,
-  TIER_DEFS,
   opencodeModelValue,
   rolesForProfile,
+  tierDef,
 } from "./models.js";
 import {
   defaultCodexRouting,
@@ -168,11 +169,20 @@ export function codexCatalogWarnings(
   );
 }
 
+/**
+ * Derives the Claude Code and opencode routing from the legacy inputs: the
+ * default tier takes the per-role model (`models`), every other tier takes the
+ * model of its class in `defs`, and the effort comes from `defs`. `defs`
+ * defaults to the current per-role table; a manifest that records no routing
+ * is materialized once with the table it was installed under instead (see
+ * `PRE_ROLE_TIER_DEFS`).
+ */
 export function legacyRouting(
   harnesses: Harness[],
   models: Record<Role, string>,
   opencodeModels: OpencodeModelMaps["opencodeModels"],
   opencodeClassModels: OpencodeModelMaps["opencodeClassModels"],
+  defs: Record<Role, Partial<Record<Tier, TierDef>>> = ROLE_TIER_DEFS,
 ): HarnessRouting {
   const routing: HarnessRouting = {};
   if (harnesses.includes("claude")) {
@@ -181,14 +191,15 @@ export function legacyRouting(
       routing.claude[role] = {
         [DEFAULT_TIER[role]]: {
           model: models[role],
-          effort: DEFAULT_TIER[role],
+          effort: tierDef(role, DEFAULT_TIER[role], defs).effort,
         },
       };
       for (const tier of ROLE_TIERS[role]) {
         if (tier === DEFAULT_TIER[role]) continue;
+        const def = tierDef(role, tier, defs);
         routing.claude[role]![tier] = {
-          model: CLASS_MODELS[TIER_DEFS[tier].modelClass],
-          effort: tier,
+          model: CLASS_MODELS[def.modelClass],
+          effort: def.effort,
         };
       }
     }
@@ -204,16 +215,17 @@ export function legacyRouting(
         routing.opencode[role] = {
           [DEFAULT_TIER[role]]: {
             model: defaultModel,
-            effort: DEFAULT_TIER[role],
+            effort: tierDef(role, DEFAULT_TIER[role], defs).effort,
           },
         };
       }
       for (const tier of ROLE_TIERS[role]) {
         if (tier === DEFAULT_TIER[role]) continue;
-        const model = opencodeClassModels?.[TIER_DEFS[tier].modelClass];
+        const def = tierDef(role, tier, defs);
+        const model = opencodeClassModels?.[def.modelClass];
         if (!model) continue;
         routing.opencode[role] ??= {};
-        routing.opencode[role]![tier] = { model, effort: tier };
+        routing.opencode[role]![tier] = { model, effort: def.effort };
       }
     }
   }
@@ -335,7 +347,7 @@ export function recordedOpencodeInheritance(
     ? maps.opencodeModels !== undefined &&
         maps.opencodeModels[role] === undefined
     : maps.opencodeClassModels !== undefined &&
-        maps.opencodeClassModels[TIER_DEFS[tier].modelClass] === undefined;
+        maps.opencodeClassModels[tierDef(role, tier).modelClass] === undefined;
 }
 
 /** Merge recorded resolution state independently of the active render scope. */

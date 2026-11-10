@@ -163,7 +163,7 @@ is now its one site; the charter only points to it
 (`agents-md-section.md:44#"The docs-only closure rule and the escalation budget are in the skill's"`), and step 8 of
 the detailed workflow does the same. It is
 pinned as sentences at that site only, in
-`test/docs-consistency.test.ts:3132#"safety core: the docs-only closing delta stays narrowly bounded at the review and recovery reference"`.
+`test/docs-consistency.test.ts:3183#"safety core: the docs-only closing delta stays narrowly bounded at the review and recovery reference"`.
 
 A second closing option sits in the same section, with its own conditions
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:180#"A second closing option covers a medium finding in the category"`).
@@ -264,7 +264,7 @@ line outside a test case keeps the round there too
 `review-and-recovery.md:241#"when any round of the task was given the"`;
 `review-and-recovery.md:246#"such a task goes through a reviewer round. On such a task the test class is"`).
 The clauses are pinned as whole sentences
-in `test/docs-consistency.test.ts:9842#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
+in `test/docs-consistency.test.ts:9833#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
 their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.
 
 ## The Decision legend in 05-review-findings.md
@@ -319,7 +319,7 @@ different fail-closed design than the run-base marker, which fails open; see
 
 ## The gate is pinned at one site
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:186#"safety core: the review gate is pinned at the charter"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:189#"safety core: the review gate is pinned at the charter"`
 pins the gate as sentences at one normative site, `agents-md-section.md` (the charter): the
 `### Review gate` heading with "High or critical reviewer findings block
 final acceptance until fixed or explicitly waived", the whole sentence that
@@ -413,7 +413,7 @@ Motivated by the same 16-round dogfood as the mutation-probes hardening in
 (`CHANGELOG.md:#[0.16.0]#"as a hard-mandatory"`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
 The mandatory rule is pinned in the installed reviewer prompt only
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:993#"is mandatory: always set it in your output"`);
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:996#"is mandatory: always set it in your output"`);
 `SKILL.md`'s ask-back sentence carries no sentence pin.
 
 ## Review-round escalation budget

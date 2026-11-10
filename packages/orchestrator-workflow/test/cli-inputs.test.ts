@@ -251,9 +251,10 @@ describe("resolveInitInputs: opencode branch", () => {
       opts: { harness: "opencode", tiers: true },
     });
     expect(result.tiers).toBe(true);
-    // 1 combined per-role warning + 3 per-class warnings (small/medium/large).
-    expect(result.warnings).toHaveLength(4);
-    for (const modelClass of ["small", "medium", "large"]) {
+    // 1 combined per-role warning + 4 per-class warnings
+    // (small/medium/large/xlarge).
+    expect(result.warnings).toHaveLength(5);
+    for (const modelClass of ["small", "medium", "large", "xlarge"]) {
       expect(
         result.warnings.some(
           (w) =>
@@ -919,5 +920,172 @@ describe("routing input and interactive harness selection", () => {
       }),
     ).rejects.toThrow(/Unknown harness/);
     expect(inquirer.prompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveInitInputs: opencode fallback to the next lower model class", () => {
+  // A stub `opencode` on PATH prints the catalog under test; PATH holds only
+  // that directory so the host's real opencode never answers.
+  let binDir: string;
+  let originalPath: string | undefined;
+
+  function stubCatalog(lines: string[]): void {
+    const script = `#!/bin/sh\nprintf '%s\\n' ${lines.map((line) => `'${line}'`).join(" ")}\n`;
+    writeFileSync(join(binDir, "opencode"), script, { mode: 0o755 });
+  }
+
+  beforeEach(() => {
+    binDir = mkdtempSync(join(tmpdir(), "stub-opencode-"));
+    originalPath = process.env.PATH;
+    process.env.PATH = binDir;
+  });
+
+  afterEach(() => {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    rmSync(binDir, { recursive: true, force: true });
+  });
+
+  const FULL_CATALOG = [
+    "github-copilot/claude-haiku-4.5",
+    "github-copilot/claude-sonnet-4.6",
+    "github-copilot/claude-opus-4.8",
+    "github-copilot/claude-fable-5",
+  ];
+
+  it("class resolved: every class and role keeps its own model and no note is printed", async () => {
+    stubCatalog(FULL_CATALOG);
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous: undefined,
+      opts: { harness: "opencode", tiers: true },
+    });
+    expect(result.opencodeClassModels).toEqual({
+      small: "github-copilot/claude-haiku-4.5",
+      medium: "github-copilot/claude-sonnet-4.6",
+      large: "github-copilot/claude-opus-4.8",
+      xlarge: "github-copilot/claude-fable-5",
+    });
+    expect(result.opencodeModels?.advisor).toBe(
+      "github-copilot/claude-fable-5",
+    );
+    expect(result.warnings).toEqual([]);
+    expect(result.routing.opencode?.implementer?.xhigh).toEqual({
+      model: "github-copilot/claude-fable-5",
+      effort: "high",
+    });
+    expect(result.routing.opencode?.["task-slicer"]?.medium?.model).toBe(
+      "github-copilot/claude-opus-4.8",
+    );
+  });
+
+  it("class missing with a lower one present: the next lower class is used and a note names role, tier and class", async () => {
+    stubCatalog(FULL_CATALOG.filter((line) => !line.includes("fable")));
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous: undefined,
+      opts: { harness: "opencode", tiers: true },
+    });
+    const opus = "github-copilot/claude-opus-4.8";
+    expect(result.opencodeClassModels?.xlarge).toBe(opus);
+    expect(result.opencodeModels?.advisor).toBe(opus);
+    expect(result.routing.opencode?.implementer?.xhigh).toEqual({
+      model: opus,
+      effort: "high",
+    });
+    expect(result.routing.opencode?.advisor?.high?.model).toBe(opus);
+    expect(result.routing.opencode?.advisor?.xhigh).toEqual({
+      model: opus,
+      effort: "xhigh",
+    });
+    expect(result.warnings.some((w) => w.startsWith("Warning:"))).toBe(false);
+    for (const line of [
+      'advisor/high: provider "github-copilot" has no "fable" model in the catalog; using the "large" class model',
+      'implementer/xhigh: provider "github-copilot" has no "fable" model in the catalog; using the "large" class model',
+      'reviewer/xhigh: provider "github-copilot" has no "fable" model in the catalog; using the "large" class model',
+      'advisor/xhigh: provider "github-copilot" has no "fable" model in the catalog; using the "large" class model',
+    ]) {
+      expect(
+        result.warnings.some((w) => w.startsWith(`Note: ${line}`)),
+        line,
+      ).toBe(true);
+    }
+  });
+
+  it("a gap of several classes falls back to the nearest lower class that resolved", async () => {
+    stubCatalog(["github-copilot/claude-haiku-4.5"]);
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous: undefined,
+      opts: { harness: "opencode", tiers: true },
+    });
+    const haiku = "github-copilot/claude-haiku-4.5";
+    expect(result.opencodeClassModels).toEqual({
+      small: haiku,
+      medium: haiku,
+      large: haiku,
+      xlarge: haiku,
+    });
+    expect(result.warnings).toContain(
+      `Note: reviewer/high: provider "github-copilot" has no "opus" model in the catalog; using the "small" class model ${haiku}.`,
+    );
+    expect(result.warnings).toContain(
+      `Note: implementer/xhigh: provider "github-copilot" has no "fable" model in the catalog; using the "small" class model ${haiku}.`,
+    );
+    expect(result.warnings.some((w) => w.startsWith("Warning:"))).toBe(false);
+  });
+
+  it("nothing resolved: the leaf is omitted and the unresolved-class warning stays, with no note", async () => {
+    stubCatalog(["other/some-model"]);
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous: undefined,
+      opts: {
+        harness: "opencode",
+        tiers: true,
+        opencodeProvider: "github-copilot",
+      },
+    });
+    expect(result.opencodeClassModels).toEqual({
+      small: undefined,
+      medium: undefined,
+      large: undefined,
+      xlarge: undefined,
+    });
+    expect(result.routing.opencode?.advisor).toBeUndefined();
+    expect(result.warnings.some((w) => w.startsWith("Note:"))).toBe(false);
+    for (const modelClass of ["small", "medium", "large", "xlarge"]) {
+      expect(
+        result.warnings.some((w) =>
+          w.includes(`Tier model class "${modelClass}"`),
+        ),
+        modelClass,
+      ).toBe(true);
+    }
+  });
+
+  it("a recorded class model wins over the catalog fallback", async () => {
+    stubCatalog(FULL_CATALOG.filter((line) => !line.includes("fable")));
+    const previous = fakeManifest({
+      harnesses: ["opencode"],
+      tiers: true,
+      opencodeModels: {},
+      opencodeClassModels: { xlarge: "local/recorded-xlarge" },
+    });
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous,
+      opts: { harness: "opencode", tiers: true },
+    });
+    expect(result.opencodeClassModels?.xlarge).toBe("local/recorded-xlarge");
+    expect(result.warnings.some((w) => w.includes("xlarge"))).toBe(false);
+    expect(result.routing.opencode?.implementer?.xhigh?.model).toBe(
+      "local/recorded-xlarge",
+    );
   });
 });

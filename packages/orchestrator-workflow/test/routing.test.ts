@@ -134,7 +134,7 @@ describe("defaultCodexRouting", () => {
     expect(defaultCodexRouting()).toEqual({
       codex: {
         explorer: {
-          low: { model: "gpt-6-luna", effort: "low" },
+          low: { model: "gpt-6-luna", effort: "high" },
           medium: { model: "gpt-6.1-sol", effort: "medium" },
           high: { model: "gpt-6.1-sol", effort: "high" },
         },
@@ -144,10 +144,10 @@ describe("defaultCodexRouting", () => {
           high: { model: "gpt-6.1-sol", effort: "high" },
         },
         implementer: {
-          low: { model: "gpt-6-luna", effort: "low" },
+          low: { model: "gpt-6-luna", effort: "high" },
           medium: { model: "gpt-6.1-sol", effort: "medium" },
           high: { model: "gpt-6.1-sol", effort: "high" },
-          xhigh: { model: "gpt-6-astra", effort: "xhigh" },
+          xhigh: { model: "gpt-6-astra", effort: "high" },
         },
         reviewer: {
           medium: { model: "gpt-6.1-sol", effort: "medium" },
@@ -260,4 +260,50 @@ describe("validateCodexCatalog", () => {
       validateCodexCatalog(selected, { models: [{ slug: 42 }] }),
     ).toThrow(/non-empty slug/);
   });
+});
+
+describe("Codex default efforts that differ from the tier name", () => {
+  it("runs the small model on the narrow low tiers at high effort and the strong model on implementer xhigh at high effort", () => {
+    const { codex } = defaultCodexRouting();
+    expect(codex.explorer.low.effort).toBe("high");
+    expect(codex.implementer.low.effort).toBe("high");
+    expect(codex.implementer.xhigh.effort).toBe("high");
+    expect(codex["task-slicer"].low.effort).toBe("low");
+  });
+
+  it("applies a small-alias patch with the default effort of each small leaf", () => {
+    expect(codexModelsRoutingPatch({ small: "gpt-small" })).toEqual({
+      codex: {
+        explorer: { low: { model: "gpt-small", effort: "high" } },
+        implementer: { low: { model: "gpt-small", effort: "high" } },
+      },
+    });
+  });
+
+  it("applies a strong-alias patch with the default effort of each strong leaf", () => {
+    expect(codexModelsRoutingPatch({ strong: "gpt-strong" })).toEqual({
+      codex: {
+        implementer: { xhigh: { model: "gpt-strong", effort: "high" } },
+        reviewer: {
+          high: { model: "gpt-strong", effort: "high" },
+          xhigh: { model: "gpt-strong", effort: "xhigh" },
+        },
+        advisor: {
+          high: { model: "gpt-strong", effort: "high" },
+          xhigh: { model: "gpt-strong", effort: "xhigh" },
+        },
+      },
+    });
+  });
+
+  it.each(["sonnet", "opus", "haiku", "fable"])(
+    "rejects the Claude alias %s as a Codex routing model",
+    (alias) => {
+      expect(() =>
+        parseRouting({
+          codex: { explorer: { low: { model: alias, effort: "low" } } },
+        }),
+      ).toThrow(/not Claude alias/);
+    },
+  );
 });

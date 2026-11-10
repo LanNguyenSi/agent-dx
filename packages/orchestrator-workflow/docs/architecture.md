@@ -12,10 +12,10 @@ model each one gets by default on Claude Code and opencode.
 flowchart TD
   OP["Operator"]
   EXP["explorer, sonnet<br/>optional, read-only<br/>terrain map"]
-  ADV["advisor, opus<br/>optional, read-only<br/>recommends, never decides"]
+  ADV["advisor, fable<br/>optional, read-only<br/>recommends, never decides"]
   ORC["Orchestrator<br/>session model<br/>plans, validates slices,<br/>decides acceptance"]
   RUN[(".ai/runs/YYYY-MM-DD-slug/<br/>00-goal ... 06-handoff<br/>state in files, not chat")]
-  TS["task-slicer, sonnet<br/>small, testable slices"]
+  TS["task-slicer, opus<br/>small, testable slices"]
   IMP["implementer, sonnet<br/>one narrow task, plus tests"]
   REV["reviewer, opus<br/>skeptical, severity-rated<br/>findings, no rewrites"]
 
