@@ -345,7 +345,11 @@ What each role's work demands:
 The shipped defaults. Claude Code and opencode: each cell is model class,
 Claude alias and effort; `*` marks the role's default tier (the unsuffixed
 file), `-` a tier the role does not have. opencode resolves the alias to the
-matching model of its provider.
+matching model of its provider when a provider is detected; when none is, or
+the provider does not offer a class, the opencode model resolution section of
+`docs/model-routing-reference.md` says what is written instead (a lower class,
+never below the medium class for reviewer and advisor variants, or no model
+line).
 
 | Claude Code and opencode | low | medium | high | xhigh |
 |---|---|---|---|---|
@@ -379,18 +383,28 @@ When to move a leaf:
   price per token. When unsure, keep the default.
 
 Codex specifics: there is no class above `strong`. The small class runs at
-effort `high` for narrow tasks. A value set in the agent file wins over a
-spawn value, so the leaf in the file is what runs. An account may not offer a
-bundled model, so always refresh the listing (`codex debug models`) and pass
-it with `--codex-catalog`. When a selected model is missing, show the operator
-which leaves it affects and which available model you propose per alias class,
-then ask before substituting (through `--codex-models` or a `--routing`
-patch). Do not move a reviewer or advisor leaf below the balanced class unless
-the operator says so. Record the intended routing next to the applied one in
-the handoff, so the install can return to it.
+effort `high` for narrow tasks. The routing stays pinned in the installed
+agent file: the leaf in the file is what runs, and a value passed at spawn
+does not replace it. An account may not offer a bundled model. When the
+install includes Codex, refresh the listing (`codex debug models`) and pass it
+with `--codex-catalog`; when the listing cannot be fetched, follow step 1 and
+report the gap instead of claiming validation. The installer stops before it
+writes anything when a selected model is missing from the supplied catalog, so
+settle the substitution first: show the operator which leaves the missing
+model affects and which available model you propose per alias class, ask, and
+then pass the agreed models through `--codex-models` or a `--routing` patch.
+Do not move a reviewer or advisor leaf below the balanced class unless the
+operator says so. Record the intended routing next to the applied one in the
+handoff, so the install can return to it.
 
-Before a fresh install ask the operator these two questions, and only these
-unless a conflict remains:
+This subsection applies to the automated installer (step 3). The manual
+fallback in step 4 renders neither tier variants nor Codex agent files, so
+there is no leaf to choose there beyond the default model per role.
+
+Before an install that has no recorded routing to preserve (a fresh `init`, or
+an `apply` to a target without one) ask the operator these two questions, and
+only these unless a conflict remains. Ask the first only when the advisor is
+installed (the `full` profile):
 
 1. Which model does the orchestrator session run on? That decides whether the
    default advisor leaf is strong enough. If the advisor would be weaker than
