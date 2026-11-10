@@ -13245,3 +13245,14 @@ changed claims were read against the code by the implementing rounds and
 checked in three review rounds (stop writes nothing, no substitution without
 degrade, a manifest without the key reads as before); the citation tests pass.
 Re-stamped install-fence-mechanics.md, model-preselection.md, operator-install-and-registry.md, review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, subagent-contracts-superset.md at 2026-11-10T13:46:53Z after that.
+
+## 2026-11-10T13:55:35Z (release 0.51.0, re-stamp)
+
+Release 0.51.0: the changes since 0.50.0 are written under a new `0.51.0`
+heading in `CHANGELOG.md` (95 lines inserted after `[Unreleased]`), and the
+version moves to 0.51.0 in `package.json` and `package-lock.json`. Every
+`CHANGELOG.md` line citation in this log moved by those 95 lines and was
+re-pointed (40 citations); the citation tests pass. Re-verified: the three
+docs that list `CHANGELOG.md` as a source cite it only by released-version
+heading anchors, none of them `[0.51.0]` or `[Unreleased]`, so no claim
+changed. Re-stamped review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, subagent-contracts-superset.md at 2026-11-10T13:55:35Z.
