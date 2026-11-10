@@ -160,7 +160,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:353#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:368#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:500-523#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2182-2190#"${role}.md must not contain model:"`,
@@ -451,7 +451,7 @@ that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `docs/model-routing-reference.md`'s "Effort tiers" section
 (moved from README.md) gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:379#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:394#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. the skill's
 `references/delegation-and-tiers.md` states it once, in a dedicated bullet
