@@ -1,6 +1,6 @@
 # Bundle log
 
-- TSPLACEHOLDER, release 0.51.0: the changes since 0.50.0 (per-role default routing, the Codex fallback, the
+- 2026-11-10T14:03:09Z, release 0.51.0: the changes since 0.50.0 (per-role default routing, the Codex fallback, the
   model-selection aid for the install agent, the tier policy and the unavailable-model rule) are written under a new
   `0.51.0` heading in `CHANGELOG.md`, 100 lines inserted after `[Unreleased]`; every `CHANGELOG.md` line citation in
   this log moved by those lines and was re-pointed (`CHANGELOG.md:1405#"The implementer"`,
