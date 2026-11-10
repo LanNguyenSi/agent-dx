@@ -154,6 +154,79 @@ describe("Codex alias candidates", () => {
     expect(() => parseCodexModelCandidates(value)).toThrow(message);
   });
 
+  describe("a model belongs to exactly one candidate list", () => {
+    it.each([
+      [
+        "strong and small",
+        { strong: ["gpt-a", "gpt-x"], small: ["gpt-x"] },
+        /"gpt-x" for both the "small" and the "strong" alias/,
+      ],
+      [
+        "balanced and small",
+        { balanced: ["gpt-a", "gpt-x"], small: ["gpt-x", "gpt-b"] },
+        /"gpt-x" for both the "small" and the "balanced" alias/,
+      ],
+      [
+        "strong and balanced, as plain model ids",
+        { strong: "gpt-x", balanced: "gpt-x" },
+        /"gpt-x" for both the "balanced" and the "strong" alias/,
+      ],
+      [
+        "one list naming a model twice",
+        { balanced: ["gpt-x", "gpt-y", "gpt-x"] },
+        /lists "gpt-x" more than once/,
+      ],
+    ])("rejects %s", (_name, value, message) => {
+      expect(() => parseCodexModelCandidates(value)).toThrow(message);
+      expect(() => parseCodexModels(value)).toThrow(message);
+      expect(() => codexModelsRoutingPatch(value)).toThrow(message);
+      expect(() => codexModelCandidates(value)).toThrow(message);
+    });
+
+    it("rejects a supplied list that names a model the bundled list of another alias keeps", () => {
+      expect(() => codexModelCandidates({ small: [SMALL, BALANCED] })).toThrow(
+        new RegExp(`"${BALANCED}" for both the "small" and the "balanced"`),
+      );
+      expect(() => codexModelCandidates({ strong: [SMALL] })).toThrow(
+        new RegExp(`"${SMALL}" for both the "small" and the "strong"`),
+      );
+    });
+
+    it("accepts lists that share no model, and the bundled file", () => {
+      expect(() => codexModelCandidates()).not.toThrow();
+      expect(
+        codexModelCandidates({
+          small: ["gpt-a", "gpt-b"],
+          balanced: ["gpt-c"],
+          strong: ["gpt-d", "gpt-e"],
+        }),
+      ).toEqual({
+        small: ["gpt-a", "gpt-b"],
+        balanced: ["gpt-c"],
+        strong: ["gpt-d", "gpt-e"],
+      });
+    });
+
+    it("stops runInit before anything is written", () => {
+      const message = thrown(() =>
+        runInit(
+          options({
+            codexFallback: "degrade",
+            codexCatalog: catalog(model(SMALL)),
+            codexModelCandidates: {
+              small: [SMALL, "gpt-x"],
+              strong: ["gpt-x"],
+            },
+          }),
+        ),
+      );
+      expect(message).toContain(
+        '"gpt-x" for both the "small" and the "strong"',
+      );
+      expect(readdirSync(target)).toEqual([]);
+    });
+  });
+
   it("keeps the bundled lists and replaces only a supplied alias, whole", () => {
     expect(codexModelCandidates()).toEqual({
       small: [SMALL],
@@ -699,52 +772,69 @@ describe("degrade: leaves that are never substituted", () => {
     ]);
   });
 
-  describe("a candidate of a class below the floor, listed in a higher list too", () => {
-    // SMALL is in the small list first and in the balanced list second, so it
-    // is a small-class model whichever list offers it.
-    const overlapping = {
-      small: [SMALL],
-      balanced: [BALANCED, SMALL],
-    };
-    const smallOnly = catalog(model(SMALL));
+  describe("a substitute found in a lower list is of that list's class", () => {
+    const leaf = (effort: "low" | "medium" | "high" | "xhigh") => ({
+      model: STRONG,
+      effort,
+    });
+
+    it.each([
+      ["low", "high"],
+      ["medium", "high"],
+      ["high", "high"],
+      ["xhigh", "xhigh"],
+    ] as const)(
+      "gives a strong leaf at %s the small model at effort %s, marked lower-class",
+      (effort, expected) => {
+        const plan = planCodexFallback(
+          { codex: { implementer: { high: leaf(effort) } } },
+          catalog(model(SMALL)),
+          codexModelCandidates(),
+        );
+        expect(plan.rows[0].used).toEqual({ model: SMALL, effort: expected });
+        expect(plan.rows[0].reason).toBe("lower-class");
+      },
+    );
 
     it.each(["reviewer", "advisor"] as const)(
-      "gives a %s leaf no substitute and says which candidate was skipped",
+      "gives a %s leaf the balanced model at least at high, marked lower-class",
       (role) => {
         const plan = planCodexFallback(
-          { codex: { [role]: { high: { model: STRONG, effort: "high" } } } },
-          smallOnly,
-          codexModelCandidates(overlapping),
+          { codex: { [role]: { high: leaf("low") } } },
+          catalog(model(SMALL), model(BALANCED)),
+          codexModelCandidates(),
+        );
+        expect(plan.rows[0].used).toEqual({ model: BALANCED, effort: "high" });
+        expect(plan.rows[0].reason).toBe("lower-class");
+      },
+    );
+
+    it.each(["reviewer", "advisor"] as const)(
+      "stops the walk at the floor: a %s leaf gets no substitute from the small list",
+      (role) => {
+        const plan = planCodexFallback(
+          { codex: { [role]: { high: leaf("high") } } },
+          catalog(model(SMALL)),
+          codexModelCandidates({ small: [SMALL, "gpt-small-b"] }),
         );
         expect(plan.rows).toEqual([
           {
             role,
             tier: "high",
-            intended: { model: STRONG, effort: "high" },
-            problem: `the catalog offers no usable candidate of the strong or balanced class (the ${role} is never substituted below the balanced class); ${SMALL} is of the small class, below the balanced class`,
+            intended: leaf("high"),
+            problem: `the catalog offers no usable candidate of the strong or balanced class (the ${role} is never substituted below the balanced class)`,
           },
         ]);
       },
     );
 
-    it("lets an implementer leaf take it", () => {
-      const plan = planCodexFallback(
-        { codex: { implementer: { high: { model: STRONG, effort: "high" } } } },
-        smallOnly,
-        codexModelCandidates(overlapping),
-      );
-      expect(plan.rows[0].used).toEqual({ model: SMALL, effort: "high" });
-      expect(plan.rows[0].reason).toBe("lower-class");
-    });
-
-    it("stops an install whose reviewer leaf has only that candidate, and writes nothing", () => {
+    it("stops an install whose reviewer and advisor leaves have only the small model, and writes nothing", () => {
       const message = thrown(() =>
         runInit(
           options({
             tiers: false,
             codexFallback: "degrade",
-            codexModelCandidates: overlapping,
-            codexCatalog: smallOnly,
+            codexCatalog: catalog(model(SMALL)),
           }),
         ),
       );
@@ -755,15 +845,6 @@ describe("degrade: leaves that are never substituted", () => {
         `advisor/high: ${STRONG} (high) -> no substitute:`,
       );
       expect(readdirSync(target)).toEqual([]);
-    });
-
-    it("counts a model first in both the balanced and the small list as balanced", () => {
-      const plan = planCodexFallback(
-        { codex: { reviewer: { high: { model: STRONG, effort: "high" } } } },
-        catalog(model("gpt-tie")),
-        codexModelCandidates({ small: ["gpt-tie"], balanced: ["gpt-tie"] }),
-      );
-      expect(plan.rows[0].used).toEqual({ model: "gpt-tie", effort: "high" });
     });
   });
 
@@ -776,36 +857,6 @@ describe("degrade: leaves that are never substituted", () => {
       }),
     );
     expect(agent("reviewer")).toEqual({ model: BALANCED, effort: "high" });
-  });
-});
-
-describe("class of a model that several candidate lists name", () => {
-  it("uses the list that names it earliest, and the stronger class on a tie", () => {
-    const leaf = { model: "gpt-shared", effort: "high" as const };
-    const plan = (candidates: Record<string, string[]>) =>
-      planCodexFallback(
-        { codex: { implementer: { high: leaf } } },
-        catalog(
-          model("gpt-small-next"),
-          model("gpt-bal-next"),
-          model("gpt-strong-next"),
-        ),
-        codexModelCandidates(candidates),
-      ).rows[0].used?.model;
-    // Earliest position wins: first in balanced, second in strong.
-    expect(
-      plan({
-        balanced: ["gpt-shared", "gpt-bal-next"],
-        strong: ["gpt-other", "gpt-shared", "gpt-strong-next"],
-      }),
-    ).toBe("gpt-bal-next");
-    // Same position in both: the stronger class.
-    expect(
-      plan({
-        balanced: ["gpt-shared", "gpt-bal-next"],
-        strong: ["gpt-shared", "gpt-strong-next"],
-      }),
-    ).toBe("gpt-strong-next");
   });
 });
 
@@ -1104,6 +1155,28 @@ describe("re-install of a degraded target", () => {
       }
     });
 
+    it("counts a catalog model without listed levels as offering the intended effort", () => {
+      degraded();
+      const report = runInit(
+        options({
+          tiers: false,
+          codexCatalog: catalog(
+            model(SMALL),
+            model(BALANCED),
+            model(STRONG, null),
+          ),
+        }),
+      );
+      expect(rawManifest().routingResolution).toBeUndefined();
+      for (const leaf of uninstalled) {
+        const [dropped, ...others] = noteFor(report.notes, leaf);
+        expect(others).toEqual([]);
+        expect(dropped).toContain(
+          "is dropped, because this run's catalog offers the intended model, and",
+        );
+      }
+    });
+
     it("carries its record, with one note per carried record, when the catalog does not offer the intended model", () => {
       degraded();
       const report = runInit(
@@ -1317,6 +1390,51 @@ describe("--codex-fallback on the command line", () => {
       expect(result.stderr).toContain("valid values: stop, degrade");
       expect(readdirSync(target)).toEqual([]);
       expect(existsSync(home)).toBe(false);
+    },
+  );
+
+  it.each(["init", "setup", "apply"])(
+    "%s rejects --codex-models lists that overlap before doing anything",
+    (command) => {
+      const args = [
+        ...(command === "init"
+          ? [target]
+          : command === "apply"
+            ? ["--target", target]
+            : []),
+        "--yes",
+        "--harness",
+        "codex",
+      ];
+      const overlapping: [string, unknown, string][] = [
+        [
+          "strong-small",
+          { strong: [STRONG, SMALL], small: [SMALL] },
+          `"${SMALL}" for both the "small" and the "strong" alias`,
+        ],
+        [
+          "balanced-small",
+          { balanced: [BALANCED, "gpt-x"], small: ["gpt-x"] },
+          '"gpt-x" for both the "small" and the "balanced" alias',
+        ],
+        [
+          "twice",
+          { balanced: [BALANCED, "gpt-x", "gpt-x"] },
+          'lists "gpt-x" more than once',
+        ],
+      ];
+      for (const [name, value, message] of overlapping) {
+        const result = run(
+          command,
+          ...args,
+          "--codex-models",
+          jsonFile(name, value),
+        );
+        expect(result.status, name).toBe(2);
+        expect(result.stderr, name).toContain(message);
+        expect(readdirSync(target), name).toEqual([]);
+        expect(existsSync(home), name).toBe(false);
+      }
     },
   );
 

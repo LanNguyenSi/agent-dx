@@ -197,8 +197,13 @@ An alias value is a model id or an array of model ids, in
 of the class and is the only one the routing uses; a single id is a list of
 one. The later entries are candidates: models the installer may substitute for
 the intended one, and only in the case the next section describes. A list must
-not be empty or name a model twice. `--codex-models` replaces the bundled list
-of each alias it names as a whole.
+not be empty. A model belongs to exactly one candidate list: an id may appear
+in at most one of the three lists and once in it. A file that names a model in
+two lists, or twice in one, is rejected by `init`, `apply`, and `setup` with an
+error that names the model and the aliases, before anything is resolved or
+written. `--codex-models` replaces the bundled list of each alias it names as
+a whole, and the supplied lists together with the bundled lists of the
+aliases it leaves out must follow the same rule.
 
 ### When the catalog lacks a selected model
 
@@ -225,20 +230,20 @@ The substitute of a leaf is chosen by a fixed rule, in this order:
 3. Otherwise the leaf has no substitute. The installer never drops the model
    line to let the leaf inherit the session model.
 
-A leaf belongs to the class whose candidate list contains its model. When
-several lists contain it, the list that names it earliest decides, and among
-those the stronger class. A leaf whose model is in no candidate list is never
-substituted: an explicitly chosen model outside the lists is not replaced, and
+A leaf belongs to the class whose candidate list contains its model, and a
+substitute found in a list is of that list's class. A leaf whose model is in
+no candidate list is never substituted: an explicitly chosen model outside the lists is not replaced, and
 the install stops and names the leaf. The source of a leaf does not matter: a
 leaf set through `--routing` that names a listed model is treated like any
 leaf of that class.
 
 Floors: a reviewer or advisor leaf is never substituted with a model of a
-class below `balanced`. The class of a candidate is the class rule above, not
-the list it is offered from: a model that the `small` list names first and the
-`balanced` list names later is a `small` model, and such a leaf skips it. When
-only `small` models are available for such a leaf, it has no substitute, and
-the table names each skipped candidate.
+class below `balanced`; the walk down the classes stops there. When only
+`small` models are available for such a leaf, it has no substitute.
+
+Operator note: to let strong leaves fall back to the balanced model, list
+nothing twice. Do not repeat the balanced model in the `strong` list; rule 2
+already offers the `balanced` list to a strong leaf.
 
 Effort of a substituted leaf: a leaf that dropped to a lower class runs at
 `high` at least. The result is then clamped to the levels the catalog lists
@@ -293,7 +298,13 @@ Re-install. The intended routing is sticky as described above.
   carried with one note per carried record. When Codex is not among the
   harnesses of a run, or there is no catalog, the record is carried unchanged.
 - A kit version older than this behavior ignores the record and discards it on
-  a re-install; that install renders the intended models again.
+  a re-install; that install renders the intended models again for the leaves
+  it installs.
+- A tier-variant file that a run with tiers off left on disk is untracked and
+  keeps its content, also after its record was dropped. A later run with tiers
+  on reports it under conflicts and keeps that content until the file is
+  removed or `--force` is given; only then does the leaf render its intended
+  model.
 
 `doctor` and `apply --sync` compare and project the intended routing, so a
 substitution alone is not a divergence; drift detection and `uninstall` use

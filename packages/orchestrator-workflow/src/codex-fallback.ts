@@ -217,21 +217,15 @@ const ROLE_ALIAS_FLOOR: Partial<Record<Role, CodexModelAlias>> = {
 };
 
 /**
- * The alias class a model belongs to: the class whose candidate list contains
- * it. When several lists do, the list naming it earliest wins, and among
- * those the stronger class. `undefined` for a model in no list.
+ * The alias class a model belongs to: the class whose candidate list names it.
+ * A model is named by one list only, so there is one answer. `undefined` for a
+ * model in no list.
  */
 function modelAliasClass(
   model: string,
   candidates: CodexModelCandidates,
 ): CodexModelAlias | undefined {
-  let best: { alias: CodexModelAlias; index: number } | undefined;
-  for (const alias of CODEX_MODEL_ALIASES) {
-    const index = candidates[alias].indexOf(model);
-    if (index === -1) continue;
-    if (best === undefined || index <= best.index) best = { alias, index };
-  }
-  return best?.alias;
+  return CODEX_MODEL_ALIASES.find((alias) => candidates[alias].includes(model));
 }
 
 /**
@@ -293,7 +287,6 @@ function substituteFor(
   const floorIndex = CODEX_MODEL_ALIASES.indexOf(floor);
   const tried: CodexModelAlias[] = [];
   const unusable: string[] = [];
-  const belowFloor: string[] = [];
   for (
     let index = CODEX_MODEL_ALIASES.indexOf(leafClass);
     index >= floorIndex;
@@ -303,22 +296,13 @@ function substituteFor(
     const lowerClass = alias !== leafClass;
     tried.push(alias);
     // Same class: only the candidates after the intended model. Lower class:
-    // the whole list in order.
+    // the whole list in order. The list a candidate is found in is its class.
     const list = lowerClass
       ? candidates[alias]
       : candidates[alias].slice(candidates[alias].indexOf(intended.model) + 1);
     for (const candidate of list) {
       const model = models.get(candidate);
       if (model === undefined) continue;
-      // A candidate is judged by its own class: a model that a lower list
-      // names earlier is of that lower class, whichever list offered it here.
-      const candidateClass = modelAliasClass(candidate, candidates)!;
-      if (CODEX_MODEL_ALIASES.indexOf(candidateClass) < floorIndex) {
-        belowFloor.push(
-          `${candidate} is of the ${candidateClass} class, below the ${floor} class`,
-        );
-        continue;
-      }
       const effort = substituteEffort(intended.effort, model, lowerClass);
       if ("unusable" in effort) {
         unusable.push(`${candidate} ${effort.unusable}`);
@@ -342,12 +326,12 @@ function substituteFor(
     tried.length === 0
       ? `the ${leafClass} class is below the ${floor} class, and the ${role} is never substituted below it`
       : `the catalog offers no usable candidate of the ${tried.join(" or ")} class${floorNote}`;
-  const reasons = [...belowFloor, ...unusable];
   return {
     role,
     tier,
     intended,
-    problem: reasons.length > 0 ? `${problem}; ${reasons.join("; ")}` : problem,
+    problem:
+      unusable.length > 0 ? `${problem}; ${unusable.join("; ")}` : problem,
   };
 }
 
@@ -356,8 +340,7 @@ function substituteFor(
  * catalog lacks. Per leaf, in this order: the first later candidate of the
  * leaf's own alias class that the catalog offers; else the first offered
  * candidate of the next lower class, down to the role's floor; else no
- * substitute. A candidate whose own class (the class rule of its lists, not
- * the list it is offered from) is below the role's floor is skipped. A leaf whose model is in no candidate list is never
+ * substitute. A leaf whose model is in no candidate list is never
  * substituted. A leaf whose model the catalog offers is checked as before
  * (an effort it does not list throws). This helper makes no CLI or network
  * call and writes nothing; callers pass only the installed leaves.

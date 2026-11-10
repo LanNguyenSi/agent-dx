@@ -404,7 +404,9 @@ the same `--codex-models` file. Show that table to the operator and ask. Pass
 that table. When the operator wants other models, or a leaf has no
 substitute, pass the agreed models through `--codex-models` (a model id per
 alias class, or an ordered array whose later entries are the substitutes to
-try first) or a `--routing` patch instead. Only a leaf whose model is in no
+try first) or a `--routing` patch instead. A model belongs to exactly one
+candidate list: a file that names a model in two lists, or twice in one, is
+rejected before anything is written. Only a leaf whose model is in no
 candidate list is never substituted; a `--routing` leaf that names a listed
 model is treated like any leaf of that class.
 Do not move a reviewer or advisor leaf below the balanced class unless the

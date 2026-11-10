@@ -353,7 +353,7 @@ program
   )
   .option(
     CODEX_FALLBACK_OPTION,
-    `${CODEX_FALLBACK_DESCRIPTION}; the stored defaults always keep the intended routing, degrade only lets them be saved and prints the substitutes an install would use`,
+    `${CODEX_FALLBACK_DESCRIPTION}; the stored defaults always keep the intended routing, degrade only lets them be saved and prints the substitutes an install given the same --codex-models file would use`,
   )
   .option(
     "--profile <profile>",
