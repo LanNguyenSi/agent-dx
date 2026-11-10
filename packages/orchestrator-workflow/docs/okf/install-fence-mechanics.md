@@ -336,7 +336,7 @@ exact explicit leaves across reinstall and supplies Codex's model/effort
 definitions, except for a Codex leaf listed in the optional `routingResolution`, which is rendered from that record's `used` selection while `routing` keeps the intended one. Optional `opencodeModels` and `opencodeClassModels` compatibility
 maps preserve supported bare legacy opencode ids that cannot inhabit strict
 routing (`init.ts:173-183#"routing?: HarnessRouting;"`,
-`routing-state.ts:41-43#"opencodeClassModels?: Partial<Record<ModelClass, string | undefined>>;"`). A malformed stored routing map is a hard read error rather than a
+`routing-state.ts:42-44#"opencodeClassModels?: Partial<Record<ModelClass, string | undefined>>;"`). A malformed stored routing map is a hard read error rather than a
 silent fallback to shipped model choices. The optional `pin` remains distinct
 from the actually installed `version`: a string sets it, `null` clears it, and
 an omitted value carries the previous pin forward.
