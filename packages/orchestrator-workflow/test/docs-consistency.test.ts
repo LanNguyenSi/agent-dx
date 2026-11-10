@@ -3256,7 +3256,7 @@ describe("safety core: the docs-only closing delta stays narrowly bounded at the
 /**
  * Safety core, rule 3 (continued): an unavailable model never lowers a tier,
  * never moves a role inline, and never turns an independent review into a
- * self-review. The two sentences are pinned whole at one site, the review
+ * self-review. The four sentences are pinned whole at one site, the review
  * and recovery reference. The list of other sites is read from the files
  * (every other skill reference, SKILL.md, the charter section and every agent
  * prompt), so a copy added to any of them fails here.
@@ -3280,6 +3280,8 @@ describe("safety core: the unavailable-model rule is pinned at the review and re
     text.split(needle).length - 1;
 
   const sentencesPinned = [
+    "For every role there is one way to continue without the operator: re-resolve the routing against a fresh model catalog when the operator has already agreed to a substitution.",
+    "The orchestrator does not pick another installed variant of the role on its own because a model is unavailable, a stronger one included: which leaf does the work instead is the operator's decision.",
     "No role is moved to a weaker leaf, and no role is run inline by the orchestrator, because its model is unavailable: an environment fault does not lower a tier the tier rules chose, and it does not turn an independent review into a self-review.",
     "Otherwise the work is held and the orchestrator asks the operator.",
   ];
