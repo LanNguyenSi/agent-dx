@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -490,7 +491,11 @@ describe("a manifest recorded before routing existed (only `models`)", () => {
         medium: { model: "sonnet", effort: "medium" },
         high: { model: "sonnet", effort: "high" },
       });
-      expect(read.routing?.codex).toBeUndefined();
+      // The Codex leaves come from the frozen table of that time too, also
+      // for an install that does not use Codex.
+      expect(read.routing?.codex).toEqual(
+        toRouting(OLD_CLAUDE_TABLE, OLD_CODEX_TABLE).codex,
+      );
 
       await reinstall(["claude"], undefined);
       const manifest = readInstalledManifest(target)!;
@@ -522,7 +527,7 @@ describe("a manifest recorded before routing existed (only `models`)", () => {
     },
   );
 
-  it("a pre-routing manifest records no Codex leaves, so Codex added by the re-install takes the current defaults", async () => {
+  it("a pre-routing manifest materializes the frozen Codex leaves, so Codex added by the re-install takes them, not the current defaults", async () => {
     writeOldManifest(true, ["claude"], false);
     const previous = readInstalledManifest(target);
     const inputs = await resolveInitInputs({
@@ -543,7 +548,7 @@ describe("a manifest recorded before routing existed (only `models`)", () => {
     });
     expect(codexFields("explorer-low.toml")).toEqual({
       model: "gpt-6-luna",
-      effort: "high",
+      effort: "low",
     });
     expect(claudeFrontmatter("implementer-xhigh.md")).toEqual({
       model: "opus",
@@ -897,7 +902,11 @@ describe("a routing-less operator manifest is materialized with the table it was
     rmSync(home, { recursive: true, force: true });
   });
 
-  function writeRoutinglessOperator(tiers: boolean): void {
+  function writeRoutinglessOperator(
+    tiers: boolean,
+    harnesses: Harness[] = ["claude"],
+    targets: { path: string }[] = [],
+  ): void {
     writeFileSync(
       join(home, "manifest.json"),
       `${JSON.stringify(
@@ -905,12 +914,16 @@ describe("a routing-less operator manifest is materialized with the table it was
           kit: "orchestrator-workflow",
           schemaVersion: 1,
           defaults: {
-            harnesses: ["claude"],
+            harnesses,
             profile: "full",
             tiers,
             models: OLD_MODELS,
           },
-          targets: [],
+          targets: targets.map(({ path }) => ({
+            path,
+            lastAppliedVersion: "0.50.0",
+            lastAppliedAt: "2026-11-04T00:00:00.000Z",
+          })),
           createdAt: "2026-11-04T00:00:00.000Z",
           updatedAt: "2026-11-04T00:00:00.000Z",
         },
@@ -945,17 +958,94 @@ describe("a routing-less operator manifest is materialized with the table it was
     });
     writeRoutinglessOperator(true);
     const filesBefore = agentFiles();
-    const claudeRoutingBefore = readInstalledManifest(target)!.routing?.claude;
+    const routingBefore = readInstalledManifest(target)!.routing;
 
     const result = runCli("apply", "--target", target, "--sync", "--yes");
     expect(result.status, result.stderr).toBe(0);
     expect(agentFiles()).toEqual(filesBefore);
-    expect(readInstalledManifest(target)!.routing?.claude).toEqual(
-      claudeRoutingBefore,
-    );
+    expect(readInstalledManifest(target)!.routing).toEqual(routingBefore);
     expect(claudeFrontmatter("implementer-xhigh.md")).toEqual({
       model: "opus",
       effort: "xhigh",
+    });
+  });
+
+  it.each([
+    {
+      name: "claude and codex",
+      targetHarnesses: ["claude", "codex"],
+      operatorHarnesses: ["claude", "codex"],
+    },
+    {
+      name: "a claude-only target",
+      targetHarnesses: ["claude"],
+      operatorHarnesses: ["claude"],
+    },
+  ] as {
+    name: string;
+    targetHarnesses: Harness[];
+    operatorHarnesses: Harness[];
+  }[])(
+    "doctor reports no routing divergence and apply --sync keeps the whole routing of a 0.50.0 target against it ($name)",
+    ({ targetHarnesses, operatorHarnesses }) => {
+      writeOldManifest(true, targetHarnesses, true);
+      runInit({
+        targetDir: target,
+        harnesses: targetHarnesses,
+        models: { ...OLD_MODELS },
+        tiers: true,
+        routing: toRouting(OLD_CLAUDE_TABLE, OLD_CODEX_TABLE),
+        routingMode: "replace",
+      });
+      writeRoutinglessOperator(true, operatorHarnesses, [
+        { path: realpathSync(target) },
+      ]);
+      const filesBefore = agentFiles();
+      const routingBefore = readInstalledManifest(target)!.routing;
+      expect(routingBefore?.codex).toEqual(
+        toRouting(OLD_CLAUDE_TABLE, OLD_CODEX_TABLE).codex,
+      );
+
+      const doctor = runCli("doctor", "--json");
+      const report = JSON.parse(doctor.stdout);
+      expect(report.targets, doctor.stderr).toHaveLength(1);
+      expect(report.targets[0].divergence?.routing).toBeFalsy();
+
+      const result = runCli("apply", "--target", target, "--sync", "--yes");
+      expect(result.status, result.stderr).toBe(0);
+      expect(agentFiles()).toEqual(filesBefore);
+      expect(readInstalledManifest(target)!.routing).toEqual(routingBefore);
+    },
+  );
+});
+
+describe("the routing of a manifest that records none, for every harness", () => {
+  it("materializes the Codex leaves from the frozen table of that time", () => {
+    writeOldManifest(true, ["claude", "codex"], false);
+    const routing = readInstalledManifest(target)!.routing!;
+    expect(routing.codex?.explorer?.low).toEqual({
+      model: "gpt-6-luna",
+      effort: "low",
+    });
+    expect(routing.codex?.implementer?.xhigh).toEqual({
+      model: "gpt-6-astra",
+      effort: "xhigh",
+    });
+    expect(routing.codex).toEqual(
+      toRouting(OLD_CLAUDE_TABLE, OLD_CODEX_TABLE).codex,
+    );
+  });
+
+  it("leaves a fresh install on the current Codex table", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["codex"],
+      models: { ...DEFAULT_MODELS },
+      tiers: true,
+    });
+    expect(codexFields("explorer-low.toml")).toEqual({
+      model: "gpt-6-luna",
+      effort: "high",
     });
   });
 });

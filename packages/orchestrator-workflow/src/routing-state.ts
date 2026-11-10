@@ -19,6 +19,7 @@ import {
   defaultCodexRouting,
   mergeRouting,
   parseRouting,
+  preRoutingCodexRouting,
   validateCodexCatalog,
 } from "./routing.js";
 import type { HarnessRouting } from "./routing.js";
@@ -172,14 +173,6 @@ export function codexCatalogWarnings(
 }
 
 /**
- * Derives the Claude Code and opencode routing from the legacy inputs: the
- * default tier takes the per-role model (`models`), every other tier takes the
- * model of its class in `defs`, and the effort comes from `defs`. `defs`
- * defaults to the current per-role table; a manifest that records no routing
- * is materialized once with the table it was installed under instead (see
- * `PRE_ROLE_TIER_DEFS`).
- */
-/**
  * The opencode model of a tier-variant leaf taken from the class map, or
  * `undefined` when the class has none or the model sits below the role's
  * class floor (the leaf is then omitted and inherits the session model).
@@ -199,7 +192,9 @@ export function opencodeClassLeafModel(
  * existed): derived once from its legacy inputs with the tier-uniform table
  * of that time, so a re-install keeps the routing that install was running
  * instead of adopting the current per-role defaults for its non-default
- * tiers. Empty when no Claude Code or opencode leaf can be derived.
+ * tiers, and its Codex leaves from the Codex aliases and efforts of that time
+ * (every version that knows routing records them, also on an install that
+ * does not use Codex, so they are derived whichever harnesses are selected).
  */
 export function materializePreRoutingRouting(
   harnesses: Harness[],
@@ -207,17 +202,28 @@ export function materializePreRoutingRouting(
   maps: OpencodeModelMaps,
 ): HarnessRouting | undefined {
   const materialized = persistableRouting(
-    legacyRouting(
-      harnesses,
-      { ...DEFAULT_MODELS, ...models },
-      maps.opencodeModels,
-      maps.opencodeClassModels,
-      PRE_ROLE_TIER_DEFS,
+    mergeRouting(
+      preRoutingCodexRouting(),
+      legacyRouting(
+        harnesses,
+        { ...DEFAULT_MODELS, ...models },
+        maps.opencodeModels,
+        maps.opencodeClassModels,
+        PRE_ROLE_TIER_DEFS,
+      ),
     ),
   );
   return Object.keys(materialized).length > 0 ? materialized : undefined;
 }
 
+/**
+ * Derives the Claude Code and opencode routing from the legacy inputs: the
+ * default tier takes the per-role model (`models`), every other tier takes the
+ * model of its class in `defs`, and the effort comes from `defs`. `defs`
+ * defaults to the current per-role table; a manifest that records no routing
+ * is materialized once with the table it was installed under instead (see
+ * `PRE_ROLE_TIER_DEFS`).
+ */
 export function legacyRouting(
   harnesses: Harness[],
   models: Record<Role, string>,

@@ -1146,8 +1146,14 @@ describe("readOperatorManifest: defaults recorded without routing", () => {
     });
   });
 
-  it("records no routing when no Claude Code or opencode harness is selected", () => {
+  it("derives only the Codex leaves when no Claude Code or opencode harness is selected", () => {
     seedRaw({ harnesses: [], profile: "full", tiers: false, models: {} });
-    expect(readOperatorManifest(home)?.defaults.routing).toBeUndefined();
+    const routing = readOperatorManifest(home)?.defaults.routing;
+    expect(routing?.claude).toBeUndefined();
+    expect(routing?.opencode).toBeUndefined();
+    expect(routing?.codex?.explorer?.low).toEqual({
+      model: "gpt-6-luna",
+      effort: "low",
+    });
   });
 });

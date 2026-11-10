@@ -322,13 +322,44 @@ export function codexDefault(role: Role, tier: Tier): CodexDefault | undefined {
   ];
 }
 
+/**
+ * The Codex alias per role and tier that installs recorded before per-role
+ * routing existed (the effort equals the tier name). It is only used to
+ * materialize the routing of a manifest that records none, so such an install
+ * keeps its Codex leaves like its Claude Code and opencode leaves; the alias
+ * to model id mapping is the same one the current table uses.
+ */
+const PRE_ROUTING_CODEX_ALIASES = {
+  explorer: { low: "small", medium: "balanced", high: "balanced" },
+  "task-slicer": { low: "balanced", medium: "balanced", high: "balanced" },
+  implementer: {
+    low: "small",
+    medium: "balanced",
+    high: "balanced",
+    xhigh: "strong",
+  },
+  reviewer: { medium: "balanced", high: "strong", xhigh: "strong" },
+  advisor: { high: "strong", xhigh: "strong" },
+} satisfies Record<Role, Partial<Record<Tier, CodexModelAlias>>>;
+
+function preRoutingCodexDefault(
+  role: Role,
+  tier: Tier,
+): CodexDefault | undefined {
+  const alias = (
+    PRE_ROUTING_CODEX_ALIASES[role] as Partial<Record<Tier, CodexModelAlias>>
+  )[tier];
+  return alias === undefined ? undefined : { alias, effort: tier };
+}
+
 function codexRoutingForAliases(
   models: Partial<Record<CodexModelAlias, string>>,
+  lookup: (role: Role, tier: Tier) => CodexDefault | undefined = codexDefault,
 ): HarnessRouting {
   const routing: HarnessRouting = { codex: {} };
   for (const role of ROLES) {
     for (const tier of ROLE_TIERS[role]) {
-      const entry = codexDefault(role, tier);
+      const entry = lookup(role, tier);
       if (entry === undefined) continue;
       const model = models[entry.alias];
       if (model === undefined) continue;
@@ -361,6 +392,17 @@ export type CodexDefaultRouting = HarnessRouting & {
     >;
   };
 };
+
+/**
+ * The Codex routing of a manifest that records none: the frozen pre-routing
+ * alias table mapped to the bundled model ids.
+ */
+export function preRoutingCodexRouting(): HarnessRouting {
+  return codexRoutingForAliases(
+    loadBundledCodexModels(),
+    preRoutingCodexDefault,
+  );
+}
 
 /** Returns a fresh complete Codex routing layer, including each default tier. */
 export function defaultCodexRouting(): CodexDefaultRouting {

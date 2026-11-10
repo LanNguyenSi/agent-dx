@@ -159,7 +159,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:195#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:200#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:500-523#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2182-2190#"${role}.md must not contain model:"`,
@@ -202,8 +202,8 @@ legacy `opencodeModels` and `opencodeClassModels` fallback maps instead.
 A present map, including an empty map, records session inheritance for missing
 slots unless an explicit routing leaf supplies that selection. An absent map
 means legacy resolution is unknown; updates and doctor retain this distinction
-(`routing-state.ts:89-108#"result[field] = bare;"`,
-`routing-state.ts:114-120#"delete result.opencode?.[role]?.[tier];"`). A manifest that records no `routing` (installed before routing existed) is materialized once, when `readInstalledManifest` reads it (and `readOperatorManifest` for the operator defaults), by `materializePreRoutingRouting` with the tier-uniform table it was installed under (`PRE_ROLE_TIER_DEFS`), so a re-install keeps that routing and `doctor`/`apply --sync` compare it instead of adopting the per-role defaults for its non-default tiers.
+(`routing-state.ts:90-109#"result[field] = bare;"`,
+`routing-state.ts:115-121#"delete result.opencode?.[role]?.[tier];"`). A manifest that records no `routing` (installed before routing existed) is materialized once, when `readInstalledManifest` reads it (and `readOperatorManifest` for the operator defaults), by `materializePreRoutingRouting` with the tier-uniform table it was installed under (`PRE_ROLE_TIER_DEFS`), so a re-install keeps that routing and `doctor`/`apply --sync` compare it instead of adopting the per-role defaults for its non-default tiers.
 
 Codex begins with a complete deterministic default map: Luna at low for
 explorer and implementer, run at high effort; balanced Sol at task-slicer low, explorer,
@@ -211,7 +211,7 @@ task-slicer, and implementer medium/high, plus reviewer medium; Astra at impleme
 high/xhigh, and advisor high/xhigh. Effort matches the routing tier except on those three leaves. The
 orchestrator itself stays on
 the session model;
-`packages/orchestrator-workflow/docs/model-routing-reference.md:68-69#"for demanding work."`
+`packages/orchestrator-workflow/docs/model-routing-reference.md:73-74#"for demanding work."`
 recommends Astra/high normally and xhigh for demanding sessions without
 changing global configuration.
 
@@ -450,7 +450,7 @@ that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `docs/model-routing-reference.md`'s "Effort tiers" section
 (moved from README.md) gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:221#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:226#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. the skill's
 `references/delegation-and-tiers.md` states it once, in a dedicated bullet

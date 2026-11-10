@@ -37,8 +37,9 @@ visible consequences:
   from the recorded `models` value.
 - Codex leaves are recorded by every version that knows routing, also on an
   install that does not use Codex. Codex added to such an install keeps the
-  recorded Codex defaults. A manifest that records no routing holds no Codex
-  leaves, so Codex added to it takes the current ones.
+  recorded Codex defaults. A manifest that records no routing is read with
+  the Codex leaves of the old table too (see below), so Codex added to it
+  takes those, not the current ones.
 - A partial recorded routing map is filled with the current default for every
   leaf it lacks.
 
@@ -46,10 +47,14 @@ A manifest recorded before routing existed, one that contains only `models`,
 is read as the routing derived with the tier-uniform table it was installed
 under (every role: `low` is `haiku`, `medium` and `high` are `sonnet`, `xhigh`
 is `opus`, with the effort equal to the tier name) and is then preserved like
-any recorded routing; the next write records it. This holds for the
-repository manifest and for the operator manifest alike, so `doctor` and
-`apply --sync` compare and project that routing instead of the current
-table. To adopt the
+any recorded routing; the next write records it. This holds for every
+harness: the Codex leaves take the old aliases with the effort equal to the
+tier name as well, mapped to the bundled model ids, whichever harnesses are
+selected. It holds for the repository manifest and for the operator manifest
+alike, so `doctor` and `apply --sync` compare and project that routing
+instead of the current table. A new target applied from operator defaults
+that record no routing therefore gets the old tier-uniform table, not the
+current per-role defaults. To adopt the
 current defaults for a role on an existing install, patch its leaves with
 `--routing`, for example:
 

@@ -23,6 +23,7 @@ import {
   updateOperatorManifest,
 } from "../src/operator-manifest.js";
 import { runDoctor } from "../src/doctor.js";
+import { defaultCodexRouting } from "../src/routing.js";
 import { runUninstall } from "../src/uninstall.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -607,6 +608,10 @@ describe("legacy routing compatibility across commands", () => {
       profile: "minimal",
       tiers: true,
       models: { ...DEFAULT_MODELS },
+      // Defaults written by setup record routing; a routing-less record would
+      // read as the pre-routing Codex table, unlike the current-table
+      // Codex leaves this install recorded.
+      routing: defaultCodexRouting(),
       opencodeModels,
       opencodeClassModels,
     });
