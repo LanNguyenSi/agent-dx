@@ -13208,3 +13208,21 @@ surface of INSTALL-AGENT.md and the README, neither of which changed;
 review-gate-and-waivers.md and subagent-contracts-superset.md cite lines of
 the test file above the appended block, which did not move. The citation
 tests pass. Re-stamped the docs listed as stale (install-fence-mechanics.md model-preselection.md review-gate-and-waivers.md run-state-lifecycle-and-markers.md subagent-contracts-superset.md) at 2026-11-10T11:14:06Z after that.
+
+## 2026-11-10T11:40:11Z (tier policy and unavailable-model rule in the skill, re-stamp)
+
+assets/skill/references/delegation-and-tiers.md gained the routing-leaf
+definition of a tier, the escalation order, the per-spawn override bullet, the
+advisor strength sentence and two bullets under Models;
+assets/skill/references/review-and-recovery.md gained the section "Unavailable
+model" (one way to continue without the operator, no other variant picked on
+the orchestrator's own, otherwise held, never a weaker leaf or an inline run),
+with four sentences pinned by a new safety-core block in
+test/docs-consistency.test.ts; assets/skill/references/run-state-and-harness.md
+gained the "Model listing" bullet and assets/skill/SKILL.md two routing
+pointers. The section "Review method and reviewer tier by risk class" is
+unchanged. In the four docs below only line citations into these files moved
+and were re-pointed; their claims were read against the changed text by the
+implementing rounds (the Models subsection, the risk-class rows and closing
+options, the per-harness bullets, the misfire rule citations) and hold. The
+citation tests pass. Re-stamped model-preselection.md, review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, subagent-contracts-superset.md at 2026-11-10T11:40:11Z after that.
