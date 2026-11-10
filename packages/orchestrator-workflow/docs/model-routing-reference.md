@@ -17,11 +17,11 @@ already recorded in an existing manifest wins over it for that install:
 
 | Role | Default | Why |
 |---|---|---|
-| explorer | `sonnet` | read-only terrain mapping is broad reading, not deep reasoning |
-| task-slicer | `opus` | decomposition decides the quality of every later step |
-| implementer | `sonnet` | fast, cheap, good enough for narrow pre-sliced tasks |
-| reviewer | `opus` | skeptical review benefits from a strong model |
-| advisor | `fable` | escalations happen precisely when the situation is hard, so it gets the strongest model |
+| explorer | `sonnet` | broad reading, and a mistake is cheap to notice |
+| task-slicer | `opus` | decomposition judgment, and a bad cut surfaces late and costs whole rounds |
+| implementer | `sonnet` | a narrow pre-sliced task with tests, and the tests catch mistakes |
+| reviewer | `opus` | skeptical judgment, and the last check before acceptance |
+| advisor | `fable` | a second opinion at escalation, only useful when at least as strong as the model the orchestrator session runs on |
 
 **Existing installs keep their routing.** A re-install preserves every
 recorded routing leaf, so changed defaults reach only a fresh install, a leaf
@@ -74,6 +74,29 @@ The orchestrator itself runs on the session's main model. For Codex, start the
 orchestrator on `gpt-6-astra` at `high` effort; use `xhigh` for demanding work.
 The installer does not mutate global or fleet Codex configuration to enforce
 that recommendation.
+
+## Choosing a different leaf
+
+The defaults above are the starting point. When a leaf needs to move:
+
+- Adjust effort before the model. Beyond `high`, prefer the stronger model at
+  lower effort, as the shipped `xhigh` implementer and reviewer do.
+- Go down a class only for work whose mistakes are cheap to notice. Small
+  models are not the place for code edits without a test, slicing, review or
+  advice.
+- Go up a class for long unattended runs, large migrations, or when the next
+  effort step no longer helps.
+- Compare by the cost of the finished task including fix rounds, not by the
+  price per token. When unsure, keep the default.
+- Change one leaf at a time and keep the prior routing as the rollback input.
+
+The vendor guidance behind these rules: for Claude models,
+[which Claude model to build with](https://claude.dev/blog/which-claude-model-should-you-build-with/);
+for Codex, [models](https://learn.chatgpt.com/docs/models) and
+[subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents). The
+install agent applies the same rules from
+[INSTALL-AGENT.md](../INSTALL-AGENT.md), which carries them without depending
+on this page.
 
 ## Routing JSON shape
 

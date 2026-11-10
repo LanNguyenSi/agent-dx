@@ -191,6 +191,8 @@ per non-default tier. See [Model routing reference](docs/model-routing-reference
 for the default-model table, the `--routing` JSON shape, the Codex default
 routing table, opencode model resolution, and the full effort-tiers
 mechanics (including the `CLAUDE_CODE_EFFORT_LEVEL` environment override).
+To move a single leaf off the defaults, see
+[Choosing a different leaf](docs/model-routing-reference.md#choosing-a-different-leaf).
 
 ### Effort tiers
 
