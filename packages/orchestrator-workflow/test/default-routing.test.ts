@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -8,9 +10,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse } from "@iarna/toml";
+
+import { OPERATOR_HOME_ENV } from "../src/operator-manifest.js";
 
 import { resolveInitInputs } from "../src/cli-inputs.js";
 import { MANIFEST_PATH, readInstalledManifest, runInit } from "../src/init.js";
@@ -18,6 +23,10 @@ import type { Harness } from "../src/detect.js";
 import { DEFAULT_MODELS, ROLES } from "../src/models.js";
 import type { Role, Tier } from "../src/models.js";
 import type { HarnessRouting } from "../src/routing.js";
+import {
+  opencodeClassLeafModel,
+  recordedOpencodeInheritance,
+} from "../src/routing-state.js";
 
 /**
  * The default routing of a fresh install, written out as plain data so the
@@ -200,6 +209,7 @@ function codexFields(file: string): { model: string; effort: string } {
 function agentFiles(): Map<string, string> {
   const files = new Map<string, string>();
   for (const directory of [".claude/agents", ".codex/agents"]) {
+    if (!existsSync(join(target, directory))) continue;
     for (const name of readdirSync(join(target, directory)).sort())
       files.set(
         join(directory, name),
@@ -336,6 +346,8 @@ async function reinstall(
     tiers: inputs.tiers,
     routing: inputs.routing,
     routingMode: "replace",
+    opencodeModels: inputs.opencodeModels,
+    opencodeClassModels: inputs.opencodeClassModels,
   });
 }
 
@@ -510,7 +522,7 @@ describe("a manifest recorded before routing existed (only `models`)", () => {
     },
   );
 
-  it("gives a harness added by the re-install the new defaults, since it never had routing", async () => {
+  it("a pre-routing manifest records no Codex leaves, so Codex added by the re-install takes the current defaults", async () => {
     writeOldManifest(true, ["claude"], false);
     const previous = readInstalledManifest(target);
     const inputs = await resolveInitInputs({
@@ -567,5 +579,383 @@ describe("--models keeps its meaning: it sets the default tier of that role only
     await reinstall(["claude"], undefined);
     expect(readInstalledManifest(target)?.models["task-slicer"]).toBe("sonnet");
     expect(readInstalledManifest(target)?.models.advisor).toBe("opus");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One install can carry two tier tables: a recorded leaf is kept, a leaf that
+// was never recorded takes the current default.
+// ---------------------------------------------------------------------------
+
+describe("recorded leaves are kept, leaves that were never recorded take the current default", () => {
+  let binDir: string;
+  let originalPath: string | undefined;
+
+  function stubCatalog(lines: string[]): void {
+    const script = `#!/bin/sh\nprintf '%s\\n' ${lines.map((line) => `'${line}'`).join(" ")}\n`;
+    writeFileSync(join(binDir, "opencode"), script, { mode: 0o755 });
+  }
+
+  beforeEach(() => {
+    binDir = mkdtempSync(join(tmpdir(), "ow-stub-opencode-"));
+    originalPath = process.env.PATH;
+    process.env.PATH = binDir;
+    stubCatalog([
+      "github-copilot/claude-haiku-4.5",
+      "github-copilot/claude-sonnet-4.6",
+      "github-copilot/claude-opus-4.8",
+      "github-copilot/claude-fable-5",
+    ]);
+  });
+
+  afterEach(() => {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    rmSync(binDir, { recursive: true, force: true });
+  });
+
+  function opencodeFrontmatter(file: string): string {
+    return readFileSync(join(target, ".opencode/agents", file), "utf8");
+  }
+
+  /** A 0.50.0 record with opencode: default-tier ids only, no class map. */
+  function writeOldOpencodeManifest(
+    harnesses: Harness[],
+    tiers: boolean,
+  ): void {
+    const old = toRouting(OLD_CLAUDE_TABLE, OLD_CODEX_TABLE);
+    const opencodeIds: Record<Role, string> = {
+      explorer: "github-copilot/claude-sonnet-4.5",
+      "task-slicer": "github-copilot/claude-sonnet-4.5",
+      implementer: "github-copilot/claude-sonnet-4.5",
+      reviewer: "github-copilot/claude-opus-4.6",
+      advisor: "github-copilot/claude-opus-4.6",
+    };
+    const routing: HarnessRouting = {
+      ...old,
+      ...(harnesses.includes("opencode")
+        ? {
+            opencode: Object.fromEntries(
+              ROLES.map((role) => [
+                role,
+                {
+                  [DEFAULT_TIERS[role]]: {
+                    model: opencodeIds[role],
+                    effort: DEFAULT_TIERS[role],
+                  },
+                },
+              ]),
+            ),
+          }
+        : {}),
+    } as HarnessRouting;
+    const manifest = {
+      kit: "orchestrator-workflow",
+      version: "0.50.0",
+      harnesses,
+      models: OLD_MODELS,
+      profile: "full",
+      tiers,
+      ...(harnesses.includes("opencode")
+        ? { opencodeModels: opencodeIds }
+        : {}),
+      routing,
+      files: {},
+      installedAt: "2026-11-04T00:00:00.000Z",
+    };
+    const path = join(target, MANIFEST_PATH);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+
+  async function reinstallWith(
+    detected: Harness[],
+    opts: Record<string, unknown>,
+  ): Promise<void> {
+    const previous = readInstalledManifest(target);
+    const inputs = await resolveInitInputs({
+      detected,
+      interactive: false,
+      previous,
+      previousIsRecordedManifest: true,
+      opts,
+    });
+    runInit({
+      targetDir: target,
+      harnesses: inputs.harnesses,
+      models: inputs.models,
+      profile: inputs.profile,
+      tiers: inputs.tiers,
+      routing: inputs.routing,
+      routingMode: "replace",
+      opencodeModels: inputs.opencodeModels,
+      opencodeClassModels: inputs.opencodeClassModels,
+    });
+  }
+
+  it("turning --tiers on for a claude and opencode install: Claude variants stay old, opencode variants take the current table", async () => {
+    writeOldOpencodeManifest(["claude", "opencode"], false);
+    await reinstallWith(["claude", "opencode"], { tiers: true });
+
+    // Claude variant leaves were recorded by the 0.50.0 install.
+    expect(claudeFrontmatter("implementer-xhigh.md")).toEqual({
+      model: "opus",
+      effort: "xhigh",
+    });
+    expect(claudeFrontmatter("task-slicer-high.md")).toEqual({
+      model: "sonnet",
+      effort: "high",
+    });
+    // The opencode variant leaves were never recorded: current table.
+    const manifest = readInstalledManifest(target)!;
+    expect(manifest.routing?.opencode?.implementer?.xhigh).toEqual({
+      model: "github-copilot/claude-fable-5",
+      effort: "high",
+    });
+    expect(manifest.routing?.opencode?.["task-slicer"]?.high).toEqual({
+      model: "github-copilot/claude-opus-4.8",
+      effort: "high",
+    });
+    expect(opencodeFrontmatter("implementer-xhigh.md")).toContain(
+      "model: github-copilot/claude-fable-5",
+    );
+    // The recorded opencode default-tier ids stay.
+    expect(manifest.routing?.opencode?.reviewer?.high?.model).toBe(
+      "github-copilot/claude-opus-4.6",
+    );
+  });
+
+  it("opencode added to a claude install: its variants take the current table, Claude and Codex leaves stay recorded", async () => {
+    writeOldOpencodeManifest(["claude"], true);
+    await reinstallWith(["claude", "opencode"], { harness: "claude,opencode" });
+
+    expect(claudeFrontmatter("implementer-xhigh.md")).toEqual({
+      model: "opus",
+      effort: "xhigh",
+    });
+    const manifest = readInstalledManifest(target)!;
+    expect(manifest.routing?.opencode?.implementer?.xhigh).toEqual({
+      model: "github-copilot/claude-fable-5",
+      effort: "high",
+    });
+    expect(manifest.routing?.opencode?.advisor?.xhigh).toEqual({
+      model: "github-copilot/claude-fable-5",
+      effort: "xhigh",
+    });
+    // The legacy models value is recorded and wins for the default tier.
+    expect(manifest.routing?.opencode?.advisor?.high?.model).toBe(
+      "github-copilot/claude-opus-4.8",
+    );
+    expect(manifest.routing?.codex).toEqual(
+      toRouting(OLD_CLAUDE_TABLE, OLD_CODEX_TABLE).codex,
+    );
+  });
+
+  it("Codex added to an install recorded by a routing-aware version keeps the recorded Codex defaults", async () => {
+    writeOldManifest(true, ["claude"], true);
+    await reinstallWith(["claude", "codex"], { harness: "claude,codex" });
+    expect(codexFields("task-slicer.toml")).toEqual({
+      model: "gpt-6.1-sol",
+      effort: "medium",
+    });
+    expect(codexFields("implementer-low.toml")).toEqual({
+      model: "gpt-6-luna",
+      effort: "low",
+    });
+  });
+
+  it("a partial recorded routing map keeps what it records and takes the current default for the rest", async () => {
+    const manifest = {
+      kit: "orchestrator-workflow",
+      version: "0.50.0",
+      harnesses: ["claude"],
+      models: OLD_MODELS,
+      profile: "full",
+      tiers: true,
+      routing: {
+        claude: {
+          "task-slicer": { medium: { model: "sonnet", effort: "medium" } },
+        },
+      },
+      files: {},
+      installedAt: "2026-11-04T00:00:00.000Z",
+    };
+    const path = join(target, MANIFEST_PATH);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+    await reinstallWith(["claude"], {});
+
+    // Recorded: kept.
+    expect(claudeFrontmatter("task-slicer.md")).toEqual({
+      model: "sonnet",
+      effort: "medium",
+    });
+    // Never recorded: the current table.
+    expect(claudeFrontmatter("task-slicer-high.md")).toEqual({
+      model: "opus",
+      effort: "high",
+    });
+    expect(claudeFrontmatter("implementer-xhigh.md")).toEqual({
+      model: "fable",
+      effort: "high",
+    });
+    expect(claudeFrontmatter("advisor-xhigh.md")).toEqual({
+      model: "fable",
+      effort: "xhigh",
+    });
+  });
+});
+
+describe("opencode role class floor in the rendered files", () => {
+  const haiku = "github-copilot/claude-haiku-4.5";
+
+  it("a reviewer or advisor variant whose class model is the small class model is not rendered; other roles are", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      tiers: true,
+      opencodeModels: {
+        explorer: undefined,
+        "task-slicer": undefined,
+        implementer: undefined,
+        reviewer: undefined,
+        advisor: undefined,
+      },
+      opencodeClassModels: {
+        small: haiku,
+        medium: haiku,
+        large: haiku,
+        xlarge: haiku,
+      },
+    });
+    const files = readdirSync(join(target, ".opencode/agents"));
+    expect(files).toContain("implementer-xhigh.md");
+    expect(files).toContain("task-slicer-high.md");
+    expect(files).not.toContain("reviewer-medium.md");
+    expect(files).not.toContain("reviewer-xhigh.md");
+    expect(files).not.toContain("advisor-xhigh.md");
+  });
+
+  it("a below-floor class model is a recorded inheritance for the reviewer and advisor leaves only", () => {
+    const maps = {
+      opencodeClassModels: {
+        small: haiku,
+        medium: haiku,
+        large: haiku,
+        xlarge: haiku,
+      },
+    };
+    expect(
+      opencodeClassLeafModel("reviewer", "xlarge", maps.opencodeClassModels),
+    ).toBeUndefined();
+    expect(
+      opencodeClassLeafModel("implementer", "xlarge", maps.opencodeClassModels),
+    ).toBe(haiku);
+    expect(recordedOpencodeInheritance(maps, "reviewer", "medium")).toBe(true);
+    expect(recordedOpencodeInheritance(maps, "advisor", "xhigh")).toBe(true);
+    expect(recordedOpencodeInheritance(maps, "implementer", "low")).toBe(false);
+    expect(recordedOpencodeInheritance(maps, "implementer", "xhigh")).toBe(
+      false,
+    );
+  });
+
+  it("a reviewer variant on a genuine medium class model is rendered", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      tiers: true,
+      opencodeModels: {},
+      opencodeClassModels: {
+        small: haiku,
+        medium: "github-copilot/claude-sonnet-4.6",
+        large: "github-copilot/claude-sonnet-4.6",
+        xlarge: "github-copilot/claude-sonnet-4.6",
+      },
+    });
+    const files = readdirSync(join(target, ".opencode/agents"));
+    expect(files).toContain("reviewer-medium.md");
+    expect(files).toContain("reviewer-xhigh.md");
+    expect(files).toContain("advisor-xhigh.md");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A pre-routing operator manifest is materialized like a pre-routing repo one.
+// ---------------------------------------------------------------------------
+
+describe("a routing-less operator manifest is materialized with the table it was written under", () => {
+  const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
+  let home: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "ow-operator-home-"));
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  function writeRoutinglessOperator(tiers: boolean): void {
+    writeFileSync(
+      join(home, "manifest.json"),
+      `${JSON.stringify(
+        {
+          kit: "orchestrator-workflow",
+          schemaVersion: 1,
+          defaults: {
+            harnesses: ["claude"],
+            profile: "full",
+            tiers,
+            models: OLD_MODELS,
+          },
+          targets: [],
+          createdAt: "2026-11-04T00:00:00.000Z",
+          updatedAt: "2026-11-04T00:00:00.000Z",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  }
+
+  function runCli(...args: string[]) {
+    return spawnSync(
+      process.execPath,
+      ["--import", "tsx", "src/cli.ts", ...args],
+      {
+        cwd: PACKAGE_DIR,
+        encoding: "utf8",
+        timeout: 60_000,
+        env: { ...process.env, [OPERATOR_HOME_ENV]: home },
+      },
+    );
+  }
+
+  it("apply --sync against it leaves the tier files of a 0.50.0 target unchanged", () => {
+    writeOldManifest(true, ["claude"], true);
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...OLD_MODELS },
+      tiers: true,
+      routing: toRouting(OLD_CLAUDE_TABLE, OLD_CODEX_TABLE),
+      routingMode: "replace",
+    });
+    writeRoutinglessOperator(true);
+    const filesBefore = agentFiles();
+    const claudeRoutingBefore = readInstalledManifest(target)!.routing?.claude;
+
+    const result = runCli("apply", "--target", target, "--sync", "--yes");
+    expect(result.status, result.stderr).toBe(0);
+    expect(agentFiles()).toEqual(filesBefore);
+    expect(readInstalledManifest(target)!.routing?.claude).toEqual(
+      claudeRoutingBefore,
+    );
+    expect(claudeFrontmatter("implementer-xhigh.md")).toEqual({
+      model: "opus",
+      effort: "xhigh",
+    });
   });
 });

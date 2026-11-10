@@ -14,10 +14,8 @@ import { HARNESSES } from "./detect.js";
 import type { ModelClass, Profile, Role, Tier } from "./models.js";
 import {
   CLASS_MODELS,
-  DEFAULT_MODELS,
   DEFAULT_PROFILE,
   DEFAULT_TIER,
-  PRE_ROLE_TIER_DEFS,
   READ_ONLY_ROLES,
   ROLES,
   ROLE_TIERS,
@@ -34,10 +32,10 @@ import type { HarnessRouting, ModelSelection } from "./routing.js";
 import {
   codexCatalogWarnings,
   legacyOpencodeFallbacks,
-  legacyRouting,
   normalizeRoutingState,
   parseOpencodeModelMaps,
-  persistableRouting,
+  materializePreRoutingRouting,
+  opencodeClassLeafModel,
 } from "./routing-state.js";
 import type { OpencodeModelMaps } from "./routing-state.js";
 import type { Report } from "./writers.js";
@@ -474,16 +472,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     // so materialize it with that table: a re-install then keeps the routing
     // that install was running instead of adopting the current per-role
     // defaults for its non-default tiers.
-    const materialized = persistableRouting(
-      legacyRouting(
-        harnesses,
-        { ...DEFAULT_MODELS, ...models },
-        opencodeMaps.opencodeModels,
-        opencodeMaps.opencodeClassModels,
-        PRE_ROLE_TIER_DEFS,
-      ),
-    );
-    if (Object.keys(materialized).length > 0) routing = materialized;
+    routing = materializePreRoutingRouting(harnesses, models, opencodeMaps);
   }
   const knowledge = parseKnowledgeBundles(candidate);
   const knowledgeProblems = knowledgeEntryProblems(candidate.knowledge);
@@ -1181,7 +1170,8 @@ export function runInit(options: InitOptions): Report {
           const def = tierDef(role, tier);
           const modelClass = def.modelClass;
           const variantModelValue =
-            selection?.model ?? opencodeClassModels?.[modelClass];
+            selection?.model ??
+            opencodeClassLeafModel(role, modelClass, opencodeClassModels);
           if (variantModelValue === undefined) {
             // No model resolved for this class: opencodeEffortLine always
             // returns undefined too when its modelValue argument is

@@ -24,12 +24,32 @@ already recorded in an existing manifest wins over it for that install:
 | advisor | `fable` | escalations happen precisely when the situation is hard, so it gets the strongest model |
 
 **Existing installs keep their routing.** A re-install preserves every
-recorded routing leaf, so changed defaults reach only a fresh install, a
-harness added later, or a leaf you change. A manifest recorded before routing
-existed, one that contains only `models`, is materialized once with the
-tier-uniform table it was installed under (every role: `low` is `haiku`,
-`medium` and `high` are `sonnet`, `xhigh` is `opus`, with the effort equal to
-the tier name) and is then preserved like any recorded routing. To adopt the
+recorded routing leaf, so changed defaults reach only a fresh install, a leaf
+you change, or a leaf that was never recorded. The rule is: a recorded leaf is
+kept, and a leaf that was never recorded takes the current default. Its
+visible consequences:
+
+- A harness whose tier leaves were never recorded follows the current table.
+  Adding opencode to an install, or turning `--tiers` on for an opencode
+  install that never resolved its variants, gives the opencode variants the
+  current table while the Claude Code variants of the same install keep the
+  leaves recorded for them. The default-tier model of that role still comes
+  from the recorded `models` value.
+- Codex leaves are recorded by every version that knows routing, also on an
+  install that does not use Codex. Codex added to such an install keeps the
+  recorded Codex defaults. A manifest that records no routing holds no Codex
+  leaves, so Codex added to it takes the current ones.
+- A partial recorded routing map is filled with the current default for every
+  leaf it lacks.
+
+A manifest recorded before routing existed, one that contains only `models`,
+is read as the routing derived with the tier-uniform table it was installed
+under (every role: `low` is `haiku`, `medium` and `high` are `sonnet`, `xhigh`
+is `opus`, with the effort equal to the tier name) and is then preserved like
+any recorded routing; the next write records it. This holds for the
+repository manifest and for the operator manifest alike, so `doctor` and
+`apply --sync` compare and project that routing instead of the current
+table. To adopt the
 current defaults for a role on an existing install, patch its leaves with
 `--routing`, for example:
 
@@ -151,10 +171,18 @@ the catalog. When multiple providers offer Claude models the CLI warns and asks
 you to pass `--opencode-provider <id>` to disambiguate, or to supply
 fully-qualified ids per role via `--models`. The alias `fable` resolves
 against ids that start with `claude-fable`, like the other aliases against
-their own family token. When the catalog has no model for an alias or for a
-tier's model class, the leaf uses the next lower class that does have one
-(`fable` falls back to `opus`, then `sonnet`, then `haiku`) and the installer
-prints a note naming the role, the tier and the class used. A model already
+their own family token. When the catalog has no model for a default-tier alias (the
+role's default, or an alias given through `--models`), the `model:` line is
+omitted, the subagent inherits the session model, and the installer prints a
+warning; no other model replaces the alias. A tier variant is keyed to a model
+class instead: when the catalog has no model for its class, the variant uses
+the next lower class that does have one (`fable` falls back to `opus`, then
+`sonnet`, then `haiku`) and the installer prints a note naming the role, the
+tier and the class used. A fall-back across more than one class is printed as
+a warning instead of a note. Reviewer and advisor variants never use a class
+below `medium`: when only a lower class resolves, the variant is not rendered
+and the installer prints a warning naming the role and the tier. Messages are
+printed for the leaves that this run assigns, not for recorded ones. A model already
 recorded for a leaf is kept and not re-resolved. If no class at or below
 resolves, or no resolution is possible at all (catalog empty, `opencode`
 binary absent, ambiguous provider), the `model:` frontmatter line is omitted

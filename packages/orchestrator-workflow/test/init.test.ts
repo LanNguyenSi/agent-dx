@@ -1491,7 +1491,7 @@ describe("tier variants (`--tiers`)", () => {
   });
 
   it("default agent files are byte-identical whether tiers is on or off (0.22.0 pinned-default-effort invariant)", () => {
-    // The pinned default effort (`TIER_DEFS[DEFAULT_TIER[role]].effort`) is
+    // The pinned default effort (`tierDef(role, DEFAULT_TIER[role]).effort`) is
     // decided inside composeClaudeAgent/composeOpencodeAgent themselves and
     // does not read the `tiers` flag at all, so every role's default
     // (unsuffixed) file must render byte-identically regardless of whether

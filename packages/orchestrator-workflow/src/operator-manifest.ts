@@ -22,7 +22,10 @@ import {
   isProfile,
 } from "./models.js";
 import { parseRouting } from "./routing.js";
-import { parseOpencodeModelMaps } from "./routing-state.js";
+import {
+  materializePreRoutingRouting,
+  parseOpencodeModelMaps,
+} from "./routing-state.js";
 import type { OpencodeModelMaps } from "./routing-state.js";
 import type { HarnessRouting } from "./routing.js";
 
@@ -173,6 +176,12 @@ export function readOperatorManifest(
       // manifest as unreadable so setup/apply cannot overwrite it by guess.
       return undefined;
     }
+  } else {
+    // Defaults recorded before routing existed carry only `models`: derive
+    // their routing once with the table of that time, as the per-repo
+    // manifest reader does, so applying them neither reports a clean
+    // pre-routing target as divergent nor rewrites its tier files.
+    routing = materializePreRoutingRouting(harnesses, models, opencodeMaps);
   }
 
   const targets: OperatorTarget[] = (

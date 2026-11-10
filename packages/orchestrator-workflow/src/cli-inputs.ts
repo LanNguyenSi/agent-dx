@@ -11,7 +11,9 @@ import {
   DEFAULT_PROFILE,
   MODEL_ALIASES,
   MODEL_CLASSES,
+  ROLE_CLASS_FLOOR,
   ROLE_TIERS,
+  belowRoleFloor,
   assertValidModelId,
   parseModelsSpec,
   parseProfile,
@@ -414,25 +416,27 @@ export async function resolveInitInputs(
       ));
   if (needsOpencodeResolution) {
     const catalog = loadOpencodeCatalog();
-    const {
-      resolved,
-      warnings: modelWarnings,
-      notes: modelNotes,
-    } = resolveOpencodeModels(models, {
-      catalog,
-      explicitProvider: opts.opencodeProvider,
-    });
-    opencodeModels =
-      previousMaps.opencodeModels !== undefined && !opts.opencodeProvider
-        ? { ...previousMaps.opencodeModels }
-        : resolved;
+    // The resolved role models only reach the install when there is no
+    // recorded map to keep (or the provider changes); otherwise they apply to
+    // the roles overridden through `--models` alone, and only those are
+    // reported.
+    const resolvedModelsApply =
+      previousMaps.opencodeModels === undefined || !!opts.opencodeProvider;
+    const { resolved, warnings: modelWarnings } = resolveOpencodeModels(
+      models,
+      {
+        catalog,
+        explicitProvider: opts.opencodeProvider,
+        reportRoles: resolvedModelsApply ? undefined : legacyOverrideRoles,
+      },
+    );
+    opencodeModels = resolvedModelsApply
+      ? resolved
+      : { ...previousMaps.opencodeModels };
     for (const role of legacyOverrideRoles)
       opencodeModels[role] = resolved[role];
     for (const w of modelWarnings) {
       warnings.push(`Warning: ${w}`);
-    }
-    for (const n of modelNotes) {
-      warnings.push(`Note: ${n}`);
     }
     if (tiers) {
       const providerResult = detectProvider({
@@ -460,6 +464,9 @@ export async function resolveInitInputs(
           : resolution?.model;
         opencodeClassModels[modelClass] = resolvedModel;
         if (resolution !== undefined && resolution.usedClass !== modelClass) {
+          const droppedClasses =
+            MODEL_CLASSES.indexOf(modelClass) -
+            MODEL_CLASSES.indexOf(resolution.usedClass);
           for (const role of rolesForProfile(profile)) {
             for (const tier of ROLE_TIERS[role]) {
               if (tier === DEFAULT_TIER[role]) continue;
@@ -471,8 +478,15 @@ export async function resolveInitInputs(
                 opts.opencodeProvider === undefined
               )
                 continue;
+              const where = `${role}/${tier}: provider "${providerResult.provider}" has no "${alias}" model in the catalog`;
+              if (belowRoleFloor(role, resolution.model, opencodeClassModels)) {
+                warnings.push(
+                  `Warning: ${where}; the next lower class that resolved is "${resolution.usedClass}", below the "${ROLE_CLASS_FLOOR[role]}" class this role never goes under, so no variant file is rendered for it.`,
+                );
+                continue;
+              }
               warnings.push(
-                `Note: ${role}/${tier}: provider "${providerResult.provider}" has no "${alias}" model in the catalog; using the "${resolution.usedClass}" class model ${resolution.model}.`,
+                `${droppedClasses > 1 ? "Warning" : "Note"}: ${where}; using the "${resolution.usedClass}" class model ${resolution.model}${droppedClasses > 1 ? ` (${droppedClasses} classes lower)` : ""}.`,
               );
             }
           }

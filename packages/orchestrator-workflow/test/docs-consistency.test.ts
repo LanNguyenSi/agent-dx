@@ -1302,16 +1302,26 @@ describe("model-routing-reference.md tier-to-model-class tables enumerate ROLE_T
 
   it("names the default models in the README's Effort tiers section", () => {
     const readme = readDoc("README.md");
-    const section = readme.slice(readme.indexOf("### Effort tiers"));
-    for (const role of ROLES) {
-      const roles = ROLES.filter(
-        (other) => DEFAULT_MODELS[other] === DEFAULT_MODELS[role],
-      );
-      expect(section.slice(0, section.indexOf("\n## ")), role).toContain(
-        `\`${DEFAULT_MODELS[role]}\` for`,
-      );
-      expect(roles).toContain(role);
+    const start = readme.indexOf("### Effort tiers");
+    const rest = readme.slice(start);
+    const section = rest.slice(0, rest.indexOf("\n## "));
+    // "The default models are `a` for x and y, `b` for z, and `c` for w;"
+    const sentence = /The default models are ([^;]+);/.exec(
+      section.replace(/\s+/g, " "),
+    );
+    expect(sentence, "the README names the default models").not.toBeNull();
+    const documented: Record<string, string[]> = {};
+    for (const match of sentence![1].matchAll(
+      /`([a-z]+)` for ([a-z-]+(?:(?:, and |, | and )(?!and\b)[a-z-]+)*)/g,
+    )) {
+      documented[match[1]] = match[2].split(/, and |, | and /).sort();
     }
+    const expected: Record<string, string[]> = {};
+    for (const role of ROLES) {
+      (expected[DEFAULT_MODELS[role]] ??= []).push(role);
+    }
+    for (const roles of Object.values(expected)) roles.sort();
+    expect(documented).toEqual(expected);
   });
 });
 
@@ -5044,13 +5054,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1010,
-    end: 1010,
+    start: 999,
+    end: 999,
     anchorKey: "3a4a026f",
     paragraphLine: 63,
-    uncitedLines: [1030],
+    uncitedLines: [1019],
     claim:
-      "the sentence describes the per-template asset read driven by `listTemplateNames()`; line 1010 is the read of a templates-directory asset, while uncited 1030 reads the skill asset for a different install step the sentence never mentions.",
+      "the sentence describes the per-template asset read driven by `listTemplateNames()`; line 999 is the read of a templates-directory asset, while uncited 1019 reads the skill asset for a different install step the sentence never mentions.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5068,13 +5078,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 991,
-    end: 996,
+    start: 980,
+    end: 985,
     anchorKey: "33e8e25a",
     paragraphLine: 360,
-    uncitedLines: [1004],
+    uncitedLines: [993],
     claim:
-      "the sentence is explicitly about the path-exists-and-unedited branch; line 996 records the hash inside that branch's own `if`, while uncited 1004 is the path-does-not-exist branch's record, which the sentence's own wording excludes.",
+      "the sentence is explicitly about the path-exists-and-unedited branch; line 985 records the hash inside that branch's own `if`, while uncited 993 is the path-does-not-exist branch's record, which the sentence's own wording excludes.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5104,13 +5114,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "model-preselection.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1167,
-    end: 1171,
+    start: 1156,
+    end: 1160,
     anchorKey: "8cd81eb8",
     paragraphLine: 158,
-    uncitedLines: [1175],
+    uncitedLines: [1164],
     claim:
-      "the :158 sentence names the effort-line computation call and the model argument it is computed from; line 1171 is that argument, while uncited 1175 passes the computed local into the agent-composition call that the separately cited `init.ts:1153-1175` sentence describes.",
+      "the :158 sentence names the effort-line computation call and the model argument it is computed from; line 1160 is that argument, while uncited 1164 passes the computed local into the agent-composition call that the separately cited `init.ts:1153-1175` sentence describes.",
   },
   {
     doc: "model-preselection.md",
@@ -5152,49 +5162,49 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1010,
-    end: 1010,
+    start: 999,
+    end: 999,
     anchorKey: "3a4a026f",
     paragraphLine: 63,
-    uncitedLines: [1033],
+    uncitedLines: [1022],
     claim:
-      'line 1010 cites `readAsset(join("templates", name)),`; uncited 1033 is instead line 1033 in `content: readAsset(join("skill", "references", name)),`, a different site the citing sentence never names.',
+      'line 999 cites `readAsset(join("templates", name)),`; uncited 1022 is instead line 1022 in `content: readAsset(join("skill", "references", name)),`, a different site the citing sentence never names.',
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1104,
-    end: 1106,
+    start: 1093,
+    end: 1095,
     anchorKey: "d89da8cc",
     paragraphLine: 79,
-    uncitedLines: [632],
+    uncitedLines: [621],
     claim:
-      "line 1106 cites `composeClaudeAgentVariant(`; uncited 632 is instead line 632 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
+      "line 1095 cites `composeClaudeAgentVariant(`; uncited 621 is instead line 621 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 705,
-    end: 721,
+    start: 694,
+    end: 710,
     anchorKey: "c0c3cd7c",
     paragraphLine: 103,
-    uncitedLines: [601],
+    uncitedLines: [590],
     claim:
-      "the sentence describes `effortLine` being passed into `composeOpencodeAgentVariant` as a parameter; line 721 is that function's own effortLine push, while uncited 601 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer the sentence does not name.",
+      "the sentence describes `effortLine` being passed into `composeOpencodeAgentVariant` as a parameter; line 710 is that function's own effortLine push, while uncited 590 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer the sentence does not name.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/cli-inputs.ts",
-    start: 294,
-    end: 294,
+    start: 296,
+    end: 296,
     anchorKey: "23db3722",
     paragraphLine: 212,
-    uncitedLines: [174],
+    uncitedLines: [176],
     claim:
-      "line 294 cites `previous.harnessesRecordedEmpty`; uncited 174 is instead line 174 in `* together with `previous.harnessesRecordedEmpty` (which `apply`'s`, a different site the citing sentence never names.",
+      "line 296 cites `previous.harnessesRecordedEmpty`; uncited 176 is instead line 176 in `* together with `previous.harnessesRecordedEmpty` (which `apply`'s`, a different site the citing sentence never names.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5224,13 +5234,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 150,
-    end: 160,
+    start: 148,
+    end: 158,
     anchorKey: "3e9881f8",
     paragraphLine: 338,
-    uncitedLines: [96],
+    uncitedLines: [94],
     claim:
-      "the sentence describes `Manifest`'s own persisted `routing` field; line 160 is that field's declaration inside the `Manifest` interface, while uncited 96 is the byte-identical declaration inside `InitOptions`, the install-input type the sentence does not name.",
+      "the sentence describes `Manifest`'s own persisted `routing` field; line 158 is that field's declaration inside the `Manifest` interface, while uncited 94 is the byte-identical declaration inside `InitOptions`, the install-input type the sentence does not name.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5248,13 +5258,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 997,
-    end: 999,
+    start: 986,
+    end: 988,
     anchorKey: "eeab560e",
     paragraphLine: 361,
-    uncitedLines: [1062],
+    uncitedLines: [1051],
     claim:
-      "line 999 cites `installedFiles[relativePath] = recorded;`; uncited 1062 is instead line 1062 in `if (recorded !== undefined) installedFiles[relativePath] = recorded;`, a different site the citing sentence never names.",
+      "line 988 cites `installedFiles[relativePath] = recorded;`; uncited 1051 is instead line 1051 in `if (recorded !== undefined) installedFiles[relativePath] = recorded;`, a different site the citing sentence never names.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5380,37 +5390,37 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 559,
-    end: 570,
+    start: 548,
+    end: 559,
     anchorKey: "58938c96",
     paragraphLine: 125,
-    uncitedLines: [647],
+    uncitedLines: [636],
     claim:
-      "the sentence describes `composeClaudeAgent`'s read-only-roles push; line 570 is that function's own push, while uncited 647 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
+      "the sentence describes `composeClaudeAgent`'s read-only-roles push; line 559 is that function's own push, while uncited 636 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 569,
-    end: 570,
+    start: 558,
+    end: 559,
     anchorKey: "58938c96",
     paragraphLine: 134,
-    uncitedLines: [647],
+    uncitedLines: [636],
     claim:
-      "the sentence names the read-only roles getting `disallowedTools:` right after `effort:` inside `composeClaudeAgent`; line 570 is that function's own push, while uncited 647 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
+      "the sentence names the read-only roles getting `disallowedTools:` right after `effort:` inside `composeClaudeAgent`; line 559 is that function's own push, while uncited 636 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 584,
-    end: 604,
+    start: 573,
+    end: 593,
     anchorKey: "efde4d0d",
     paragraphLine: 156,
-    uncitedLines: [724],
+    uncitedLines: [713],
     claim:
-      "the sentence describes `composeOpencodeAgent`'s read-only-roles push (`permission:`/`edit: deny`); line 604 is that function's own push, while uncited 724 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
+      "the sentence describes `composeOpencodeAgent`'s read-only-roles push (`permission:`/`edit: deny`); line 593 is that function's own push, while uncited 713 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -5428,37 +5438,37 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1103,
-    end: 1106,
+    start: 1092,
+    end: 1095,
     anchorKey: "d89da8cc",
     paragraphLine: 256,
-    uncitedLines: [632],
+    uncitedLines: [621],
     claim:
-      "line 1106 cites `composeClaudeAgentVariant(`; uncited 632 is instead line 632 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
+      "line 1095 cites `composeClaudeAgentVariant(`; uncited 621 is instead line 621 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 632,
-    end: 647,
+    start: 621,
+    end: 636,
     anchorKey: "58938c96",
     paragraphLine: 271,
-    uncitedLines: [570],
+    uncitedLines: [559],
     claim:
-      "the sentence describes `composeClaudeAgentVariant`'s own read-only-roles push; line 647 is that function's own push, while uncited 570 is the byte-identical push inside `composeClaudeAgent`, the default (non-variant) composer covered separately under \"Per-harness frontmatter behavior\" above, which this sentence does not name.",
+      "the sentence describes `composeClaudeAgentVariant`'s own read-only-roles push; line 636 is that function's own push, while uncited 559 is the byte-identical push inside `composeClaudeAgent`, the default (non-variant) composer covered separately under \"Per-harness frontmatter behavior\" above, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 705,
-    end: 724,
+    start: 694,
+    end: 713,
     anchorKey: "efde4d0d",
     paragraphLine: 275,
-    uncitedLines: [604],
+    uncitedLines: [593],
     claim:
-      "the sentence describes `composeOpencodeAgentVariant`'s own read-only-roles push; line 724 is that function's own push, while uncited 604 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer this sentence does not name.",
+      "the sentence describes `composeOpencodeAgentVariant`'s own read-only-roles push; line 713 is that function's own push, while uncited 593 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -5476,13 +5486,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 1106,
-    end: 1106,
+    start: 1095,
+    end: 1095,
     anchorKey: "d89da8cc",
     paragraphLine: 371,
-    uncitedLines: [632],
+    uncitedLines: [621],
     claim:
-      "line 1106 cites `composeClaudeAgentVariant(`; uncited 632 is instead line 632 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
+      "line 1095 cites `composeClaudeAgentVariant(`; uncited 621 is instead line 621 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
   },
   {
     doc: "model-preselection.md",
@@ -5536,25 +5546,25 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 559,
-    end: 570,
+    start: 548,
+    end: 559,
     anchorKey: "58938c96",
     paragraphLine: 422,
-    uncitedLines: [647],
+    uncitedLines: [636],
     claim:
-      "the sentence names `composeClaudeAgent` as the function 0.22.0 gave a pinned `effort:` line; line 570 is that function's own read-only-roles push, included in the cited range, while uncited 647 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
+      "the sentence names `composeClaudeAgent` as the function 0.22.0 gave a pinned `effort:` line; line 559 is that function's own read-only-roles push, included in the cited range, while uncited 636 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 584,
-    end: 604,
+    start: 573,
+    end: 593,
     anchorKey: "efde4d0d",
     paragraphLine: 423,
-    uncitedLines: [724],
+    uncitedLines: [713],
     claim:
-      "the sentence names `composeOpencodeAgent` as the function 0.22.0 gave a pinned effort line; line 604 is that function's own read-only-roles push, included in the cited range, while uncited 724 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling this sentence does not name.",
+      "the sentence names `composeOpencodeAgent` as the function 0.22.0 gave a pinned effort line; line 593 is that function's own read-only-roles push, included in the cited range, while uncited 713 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling this sentence does not name.",
   },
   {
     doc: "model-preselection.md",

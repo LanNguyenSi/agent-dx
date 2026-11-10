@@ -79,14 +79,14 @@ below.
    as `DEFAULT_MODELS` overlaid with the *previous* manifest's models (if
    any), then applies `--models` on top; when running interactively with no
    `--models`, it prompts per role instead, defaulting each prompt to the
-   already-resolved value (`src/cli-inputs.ts:362#"...DEFAULT_MODELS,"`, prompt UI at
-   `src/cli-inputs.ts:120-141#"return models;"`). Since agent-dx task T-003, this whole
+   already-resolved value (`src/cli-inputs.ts:364#"...DEFAULT_MODELS,"`, prompt UI at
+   `src/cli-inputs.ts:122-143#"return models;"`). Since agent-dx task T-003, this whole
    resolution step (harnesses, profile, models, tiers, and the opencode
    catalog resolution) lives in a single reusable function,
    `resolveInitInputs` (`src/cli-inputs.ts`), which `init`'s CLI action
    calls; a later `apply --target` command can call the same function
    without duplicating the logic. Since 0.15.0 the interactive prompt only asks about
-   the roles `rolesForProfile(profile)` selects (`src/cli-inputs.ts:104#"for (const role of roles) {"`
+   the roles `rolesForProfile(profile)` selects (`src/cli-inputs.ts:106#"for (const role of roles) {"`
    iterates a `roles` parameter instead of the full `ROLES` list), so a
    `minimal` install is not asked for `explorer`/`task-slicer` models (and,
    since 0.21.0, not for `advisor` either: the same `rolesForProfile`
@@ -94,27 +94,27 @@ below.
    required). Since
    0.19.0 the CLI also resolves `tiers` right after models, on the same
    override-vs-persist rule, now via a `--tiers`/`--no-tiers` negatable pair
-   with no interactive prompt at all (`src/cli-inputs.ts:388#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`; see "Effort
+   with no interactive prompt at all (`src/cli-inputs.ts:390#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`; see "Effort
    tiers" below).
 3. **Manifest.** `runInit` writes the resolved map to
-   `.ai/workflow/manifest.json` under `models` (`src/init.ts:1222-1275#"force: true,"`,
-   `desired` object at `:1220-1231#"...(pin !== undefined ? { pin } : {}),"`), alongside `kit`, `version`, `harnesses`,
+   `.ai/workflow/manifest.json` under `models` (`src/init.ts:1212-1265#"force: true,"`,
+   `desired` object at `:1210-1221#"...(pin !== undefined ? { pin } : {}),"`), alongside `kit`, `version`, `harnesses`,
    `profile`, `tiers` (since 0.19.0), and per-file hashes. On the next run,
    `readInstalledManifest` reads it back and re-validates every value with
    `assertValidModelId`; an invalid stored id is silently dropped (falling
    back to `DEFAULT_MODELS` for that role) rather than crashing
-   (`src/init.ts:398-516#"? { pin: candidate.pin.trim() }"`, specifically `src/init.ts:397-404#"} catch {"`).
+   (`src/init.ts:396-505#"? { pin: candidate.pin.trim() }"`, specifically `src/init.ts:395-402#"} catch {"`).
 4. **Per-harness frontmatter.** For each selected harness, `runInit` calls a
    `compose*Agent` function per role that turns the resolved model string
-   into that harness's frontmatter shape (`src/init.ts:543-604#"permission:"`,
-   invocations at `src/init.ts:1093-1097#"options.models[role],"` for Claude Code and `init.ts:1173-1175#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"` for
+   into that harness's frontmatter shape (`src/init.ts:532-593#"permission:"`,
+   invocations at `src/init.ts:1082-1086#"options.models[role],"` for Claude Code and `init.ts:1162-1164#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"` for
    opencode). Since 0.15.0 those invocations iterate `rolesForProfile(profile)`
    rather than the unconditional `ROLES` list, so a role's preselected model
    is only ever composed into a subagent file when the profile actually
    installs that role, see
    [install-fence-mechanics.md](install-fence-mechanics.md). Since 0.19.0 a
    second, sibling pair of `compose*AgentVariant` functions
-   (`src/init.ts:632-647#"disallowedTools: Edit, Write, NotebookEdit"` Claude Code, `src/init.ts:705-724#"permission:"` opencode) composes the
+   (`src/init.ts:621-636#"disallowedTools: Edit, Write, NotebookEdit"` Claude Code, `src/init.ts:694-713#"permission:"` opencode) composes the
    tier-variant files from the same `readAgentAsset` body; see "Effort
    tiers" below for what differs in their frontmatter.
 
@@ -122,16 +122,16 @@ below.
 
 - **Claude Code.** `composeClaudeAgent` always emits a `model:` line;
   `claudeModelValue` is the identity function, so aliases and full ids pass
-  through unchanged (`src/models.ts:296-297#"return (MODEL_ALIASES as string[]).includes(value);"`, `src/init.ts:559-570#"disallowedTools: Edit, Write, NotebookEdit"`). Since
+  through unchanged (`src/models.ts:296-297#"return (MODEL_ALIASES as string[]).includes(value);"`, `src/init.ts:548-559#"disallowedTools: Edit, Write, NotebookEdit"`). Since
   0.22.0 it also always emits a pinned `effort:` line right after `model:`
-  (`tierDef(role, DEFAULT_TIER[role]).effort`, `src/init.ts:563-566#"selection?.effort ?? tierDef(role, DEFAULT_TIER[role]).effort"`; medium for
+  (`tierDef(role, DEFAULT_TIER[role]).effort`, `src/init.ts:552-555#"selection?.effort ?? tierDef(role, DEFAULT_TIER[role]).effort"`; medium for
   explorer/task-slicer/implementer, high for reviewer/advisor), covered in
   its own "Pinned default effort (0.22.0)" section below. The read-only
   roles (`explorer`, `reviewer`, and since 0.21.0 `advisor`, per
   `READ_ONLY_ROLES` at
   `src/models.ts:22#"export const READ_ONLY_ROLES: ReadonlySet<Role> = new"`) additionally get
   `disallowedTools: Edit, Write, NotebookEdit` right after `effort:`
-  (`src/init.ts:569-570#"disallowedTools: Edit, Write, NotebookEdit"`). Test coverage:
+  (`src/init.ts:558-559#"disallowedTools: Edit, Write, NotebookEdit"`). Test coverage:
   `test/init.test.ts:113#"expect(slicer).toMatch(/^model: opus$/m);"` (the task-slicer carries `model: opus`) and
   `test/init.test.ts:114-119#"{{MODEL}}"` (`model: opus` present, and the
   `{{MODEL}}` placeholder is not left unsubstituted) and
@@ -144,22 +144,22 @@ below.
   richer: when the `opencode` harness is selected, `resolveInitInputs`
   (`cli-inputs.ts`) shells out to
   `opencode models`, parses the catalog (`loadOpencodeCatalog`,
-  `src/opencode.ts:284-293#"return [];"`), auto-detects the provider offering Claude
-  models (`detectProvider`, `src/opencode.ts:46-70#"return { provider: undefined, ambiguous: false };"`; exactly one candidate
+  `src/opencode.ts:270-279#"return [];"`), auto-detects the provider offering Claude
+  models (`detectProvider`, `src/opencode.ts:40-64#"return { provider: undefined, ambiguous: false };"`; exactly one candidate
   provider resolves automatically, more than one triggers an "ambiguous,
   pass `--opencode-provider`" warning, none triggers a "no provider found"
   warning), and resolves each alias to the highest-versioned canonical match
-  (`resolveAlias`, `src/opencode.ts:122-155#"return best;"`, non-canonical variants like
+  (`resolveAlias`, `src/opencode.ts:116-149#"return best;"`, non-canonical variants like
   `-fast`/`-thinking`/`-mini`/`-latest` deprioritized). `composeOpencodeAgent`
   emits `model:` only when a resolved value exists; otherwise the line is
   omitted entirely so the subagent inherits the session/default model
-  (`src/init.ts:584-604#"permission:"`, comment at `:595-596#"// Omitting it lets the subagent inherit the session/default model."`). Since 0.22.0 it also takes
+  (`src/init.ts:573-593#"permission:"`, comment at `:584-585#"// Omitting it lets the subagent inherit the session/default model."`). Since 0.22.0 it also takes
   an `effortLine` parameter, computed once by the caller via
-  `opencodeEffortLine(DEFAULT_TIER[role], modelValue)` (`src/init.ts:1167-1171#"modelValue,"`)
+  `opencodeEffortLine(DEFAULT_TIER[role], modelValue)` (`src/init.ts:1156-1160#"modelValue,"`)
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:167#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:195#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:500-523#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2182-2190#"${role}.md must not contain model:"`,
@@ -202,8 +202,8 @@ legacy `opencodeModels` and `opencodeClassModels` fallback maps instead.
 A present map, including an empty map, records session inheritance for missing
 slots unless an explicit routing leaf supplies that selection. An absent map
 means legacy resolution is unknown; updates and doctor retain this distinction
-(`routing-state.ts:87-106#"result[field] = bare;"`,
-`routing-state.ts:112-118#"delete result.opencode?.[role]?.[tier];"`). A manifest that records no `routing` (installed before routing existed) is materialized once, when `readInstalledManifest` reads it, with the tier-uniform table it was installed under (`PRE_ROLE_TIER_DEFS`), so a re-install keeps that routing instead of adopting the per-role defaults for its non-default tiers.
+(`routing-state.ts:89-108#"result[field] = bare;"`,
+`routing-state.ts:114-120#"delete result.opencode?.[role]?.[tier];"`). A manifest that records no `routing` (installed before routing existed) is materialized once, when `readInstalledManifest` reads it (and `readOperatorManifest` for the operator defaults), by `materializePreRoutingRouting` with the tier-uniform table it was installed under (`PRE_ROLE_TIER_DEFS`), so a re-install keeps that routing and `doctor`/`apply --sync` compare it instead of adopting the per-role defaults for its non-default tiers.
 
 Codex begins with a complete deterministic default map: Luna at low for
 explorer and implementer, run at high effort; balanced Sol at task-slicer low, explorer,
@@ -211,7 +211,7 @@ task-slicer, and implementer medium/high, plus reviewer medium; Astra at impleme
 high/xhigh, and advisor high/xhigh. Effort matches the routing tier except on those three leaves. The
 orchestrator itself stays on
 the session model;
-`packages/orchestrator-workflow/docs/model-routing-reference.md:48-49#"for demanding work."`
+`packages/orchestrator-workflow/docs/model-routing-reference.md:68-69#"for demanding work."`
 recommends Astra/high normally and xhigh for demanding sessions without
 changing global configuration.
 
@@ -235,7 +235,7 @@ Since 0.19.0, `init` also accepts `--tiers`: for each role, it renders one
 additional subagent file per effort tier the role has that is not that
 role's own default tier, alongside the base `<role>.md` file described
 above. Off by default; there is no interactive prompt for it at all
-(`src/cli-inputs.ts:388#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`; the code comment there states explicitly why: tiers
+(`src/cli-inputs.ts:390#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`; the code comment there states explicitly why: tiers
 is opt-in/off via the flags only). A fix-round-1 correction on the initial
 0.19.0 release (review finding M2) added commander's negatable-option
 counterpart, `--no-tiers`, so a re-run can explicitly turn a previously
@@ -253,8 +253,8 @@ its default already sits at `high`, one step below the reviewer's default
 corresponds to (`medium` for explorer/task-slicer/implementer, `high` for
 reviewer and, since 0.21.0, advisor), the tier a variant is never rendered
 for since that would both collide with and duplicate the default file
-(`init.ts:1103-1106#"composeClaudeAgentVariant("` Claude Code,
-`init.ts:1180-1182#"const modelClass = def.modelClass;"` opencode, both a `continue` guarded by
+(`init.ts:1092-1095#"composeClaudeAgentVariant("` Claude Code,
+`init.ts:1169-1171#"const modelClass = def.modelClass;"` opencode, both a `continue` guarded by
 `tier === DEFAULT_TIER[role]`, role-generic code unchanged by the role
 addition). `ROLE_TIER_DEFS` (`src/models.ts:211-233#"advisor: {"`) maps each role and tier to a
 `ModelClass` (`"small" | "medium" | "large" | "xlarge"`, `src/models.ts:179#"export type ModelClass ="`) and its requested
@@ -268,13 +268,13 @@ dropped outright rather than forced into a real call site, since the
 `tiers` field they would degrade is a plain `boolean`, not a `Tier` value:
 `isTier` had nothing to validate.
 
-**Composition.** `composeClaudeAgentVariant` (`init.ts:632-647#"disallowedTools: Edit, Write, NotebookEdit"`) is the
+**Composition.** `composeClaudeAgentVariant` (`init.ts:621-636#"disallowedTools: Edit, Write, NotebookEdit"`) is the
 tier-variant sibling of `composeClaudeAgent`: same frontmatter shape plus
 `model: <CLASS_MODELS[modelClass]>` and `effort: <tier>` (in that order,
 right after `description:`), and the same `disallowedTools:` line for
-`READ_ONLY_ROLES`. `composeOpencodeAgentVariant` (`init.ts:705-724#"permission:"`) is the
+`READ_ONLY_ROLES`. `composeOpencodeAgentVariant` (`init.ts:694-713#"permission:"`) is the
 opencode sibling; its effort line is decided by `opencodeEffortLine`
-(`init.ts:682-695#"reasoningEffort: ${effort}"`, renamed from `opencodeVariantEffortLine` in 0.22.0 since
+(`init.ts:671-684#"reasoningEffort: ${effort}"`, renamed from `opencodeVariantEffortLine` in 0.22.0 since
 the function is no longer variant-only, see "Pinned default effort
 (0.22.0)" below), which dispatches on model *family*, not provider id,
 a fix-round-1 correction (review finding M4): the original 0.19.0 release
@@ -282,7 +282,7 @@ keyed the check on the literal provider string `"anthropic"`, so a Claude
 model fronted by a different provider (`github-copilot/claude-sonnet-4.6`,
 or the nested `openrouter/anthropic/claude-sonnet-4.6`) silently fell
 through to the `reasoningEffort:` branch instead of the `variant:` one.
-`isClaudeFamilyModel` (`init.ts:662-666#"return remainder.includes("`) now treats a resolved model id as
+`isClaudeFamilyModel` (`init.ts:651-655#"return remainder.includes("`) now treats a resolved model id as
 Claude-family when the segment after the first `/` contains `claude-`, or
 the id starts with `anthropic/` outright, regardless of which provider
 fronts it. Claude-family models get `variant: high` for the `high` tier and
@@ -299,7 +299,7 @@ get no effort line. Every other non-Claude-family, non-Ollama,
 provider-qualified model gets a plain `reasoningEffort: <tier>` line,
 `xhigh` included (D8: not mapped down to `high`, not dropped, it is part of
 opencode's documented built-in OpenAI-style variant range). Both variant
-composers share `tierDescriptionSuffix` (`init.ts:619-623#"${asset.description} (Effort tier: ${tier}.)"`), which appends
+composers share `tierDescriptionSuffix` (`init.ts:608-612#"${asset.description} (Effort tier: ${tier}.)"`), which appends
 `" (Effort tier: <tier>.)"` to the role's own description. Since fix-round-2
 (review finding R2-L1), `composeOpencodeAgentVariant` takes the decided
 effort line as an explicit fourth parameter instead of recomputing it via a
@@ -324,16 +324,16 @@ class resolution at all) silently rendered a no-op opencode variant file
 carrying neither `model:` nor an effort line, distinguishable from the base
 file only by diffing the two, and with no warning anywhere. Two changes
 close this. First, `resolveInitInputs`'s tier-class resolution loop
-(`cli-inputs.ts:494#"// and need no live catalog lookup, so they are unaffected)."`) now returns one warning
+(`cli-inputs.ts:508#"// and need no live catalog lookup, so they are unaffected)."`) now returns one warning
 line per unresolved class (`small`/`medium`/
 `large`/`xlarge`) in its `warnings` array (agent-dx task T-003 moved this loop out
 of `init`'s CLI action into `resolveInitInputs` so a later `apply --target`
 command can reuse it; `init` still writes each returned warning to stderr),
-mirroring `resolveOpencodeModels`'s own per-role warning style (a class with no model of its own first falls back to the next lower class that resolved, with a `Note:` line naming role, tier and class used, and warns only when nothing at or below it resolved)
-(`opencode.ts:194-273#"return { resolved, warnings, notes };"`) rather than staying silent. Second, `runInit`'s
-opencode tier loop (`init.ts:1183-1210#"effortLine,"`) now checks whether the variant's
+mirroring `resolveOpencodeModels`'s own per-role warning style (a default-tier alias with no model is omitted with a `Warning:` and never replaced; a tier-variant class with no model of its own falls back to the next lower class that resolved, with a `Note:` line naming role, tier and class used, a `Warning:` when it drops more than one class, and no variant for a reviewer or advisor below the `medium` class)
+(`opencode.ts:190-259#"return { resolved, warnings };"`) rather than staying silent. Second, `runInit`'s
+opencode tier loop (`init.ts:1172-1200#"effortLine,"`) now checks whether the variant's
 class model resolved at all (`variantModelValue !== undefined`,
-`init.ts:1185-1197#"// rules in opencodeEffortLine above."`) and skips the write, and the manifest ledger entry,
+`init.ts:1175-1187#"// rules in opencodeEffortLine above."`) and skips the write, and the manifest ledger entry,
 entirely when it did not, so an unresolved class produces zero tier-variant
 files for opencode instead of nine indistinguishable empty ones.
 
@@ -348,7 +348,7 @@ effect. The wording also never named which harness it applied to, reading
 as if it could affect Claude Code variants too, when Claude Code's
 `model:` line resolves from a plain alias (`haiku`/`sonnet`/`opus`/`fable`) and
 needs no live catalog lookup at all. The corrected wording
-(`cli-inputs.ts:494#"// and need no live catalog lookup, so they are unaffected)."`) is `Warning: Tier model class "<class>" (alias
+(`cli-inputs.ts:508#"// and need no live catalog lookup, so they are unaffected)."`) is `Warning: Tier model class "<class>" (alias
 "<alias>") could not be resolved to an opencode model id (<reason>); no
 opencode effort-tier variant files will be rendered for this class (Claude
 Code variants are unaffected).`, stating both the real rendering effect and
@@ -363,12 +363,12 @@ pass. No test pins that prose any more: the tier and model-class tables of
 the same section are guarded against `models.ts` (see "Docs-consistency
 pins" below), the sentences around them are covered by review.
 
-**Rendering (`init.ts:1143-1210#"effortLine,"`).** For each harness and each role
+**Rendering (`init.ts:1132-1200#"effortLine,"`).** For each harness and each role
 `rolesForProfile(profile)` selects, `runInit` writes the base file exactly
 as it always has (now including its own pinned default effort, see "Pinned
 default effort (0.22.0)" below), then, only `if (tiers)`, loops
 `ROLE_TIERS[role]` skipping the role's `DEFAULT_TIER` and writes
-`<role>-<tier>.md` (`:1106#"composeClaudeAgentVariant("` Claude Code, `:1204-1209#"variantModelValue,"` opencode, the
+`<role>-<tier>.md` (`:1095#"composeClaudeAgentVariant("` Claude Code, `:1194-1199#"variantModelValue,"` opencode, the
 opencode loop now carrying the unresolved-class skip described above). The
 base file's own composition call takes no `tiers`-flag input at all, so a
 tiers-off install renders byte-identical output to a tiers-on install (not,
@@ -390,9 +390,9 @@ anti-downgrade check, that `reviewer.md` still carries `model: opus` and, since 
 carries `model: fable` (`opus` before the per-role default routing), each with `effort: high` rather than no `effort:`
 line since 0.22.0). opencode's variant `model:` values come from a new,
 separate resolution pass keyed by `ModelClass` instead of `Role`
-(`InitOptions.opencodeClassModels`, `init.ts:81-90#"opencodeClassModels?: Partial<Record<ModelClass, string | undefined>>;"`; resolved in `resolveInitInputs` at
-`cli-inputs.ts:494#"// and need no live catalog lookup, so they are unaffected)."`, mirroring the existing per-role opencode resolution just above
-it at `cli-inputs.ts:495-496#"Warning: Tier model class"`). The Claude-family-`variant:` and Ollama-no-effort-field
+(`InitOptions.opencodeClassModels`, `init.ts:79-88#"opencodeClassModels?: Partial<Record<ModelClass, string | undefined>>;"`; resolved in `resolveInitInputs` at
+`cli-inputs.ts:508#"// and need no live catalog lookup, so they are unaffected)."`, mirroring the existing per-role opencode resolution just above
+it at `cli-inputs.ts:509-510#"Warning: Tier model class"`). The Claude-family-`variant:` and Ollama-no-effort-field
 provider-branch outcomes are pinned at `test/init.test.ts:1768-1812#"expect(implementerLow).not.toContain(" and test/init.test.ts:1823-1841#"model: ollama/llama3"`; a
 resolved class id with no provider prefix at all (no `/`) reaches the same
 no-effort-field outcome as Ollama but via `opencodeEffortLine`'s
@@ -419,14 +419,14 @@ at all, so a default subagent spawn silently inherited whatever effort the
 orchestrator's own session happened to run at (a `high`-effort orchestrator
 session made every default spawn run at `high` too, regardless of the
 role's own intended weight). 0.22.0 closes that gap by having
-`composeClaudeAgent` (`init.ts:559-570#"disallowedTools: Edit, Write, NotebookEdit"`) and `composeOpencodeAgent`
-(`init.ts:584-604#"permission:"`) add the role's own
+`composeClaudeAgent` (`init.ts:548-559#"disallowedTools: Edit, Write, NotebookEdit"`) and `composeOpencodeAgent`
+(`init.ts:573-593#"permission:"`) add the role's own
 `` `effort: ${tierDef(role, DEFAULT_TIER[role]).effort}` `` (Claude Code,
-`init.ts:563-566#"selection?.effort ?? tierDef(role, DEFAULT_TIER[role]).effort"`) or the equivalent opencode effort line (via
+`init.ts:552-555#"selection?.effort ?? tierDef(role, DEFAULT_TIER[role]).effort"`) or the equivalent opencode effort line (via
 `opencodeEffortLine(DEFAULT_TIER[role], modelValue)`, computed once per role
 at the call site described above under "Per-harness frontmatter behavior",
 and passed in as a parameter at the call right after,
-`init.ts:1173-1175#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`, the same
+`init.ts:1162-1164#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`, the same
 way `composeOpencodeAgentVariant` already took its own effort line since
 fix-round-2) unconditionally, for every install regardless of `--tiers`.
 Since `tierDef(role, DEFAULT_TIER[role]).effort` is `"medium"` for
@@ -450,7 +450,7 @@ that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `docs/model-routing-reference.md`'s "Effort tiers" section
 (moved from README.md) gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:193#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:221#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. the skill's
 `references/delegation-and-tiers.md` states it once, in a dedicated bullet
@@ -462,14 +462,14 @@ behaviour eval set, not by a sentence pin (see "Docs-consistency pins"
 below for what is still guarded against `models.ts`).
 
 **Manifest and re-install.** The chosen value is recorded in a new `tiers`
-boolean on `.ai/workflow/manifest.json` (`Manifest.tiers`, `init.ts:157-158#"tiers: boolean;"`).
+boolean on `.ai/workflow/manifest.json` (`Manifest.tiers`, `init.ts:155-156#"tiers: boolean;"`).
 A manifest written before tiers existed (no `tiers` key) degrades to
-`false` (`init.ts:458-462#"const tiers = typeof candidate.tiers ==="`), the same per-field-degradation style already
-used for a missing `profile` field just above it (`init.ts:450-456#": DEFAULT_PROFILE;"`): a legacy
+`false` (`init.ts:456-460#"const tiers = typeof candidate.tiers ==="`), the same per-field-degradation style already
+used for a missing `profile` field just above it (`init.ts:448-454#": DEFAULT_PROFILE;"`): a legacy
 manifest never rendered variant files, so `false` is the only value
 consistent with what is actually on disk. `resolveInitInputs` (`cli-inputs.ts`) resolves the flag with
 the same override-vs-persist rule as `--profile`/`--models`, but with no
-interactive branch: `opts.tiers ?? previous?.tiers ?? false` (`cli-inputs.ts:388#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`).
+interactive branch: `opts.tiers ?? previous?.tiers ?? false` (`cli-inputs.ts:390#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`).
 This is the fix-round-1 form (review finding M2); the original 0.19.0
 release read `opts.tiers ? true : (previous?.tiers ?? false)`, which had no
 way to express an explicit "turn it off" short of hand-editing the
@@ -488,12 +488,12 @@ explicit `--tiers` or `--no-tiers` always turns it on or off; a plain
 re-run (neither flag) keeps whatever the previous install had; a fresh
 install with no prior manifest defaults to off. A `tiers: true -> false`
 transition now leaves the same kind of leftover-file note a
-`full -> minimal` profile downgrade does (`init.ts:895-905#"now untracked after tiers were turned off"`, review finding
+`full -> minimal` profile downgrade does (`init.ts:884-894#"now untracked after tiers were turned off"`, review finding
 M2; before the fix this transition was silent, see
 [install-fence-mechanics.md](install-fence-mechanics.md)), and a
 `full -> minimal` downgrade that also had `tiers: true` now notes the
 dropped roles' tier-variant files too, not just their base files
-(`init.ts:870-879#"variantPath}: now untracked after the full"`, review finding M3;
+(`init.ts:859-868#"variantPath}: now untracked after the full"`, review finding M3;
 `test/init.test.ts:869-906#"The variant files themselves are untouched, only untracked, same as"` pins the note count, since 0.21.0 asserting 8
 notes rather than 6 for the base-plus-tiers case: advisor became a third
 dropped role, contributing 1 base-file note plus 1 non-default-tier note of
@@ -516,7 +516,7 @@ loop's ledger gate; review round 3 (R3-L1) added a sibling
 (`init.ts` ~453) the same way, after a mutant that always pushed that note
 (`if (true)` in place of the `previous.files` check) survived the full
 suite untested. Variant files themselves still flow through the same
-`installKitFile` hash ledger as every other kit-owned file (`init.ts:983-1003#"installFile(report, path, content, { force });"`,
+`installKitFile` hash ledger as every other kit-owned file (`init.ts:972-992#"installFile(report, path, content, { force });"`,
 unchanged by this feature), so idempotence, conflict detection, and
 `uninstall` (see [install-fence-mechanics.md](install-fence-mechanics.md))
 all cover them automatically with no tier-specific removal code.
@@ -546,9 +546,9 @@ tier-variant files.
 
 A re-run with no `--models` reuses the previously chosen models rather than
 resetting to shipped defaults: `models = { ...DEFAULT_MODELS,
-...(previous?.models ?? {}) }` in `src/cli-inputs.ts:358#"if (interactive) profile = await promptProfile(profile);"`. The same
-override-vs-persist rule now also covers `--profile` (`src/cli-inputs.ts:354#"if (opts.profile) {"`)
-and, since 0.19.0, `--tiers`/`--no-tiers` (`src/cli-inputs.ts:388#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`, see
+...(previous?.models ?? {}) }` in `src/cli-inputs.ts:360#"if (interactive) profile = await promptProfile(profile);"`. The same
+override-vs-persist rule now also covers `--profile` (`src/cli-inputs.ts:356#"if (opts.profile) {"`)
+and, since 0.19.0, `--tiers`/`--no-tiers` (`src/cli-inputs.ts:390#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`, see
 "Effort tiers" above): a plain re-run keeps the previously installed value
 for each, an explicit flag overrides it. Test:
 `test/init.test.ts:1132-1151#"model: haiku"` runs `init --models implementer=haiku`, then a
@@ -559,7 +559,7 @@ falls back to `[]` filtered against known harnesses, each model id is
 re-validated, with invalid entries dropped back to that role's default, a
 missing `profile` field degrades to `"full"` rather than `"minimal"`, and
 (since 0.19.0) a missing `tiers` field degrades to `false`
-(`src/init.ts:398-516#"? { pin: candidate.pin.trim() }"`; end-to-end proof at `test/init.test.ts:282-323#"expect(manifest.models.implementer).toBe("`,
+(`src/init.ts:396-505#"? { pin: candidate.pin.trim() }"`; end-to-end proof at `test/init.test.ts:282-323#"expect(manifest.models.implementer).toBe("`,
 where a malformed `reviewer: 'opus: "x"'` is dropped to `opus` while a valid
 sibling `implementer: "haiku"` survives; the `profile`-fallback proof is
 `test/init.test.ts:748-777#"should exist under the full-profile fallback"`, see

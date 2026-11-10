@@ -194,11 +194,11 @@ reinforced by an exact-sub-field-name pin at the producing prompt only
 equality test cannot: renaming a sub-field identically in both copies still
 passes the equality check (it only proves the two copies match each other),
 but fails the exact-name pin; and the advisor pair a block equality test
-(`test/docs-consistency.test.ts:1364#"expect(skillBlock).toBe(advisorBlock);"`),
+(`test/docs-consistency.test.ts:1374#"expect(skillBlock).toBe(advisorBlock);"`),
 next to a pin that `SKILL.md` carries the Advisor output contract block with
 the `escalation_necessary: warranted | unwarranted` enum; and the explorer
 pair a block equality test between `explorer.md` and `contracts.md`
-(`test/docs-consistency.test.ts:1390#"expect(explorerBlock).toBe(contractsBlock);"`),
+(`test/docs-consistency.test.ts:1400#"expect(explorerBlock).toBe(contractsBlock);"`),
 next to an exact top-level field list, a nested field list for
 `relevant_terrain` and `solution_options`, and the `status` and `risk` enums
 in the same `describe` block. The sentences that describe the advisor's escalation policy in
@@ -520,12 +520,12 @@ scoped to `reviewer.md`'s output-contract yaml block checks that it gains no
 `replayed` field, sliced from the output-contract heading rather than the
 first yaml fence in the file so an earlier decoy fence cannot be mistaken for
 it
-(`test/docs-consistency.test.ts:3286#"outputContractBlock).not.toContain"`); and a further pin
+(`test/docs-consistency.test.ts:3296#"outputContractBlock).not.toContain"`); and a further pin
 locks the eleven `mutation_probes` sub-fields to their fixed order in both
 copies (grown from five at this rule's own introduction to ten, then to
 eleven, under task 06330af2, see Mutation probe definition fields and
 expectation split below)
-(`test/docs-consistency.test.ts:3289#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
+(`test/docs-consistency.test.ts:3299#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
 
 Motivation: `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
 7(ii) found fix-round regressions from a prior round's own fix that a
@@ -612,7 +612,7 @@ a dedicated pin on the `reason` requiredness rule
 (`test/docs-consistency.test.ts:856#"is required exactly when result is not_applicable, empty otherwise"`),
 a fixed-order pin locking all eleven sub-fields to their exact order in
 both copies
-(`test/docs-consistency.test.ts:3289#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
+(`test/docs-consistency.test.ts:3299#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
 and a template agreement pin that derives the
 `04-implementation-summary.md` Mutation Probes table's columns and the
 `mutation_probes` contract's sub-field list programmatically and asserts
@@ -766,7 +766,7 @@ path, and to state that only exit `0` or `1` is a result while exit `2`
 is a usage error rather than a clean check. The two argv shapes the bullet
 prescribes are a published interface of the `slop-detector` package, whose CLI
 source and CLI test run exactly those shapes end to end, so
-`test/docs-consistency.test.ts:1438#"the implementer prompt prescribes the two slop-detector argv shapes the slop-detector package runs"`
+`test/docs-consistency.test.ts:1448#"the implementer prompt prescribes the two slop-detector argv shapes the slop-detector package runs"`
 pins them in the prompt, and the prose around them is not pinned.
 
 The prompt also carries a commit hygiene rule bullet directly after the
@@ -858,7 +858,7 @@ unnamed-method default in `reviewer.md` carries no sentence pin. The class
 list and the rules under it, including the
 never-`adversarial`-on-`-medium` constraint, are pinned as whole sentences at
 their one site in the delegation and tiers reference
-(`test/docs-consistency.test.ts:9979#"safety core: the review method and tier class list stays pinned"`),
+(`test/docs-consistency.test.ts:9989#"safety core: the review method and tier class list stays pinned"`),
 and `test/charter.test.ts` pins that the class mapping appears at that site only
 (`test/charter.test.ts:215#"the review method and tier class mapping is normative once"`).
 

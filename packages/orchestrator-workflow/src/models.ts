@@ -297,6 +297,36 @@ export function isModelAlias(value: string): value is ModelAlias {
   return (MODEL_ALIASES as string[]).includes(value);
 }
 
+/**
+ * The lowest model class a role's opencode tier-variant leaf may fall back to
+ * when its own class has no model in the catalog. Roles that judge or advise
+ * never run on a class below their floor; a role without an entry may fall
+ * back as far as the lowest class.
+ */
+export const ROLE_CLASS_FLOOR: Partial<Record<Role, ModelClass>> =
+  Object.fromEntries(
+    (["reviewer", "advisor"] as const).map((role) => [role, "medium" as const]),
+  );
+
+/**
+ * Whether `model`, taken from the class map of an opencode install, is the
+ * model of a class below the role's floor. A class that fell back to a lower
+ * class shares that class's model id, and distinct classes never resolve to
+ * the same id on their own, so equality with a below-floor class entry marks
+ * a fall-back below the floor.
+ */
+export function belowRoleFloor(
+  role: Role,
+  model: string,
+  classModels: Partial<Record<ModelClass, string | undefined>> | undefined,
+): boolean {
+  const floor = ROLE_CLASS_FLOOR[role];
+  if (floor === undefined || classModels === undefined) return false;
+  return MODEL_CLASSES.slice(0, MODEL_CLASSES.indexOf(floor)).some(
+    (modelClass) => classModels[modelClass] === model,
+  );
+}
+
 /** The next lower model class, or `undefined` for the lowest. */
 export function lowerModelClass(
   modelClass: ModelClass,
