@@ -175,6 +175,11 @@ function phraseBoundedSlice(
  *      review method class mapping, delegation-and-tiers.md.
  *   4. The reviewer's read-only rule. Site: assets/agents/reviewer.md.
  *
+ * The unavailable-model rule of review-and-recovery.md decides who reviews
+ * when a routed model is not offered, so it is part of rule 3. Its three
+ * sentences are pinned at that one site (see the describe on the unavailable
+ * model rule).
+ *
  * Rule 1 also lives in runbook-selection.test.ts. charter.test.ts rejects a
  * second copy of a pinned sentence in the charter, SKILL.md, or a reference.
  */
@@ -3246,6 +3251,42 @@ describe("safety core: the docs-only closing delta stays narrowly bounded at the
       expect(rule).toContain("`accepted`");
     }
   });
+});
+
+/**
+ * Safety core, rule 3 (continued): an unavailable model never lowers a tier,
+ * never moves a role inline, and never turns an independent review into a
+ * self-review. The three sentences are pinned whole at one site, the review
+ * and recovery reference; no other skill file restates them.
+ */
+describe("safety core: the unavailable-model rule is pinned at the review and recovery reference", () => {
+  const recovery = unwrap(
+    readRawAsset("skill/references/review-and-recovery.md"),
+  );
+  const others = [
+    readRawAsset("skill/SKILL.md"),
+    ...workflowReferences
+      .filter((name) => name !== "review-and-recovery.md")
+      .map((name) => readRawAsset(`skill/references/${name}`)),
+    readRawAsset("skill/references/delegation-and-tiers.md"),
+    readRawAsset("skill/references/trust-and-outward.md"),
+  ].map(unwrap);
+  const countIn = (text: string, needle: string): number =>
+    text.split(needle).length - 1;
+
+  const sentencesPinned = [
+    "No role is moved to a weaker leaf, and no role is run inline by the orchestrator, because its model is unavailable: an environment fault does not lower a tier the tier rules chose, and it does not turn an independent review into a self-review.",
+    "Otherwise the work is held and the orchestrator asks the operator.",
+  ];
+
+  for (const sentence of sentencesPinned) {
+    it(`states once at the reference: ${sentence.slice(0, 50)}`, () => {
+      expect(countIn(recovery, sentence)).toBe(1);
+      for (const other of others) {
+        expect(other).not.toContain(sentence);
+      }
+    });
+  }
 });
 
 /**

@@ -47,25 +47,24 @@ no reason to resume or respawn the subagent.
 A spawn that fails because the account or catalog does not offer the routed
 model is an environment fault. It is not a subagent misfire and not a failed
 attempt of the task: it does not count as a negative round or toward the
-escalation budget. The orchestrator does not retry the same definition.
+escalation budget. When a failed spawn could be either, check the error cause
+before applying the misfire rule's resume: the same definition is not retried
+against a model that is not offered.
 
-For the explorer, the task slicer, and the implementer, in this order:
-re-resolve the routing against a fresh model catalog when the operator has
-already agreed to a substitution; otherwise use the same role's next lower
-installed tier variant whose model is available, recorded as a tier
-decision; otherwise run the role inline with the same contract.
+For every role there are two ways to continue without the operator, in this
+order: re-resolve the routing against a fresh model catalog when the operator
+has already agreed to a substitution; or use an installed variant of the same
+role whose leaf is at least as strong as the one the task was given (model
+class and effort as the installed definition states them, not the tier name)
+and whose model is available, recorded as a non-default tier choice.
 
-The reviewer is never run inline by the orchestrator and never moved below
-the tier its change class names in
-[delegation and tiers](delegation-and-tiers.md): an environment fault does
-not turn an independent review into a self-review. Re-resolve the routing
-when the operator has already agreed to a substitution, or use an installed
-reviewer variant at or above that tier whose model is available; otherwise
-hold the merge and ask the operator. The advisor is not replaced by a weaker
-variant or an inline pass either: its question goes to the operator.
+Otherwise the work is held and the orchestrator asks the operator. No role is
+moved to a weaker leaf, and no role is run inline by the orchestrator, because
+its model is unavailable: an environment fault does not lower a tier the tier
+rules chose, and it does not turn an independent review into a self-review.
 
-Each use is one row in `03-decisions.md` (role and tier, intended model,
-used model, reason) and one line in the handoff.
+Each use is one row in `03-decisions.md` (role and tier, intended model, used
+model, reason) and one line in the handoff.
 
 ## Round-2 halt rule
 
