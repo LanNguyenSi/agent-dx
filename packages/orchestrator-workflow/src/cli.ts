@@ -8,6 +8,11 @@ import inquirer from "inquirer";
 import { PACKAGE_VERSION } from "./assets.js";
 import { buildApplyInitInputs } from "./cli-apply.js";
 import { buildInitInitInputs } from "./cli-init.js";
+import {
+  CODEX_FALLBACK_MODES,
+  parseCodexFallbackMode,
+} from "./codex-fallback.js";
+import type { CodexFallbackMode } from "./codex-fallback.js";
 import { resolveInitInputs } from "./cli-inputs.js";
 import { HARNESSES, detectHarnesses } from "./detect.js";
 import type { Harness } from "./detect.js";
@@ -17,6 +22,7 @@ import type { Manifest } from "./init.js";
 import {
   codexModelsRoutingPatch,
   mergeRouting,
+  parseCodexModelCandidates,
   parseRouting,
 } from "./routing.js";
 import {
@@ -155,6 +161,9 @@ function defaultsEqual(
   return normalize(a) === normalize(b);
 }
 
+const CODEX_FALLBACK_OPTION = "--codex-fallback <mode>";
+const CODEX_FALLBACK_DESCRIPTION = `with --codex-catalog, what happens when the catalog lacks a selected Codex model (${CODEX_FALLBACK_MODES.join(", ")}): stop (default) ends before anything is written and prints the substitution table, degrade applies that table and records each substitute next to the intended routing; no effect without a catalog`;
+
 const program = new Command();
 
 program
@@ -184,6 +193,7 @@ program
     "--codex-catalog <json-file>",
     "optional offline Codex capability catalog JSON to validate before writing",
   )
+  .option(CODEX_FALLBACK_OPTION, CODEX_FALLBACK_DESCRIPTION)
   .option(
     "--profile <profile>",
     `subagent role profile (${PROFILES.join(", ")}); default: full, or the previously installed profile on a re-run`,
@@ -211,6 +221,7 @@ program
         routing?: string;
         codexModels?: string;
         codexCatalog?: string;
+        codexFallback?: string;
         profile?: string;
         opencodeProvider?: string;
         tiers?: boolean;
@@ -221,6 +232,7 @@ program
       const interactive = !opts.yes && isInteractive();
       let routing: HarnessRouting | undefined;
       let codexCatalog: unknown;
+      let codexFallback: CodexFallbackInputs;
       try {
         routing = mergeRouting(
           codexModelsOption(opts.codexModels),
@@ -229,6 +241,7 @@ program
         codexCatalog = opts.codexCatalog
           ? readJsonOption(opts.codexCatalog, "--codex-catalog")
           : undefined;
+        codexFallback = codexFallbackInputs(opts);
       } catch (error) {
         console.error(error instanceof Error ? error.message : error);
         process.exitCode = 2;
@@ -300,6 +313,8 @@ program
         routing: resolvedRouting,
         routingMode: "replace",
         codexCatalog,
+        codexFallback: codexFallback.fallback,
+        codexModelCandidates: codexFallback.candidates,
       });
 
       showPaths("Created", report.written);
@@ -337,6 +352,10 @@ program
     "optional offline Codex capability catalog JSON to validate before saving",
   )
   .option(
+    CODEX_FALLBACK_OPTION,
+    `${CODEX_FALLBACK_DESCRIPTION}; the stored defaults always keep the intended routing, degrade only lets them be saved and prints the substitutes an install given the same --codex-models file would use`,
+  )
+  .option(
     "--profile <profile>",
     `subagent role profile (${PROFILES.join(", ")}); default: full, or the previously stored profile on a re-run`,
   )
@@ -360,6 +379,7 @@ program
       routing?: string;
       codexModels?: string;
       codexCatalog?: string;
+      codexFallback?: string;
       profile?: string;
       opencodeProvider?: string;
       tiers?: boolean;
@@ -368,6 +388,7 @@ program
       const home = resolveOperatorHome();
       let routingPatch: HarnessRouting | undefined;
       let codexCatalog: unknown;
+      let codexFallback: CodexFallbackInputs;
       try {
         routingPatch = mergeRouting(
           codexModelsOption(opts.codexModels),
@@ -376,6 +397,7 @@ program
         codexCatalog = opts.codexCatalog
           ? readJsonOption(opts.codexCatalog, "--codex-catalog")
           : undefined;
+        codexFallback = codexFallbackInputs(opts);
       } catch (error) {
         console.error(error instanceof Error ? error.message : error);
         process.exitCode = 2;
@@ -427,6 +449,7 @@ program
             routing,
             { harnesses, profile, tiers },
             codexCatalog,
+            codexFallback,
           )) {
             process.stderr.write(`Warning: ${warning}\n`);
           }
@@ -730,6 +753,7 @@ program
     "--codex-catalog <json-file>",
     "optional offline Codex capability catalog JSON to validate before writing",
   )
+  .option(CODEX_FALLBACK_OPTION, CODEX_FALLBACK_DESCRIPTION)
   .option(
     "--profile <profile>",
     `subagent role profile (${PROFILES.join(", ")}); default: the target's recorded profile, else the operator default`,
@@ -772,6 +796,7 @@ program
       routing?: string;
       codexModels?: string;
       codexCatalog?: string;
+      codexFallback?: string;
       profile?: string;
       opencodeProvider?: string;
       tiers?: boolean;
@@ -782,6 +807,7 @@ program
     }) => {
       let routingPatch: HarnessRouting | undefined;
       let codexCatalog: unknown;
+      let codexFallback: CodexFallbackInputs;
       try {
         routingPatch = mergeRouting(
           codexModelsOption(opts.codexModels),
@@ -790,6 +816,7 @@ program
         codexCatalog = opts.codexCatalog
           ? readJsonOption(opts.codexCatalog, "--codex-catalog")
           : undefined;
+        codexFallback = codexFallbackInputs(opts);
       } catch (error) {
         console.error(error instanceof Error ? error.message : error);
         process.exitCode = 2;
@@ -994,6 +1021,8 @@ program
         routing: resolvedRouting,
         routingMode: "replace",
         codexCatalog,
+        codexFallback: codexFallback.fallback,
+        codexModelCandidates: codexFallback.candidates,
         pin,
       });
 
@@ -1767,4 +1796,31 @@ function codexModelsOption(
   return path === undefined
     ? undefined
     : codexModelsRoutingPatch(readJsonOption(path, "--codex-models"));
+}
+
+interface CodexFallbackInputs {
+  fallback?: CodexFallbackMode;
+  candidates?: ReturnType<typeof parseCodexModelCandidates>;
+}
+
+/**
+ * The `--codex-fallback` mode and the candidate lists of `--codex-models`,
+ * which choose a substitute when a supplied catalog lacks a selected model.
+ */
+function codexFallbackInputs(opts: {
+  codexFallback?: string;
+  codexModels?: string;
+}): CodexFallbackInputs {
+  return {
+    ...(opts.codexFallback !== undefined
+      ? { fallback: parseCodexFallbackMode(opts.codexFallback) }
+      : {}),
+    ...(opts.codexModels !== undefined
+      ? {
+          candidates: parseCodexModelCandidates(
+            readJsonOption(opts.codexModels, "--codex-models"),
+          ),
+        }
+      : {}),
+  };
 }

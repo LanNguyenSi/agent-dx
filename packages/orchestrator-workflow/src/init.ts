@@ -27,10 +27,19 @@ import {
   rolesForProfile,
 } from "./models.js";
 import { composeCodexAgent } from "./codex.js";
-import { parseRouting } from "./routing.js";
-import type { HarnessRouting, ModelSelection } from "./routing.js";
 import {
-  codexCatalogWarnings,
+  parseCodexFallbackMode,
+  parseRoutingResolution,
+} from "./codex-fallback.js";
+import type { CodexFallbackMode, RoutingResolution } from "./codex-fallback.js";
+import { parseRouting } from "./routing.js";
+import type {
+  CodexModelAlias,
+  HarnessRouting,
+  ModelSelection,
+} from "./routing.js";
+import {
+  resolveCodexInstall,
   legacyOpencodeFallbacks,
   normalizeRoutingState,
   parseOpencodeModelMaps,
@@ -105,6 +114,22 @@ export interface InitOptions {
    */
   codexCatalog?: unknown;
   /**
+   * What to do when `codexCatalog` lacks the model of an installed Codex
+   * leaf. `"stop"` (default) throws the substitution table before any file
+   * is written; `"degrade"` renders a substitute chosen by the fixed
+   * candidate rule and records it in the manifest's `routingResolution`,
+   * while `routing` keeps the intended selection. Without a catalog it has
+   * no effect.
+   */
+  codexFallback?: CodexFallbackMode;
+  /**
+   * Sparse Codex alias map (the `--codex-models` shape: a model id or an
+   * ordered array of ids per alias) replacing the bundled candidate list of
+   * each supplied alias. Only consulted to choose a substitute; it does not
+   * change the routing, which callers patch through `routing`.
+   */
+  codexModelCandidates?: Partial<Record<CodexModelAlias, string | string[]>>;
+  /**
    * Repo kit-version pin (distinct from the actually-installed `version`),
    * so a later `apply` command can gate on it. A `string` sets a new
    * recorded kit-version pin; `null` clears an existing pin; `undefined`
@@ -156,6 +181,13 @@ export interface Manifest extends OpencodeModelMaps {
   tiers: boolean;
   /** Exact resolved harness/role/tier selections from the install. */
   routing?: HarnessRouting;
+  /**
+   * The Codex leaves rendered with a substitute because a supplied catalog
+   * lacked their intended model: per role and tier the intended selection
+   * (the one `routing` keeps), the used selection (the one in the agent
+   * file), and the reason. Absent when no leaf is substituted.
+   */
+  routingResolution?: RoutingResolution;
   /**
    * sha256 of every kit-owned file as installed. This is how a re-run tells
    * "upstream changed, safe to update" apart from "user edited, conflict".
@@ -474,6 +506,11 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     // defaults for its non-default tiers.
     routing = materializePreRoutingRouting(harnesses, models, opencodeMaps);
   }
+  // Strict like routing: the record decides what a re-install renders.
+  const routingResolution =
+    "routingResolution" in candidate
+      ? parseRoutingResolution(candidate.routingResolution)
+      : undefined;
   const knowledge = parseKnowledgeBundles(candidate);
   const knowledgeProblems = knowledgeEntryProblems(candidate.knowledge);
 
@@ -492,6 +529,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     profile,
     tiers,
     ...(routing !== undefined ? { routing } : {}),
+    ...(routingResolution !== undefined ? { routingResolution } : {}),
     ...(knowledge !== undefined ? { knowledge } : {}),
     ...(knowledgeProblems.length > 0 ? { knowledgeProblems } : {}),
     ...opencodeMaps,
@@ -776,14 +814,23 @@ export function runInit(options: InitOptions): Report {
       ? validateKnowledgeBundles(options.knowledge)
       : previous?.knowledge;
 
-  // Check only rendered selections before the first mutation.
-  for (const warning of codexCatalogWarnings(
+  // Check only rendered selections before the first mutation. `routing` stays
+  // the intended routing; a substituted Codex leaf differs only in
+  // `codexInstall.rendered` and is recorded in `codexInstall.resolution`.
+  const codexInstall = resolveCodexInstall(
     routing,
     { harnesses: options.harnesses, profile, tiers },
     options.codexCatalog,
-  )) {
-    report.notes.push(`Codex catalog: ${warning}`);
-  }
+    previous?.routingResolution,
+    {
+      fallback:
+        options.codexFallback === undefined
+          ? undefined
+          : parseCodexFallbackMode(options.codexFallback),
+      candidates: options.codexModelCandidates,
+    },
+  );
+  report.notes.push(...codexInstall.notes);
   // `null` clears an existing pin, a string sets a new one, and omitted
   // (`undefined`) carries the previous manifest's pin forward unchanged. An
   // empty or whitespace-only string is normalized to a clear as well: it can
@@ -1110,7 +1157,7 @@ export function runInit(options: InitOptions): Report {
     installSkillBundle(skillDir);
     for (const role of rolesForProfile(profile)) {
       const defaultSelection = routingSelection(
-        routing,
+        codexInstall.rendered,
         "codex",
         role,
         DEFAULT_TIER[role],
@@ -1130,7 +1177,12 @@ export function runInit(options: InitOptions): Report {
       if (tiers) {
         for (const tier of ROLE_TIERS[role]) {
           if (tier === DEFAULT_TIER[role]) continue;
-          const selection = routingSelection(routing, "codex", role, tier);
+          const selection = routingSelection(
+            codexInstall.rendered,
+            "codex",
+            role,
+            tier,
+          );
           if (!selection) {
             throw new Error(`Missing Codex routing for ${role}/${tier}`);
           }
@@ -1215,6 +1267,9 @@ export function runInit(options: InitOptions): Report {
     profile,
     tiers,
     routing,
+    ...(codexInstall.resolution !== undefined
+      ? { routingResolution: codexInstall.resolution }
+      : {}),
     ...(knowledge !== undefined ? { knowledge } : {}),
     ...compatibility,
     files: installedFiles,
@@ -1231,6 +1286,9 @@ export function runInit(options: InitOptions): Report {
       profile: previous.profile,
       tiers: previous.tiers,
       ...(previous.routing !== undefined ? { routing: previous.routing } : {}),
+      ...(previous.routingResolution !== undefined
+        ? { routingResolution: previous.routingResolution }
+        : {}),
       ...(previous.knowledge !== undefined
         ? { knowledge: previous.knowledge }
         : {}),

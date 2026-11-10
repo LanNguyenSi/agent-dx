@@ -69,7 +69,7 @@ touches no repository. A flag always wins; a flag-less re-run keeps the
 previously stored values; a first-ever `setup` falls back to `claude` /
 `full` / the kit's default routing / tiers off. `setup` takes the same
 option flags as `init` (`--harness`, `--profile`, `--models`, `--codex-models`, `--routing`,
-`--codex-catalog`, `--tiers` / `--no-tiers`, `--opencode-provider`, `--yes`).
+`--codex-catalog`, `--codex-fallback`, `--tiers` / `--no-tiers`, `--opencode-provider`, `--yes`).
 The defaults live in
 `<operator home>/manifest.json`, where the operator home is
 `~/.orchestrator-workflow/` unless the `ORCHESTRATOR_WORKFLOW_HOME`
@@ -95,7 +95,7 @@ profile, tiers, legacy models, and routing: the operator's defaults then win ove
 the target already had recorded. A target pinned to a kit version other
 than the one being applied is skipped rather than touched (see the pin
 rule below). `apply` also takes the same install options as `init` (`--harness`,
-`--profile`, `--models`, `--codex-models`, `--routing`, `--codex-catalog`, `--tiers` /
+`--profile`, `--models`, `--codex-models`, `--routing`, `--codex-catalog`, `--codex-fallback`, `--tiers` /
 `--no-tiers`, `--opencode-provider`, `--force`, `--yes`), which feed the
 precedence rule above. An explicit routing file is the highest-precedence
 deep patch; leaves it omits retain their resolved baseline values.
