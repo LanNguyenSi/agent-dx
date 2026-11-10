@@ -13226,3 +13226,22 @@ and were re-pointed; their claims were read against the changed text by the
 implementing rounds (the Models subsection, the risk-class rows and closing
 options, the per-harness bullets, the misfire rule citations) and hold. The
 citation tests pass. Re-stamped model-preselection.md, review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, subagent-contracts-superset.md at 2026-11-10T11:40:11Z after that.
+
+## 2026-11-10T13:46:53Z (Codex fallback when a catalog lacks a routed model, re-stamp)
+
+The installer gained `--codex-fallback <stop|degrade>` on init, setup and
+apply, ordered candidate lists per Codex alias class, the substitution plan in
+src/codex-fallback.ts (same-class candidate, then the next lower class; the
+class of a model is the lowest list that names it; reviewer and advisor never
+below balanced; a lower-class substitute at effort high at least) and the
+optional manifest key `routingResolution` beside the unchanged intended
+`routing`. model-preselection.md gained the claim that a missing model is
+substituted only under degrade and lists src/codex-fallback.ts as a source;
+install-fence-mechanics.md gained the claim that the resolved routing supplies
+Codex's model and effort. In the other docs only line citations into
+src/routing.ts, src/routing-state.ts, src/init.ts, src/cli.ts and the tests
+moved and were re-pointed; their claims do not depend on the fallback. The
+changed claims were read against the code by the implementing rounds and
+checked in three review rounds (stop writes nothing, no substitution without
+degrade, a manifest without the key reads as before); the citation tests pass.
+Re-stamped install-fence-mechanics.md, model-preselection.md, operator-install-and-registry.md, review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, subagent-contracts-superset.md at 2026-11-10T13:46:53Z after that.
