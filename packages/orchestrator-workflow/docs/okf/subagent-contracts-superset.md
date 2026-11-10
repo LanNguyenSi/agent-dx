@@ -520,12 +520,12 @@ scoped to `reviewer.md`'s output-contract yaml block checks that it gains no
 `replayed` field, sliced from the output-contract heading rather than the
 first yaml fence in the file so an earlier decoy fence cannot be mistaken for
 it
-(`test/docs-consistency.test.ts:3337#"outputContractBlock).not.toContain"`); and a further pin
+(`test/docs-consistency.test.ts:3343#"outputContractBlock).not.toContain"`); and a further pin
 locks the eleven `mutation_probes` sub-fields to their fixed order in both
 copies (grown from five at this rule's own introduction to ten, then to
 eleven, under task 06330af2, see Mutation probe definition fields and
 expectation split below)
-(`test/docs-consistency.test.ts:3340#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
+(`test/docs-consistency.test.ts:3346#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
 
 Motivation: `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
 7(ii) found fix-round regressions from a prior round's own fix that a
@@ -612,7 +612,7 @@ a dedicated pin on the `reason` requiredness rule
 (`test/docs-consistency.test.ts:861#"is required exactly when result is not_applicable, empty otherwise"`),
 a fixed-order pin locking all eleven sub-fields to their exact order in
 both copies
-(`test/docs-consistency.test.ts:3340#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
+(`test/docs-consistency.test.ts:3346#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
 and a template agreement pin that derives the
 `04-implementation-summary.md` Mutation Probes table's columns and the
 `mutation_probes` contract's sub-field list programmatically and asserts
@@ -677,7 +677,7 @@ spawn, and names split or redesign in `03-decisions.md`
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:336#"Halt at the first"`);
 the Round-2 halt rule's own cross-reference to step 8 states the identical
 scope
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:82#"Step 8 of the detailed workflow states the operational"`),
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:85#"Step 8 of the detailed workflow states the operational"`),
 no test pins either site's wording.
 Full treatment of the Round-2 halt rule and the escalation budget it
 feeds is out of this doc's lane; see
@@ -858,7 +858,7 @@ unnamed-method default in `reviewer.md` carries no sentence pin. The class
 list and the rules under it, including the
 never-`adversarial`-on-`-medium` constraint, are pinned as whole sentences at
 their one site in the delegation and tiers reference
-(`test/docs-consistency.test.ts:10030#"safety core: the review method and tier class list stays pinned"`),
+(`test/docs-consistency.test.ts:10036#"safety core: the review method and tier class list stays pinned"`),
 and `test/charter.test.ts` pins that the class mapping appears at that site only
 (`test/charter.test.ts:215#"the review method and tier class mapping is normative once"`).
 
