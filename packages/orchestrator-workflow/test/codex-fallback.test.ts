@@ -593,6 +593,31 @@ describe("degrade: leaves that are never substituted", () => {
     expect(readdirSync(target)).toEqual([]);
   });
 
+  it("substitutes a leaf set through --routing when its model is in a candidate list", () => {
+    runInit(
+      options({
+        tiers: false,
+        codexFallback: "degrade",
+        routing: {
+          codex: { implementer: { medium: { model: STRONG, effort: "high" } } },
+        },
+        codexCatalog: catalog(model(SMALL), model(BALANCED)),
+      }),
+    );
+    expect(agent("implementer")).toEqual({ model: BALANCED, effort: "high" });
+    expect(
+      readInstalledManifest(target)?.routing?.codex?.implementer?.medium,
+    ).toEqual({ model: STRONG, effort: "high" });
+    expect(
+      readInstalledManifest(target)?.routingResolution?.codex?.implementer
+        ?.medium,
+    ).toEqual({
+      intended: { model: STRONG, effort: "high" },
+      used: { model: BALANCED, effort: "high" },
+      reason: "lower-class",
+    });
+  });
+
   it("writes no file and leaves the manifest alone when a leaf of an existing install has no substitute", () => {
     runInit(options());
     const before = snapshot();
@@ -672,6 +697,74 @@ describe("degrade: leaves that are never substituted", () => {
           "the small class is below the balanced class, and the reviewer is never substituted below it",
       },
     ]);
+  });
+
+  describe("a candidate of a class below the floor, listed in a higher list too", () => {
+    // SMALL is in the small list first and in the balanced list second, so it
+    // is a small-class model whichever list offers it.
+    const overlapping = {
+      small: [SMALL],
+      balanced: [BALANCED, SMALL],
+    };
+    const smallOnly = catalog(model(SMALL));
+
+    it.each(["reviewer", "advisor"] as const)(
+      "gives a %s leaf no substitute and says which candidate was skipped",
+      (role) => {
+        const plan = planCodexFallback(
+          { codex: { [role]: { high: { model: STRONG, effort: "high" } } } },
+          smallOnly,
+          codexModelCandidates(overlapping),
+        );
+        expect(plan.rows).toEqual([
+          {
+            role,
+            tier: "high",
+            intended: { model: STRONG, effort: "high" },
+            problem: `the catalog offers no usable candidate of the strong or balanced class (the ${role} is never substituted below the balanced class); ${SMALL} is of the small class, below the balanced class`,
+          },
+        ]);
+      },
+    );
+
+    it("lets an implementer leaf take it", () => {
+      const plan = planCodexFallback(
+        { codex: { implementer: { high: { model: STRONG, effort: "high" } } } },
+        smallOnly,
+        codexModelCandidates(overlapping),
+      );
+      expect(plan.rows[0].used).toEqual({ model: SMALL, effort: "high" });
+      expect(plan.rows[0].reason).toBe("lower-class");
+    });
+
+    it("stops an install whose reviewer leaf has only that candidate, and writes nothing", () => {
+      const message = thrown(() =>
+        runInit(
+          options({
+            tiers: false,
+            codexFallback: "degrade",
+            codexModelCandidates: overlapping,
+            codexCatalog: smallOnly,
+          }),
+        ),
+      );
+      expect(message).toContain(
+        `reviewer/high: ${STRONG} (high) -> no substitute:`,
+      );
+      expect(message).toContain(
+        `advisor/high: ${STRONG} (high) -> no substitute:`,
+      );
+      expect(readdirSync(target)).toEqual([]);
+    });
+
+    it("counts a model first in both the balanced and the small list as balanced", () => {
+      const plan = planCodexFallback(
+        { codex: { reviewer: { high: { model: STRONG, effort: "high" } } } },
+        catalog(model("gpt-tie")),
+        codexModelCandidates({ small: ["gpt-tie"], balanced: ["gpt-tie"] }),
+      );
+      expect(plan.rows[0].used).toEqual({ model: "gpt-tie", effort: "high" });
+    });
   });
 
   it("lets a reviewer leaf drop from strong to balanced", () => {
@@ -958,35 +1051,116 @@ describe("re-install of a degraded target", () => {
     ).toEqual({ model: BALANCED, effort: "high" });
   });
 
-  it("carries the record of a leaf that is not installed in this run", () => {
+  it("drops the record of a leaf whose intended effort alone changed, and renders the intended model", () => {
     degraded();
-    // Variants off: only the default tiers are installed and re-checked.
-    const report = runInit(options({ tiers: false, codexCatalog: complete }));
-    expect(agent("reviewer").model).toBe(STRONG);
+    const report = runInit(
+      options({
+        routing: {
+          codex: { reviewer: { high: { model: STRONG, effort: "medium" } } },
+        },
+      }),
+    );
     expect(
-      Object.keys(
-        readInstalledManifest(target)?.routingResolution?.codex ?? {},
-      ),
-    ).toEqual(["implementer", "reviewer", "advisor"]);
+      readInstalledManifest(target)?.routingResolution?.codex?.reviewer?.high,
+    ).toBeUndefined();
+    expect(agent("reviewer")).toEqual({ model: STRONG, effort: "medium" });
+    expect(fallbackNotes(report.notes)).toContain(
+      `Codex fallback: the recorded substitution of reviewer/high (${BALANCED} (high) for intended ${STRONG} (high)) is dropped, because the intended routing of that leaf changed to ${STRONG} (medium).`,
+    );
+    // The other leaves keep their records.
     expect(
-      readInstalledManifest(target)?.routingResolution?.codex?.reviewer,
-    ).toEqual({
-      xhigh: {
-        intended: { model: STRONG, effort: "xhigh" },
-        used: { model: BALANCED, effort: "xhigh" },
-        reason: "lower-class",
-      },
+      readInstalledManifest(target)?.routingResolution?.codex?.reviewer?.xhigh,
+    ).toBeDefined();
+  });
+
+  describe("a leaf that is not installed in this run", () => {
+    const uninstalled = [
+      "implementer/xhigh",
+      "reviewer/xhigh",
+      "advisor/xhigh",
+    ];
+    const noteFor = (notes: string[], leaf: string) =>
+      fallbackNotes(notes).filter((note) => note.includes(leaf));
+
+    it("drops its record with a note when the catalog offers its intended model at the intended effort", () => {
+      degraded();
+      // Variants off: only the default tiers are installed and re-checked.
+      const report = runInit(options({ tiers: false, codexCatalog: complete }));
+      expect(agent("reviewer").model).toBe(STRONG);
+      expect(rawManifest().routingResolution).toBeUndefined();
+      expect(
+        fallbackNotes(report.notes).filter((note) =>
+          note.includes("returns to"),
+        ),
+      ).toHaveLength(2);
+      for (const leaf of uninstalled) {
+        const [dropped, ...others] = noteFor(report.notes, leaf);
+        expect(others).toEqual([]);
+        expect(dropped).toContain(`the recorded substitution of ${leaf} (`);
+        expect(dropped).toContain(
+          "is dropped, because this run's catalog offers the intended model, and",
+        );
+        expect(dropped).toContain("is not installed in this run");
+      }
     });
-    expect(
-      fallbackNotes(report.notes).filter((note) => note.includes("returns to")),
-    ).toHaveLength(2);
-    // Variants on again without a catalog: the carried record is rendered.
-    runInit(options());
-    expect(agent("reviewer-xhigh")).toEqual({
-      model: BALANCED,
-      effort: "xhigh",
+
+    it("carries its record, with one note per carried record, when the catalog does not offer the intended model", () => {
+      degraded();
+      const report = runInit(
+        options({
+          tiers: false,
+          codexFallback: "degrade",
+          codexCatalog: lacksStrong,
+        }),
+      );
+      const codex = readInstalledManifest(target)?.routingResolution?.codex;
+      expect(Object.keys(codex ?? {})).toEqual([
+        "implementer",
+        "reviewer",
+        "advisor",
+      ]);
+      expect(Object.keys(codex?.reviewer ?? {})).toEqual(["high", "xhigh"]);
+      for (const leaf of uninstalled) {
+        expect(noteFor(report.notes, leaf)).toEqual([
+          expect.stringMatching(
+            new RegExp(
+              `^Codex fallback: ${leaf} is not installed in this run; its recorded substitute .* is carried unchecked\\.$`,
+            ),
+          ),
+        ]);
+      }
+      expect(
+        fallbackNotes(report.notes).filter((note) =>
+          note.includes("carried unchecked"),
+        ),
+      ).toHaveLength(uninstalled.length);
     });
-    expect(agent("reviewer")).toEqual({ model: STRONG, effort: "high" });
+
+    it("carries its record when the catalog offers the model but not the intended effort", () => {
+      degraded();
+      const report = runInit(
+        options({
+          tiers: false,
+          codexCatalog: catalog(
+            model(SMALL),
+            model(BALANCED),
+            model(STRONG, ["low", "medium", "high"]),
+          ),
+        }),
+      );
+      const codex = readInstalledManifest(target)?.routingResolution?.codex;
+      expect(Object.keys(codex?.reviewer ?? {})).toEqual(["xhigh"]);
+      expect(noteFor(report.notes, "reviewer/xhigh")).toEqual([
+        expect.stringContaining("is carried unchecked"),
+      ]);
+      // Variants on again without a catalog: the carried record is rendered.
+      runInit(options());
+      expect(agent("reviewer-xhigh")).toEqual({
+        model: BALANCED,
+        effort: "xhigh",
+      });
+      expect(agent("reviewer")).toEqual({ model: STRONG, effort: "high" });
+    });
   });
 
   it("keeps the record when Codex is not among the harnesses of a run", () => {
@@ -1182,6 +1356,55 @@ describe("--codex-fallback on the command line", () => {
     );
     expect(blocked.status).toBe(2);
     expect(blocked.stderr).toContain("have no substitute");
+  });
+
+  it("setup with --codex-models names the condition, and an apply without the file chooses from the bundled lists", () => {
+    const lists = jsonFile("lists", {
+      balanced: [BALANCED, "gpt-bal-b"],
+      strong: [STRONG, "gpt-strong-b"],
+    });
+    const offered = jsonFile(
+      "offered",
+      catalog(model(SMALL), model("gpt-bal-b"), model("gpt-strong-b")),
+    );
+    const saved = run(
+      "setup",
+      "--yes",
+      "--harness",
+      "codex",
+      "--tiers",
+      "--codex-models",
+      lists,
+      "--codex-catalog",
+      offered,
+      "--codex-fallback",
+      "degrade",
+    );
+    expect(saved.status, saved.stderr).toBe(0);
+    expect(saved.stderr).toContain(
+      `Codex fallback: advisor/high: ${STRONG} (high) -> gpt-strong-b (high) [class-candidate]. The stored defaults keep the intended model ${STRONG}; an install substitutes gpt-strong-b only with a catalog, --codex-fallback degrade and the same --codex-models file.`,
+    );
+
+    // The same catalog without the file: the bundled lists have no substitute
+    // for the strong leaves, and the apply prints its own table.
+    const applied = run(
+      "apply",
+      "--target",
+      target,
+      "--yes",
+      "--codex-catalog",
+      offered,
+      "--codex-fallback",
+      "degrade",
+    );
+    expect(applied.status).toBe(1);
+    expect(applied.stderr).toContain(
+      "--codex-fallback degrade cannot proceed:",
+    );
+    expect(applied.stderr).toContain(
+      `  advisor/high: ${STRONG} (high) -> no substitute:`,
+    );
+    expect(readdirSync(target)).toEqual([]);
   });
 
   it("apply degrades a target, doctor reports it clean, and apply --sync keeps the record", () => {

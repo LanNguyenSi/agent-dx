@@ -293,6 +293,7 @@ function substituteFor(
   const floorIndex = CODEX_MODEL_ALIASES.indexOf(floor);
   const tried: CodexModelAlias[] = [];
   const unusable: string[] = [];
+  const belowFloor: string[] = [];
   for (
     let index = CODEX_MODEL_ALIASES.indexOf(leafClass);
     index >= floorIndex;
@@ -309,6 +310,15 @@ function substituteFor(
     for (const candidate of list) {
       const model = models.get(candidate);
       if (model === undefined) continue;
+      // A candidate is judged by its own class: a model that a lower list
+      // names earlier is of that lower class, whichever list offered it here.
+      const candidateClass = modelAliasClass(candidate, candidates)!;
+      if (CODEX_MODEL_ALIASES.indexOf(candidateClass) < floorIndex) {
+        belowFloor.push(
+          `${candidate} is of the ${candidateClass} class, below the ${floor} class`,
+        );
+        continue;
+      }
       const effort = substituteEffort(intended.effort, model, lowerClass);
       if ("unusable" in effort) {
         unusable.push(`${candidate} ${effort.unusable}`);
@@ -332,12 +342,12 @@ function substituteFor(
     tried.length === 0
       ? `the ${leafClass} class is below the ${floor} class, and the ${role} is never substituted below it`
       : `the catalog offers no usable candidate of the ${tried.join(" or ")} class${floorNote}`;
+  const reasons = [...belowFloor, ...unusable];
   return {
     role,
     tier,
     intended,
-    problem:
-      unusable.length > 0 ? `${problem}; ${unusable.join("; ")}` : problem,
+    problem: reasons.length > 0 ? `${problem}; ${reasons.join("; ")}` : problem,
   };
 }
 
@@ -346,7 +356,8 @@ function substituteFor(
  * catalog lacks. Per leaf, in this order: the first later candidate of the
  * leaf's own alias class that the catalog offers; else the first offered
  * candidate of the next lower class, down to the role's floor; else no
- * substitute. A leaf whose model is in no candidate list is never
+ * substitute. A candidate whose own class (the class rule of its lists, not
+ * the list it is offered from) is below the role's floor is skipped. A leaf whose model is in no candidate list is never
  * substituted. A leaf whose model the catalog offers is checked as before
  * (an effort it does not list throws). This helper makes no CLI or network
  * call and writes nothing; callers pass only the installed leaves.

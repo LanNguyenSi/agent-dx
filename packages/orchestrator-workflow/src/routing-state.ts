@@ -32,6 +32,7 @@ import {
   codexModelCandidates,
   defaultCodexRouting,
   mergeRouting,
+  normalizeCodexCatalog,
   parseRouting,
   preRoutingCodexRouting,
 } from "./routing.js";
@@ -206,7 +207,8 @@ function plannedCodexFallback(
 /**
  * One shared, offline catalog check for stored defaults (`setup`). Defaults
  * hold the intended routing and no resolution, so under `degrade` a missing
- * model is only announced with the substitute an install would use.
+ * model is only announced with the substitute an install would use when it
+ * is given the same candidate lists: they are not stored.
  */
 export function codexCatalogWarnings(
   routing: HarnessRouting,
@@ -217,11 +219,17 @@ export function codexCatalogWarnings(
   if (!scope.harnesses.includes("codex")) return [];
   if (catalog === undefined) return [NO_CODEX_CATALOG_NOTE];
   const plan = plannedCodexFallback(routing, scope, catalog, options);
+  // The candidate lists are not stored: an install chooses from the lists it
+  // is given itself.
+  const condition =
+    options.candidates === undefined
+      ? "a catalog and --codex-fallback degrade"
+      : "a catalog, --codex-fallback degrade and the same --codex-models file";
   return [
     ...plan.warnings,
     ...plan.rows.map(
       (row) =>
-        `Codex fallback: ${formatCodexFallbackRow(row)}. The stored defaults keep the intended model ${row.intended.model}; an install substitutes ${row.used!.model} only with a catalog and --codex-fallback degrade.`,
+        `Codex fallback: ${formatCodexFallbackRow(row)}. The stored defaults keep the intended model ${row.intended.model}; an install substitutes ${row.used!.model} only with ${condition}.`,
     ),
   ];
 }
@@ -299,9 +307,28 @@ export function resolveCodexInstall(
         );
       }
     }
-    // Every installed leaf was resolved anew; a leaf that is not installed
-    // keeps its carried record.
-    entries = entries.filter(({ role, tier }) => !isInstalled(role, tier));
+    // Every installed leaf was resolved anew. A leaf that is not installed is
+    // not resolved: its record is dropped when this catalog offers its
+    // intended model at the intended effort, and carried otherwise.
+    const offered = normalizeCodexCatalog(catalog);
+    entries = entries.filter(({ role, tier, entry }) => {
+      if (isInstalled(role, tier)) return false;
+      const model = offered.get(entry.intended.model);
+      if (
+        model !== undefined &&
+        (model.supportedEfforts === undefined ||
+          model.supportedEfforts.has(entry.intended.effort))
+      ) {
+        notes.push(
+          `Codex fallback: the recorded substitution of ${role}/${tier} (${describe(entry.used)} for intended ${describe(entry.intended)}) is dropped, because this run's catalog offers the intended model, and ${role}/${tier} is not installed in this run.`,
+        );
+        return false;
+      }
+      notes.push(
+        `Codex fallback: ${role}/${tier} is not installed in this run; its recorded substitute ${describe(entry.used)} for intended ${describe(entry.intended)} [${entry.reason}] is carried unchecked.`,
+      );
+      return true;
+    });
     for (const row of plan.rows) {
       notes.push(
         `Codex fallback: ${row.role}/${row.tier} uses ${describe(row.used!)} instead of intended ${describe(row.intended)} [${row.reason!}].`,

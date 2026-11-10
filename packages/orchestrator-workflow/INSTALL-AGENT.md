@@ -395,13 +395,18 @@ writes anything when a selected model is missing from the supplied catalog, so
 settle the substitution first. Run the installer once with the default
 (`--codex-fallback stop`): its error is the substitution table, one line per
 affected leaf with the intended model and effort and the model and effort the
-installer would use instead, or `no substitute` with the reason. Show that
-table to the operator and ask. Pass `--codex-fallback degrade` only after the
-operator agreed; it applies exactly that table. When the operator wants other
-models, or a leaf has no substitute, pass the agreed models through
-`--codex-models` (a model id per alias class, or an ordered array whose later
-entries are the substitutes to try first) or a `--routing` patch instead. A
-leaf set through `--routing` is never substituted.
+installer would use instead, or `no substitute` with the reason. The table to
+agree on with the operator is the one printed by the `init` or `apply` run
+that will install: the candidate lists are not stored, so the table of
+another run, or the line `setup` prints, holds only when the install is given
+the same `--codex-models` file. Show that table to the operator and ask. Pass
+`--codex-fallback degrade` only after the operator agreed; it applies exactly
+that table. When the operator wants other models, or a leaf has no
+substitute, pass the agreed models through `--codex-models` (a model id per
+alias class, or an ordered array whose later entries are the substitutes to
+try first) or a `--routing` patch instead. Only a leaf whose model is in no
+candidate list is never substituted; a `--routing` leaf that names a listed
+model is treated like any leaf of that class.
 Do not move a reviewer or advisor leaf below the balanced class unless the
 operator says so; `degrade` never does. Record the intended routing next to
 the applied one in the handoff, so the install can return to it. With

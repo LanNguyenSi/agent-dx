@@ -8,6 +8,7 @@ sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
   - packages/orchestrator-workflow/src/routing-state.ts
+  - packages/orchestrator-workflow/src/codex-fallback.ts
   - packages/orchestrator-workflow/src/codex.ts
   - packages/orchestrator-workflow/src/cli.ts
   - packages/orchestrator-workflow/src/cli-inputs.ts

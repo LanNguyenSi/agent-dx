@@ -227,13 +227,18 @@ The substitute of a leaf is chosen by a fixed rule, in this order:
 
 A leaf belongs to the class whose candidate list contains its model. When
 several lists contain it, the list that names it earliest decides, and among
-those the stronger class. A leaf whose model is in no candidate list, such as
-one set through `--routing`, is never substituted: explicit input is not
-replaced, and the install stops and names the leaf.
+those the stronger class. A leaf whose model is in no candidate list is never
+substituted: an explicitly chosen model outside the lists is not replaced, and
+the install stops and names the leaf. The source of a leaf does not matter: a
+leaf set through `--routing` that names a listed model is treated like any
+leaf of that class.
 
 Floors: a reviewer or advisor leaf is never substituted with a model of a
-class below `balanced`. When only the `small` class is available for such a
-leaf, it has no substitute.
+class below `balanced`. The class of a candidate is the class rule above, not
+the list it is offered from: a model that the `small` list names first and the
+`balanced` list names later is a `small` model, and such a leaf skips it. When
+only `small` models are available for such a leaf, it has no substitute, and
+the table names each skipped candidate.
 
 Effort of a substituted leaf: a leaf that dropped to a lower class runs at
 `high` at least. The result is then clamped to the levels the catalog lists
@@ -281,16 +286,26 @@ Re-install. The intended routing is sticky as described above.
   re-install that should choose among the same substitutes passes the same
   `--codex-models` file again, otherwise the bundled lists apply.
 - A record is dropped, with a note, when the intended selection of its leaf
-  changed. The record of a leaf that is not installed in a run (its tier
-  variants are off, or Codex is not among the harnesses) is carried unchanged.
+  changed, its model or only its effort.
+- The record of a leaf that is not installed in a run (its tier variants are
+  off) is not resolved. With a catalog it is dropped, with a note, when the
+  catalog offers the intended model at the intended effort, and otherwise
+  carried with one note per carried record. When Codex is not among the
+  harnesses of a run, or there is no catalog, the record is carried unchanged.
+- A kit version older than this behavior ignores the record and discards it on
+  a re-install; that install renders the intended models again.
 
 `doctor` and `apply --sync` compare and project the intended routing, so a
 substitution alone is not a divergence; drift detection and `uninstall` use
 the file hashes of what was rendered. The operator manifest holds the intended
 routing and never a `routingResolution`: `setup --codex-fallback degrade`
 saves defaults whose models the catalog lacks, prints the substitute an
-install would use, and leaves the substitution to each `init` or `apply` that
-passes a catalog and `degrade`.
+install run with the same `--codex-models` file and a catalog would use, and
+leaves the substitution to each `init` or `apply` that passes a catalog and
+`degrade`. That install chooses from the candidate lists it is given: an
+`apply` without the file uses the bundled lists and may find a different
+substitute or none, so the table to agree on is the one that `init` or `apply`
+prints.
 
 ## opencode model resolution
 

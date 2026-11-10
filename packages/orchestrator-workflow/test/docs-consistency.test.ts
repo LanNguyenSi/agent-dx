@@ -5166,10 +5166,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1208,
     end: 1212,
     anchorKey: "8cd81eb8",
-    paragraphLine: 158,
+    paragraphLine: 159,
     uncitedLines: [1216],
     claim:
-      "the :158 sentence names the effort-line computation call and the model argument it is computed from; line 1212 is that argument, while uncited 1216 passes the computed local into the agent-composition call that the separately cited `init.ts:1153-1175` sentence describes.",
+      "the :159 sentence names the effort-line computation call and the model argument it is computed from; line 1212 is that argument, while uncited 1216 passes the computed local into the agent-composition call that the separately cited `init.ts:1153-1175` sentence describes.",
   },
   {
     doc: "model-preselection.md",
@@ -5178,7 +5178,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1472,
     end: 1488,
     anchorKey: "5ea9652d",
-    paragraphLine: 380,
+    paragraphLine: 381,
     uncitedLines: [1468],
     claim:
       "the sentence names the content assertion pinning the five-line default frontmatter; line 1488 is the asserted array element, while uncited 1468 is a comment above the test restating the same literal in prose.",
@@ -5190,7 +5190,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1768,
     end: 1812,
     anchorKey: "d90f95bc",
-    paragraphLine: 396,
+    paragraphLine: 397,
     uncitedLines: [1813],
     claim:
       "the sentence names only the Claude-family variant-suffix outcomes; line 1812 asserts the low tier gets no `variant:` line, which is what the sentence needs, while uncited 1813 asserts the absence of `reasoningEffort`, opencode's own field for a non-Claude-family, non-Ollama provider (`src/init.ts:540`), not a codex field (codex's own equivalent is `model_reasoning_effort`, `src/codex.ts:50`) -- not part of what this sentence claims (the Ollama-side outcome it does name is cited separately, at a different range).",
@@ -5442,7 +5442,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 586,
     end: 597,
     anchorKey: "58938c96",
-    paragraphLine: 125,
+    paragraphLine: 126,
     uncitedLines: [674],
     claim:
       "the sentence describes `composeClaudeAgent`'s read-only-roles push; line 597 is that function's own push, while uncited 674 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
@@ -5454,7 +5454,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 596,
     end: 597,
     anchorKey: "58938c96",
-    paragraphLine: 134,
+    paragraphLine: 135,
     uncitedLines: [674],
     claim:
       "the sentence names the read-only roles getting `disallowedTools:` right after `effort:` inside `composeClaudeAgent`; line 597 is that function's own push, while uncited 674 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
@@ -5466,7 +5466,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 611,
     end: 631,
     anchorKey: "efde4d0d",
-    paragraphLine: 156,
+    paragraphLine: 157,
     uncitedLines: [751],
     claim:
       "the sentence describes `composeOpencodeAgent`'s read-only-roles push (`permission:`/`edit: deny`); line 631 is that function's own push, while uncited 751 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
@@ -5478,7 +5478,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2196,
     end: 2202,
     anchorKey: "10aeb3a5",
-    paragraphLine: 170,
+    paragraphLine: 171,
     uncitedLines: [1369, 2232],
     claim:
       'line 2202 cites the `writes the --opencode-provider hint to STDERR (not stdout) …` test (`expect(result.stdout).not.toContain("--opencode-provider");`); uncited 1369 and 2232 is instead line 1369 in the `a subsequent run with harnesses: [] over a claude install l…` test (`expect(result.stdout).not.toContain("installed for: ");`); and line 2232 in the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(result.stdout).not.toContain(`Tier model class`);`), a different site the citing sentence never names.',
@@ -5490,7 +5490,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1139,
     end: 1142,
     anchorKey: "d89da8cc",
-    paragraphLine: 256,
+    paragraphLine: 257,
     uncitedLines: [659],
     claim:
       "line 1142 cites `composeClaudeAgentVariant(`; uncited 659 is instead line 659 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
@@ -5502,7 +5502,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 659,
     end: 674,
     anchorKey: "58938c96",
-    paragraphLine: 271,
+    paragraphLine: 272,
     uncitedLines: [597],
     claim:
       "the sentence describes `composeClaudeAgentVariant`'s own read-only-roles push; line 674 is that function's own push, while uncited 597 is the byte-identical push inside `composeClaudeAgent`, the default (non-variant) composer covered separately under \"Per-harness frontmatter behavior\" above, which this sentence does not name.",
@@ -5514,7 +5514,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 732,
     end: 751,
     anchorKey: "efde4d0d",
-    paragraphLine: 275,
+    paragraphLine: 276,
     uncitedLines: [631],
     claim:
       "the sentence describes `composeOpencodeAgentVariant`'s own read-only-roles push; line 751 is that function's own push, while uncited 631 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer this sentence does not name.",
@@ -5526,7 +5526,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2215,
     end: 2236,
     anchorKey: "bd75126a",
-    paragraphLine: 355,
+    paragraphLine: 356,
     uncitedLines: [1966, 2269],
     claim:
       "line 2236 cites the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(agents.sort()).toEqual([`); uncited 1966 and 2269 is instead line 1966 in the `opencode: an unresolved class model (undefined) renders no …` test (`expect(agents.sort()).toEqual([`); and line 2269 in the `--tiers with fully-qualified --models but still no live cat…` test (`expect(agents.sort()).toEqual([`), a different site the citing sentence never names.",
@@ -5538,7 +5538,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1142,
     end: 1142,
     anchorKey: "d89da8cc",
-    paragraphLine: 371,
+    paragraphLine: 372,
     uncitedLines: [659],
     claim:
       "line 1142 cites `composeClaudeAgentVariant(`; uncited 659 is instead line 659 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
@@ -5550,7 +5550,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1493,
     end: 1527,
     anchorKey: "44b3936a",
-    paragraphLine: 382,
+    paragraphLine: 383,
     uncitedLines: [945, 965],
     claim:
       "line 1527 cites the `default agent files are byte-identical whether tiers is on …` test (`tiers: false,`); uncited 945 and 965 is instead line 945 in the `opencode + unresolved tier-class models (0 variant files ev…` test (`tiers: false,`); and line 965 in the `a claude install with tiers on, then a re-run switching to …` test (`tiers: false,`), a different site the citing sentence never names.",
@@ -5562,7 +5562,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1823,
     end: 1841,
     anchorKey: "c4142751",
-    paragraphLine: 396,
+    paragraphLine: 397,
     uncitedLines: [1752],
     claim:
       'line 1841 cites the `opencode: an ollama-resolved class id gets no effort field` test (`expect(implementerHigh).toContain("model: ollama/llama3");`); uncited 1752 is instead line 1752 in the `opencode default files: an Ollama or provider-less resolved…` test (`expect(rendered).toContain("model: ollama/llama3");`), a different site the citing sentence never names.',
@@ -5574,7 +5574,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1874,
     end: 1892,
     anchorKey: "e3586735",
-    paragraphLine: 403,
+    paragraphLine: 404,
     uncitedLines: [1721],
     claim:
       'line 1892 cites the `opencode: a non-anthropic, non-ollama resolved class id get…` test (`expect(implementerHigh).toContain("reasoningEffort: high");`); uncited 1721 is instead line 1721 in the `opencode default files: a non-Claude-family provider-qualif…` test (`expect(rendered).toContain("reasoningEffort: high");`), a different site the citing sentence never names.',
@@ -5586,7 +5586,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1896,
     end: 1915,
     anchorKey: "49a539a9",
-    paragraphLine: 406,
+    paragraphLine: 407,
     uncitedLines: [575],
     claim:
       'line 1915 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 575 is instead line 575 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
@@ -5598,7 +5598,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 586,
     end: 597,
     anchorKey: "58938c96",
-    paragraphLine: 422,
+    paragraphLine: 423,
     uncitedLines: [674],
     claim:
       "the sentence names `composeClaudeAgent` as the function 0.22.0 gave a pinned `effort:` line; line 597 is that function's own read-only-roles push, included in the cited range, while uncited 674 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
@@ -5610,7 +5610,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 611,
     end: 631,
     anchorKey: "efde4d0d",
-    paragraphLine: 423,
+    paragraphLine: 424,
     uncitedLines: [751],
     claim:
       "the sentence names `composeOpencodeAgent` as the function 0.22.0 gave a pinned effort line; line 631 is that function's own read-only-roles push, included in the cited range, while uncited 751 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling this sentence does not name.",
@@ -5622,7 +5622,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1015,
     end: 1049,
     anchorKey: "df091a00",
-    paragraphLine: 514,
+    paragraphLine: 515,
     uncitedLines: [993],
     claim:
       'line 1049 cites the `opencode + tiers on + unresolved tier-class models (0 varia…` test (`(note) => !note.includes("-low.md") && !note.includes("-high.md"),`); uncited 993 is instead line 993 in the `a claude install with tiers on, then a re-run switching to …` test (`expect(report.notes.every((note) => !note.includes(".opencode"))).toB…`), a different site the citing sentence never names.',
@@ -5634,7 +5634,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1132,
     end: 1151,
     anchorKey: "be999e8e",
-    paragraphLine: 554,
+    paragraphLine: 555,
     uncitedLines: [529, 1587],
     claim:
       'line 1151 cites the `a plain re-run keeps the previously chosen models` test (`).toContain("model: haiku");`); uncited 529 and 1587 is instead line 529 in the `installs all four adapters; opencode agents omit model: whe…` test (`expect(claudeSlicer).toContain("model: haiku");`); and line 1587 in the `tiers=true, claude, full profile: exactly 15 agent files wi…` test (`expect(explorerLow).toContain("model: haiku");`), a different site the citing sentence never names.',
@@ -5646,7 +5646,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 133,
     end: 133,
     anchorKey: "1429a7e8",
-    paragraphLine: 614,
+    paragraphLine: 615,
     uncitedLines: [103],
     claim:
       "line 133 cites the 'delegation-and-tiers per-role routing bullet lists every role' test; uncited 103 is the same array-equality pattern inside the separate 'INSTALL-AGENT.md write-surface brace lists name every role' test, which this sentence does not name.",
@@ -5658,7 +5658,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 103,
     end: 103,
     anchorKey: "1429a7e8",
-    paragraphLine: 618,
+    paragraphLine: 619,
     uncitedLines: [133],
     claim:
       "line 103 cites the 'INSTALL-AGENT.md write-surface brace lists name every role' test; uncited 133 is the same array-equality pattern inside the separate 'delegation-and-tiers per-role routing bullet lists every role' test, which this sentence does not name.",
