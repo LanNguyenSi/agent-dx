@@ -3256,21 +3256,26 @@ describe("safety core: the docs-only closing delta stays narrowly bounded at the
 /**
  * Safety core, rule 3 (continued): an unavailable model never lowers a tier,
  * never moves a role inline, and never turns an independent review into a
- * self-review. The three sentences are pinned whole at one site, the review
- * and recovery reference; no other skill file restates them.
+ * self-review. The two sentences are pinned whole at one site, the review
+ * and recovery reference. The list of other sites is read from the files
+ * (every other skill reference, SKILL.md, the charter section and every agent
+ * prompt), so a copy added to any of them fails here.
  */
 describe("safety core: the unavailable-model rule is pinned at the review and recovery reference", () => {
   const recovery = unwrap(
     readRawAsset("skill/references/review-and-recovery.md"),
   );
-  const others = [
-    readRawAsset("skill/SKILL.md"),
-    ...workflowReferences
+  const otherSites = [
+    "skill/SKILL.md",
+    "agents-md-section.md",
+    ...readdirSync(`${PACKAGE_DIR}/assets/skill/references`)
       .filter((name) => name !== "review-and-recovery.md")
-      .map((name) => readRawAsset(`skill/references/${name}`)),
-    readRawAsset("skill/references/delegation-and-tiers.md"),
-    readRawAsset("skill/references/trust-and-outward.md"),
-  ].map(unwrap);
+      .map((name) => `skill/references/${name}`),
+    ...readdirSync(`${PACKAGE_DIR}/assets/agents`).map(
+      (name) => `agents/${name}`,
+    ),
+  ];
+  const others = otherSites.map((site) => unwrap(readRawAsset(site)));
   const countIn = (text: string, needle: string): number =>
     text.split(needle).length - 1;
 
@@ -3282,9 +3287,10 @@ describe("safety core: the unavailable-model rule is pinned at the review and re
   for (const sentence of sentencesPinned) {
     it(`states once at the reference: ${sentence.slice(0, 50)}`, () => {
       expect(countIn(recovery, sentence)).toBe(1);
-      for (const other of others) {
-        expect(other).not.toContain(sentence);
-      }
+      expect(otherSites.length).toBeGreaterThan(10);
+      others.forEach((other, i) => {
+        expect(other, otherSites[i]).not.toContain(sentence);
+      });
     });
   }
 });

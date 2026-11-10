@@ -56,7 +56,10 @@ order: re-resolve the routing against a fresh model catalog when the operator
 has already agreed to a substitution; or use an installed variant of the same
 role whose leaf is at least as strong as the one the task was given (model
 class and effort as the installed definition states them, not the tier name)
-and whose model is available, recorded as a non-default tier choice.
+and whose model is available, recorded as a non-default tier choice. A leaf on
+a weaker model is not at least as strong, whatever its effort. When the
+comparison cannot be read from the installed definitions and the routing
+record, the leaf does not qualify and the next paragraph applies.
 
 Otherwise the work is held and the orchestrator asks the operator. No role is
 moved to a weaker leaf, and no role is run inline by the orchestrator, because
