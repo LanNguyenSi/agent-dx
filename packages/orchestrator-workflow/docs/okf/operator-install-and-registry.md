@@ -3,7 +3,7 @@ type: module
 title: Operator install and target registry
 description: The operator-level home, manifest schema, locked write API, target registry, and the setup/apply/doctor/adopt commands built on top of it.
 tags: [operator, manifest, registry, lock, doctor, adopt, pin, cli]
-timestamp: 2026-10-18T16:55:56Z
+timestamp: 2026-11-10T10:48:18Z
 sources:
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -34,40 +34,40 @@ read-modify-write entry point.
 
 `resolveOperatorHome` resolves, in order: an explicit argument, then the
 `ORCHESTRATOR_WORKFLOW_HOME` environment variable
-(operator-manifest.ts:29-30#"export const OPERATOR_HOME_ENV ="), then
+(operator-manifest.ts:32-33#"export const OPERATOR_HOME_ENV ="), then
 `~/.orchestrator-workflow/`
-(operator-manifest.ts:74-83#"return join(homedir(), OPERATOR_HOME_DIRNAME);").
+(operator-manifest.ts:77-86#"return join(homedir(), OPERATOR_HOME_DIRNAME);").
 Both the explicit argument and the env var are made absolute via `node:path`'s
 `resolve`, relative to `process.cwd()`. The manifest itself lives at
 `<home>/manifest.json`
-(operator-manifest.ts:29-31#"export const OPERATOR_MANIFEST_FILENAME =").
+(operator-manifest.ts:32-34#"export const OPERATOR_MANIFEST_FILENAME =").
 
 ## The operator manifest: schema and read states
 
 `OperatorManifest` (`schemaVersion: 1`) carries `kit`, `schemaVersion`,
 `defaults`, `targets`, `createdAt`, `updatedAt`
-(operator-manifest.ts:57-63#"updatedAt: string;"). `defaults`
+(operator-manifest.ts:60-66#"updatedAt: string;"). `defaults`
 (`OperatorManifestDefaults`) carries `harnesses`, `profile`, `tiers`, legacy
 `models`, optional sparse `routing`, and optional `opencodeModels` and
 `opencodeClassModels` compatibility maps for supported bare legacy opencode
-ids (`operator-manifest.ts:41-47#"routing?: HarnessRouting;"`). `models` is a
+ids (`operator-manifest.ts:44-50#"routing?: HarnessRouting;"`). `models` is a
 `Partial<Record<Role, string>>`, not a full record, so a
 hand-written or legacy operator manifest can carry only some roles and let the
 rest fall back to the shipped defaults at the call site)
-(operator-manifest.ts:39-47#"routing?: HarnessRouting;"). Routing is parsed
+(operator-manifest.ts:42-50#"routing?: HarnessRouting;"). Routing is parsed
 strictly: an invalid map makes the operator manifest unreadable because
-silently dropping it could change native Codex agents. Each
+silently dropping it could change native Codex agents; defaults that record no `routing` are materialized once on read from their legacy inputs with the tier-uniform table they were written under. Each
 entry of `targets` (`OperatorTarget`) stores exactly `path`,
 `lastAppliedVersion`, `lastAppliedAt`
-(operator-manifest.ts:51-54#"lastAppliedAt: string;").
+(operator-manifest.ts:54-57#"lastAppliedAt: string;").
 
 `readOperatorManifest` degrades every field independently rather than failing
 whole, the same posture `readInstalledManifest` takes for a repo manifest: an
 invalid harness, model id, profile, or tiers value is dropped or replaced with
 its shipped default instead of throwing. Only the envelope is a hard
 requirement: a `kit` that is not `"orchestrator-workflow"`
-(operator-manifest.ts:111-124#"if (candidate.kit !==") or a `schemaVersion`
-that is not `1` (operator-manifest.ts:111-125#"if (candidate.schemaVersion !==")
+(operator-manifest.ts:114-127#"if (candidate.kit !==") or a `schemaVersion`
+that is not `1` (operator-manifest.ts:114-128#"if (candidate.schemaVersion !==")
 makes the whole read return `undefined` (not a manifest this kit recognizes),
 rather than guessing.
 
@@ -75,8 +75,8 @@ A read lands in exactly one of three states, `OperatorManifestState`: `absent`
 (no file at all, the fresh-operator case), `unreadable` (a file exists but did
 not parse or validate, e.g. corrupt JSON or a foreign envelope), or `ok` (with
 `manifest` set)
-(operator-manifest.ts:534-537#"manifest: OperatorManifest };",
-operator-manifest.ts:539-543#"return manifest ? { kind:"). This distinction
+(operator-manifest.ts:543-546#"manifest: OperatorManifest };",
+operator-manifest.ts:548-552#"return manifest ? { kind:"). This distinction
 matters operationally: `absent` says "run `setup`", `unreadable` says "back it
 up and repair it, or remove it and run `setup` again"; re-running `setup`
 blindly over an unreadable file would silently wipe whatever registry data
@@ -86,7 +86,7 @@ survives next to the damaged envelope.
 
 The manifest is never written directly outside of one function,
 `updateOperatorManifest`
-(operator-manifest.ts:577#"export function updateOperatorManifest("): every
+(operator-manifest.ts:586#"export function updateOperatorManifest("): every
 write from `setup`, `apply`, `doctor --prune`, and `adopt` goes through it, so
 no command can bypass the lock and race another's read-modify-write. It runs
 the whole re-read, `mutate`, and write inside one locked critical section: the
@@ -94,43 +94,43 @@ manifest handed to `mutate` is re-read *inside* the lock, not whatever the
 caller read earlier (which can already be stale by the time the lock is
 granted). Returning `undefined` from `mutate` means "write nothing" and yields
 `written: false`
-(operator-manifest.ts:576-596#"return { state, written: false };"); returning
+(operator-manifest.ts:585-605#"return { state, written: false };"); returning
 a manifest writes it inside the lock via the internal, unlocked writer
-(operator-manifest.ts:577-623#"writeOperatorManifestUnlocked(home, toWrite);").
+(operator-manifest.ts:586-632#"writeOperatorManifestUnlocked(home, toWrite);").
 
 The lock itself, `withOperatorManifestLock`
-(operator-manifest.ts:424-431#"const pollMs = options.pollMs ?? DEFAULT_LOCK_POLL_MS;"),
+(operator-manifest.ts:433-440#"const pollMs = options.pollMs ?? DEFAULT_LOCK_POLL_MS;"),
 is a same-machine, advisory mutex built on `mkdirSync(<home>/.manifest.lock)`
-(operator-manifest.ts:250#"const OPERATOR_MANIFEST_LOCK_DIRNAME ="): directory
+(operator-manifest.ts:259#"const OPERATOR_MANIFEST_LOCK_DIRNAME ="): directory
 creation is atomic on every filesystem Node targets, so a second concurrent
 `mkdirSync` for the same path fails with `EEXIST` rather than silently
 succeeding. Right after acquiring the lock directory, a fresh random token is
 written to `<lockPath>/owner`
-(operator-manifest.ts:443#"writeFileSync(ownerPath, ownToken,"); the lock is
+(operator-manifest.ts:452#"writeFileSync(ownerPath, ownToken,"); the lock is
 released in `finally` only when that owner file still holds this call's own
-token (operator-manifest.ts:506#"if (currentOwner === ownToken) {"), so a
+token (operator-manifest.ts:515#"if (currentOwner === ownToken) {"), so a
 call whose lock was reclaimed out from under it (see below) never tears down
 the new owner's critical section.
 
 A caller that finds the lock held retries with a short synchronous sleep until
 either it acquires the lock or the default 40-second timeout elapses, in which
 case it throws `OperatorManifestLockTimeoutError` without ever calling `fn`
-(operator-manifest.ts:495#"throw new OperatorManifestLockTimeoutError(lockPath);",
-operator-manifest.ts:258#"export const DEFAULT_LOCK_TIMEOUT_MS = 40_000;").
+(operator-manifest.ts:504#"throw new OperatorManifestLockTimeoutError(lockPath);",
+operator-manifest.ts:267#"export const DEFAULT_LOCK_TIMEOUT_MS = 40_000;").
 On every failed attempt, a lock directory older than the default 30-second
 staleness window (checked via its mtime) is treated as abandoned, most likely
 left behind by a process that crashed between acquiring and releasing it, and
 reclaim is attempted by renaming it aside
-(operator-manifest.ts:262#"export const DEFAULT_LOCK_STALE_MS = 30_000;",
-operator-manifest.ts:450#"const staleRenamePath ="). The staleness check and
+(operator-manifest.ts:271#"export const DEFAULT_LOCK_STALE_MS = 30_000;",
+operator-manifest.ts:459#"const staleRenamePath ="). The staleness check and
 the rename are two separate syscalls, so age is re-checked a second time on
 the renamed copy before it is actually destroyed
-(operator-manifest.ts:341#"export function shouldDestroyReclaimedLock(",
-operator-manifest.ts:341-345#"return postAgeMs !== undefined && postAgeMs > staleMs;");
+(operator-manifest.ts:350#"export function shouldDestroyReclaimedLock(",
+operator-manifest.ts:350-354#"return postAgeMs !== undefined && postAgeMs > staleMs;");
 a lock that turns out fresh on that second check is handed back to its real
 owner instead of destroyed. The 40-second timeout is deliberately kept above
 the 30-second staleness window, and pinned as such by a dedicated test
-(test/operator-manifest.test.ts:606-613#"expect(DEFAULT_LOCK_TIMEOUT_MS).toBeGreaterThan(DEFAULT_LOCK_STALE_MS);"):
+(test/operator-manifest.test.ts:611-618#"expect(DEFAULT_LOCK_TIMEOUT_MS).toBeGreaterThan(DEFAULT_LOCK_STALE_MS);"):
 a waiter that starts anywhere from 0ms up to the staleness window after a
 killed holder left its lock behind must still be alive, polling, when that
 lock crosses the staleness threshold, rather than timing out first.
@@ -138,22 +138,22 @@ lock crosses the staleness threshold, rather than timing out first.
 ## The target registry
 
 Registering a target is `upsertOperatorTarget`
-(operator-manifest.ts:683#"export function upsertOperatorTarget("): it
+(operator-manifest.ts:692#"export function upsertOperatorTarget("): it
 dedupes by realpath, not raw string equality
-(operator-manifest.ts:682-691#"(target) => safeRealpath(target.path) === resolvedPath,"),
+(operator-manifest.ts:691-700#"(target) => safeRealpath(target.path) === resolvedPath,"),
 via a realpath helper that never throws
-(operator-manifest.ts:659#"export function safeRealpath(candidate: string): string {"),
+(operator-manifest.ts:668#"export function safeRealpath(candidate: string): string {"),
 so the same directory reached via a symlink or a differently-cased path
 updates the existing entry in place instead of appending a duplicate. Both
 `apply` and `adopt` call it inside their own `updateOperatorManifest`
 mutation; a brand-new operator manifest otherwise starts with an empty
 `targets` array
-(operator-manifest.ts:87-98#"updatedAt: timestamp,"). Nothing removes a
+(operator-manifest.ts:90-101#"updatedAt: timestamp,"). Nothing removes a
 well-formed registry entry except `doctor --prune` (below); a row that
 fails `readOperatorManifest`'s own per-entry shape check is silently
 dropped on read instead, before any command ever sees it, since every
 write path rewrites the manifest from that same validated read
-(operator-manifest.ts:178-187#"typeof t.lastAppliedAt ==="). An `uninstall` on the
+(operator-manifest.ts:187-196#"typeof t.lastAppliedAt ==="). An `uninstall` on the
 target repository never touches the registry either way (see "Uninstall"
 below).
 
@@ -183,7 +183,7 @@ harnesses/profile/tiers/models/routing precedence is layered:
    `resolveInitInputs` already applies to a plain `init` re-run: for
    example `--tiers`/`--no-tiers` always overrides whatever `previous`
    (the synthetic manifest built below) carries
-   (cli-inputs.ts:386#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
+   (cli-inputs.ts:390#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
 2. Absent an explicit `--harness`, harnesses fall back to the target's own
    recorded harnesses, else the operator defaults, else detection, else `claude`
    (cli.ts:719-721#"else the operator defaults, else detected",
@@ -225,7 +225,7 @@ CLI layer, a usage error rather than an implicit precedence rule
 resolves the final stored pin the same way for both `init` and `apply`: a
 `string` sets it, `null` clears it, `undefined` (the default, no flag passed)
 carries the previous manifest's pin forward unchanged
-(init.ts:784-791#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
+(init.ts:793-800#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
 
 Registration happens even when local edits left some files `conflicted` (the
 apply itself still ran). The pin gate returns before the install is ever
@@ -361,13 +361,13 @@ not-a-directory check land on exit code 1, while `apply`'s own
 ## The pin rule
 
 A repo manifest's optional `pin` field
-(init.ts:148-168#"pin?: string;") records a kit-version an operator wants that
+(init.ts:150-170#"pin?: string;") records a kit-version an operator wants that
 repo to stay at, independent of `version` (the actually-installed kit
 version); `InitOptions.pin` is how a caller sets it: a `string` to set, `null`
 to clear, `undefined` to carry the previous value forward unchanged
-(init.ts:105-113#"pin?: string | null;"). A stored pin that is empty or
+(init.ts:107-115#"pin?: string | null;"). A stored pin that is empty or
 whitespace-only is treated as no pin at all, both on write and on read back
-(init.ts:492-496#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
+(init.ts:501-505#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
 computation applies the pin rule precisely: a recorded pin suppresses
 `version-lag` only when the pin equals the repo's own *installed* version;
 that is the expected, deliberate-stay state. When the pin and the installed

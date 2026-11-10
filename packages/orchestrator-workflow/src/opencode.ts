@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 
-import type { ModelAlias, Role } from "./models.js";
-import { isModelAlias } from "./models.js";
+import type { ModelAlias, ModelClass, Role } from "./models.js";
+import { CLASS_MODELS, isModelAlias, lowerModelClass } from "./models.js";
 
 // ---------------------------------------------------------------------------
 // Pure catalog helpers (unit-testable without shell access)
@@ -97,6 +97,7 @@ const FAMILY_TOKENS: Record<ModelAlias, string> = {
   sonnet: "claude-sonnet",
   opus: "claude-opus",
   haiku: "claude-haiku",
+  fable: "claude-fable",
 };
 
 /**
@@ -149,26 +150,60 @@ export function resolveAlias(
 }
 
 /**
+ * Resolves a model class to a fully-qualified id. When the class's own alias
+ * has no model in the catalog, the next lower class that has one is used and
+ * `usedClass` names it; `undefined` means no class at or below resolved.
+ */
+export function resolveClassWithFallback(
+  provider: string,
+  modelClass: ModelClass,
+  catalog: string[],
+): { model: string; usedClass: ModelClass } | undefined {
+  for (
+    let current: ModelClass | undefined = modelClass;
+    current !== undefined;
+    current = lowerModelClass(current)
+  ) {
+    const model = resolveAlias(provider, CLASS_MODELS[current], catalog);
+    if (model !== undefined) return { model, usedClass: current };
+  }
+  return undefined;
+}
+
+/**
  * Resolves each role's model string to a fully-qualified opencode id or
  * `undefined` (meaning: omit `model:` and inherit the session model).
  *
  * - Already fully-qualified values (contain `/`) pass through unchanged.
- * - Known aliases are resolved via the live catalog + provider detection.
+ * - Known aliases are resolved via the live catalog + provider detection. An
+ *   alias with no model in the catalog is never replaced by another model:
+ *   `model:` is omitted, with a warning.
  * - Unknown bare strings (not an alias, no `/`) → `undefined` + warning.
  * - When provider detection is ambiguous or yields nothing → `undefined` +
  *   one combined warning asking the user to pass `--opencode-provider <id>`
  *   or fully-qualified `--models`.
+ *
+ * `reportRoles` limits the warnings to the roles whose resolved value the
+ * caller actually uses; every role is still resolved. It defaults to all
+ * roles.
  */
 export function resolveOpencodeModels(
   roleModels: Record<Role, string>,
-  opts: { catalog: string[]; explicitProvider?: string },
+  opts: {
+    catalog: string[];
+    explicitProvider?: string;
+    reportRoles?: Role[];
+  },
 ): { resolved: Record<Role, string | undefined>; warnings: string[] } {
-  const { catalog, explicitProvider } = opts;
+  const { catalog, explicitProvider, reportRoles } = opts;
   const resolved = {} as Record<Role, string | undefined>;
   const warnings: string[] = [];
+  const reported = (role: Role) =>
+    reportRoles === undefined || reportRoles.includes(role);
 
   // Lazily detect provider once, shared across all roles.
   let providerResult: { provider?: string; ambiguous: boolean } | undefined;
+  let providerWarningNeeded = false;
 
   for (const [role, model] of Object.entries(roleModels) as [Role, string][]) {
     if (model.includes("/")) {
@@ -179,9 +214,10 @@ export function resolveOpencodeModels(
 
     if (!isModelAlias(model)) {
       resolved[role] = undefined;
-      warnings.push(
-        `Role "${role}": "${model}" is not a known alias and has no provider prefix; model: will be omitted (inherits session model).`,
-      );
+      if (reported(role))
+        warnings.push(
+          `Role "${role}": "${model}" is not a known alias and has no provider prefix; model: will be omitted (inherits session model).`,
+        );
       continue;
     }
 
@@ -196,26 +232,24 @@ export function resolveOpencodeModels(
     if (providerResult.provider === undefined) {
       // Warning will be added once after the loop.
       resolved[role] = undefined;
+      if (reported(role)) providerWarningNeeded = true;
       continue;
     }
 
-    const fq = resolveAlias(
-      providerResult.provider,
-      model as ModelAlias,
-      catalog,
-    );
+    const fq = resolveAlias(providerResult.provider, model, catalog);
     if (fq === undefined) {
       resolved[role] = undefined;
-      warnings.push(
-        `Role "${role}": provider "${providerResult.provider}" has no "${model}" model in the catalog; model: will be omitted.`,
-      );
+      if (reported(role))
+        warnings.push(
+          `Role "${role}": provider "${providerResult.provider}" has no "${model}" model in the catalog; model: will be omitted.`,
+        );
     } else {
       resolved[role] = fq;
     }
   }
 
   // Emit one combined warning for ambiguous / no-provider cases.
-  if (providerResult !== undefined && providerResult.provider === undefined) {
+  if (providerResult !== undefined && providerWarningNeeded) {
     const msg = providerResult.ambiguous
       ? `Multiple providers offer Claude models in the live catalog; cannot auto-detect. Pass --opencode-provider <id> or use fully-qualified --models (e.g. provider/model-id) per role to resolve aliases.`
       : `No provider offering Claude models found in the live catalog. Pass --opencode-provider <id> or use fully-qualified --models (e.g. provider/model-id) per role to resolve aliases.`;

@@ -110,7 +110,7 @@ describe("fresh install", () => {
       "utf8",
     );
     expect(slicer).toContain("name: task-slicer");
-    expect(slicer).toContain("model: sonnet");
+    expect(slicer).toMatch(/^model: opus$/m);
     const reviewer = readFileSync(
       join(target, ".claude", "agents", "reviewer.md"),
       "utf8",
@@ -1491,7 +1491,7 @@ describe("tier variants (`--tiers`)", () => {
   });
 
   it("default agent files are byte-identical whether tiers is on or off (0.22.0 pinned-default-effort invariant)", () => {
-    // The pinned default effort (`TIER_DEFS[DEFAULT_TIER[role]].effort`) is
+    // The pinned default effort (`tierDef(role, DEFAULT_TIER[role]).effort`) is
     // decided inside composeClaudeAgent/composeOpencodeAgent themselves and
     // does not read the `tiers` flag at all, so every role's default
     // (unsuffixed) file must render byte-identically regardless of whether
@@ -1592,17 +1592,17 @@ describe("tier variants (`--tiers`)", () => {
       join(target, ".claude", "agents", "implementer-xhigh.md"),
       "utf8",
     );
-    expect(implementerXhigh).toContain("model: opus");
-    expect(implementerXhigh).toContain("effort: xhigh");
+    expect(implementerXhigh).toContain("model: fable");
+    expect(implementerXhigh).toContain("effort: high");
 
-    // advisor's default file stays opus with its own pinned default effort
+    // advisor's default file is fable with its own pinned default effort
     // (`high`, from DEFAULT_TIER.advisor), same anti-downgrade shape as
     // reviewer above.
     const advisor = readFileSync(
       join(target, ".claude", "agents", "advisor.md"),
       "utf8",
     );
-    expect(advisor).toContain("model: opus");
+    expect(advisor).toContain("model: fable");
     expect(advisor).toContain("effort: high");
     expect(advisor).toContain("disallowedTools: Edit, Write, NotebookEdit");
 
@@ -1612,7 +1612,7 @@ describe("tier variants (`--tiers`)", () => {
       join(target, ".claude", "agents", "advisor-xhigh.md"),
       "utf8",
     );
-    expect(advisorXhigh).toContain("model: opus");
+    expect(advisorXhigh).toContain("model: fable");
     expect(advisorXhigh).toContain("effort: xhigh");
     expect(advisorXhigh).toContain(
       "disallowedTools: Edit, Write, NotebookEdit",
@@ -1776,15 +1776,25 @@ describe("tier variants (`--tiers`)", () => {
         small: "anthropic/claude-haiku-4-5",
         medium: "anthropic/claude-sonnet-4-6",
         large: "anthropic/claude-opus-4-8",
+        xlarge: "anthropic/claude-fable-5",
       },
     });
 
+    const advisorMax = readFileSync(
+      join(target, ".opencode", "agents", "advisor-xhigh.md"),
+      "utf8",
+    );
+    expect(advisorMax).toContain("model: anthropic/claude-fable-5");
+    expect(advisorMax).toContain("variant: max");
+
+    // The reviewer xhigh variant runs the xlarge class at `high` effort.
     const reviewerXhigh = readFileSync(
       join(target, ".opencode", "agents", "reviewer-xhigh.md"),
       "utf8",
     );
-    expect(reviewerXhigh).toContain("model: anthropic/claude-opus-4-8");
-    expect(reviewerXhigh).toContain("variant: max");
+    expect(reviewerXhigh).toContain("model: anthropic/claude-fable-5");
+    expect(reviewerXhigh).toContain("variant: high");
+    expect(reviewerXhigh).not.toContain("variant: max");
 
     const implementerHigh = readFileSync(
       join(target, ".opencode", "agents", "implementer-high.md"),
@@ -1793,13 +1803,21 @@ describe("tier variants (`--tiers`)", () => {
     expect(implementerHigh).toContain("model: anthropic/claude-sonnet-4-6");
     expect(implementerHigh).toContain("variant: high");
 
+    // The implementer low tier runs the medium class at low effort.
     const implementerLow = readFileSync(
       join(target, ".opencode", "agents", "implementer-low.md"),
       "utf8",
     );
-    expect(implementerLow).toContain("model: anthropic/claude-haiku-4-5");
+    expect(implementerLow).toContain("model: anthropic/claude-sonnet-4-6");
     expect(implementerLow).not.toContain("variant:");
     expect(implementerLow).not.toContain("reasoningEffort");
+
+    const explorerLow = readFileSync(
+      join(target, ".opencode", "agents", "explorer-low.md"),
+      "utf8",
+    );
+    expect(explorerLow).toContain("model: anthropic/claude-haiku-4-5");
+    expect(explorerLow).not.toContain("variant:");
   });
 
   it("opencode: an ollama-resolved class id gets no effort field", () => {
@@ -1911,17 +1929,21 @@ describe("tier variants (`--tiers`)", () => {
         small: "openrouter/anthropic/claude-haiku-4.5",
         medium: "openrouter/anthropic/claude-sonnet-4.6",
         large: "openrouter/anthropic/claude-opus-4.8",
+        xlarge: "openrouter/anthropic/claude-fable-5",
       },
     });
 
+    const advisorMax = readFileSync(
+      join(target, ".opencode", "agents", "advisor-xhigh.md"),
+      "utf8",
+    );
+    expect(advisorMax).toContain("model: openrouter/anthropic/claude-fable-5");
+    expect(advisorMax).toContain("variant: max");
     const reviewerXhigh = readFileSync(
       join(target, ".opencode", "agents", "reviewer-xhigh.md"),
       "utf8",
     );
-    expect(reviewerXhigh).toContain(
-      "model: openrouter/anthropic/claude-opus-4.8",
-    );
-    expect(reviewerXhigh).toContain("variant: max");
+    expect(reviewerXhigh).toContain("variant: high");
     expect(reviewerXhigh).not.toContain("reasoningEffort");
   });
 

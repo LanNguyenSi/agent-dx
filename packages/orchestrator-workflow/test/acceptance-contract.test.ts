@@ -378,6 +378,7 @@ describe("generated and legacy installed contracts", () => {
             small: "test/small",
             medium: "test/medium",
             large: "test/large",
+            xlarge: "test/xlarge",
           },
         });
       install();

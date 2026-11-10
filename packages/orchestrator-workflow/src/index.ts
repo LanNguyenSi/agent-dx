@@ -19,15 +19,24 @@ export {
   PROFILES,
   ROLES,
   ROLE_TIERS,
-  TIER_DEFS,
+  PRE_ROLE_TIER_DEFS,
+  ROLE_TIER_DEFS,
   claudeModelValue,
   isProfile,
   opencodeModelValue,
   parseModelsSpec,
   parseProfile,
   rolesForProfile,
+  tierDef,
 } from "./models.js";
-export type { ModelAlias, ModelClass, Profile, Role, Tier } from "./models.js";
+export type {
+  ModelAlias,
+  ModelClass,
+  Profile,
+  Role,
+  Tier,
+  TierDef,
+} from "./models.js";
 export type { Report } from "./writers.js";
 export { PACKAGE_VERSION } from "./assets.js";
 export {

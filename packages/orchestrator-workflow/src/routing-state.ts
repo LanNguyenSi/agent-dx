@@ -1,21 +1,25 @@
 import type { Harness } from "./detect.js";
 import { HARNESSES } from "./detect.js";
-import type { ModelClass, Profile, Role, Tier } from "./models.js";
+import type { ModelClass, Profile, Role, Tier, TierDef } from "./models.js";
 import {
   CLASS_MODELS,
   DEFAULT_MODELS,
+  PRE_ROLE_TIER_DEFS,
+  belowRoleFloor,
   DEFAULT_TIER,
   MODEL_CLASSES,
   ROLE_TIERS,
+  ROLE_TIER_DEFS,
   ROLES,
-  TIER_DEFS,
   opencodeModelValue,
   rolesForProfile,
+  tierDef,
 } from "./models.js";
 import {
   defaultCodexRouting,
   mergeRouting,
   parseRouting,
+  preRoutingCodexRouting,
   validateCodexCatalog,
 } from "./routing.js";
 import type { HarnessRouting } from "./routing.js";
@@ -168,11 +172,64 @@ export function codexCatalogWarnings(
   );
 }
 
+/**
+ * The opencode model of a tier-variant leaf taken from the class map, or
+ * `undefined` when the class has none or the model sits below the role's
+ * class floor (the leaf is then omitted and inherits the session model).
+ */
+export function opencodeClassLeafModel(
+  role: Role,
+  modelClass: ModelClass,
+  classModels: OpencodeModelMaps["opencodeClassModels"],
+): string | undefined {
+  const model = classModels?.[modelClass];
+  if (!model || belowRoleFloor(role, model, classModels)) return undefined;
+  return model;
+}
+
+/**
+ * The routing of a manifest that records none (written before routing
+ * existed): derived once from its legacy inputs with the tier-uniform table
+ * of that time, so a re-install keeps the routing that install was running
+ * instead of adopting the current per-role defaults for its non-default
+ * tiers, and its Codex leaves from the Codex aliases and efforts of that time
+ * (every version that knows routing records them, also on an install that
+ * does not use Codex, so they are derived whichever harnesses are selected).
+ */
+export function materializePreRoutingRouting(
+  harnesses: Harness[],
+  models: Partial<Record<Role, string>>,
+  maps: OpencodeModelMaps,
+): HarnessRouting | undefined {
+  const materialized = persistableRouting(
+    mergeRouting(
+      preRoutingCodexRouting(),
+      legacyRouting(
+        harnesses,
+        { ...DEFAULT_MODELS, ...models },
+        maps.opencodeModels,
+        maps.opencodeClassModels,
+        PRE_ROLE_TIER_DEFS,
+      ),
+    ),
+  );
+  return Object.keys(materialized).length > 0 ? materialized : undefined;
+}
+
+/**
+ * Derives the Claude Code and opencode routing from the legacy inputs: the
+ * default tier takes the per-role model (`models`), every other tier takes the
+ * model of its class in `defs`, and the effort comes from `defs`. `defs`
+ * defaults to the current per-role table; a manifest that records no routing
+ * is materialized once with the table it was installed under instead (see
+ * `PRE_ROLE_TIER_DEFS`).
+ */
 export function legacyRouting(
   harnesses: Harness[],
   models: Record<Role, string>,
   opencodeModels: OpencodeModelMaps["opencodeModels"],
   opencodeClassModels: OpencodeModelMaps["opencodeClassModels"],
+  defs: Record<Role, Partial<Record<Tier, TierDef>>> = ROLE_TIER_DEFS,
 ): HarnessRouting {
   const routing: HarnessRouting = {};
   if (harnesses.includes("claude")) {
@@ -181,14 +238,15 @@ export function legacyRouting(
       routing.claude[role] = {
         [DEFAULT_TIER[role]]: {
           model: models[role],
-          effort: DEFAULT_TIER[role],
+          effort: tierDef(role, DEFAULT_TIER[role], defs).effort,
         },
       };
       for (const tier of ROLE_TIERS[role]) {
         if (tier === DEFAULT_TIER[role]) continue;
+        const def = tierDef(role, tier, defs);
         routing.claude[role]![tier] = {
-          model: CLASS_MODELS[TIER_DEFS[tier].modelClass],
-          effort: tier,
+          model: CLASS_MODELS[def.modelClass],
+          effort: def.effort,
         };
       }
     }
@@ -204,16 +262,21 @@ export function legacyRouting(
         routing.opencode[role] = {
           [DEFAULT_TIER[role]]: {
             model: defaultModel,
-            effort: DEFAULT_TIER[role],
+            effort: tierDef(role, DEFAULT_TIER[role], defs).effort,
           },
         };
       }
       for (const tier of ROLE_TIERS[role]) {
         if (tier === DEFAULT_TIER[role]) continue;
-        const model = opencodeClassModels?.[TIER_DEFS[tier].modelClass];
+        const def = tierDef(role, tier, defs);
+        const model = opencodeClassLeafModel(
+          role,
+          def.modelClass,
+          opencodeClassModels,
+        );
         if (!model) continue;
         routing.opencode[role] ??= {};
-        routing.opencode[role]![tier] = { model, effort: tier };
+        routing.opencode[role]![tier] = { model, effort: def.effort };
       }
     }
   }
@@ -335,7 +398,11 @@ export function recordedOpencodeInheritance(
     ? maps.opencodeModels !== undefined &&
         maps.opencodeModels[role] === undefined
     : maps.opencodeClassModels !== undefined &&
-        maps.opencodeClassModels[TIER_DEFS[tier].modelClass] === undefined;
+        opencodeClassLeafModel(
+          role,
+          tierDef(role, tier).modelClass,
+          maps.opencodeClassModels,
+        ) === undefined;
 }
 
 /** Merge recorded resolution state independently of the active render scope. */

@@ -5,6 +5,7 @@ import {
   parseOpencodeCatalog,
   providerOf,
   resolveAlias,
+  resolveClassWithFallback,
   resolveOpencodeModels,
 } from "../src/opencode.js";
 import { DEFAULT_MODELS } from "../src/models.js";
@@ -224,9 +225,12 @@ describe("resolveOpencodeModels — FQ ids pass through", () => {
   });
 });
 
+// The default advisor alias is fable; these catalogs carry no fable model.
+const MODELS_WITHOUT_FABLE = { ...DEFAULT_MODELS, advisor: "opus" };
+
 describe("resolveOpencodeModels — alias resolution", () => {
   it("resolves known aliases via the catalog", () => {
-    const { resolved, warnings } = resolveOpencodeModels(DEFAULT_MODELS, {
+    const { resolved, warnings } = resolveOpencodeModels(MODELS_WITHOUT_FABLE, {
       catalog: GH_CATALOG,
     });
     expect(resolved.explorer).toBe("github-copilot/claude-sonnet-4.6");
@@ -243,7 +247,7 @@ describe("resolveOpencodeModels — alias resolution", () => {
       "provider-b/claude-opus-4.8",
       "provider-b/claude-haiku-4.5",
     ];
-    const { resolved, warnings } = resolveOpencodeModels(DEFAULT_MODELS, {
+    const { resolved, warnings } = resolveOpencodeModels(MODELS_WITHOUT_FABLE, {
       catalog,
       explicitProvider: "provider-b",
     });
@@ -306,5 +310,145 @@ describe("resolveOpencodeModels — empty catalog (opencode not available)", () 
       expect(v).toBeUndefined();
     }
     expect(warnings).toHaveLength(1);
+  });
+});
+
+describe("fable alias and class fallback", () => {
+  const FABLE_CATALOG = [
+    "github-copilot/claude-haiku-4.5",
+    "github-copilot/claude-sonnet-4.6",
+    "github-copilot/claude-opus-4.8",
+    "github-copilot/claude-fable-5",
+  ];
+
+  it("resolveAlias matches the claude-fable family token", () => {
+    expect(resolveAlias("github-copilot", "fable", FABLE_CATALOG)).toBe(
+      "github-copilot/claude-fable-5",
+    );
+    expect(
+      resolveAlias("github-copilot", "fable", [
+        "github-copilot/claude-fable-4",
+        "github-copilot/claude-fable-5",
+        "github-copilot/claude-opus-4.8",
+      ]),
+    ).toBe("github-copilot/claude-fable-5");
+    expect(resolveAlias("github-copilot", "fable", GH_CATALOG)).toBeUndefined();
+  });
+
+  it("detectProvider counts a fable-only provider as a Claude provider", () => {
+    expect(
+      detectProvider({ catalog: ["github-copilot/claude-fable-5"] }),
+    ).toEqual({ provider: "github-copilot", ambiguous: false });
+  });
+
+  it("resolveClassWithFallback: class resolved uses its own model", () => {
+    expect(
+      resolveClassWithFallback("github-copilot", "xlarge", FABLE_CATALOG),
+    ).toEqual({ model: "github-copilot/claude-fable-5", usedClass: "xlarge" });
+  });
+
+  it("resolveClassWithFallback: class missing uses the next lower class that resolved", () => {
+    expect(
+      resolveClassWithFallback("github-copilot", "xlarge", GH_CATALOG),
+    ).toEqual({ model: "github-copilot/claude-opus-4.8", usedClass: "large" });
+    expect(
+      resolveClassWithFallback("github-copilot", "xlarge", [
+        "github-copilot/claude-haiku-4.5",
+      ]),
+    ).toEqual({ model: "github-copilot/claude-haiku-4.5", usedClass: "small" });
+  });
+
+  it("resolveClassWithFallback: nothing at or below resolves", () => {
+    expect(
+      resolveClassWithFallback("github-copilot", "xlarge", ["other/model"]),
+    ).toBeUndefined();
+    expect(
+      resolveClassWithFallback("github-copilot", "small", [
+        "github-copilot/claude-sonnet-4.6",
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("resolveOpencodeModels: the advisor default resolves to fable when the catalog has it, with no warning", () => {
+    const { resolved, warnings } = resolveOpencodeModels(DEFAULT_MODELS, {
+      catalog: FABLE_CATALOG,
+    });
+    expect(resolved.advisor).toBe("github-copilot/claude-fable-5");
+    expect(resolved["task-slicer"]).toBe("github-copilot/claude-opus-4.8");
+    expect(warnings).toEqual([]);
+  });
+
+  it.each(["advisor", "reviewer", "explorer"] as const)(
+    "resolveOpencodeModels: a default-tier alias that does not resolve omits the model and warns, with no class fallback (%s)",
+    (role) => {
+      // Only a haiku model exists: a class fallback would pin every role to it.
+      const { resolved, warnings } = resolveOpencodeModels(
+        { ...DEFAULT_MODELS, [role]: "fable" },
+        { catalog: ["github-copilot/claude-haiku-4.5"] },
+      );
+      expect(resolved[role]).toBeUndefined();
+      expect(warnings).toContain(
+        `Role "${role}": provider "github-copilot" has no "fable" model in the catalog; model: will be omitted.`,
+      );
+    },
+  );
+
+  it("resolveOpencodeModels: a default-tier alias given explicitly is never replaced by another model", () => {
+    const { resolved } = resolveOpencodeModels(
+      { ...DEFAULT_MODELS, reviewer: "opus" },
+      {
+        catalog: [
+          "github-copilot/claude-haiku-4.5",
+          "github-copilot/claude-sonnet-4.6",
+        ],
+      },
+    );
+    expect(resolved.reviewer).toBeUndefined();
+    expect(resolved.explorer).toBe("github-copilot/claude-sonnet-4.6");
+  });
+
+  it("resolveOpencodeModels: nothing resolves for the class keeps the omitted-model warning", () => {
+    const { resolved, warnings } = resolveOpencodeModels(
+      { ...DEFAULT_MODELS, advisor: "fable" },
+      {
+        catalog: ["github-copilot/claude-opus-4.8"],
+        explicitProvider: "other-provider",
+      },
+    );
+    expect(resolved.advisor).toBeUndefined();
+    expect(warnings.some((w) => w.includes('"fable"'))).toBe(true);
+  });
+
+  it("resolveOpencodeModels: reportRoles limits the warnings to the roles whose value is used", () => {
+    // Neither opus (reviewer) nor fable (advisor) exists; only the explorer's
+    // value is used by the caller.
+    const catalog = [
+      "github-copilot/claude-haiku-4.5",
+      "github-copilot/claude-sonnet-4.6",
+    ];
+    const { resolved, warnings } = resolveOpencodeModels(DEFAULT_MODELS, {
+      catalog,
+      reportRoles: ["explorer"],
+    });
+    expect(resolved.explorer).toBe("github-copilot/claude-sonnet-4.6");
+    expect(resolved.reviewer).toBeUndefined();
+    expect(warnings).toEqual([]);
+    const all = resolveOpencodeModels(DEFAULT_MODELS, { catalog });
+    expect(all.warnings.some((w) => w.includes('Role "reviewer"'))).toBe(true);
+    expect(all.warnings.some((w) => w.includes('Role "advisor"'))).toBe(true);
+  });
+
+  it("resolveOpencodeModels: the combined provider warning needs a reported role", () => {
+    const catalog = ["a/claude-sonnet-4.6", "b/claude-sonnet-4.6"];
+    expect(
+      resolveOpencodeModels(DEFAULT_MODELS, {
+        catalog,
+        reportRoles: ["reviewer"],
+      }).warnings,
+    ).toHaveLength(1);
+    expect(
+      resolveOpencodeModels(DEFAULT_MODELS, { catalog, reportRoles: [] })
+        .warnings,
+    ).toEqual([]);
   });
 });

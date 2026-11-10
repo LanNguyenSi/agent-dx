@@ -251,9 +251,10 @@ describe("resolveInitInputs: opencode branch", () => {
       opts: { harness: "opencode", tiers: true },
     });
     expect(result.tiers).toBe(true);
-    // 1 combined per-role warning + 3 per-class warnings (small/medium/large).
-    expect(result.warnings).toHaveLength(4);
-    for (const modelClass of ["small", "medium", "large"]) {
+    // 1 combined per-role warning + 4 per-class warnings
+    // (small/medium/large/xlarge).
+    expect(result.warnings).toHaveLength(5);
+    for (const modelClass of ["small", "medium", "large", "xlarge"]) {
       expect(
         result.warnings.some(
           (w) =>
@@ -919,5 +920,357 @@ describe("routing input and interactive harness selection", () => {
       }),
     ).rejects.toThrow(/Unknown harness/);
     expect(inquirer.prompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveInitInputs: opencode fallback to the next lower model class", () => {
+  // A stub `opencode` on PATH prints the catalog under test; PATH holds only
+  // that directory so the host's real opencode never answers.
+  let binDir: string;
+  let originalPath: string | undefined;
+
+  function stubCatalog(lines: string[]): void {
+    const script = `#!/bin/sh\nprintf '%s\\n' ${lines.map((line) => `'${line}'`).join(" ")}\n`;
+    writeFileSync(join(binDir, "opencode"), script, { mode: 0o755 });
+  }
+
+  beforeEach(() => {
+    binDir = mkdtempSync(join(tmpdir(), "stub-opencode-"));
+    originalPath = process.env.PATH;
+    process.env.PATH = binDir;
+  });
+
+  afterEach(() => {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    rmSync(binDir, { recursive: true, force: true });
+  });
+
+  const FULL_CATALOG = [
+    "github-copilot/claude-haiku-4.5",
+    "github-copilot/claude-sonnet-4.6",
+    "github-copilot/claude-opus-4.8",
+    "github-copilot/claude-fable-5",
+  ];
+
+  it("class resolved: every class and role keeps its own model and no note is printed", async () => {
+    stubCatalog(FULL_CATALOG);
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous: undefined,
+      opts: { harness: "opencode", tiers: true },
+    });
+    expect(result.opencodeClassModels).toEqual({
+      small: "github-copilot/claude-haiku-4.5",
+      medium: "github-copilot/claude-sonnet-4.6",
+      large: "github-copilot/claude-opus-4.8",
+      xlarge: "github-copilot/claude-fable-5",
+    });
+    expect(result.opencodeModels?.advisor).toBe(
+      "github-copilot/claude-fable-5",
+    );
+    expect(result.warnings).toEqual([]);
+    expect(result.routing.opencode?.implementer?.xhigh).toEqual({
+      model: "github-copilot/claude-fable-5",
+      effort: "high",
+    });
+    expect(result.routing.opencode?.["task-slicer"]?.medium?.model).toBe(
+      "github-copilot/claude-opus-4.8",
+    );
+  });
+
+  it("class missing with a lower one present: a tier variant uses the next lower class and a note names role, tier and class; a default-tier alias is not replaced", async () => {
+    stubCatalog(FULL_CATALOG.filter((line) => !line.includes("fable")));
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous: undefined,
+      opts: { harness: "opencode", tiers: true },
+    });
+    const opus = "github-copilot/claude-opus-4.8";
+    expect(result.opencodeClassModels?.xlarge).toBe(opus);
+    // The default tier of the advisor is the fable alias: it does not resolve,
+    // so the model is omitted (session inheritance) with a warning, and no
+    // other model takes its place.
+    expect(result.opencodeModels?.advisor).toBeUndefined();
+    expect(result.routing.opencode?.advisor?.high).toBeUndefined();
+    expect(result.warnings).toContain(
+      'Warning: Role "advisor": provider "github-copilot" has no "fable" model in the catalog; model: will be omitted.',
+    );
+    expect(result.routing.opencode?.implementer?.xhigh).toEqual({
+      model: opus,
+      effort: "high",
+    });
+    expect(result.routing.opencode?.advisor?.xhigh).toEqual({
+      model: opus,
+      effort: "xhigh",
+    });
+    expect(result.routing.opencode?.reviewer?.xhigh?.model).toBe(opus);
+    // One class lower is a note; the only warning is the default-tier one.
+    expect(result.warnings.filter((w) => w.startsWith("Warning:"))).toEqual([
+      'Warning: Role "advisor": provider "github-copilot" has no "fable" model in the catalog; model: will be omitted.',
+    ]);
+    for (const line of [
+      'implementer/xhigh: provider "github-copilot" has no "fable" model in the catalog; using the "large" class model',
+      'reviewer/xhigh: provider "github-copilot" has no "fable" model in the catalog; using the "large" class model',
+      'advisor/xhigh: provider "github-copilot" has no "fable" model in the catalog; using the "large" class model',
+    ]) {
+      expect(
+        result.warnings.some((w) => w.startsWith(`Note: ${line}`)),
+        line,
+      ).toBe(true);
+    }
+    expect(result.warnings.some((w) => w.includes("advisor/high"))).toBe(false);
+  });
+
+  describe("only the small class resolved", () => {
+    const haiku = "github-copilot/claude-haiku-4.5";
+    const resolveSmallOnly = async () => {
+      stubCatalog([haiku]);
+      return resolveInitInputs({
+        detected: ["opencode"],
+        interactive: false,
+        previous: undefined,
+        opts: { harness: "opencode", tiers: true },
+      });
+    };
+
+    it("default-tier aliases that do not resolve omit the model with a warning, for an explorer and a reviewer", async () => {
+      const result = await resolveSmallOnly();
+      expect(result.opencodeModels?.explorer).toBeUndefined();
+      expect(result.opencodeModels?.reviewer).toBeUndefined();
+      expect(result.routing.opencode?.explorer?.medium).toBeUndefined();
+      expect(result.routing.opencode?.reviewer?.high).toBeUndefined();
+      for (const [role, alias] of [
+        ["explorer", "sonnet"],
+        ["reviewer", "opus"],
+      ]) {
+        expect(result.warnings).toContain(
+          `Warning: Role "${role}": provider "github-copilot" has no "${alias}" model in the catalog; model: will be omitted.`,
+        );
+      }
+    });
+
+    it("implementer variants fall back to the small class; a drop of two or more classes is a warning, one class a note", async () => {
+      const result = await resolveSmallOnly();
+      expect(result.opencodeClassModels).toEqual({
+        small: haiku,
+        medium: haiku,
+        large: haiku,
+        xlarge: haiku,
+      });
+      expect(result.routing.opencode?.implementer?.xhigh).toEqual({
+        model: haiku,
+        effort: "high",
+      });
+      expect(result.routing.opencode?.implementer?.low?.model).toBe(haiku);
+      // xlarge to small is three classes lower.
+      expect(result.warnings).toContain(
+        `Warning: implementer/xhigh: provider "github-copilot" has no "fable" model in the catalog; using the "small" class model ${haiku} (3 classes lower).`,
+      );
+      // task-slicer high is the large class: two classes lower.
+      expect(result.warnings).toContain(
+        `Warning: task-slicer/high: provider "github-copilot" has no "opus" model in the catalog; using the "small" class model ${haiku} (2 classes lower).`,
+      );
+      // implementer low is the medium class: one class lower.
+      expect(result.warnings).toContain(
+        `Note: implementer/low: provider "github-copilot" has no "sonnet" model in the catalog; using the "small" class model ${haiku}.`,
+      );
+    });
+
+    it.each([
+      ["reviewer", "medium", "sonnet"],
+      ["reviewer", "xhigh", "fable"],
+      ["advisor", "xhigh", "fable"],
+    ])(
+      "the %s %s variant never resolves below the medium class: it is omitted with a warning",
+      async (role, tier, alias) => {
+        const result = await resolveSmallOnly();
+        expect(
+          (result.routing.opencode as Record<string, Record<string, unknown>>)[
+            role
+          ]?.[tier],
+        ).toBeUndefined();
+        const line = result.warnings.find((w) =>
+          w.includes(`${role}/${tier}:`),
+        );
+        expect(line).toBeDefined();
+        expect(line!.startsWith("Warning:")).toBe(true);
+        expect(line).toContain(`has no "${alias}" model in the catalog`);
+        expect(line).toContain('below the "medium" class');
+        expect(line).toContain("no variant file is rendered");
+        // The class map itself still lets other roles fall back.
+        expect(result.opencodeClassModels?.xlarge).toBe(haiku);
+      },
+    );
+  });
+
+  it("nothing resolved: the leaf is omitted and the unresolved-class warning stays, with no note", async () => {
+    stubCatalog(["other/some-model"]);
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous: undefined,
+      opts: {
+        harness: "opencode",
+        tiers: true,
+        opencodeProvider: "github-copilot",
+      },
+    });
+    expect(result.opencodeClassModels).toEqual({
+      small: undefined,
+      medium: undefined,
+      large: undefined,
+      xlarge: undefined,
+    });
+    expect(result.routing.opencode?.advisor).toBeUndefined();
+    expect(result.warnings.some((w) => w.startsWith("Note:"))).toBe(false);
+    for (const modelClass of ["small", "medium", "large", "xlarge"]) {
+      expect(
+        result.warnings.some((w) =>
+          w.includes(`Tier model class "${modelClass}"`),
+        ),
+        modelClass,
+      ).toBe(true);
+    }
+  });
+
+  it("a recorded class model wins over the catalog fallback", async () => {
+    stubCatalog(FULL_CATALOG.filter((line) => !line.includes("fable")));
+    const previous = fakeManifest({
+      harnesses: ["opencode"],
+      tiers: true,
+      opencodeModels: {},
+      opencodeClassModels: { xlarge: "local/recorded-xlarge" },
+    });
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous,
+      opts: { harness: "opencode", tiers: true },
+    });
+    expect(result.opencodeClassModels?.xlarge).toBe("local/recorded-xlarge");
+    expect(result.warnings.some((w) => w.includes("xlarge"))).toBe(false);
+    expect(result.routing.opencode?.implementer?.xhigh?.model).toBe(
+      "local/recorded-xlarge",
+    );
+  });
+
+  it("a leaf that is already recorded gets no fallback note", async () => {
+    stubCatalog(FULL_CATALOG.filter((line) => !line.includes("fable")));
+    const previous = fakeManifest({
+      harnesses: ["opencode"],
+      tiers: true,
+      routing: {
+        opencode: {
+          implementer: {
+            xhigh: { model: "local/recorded-xhigh", effort: "high" },
+          },
+        },
+      },
+    });
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous,
+      opts: { harness: "opencode", tiers: true },
+    });
+    expect(result.routing.opencode?.implementer?.xhigh?.model).toBe(
+      "local/recorded-xhigh",
+    );
+    expect(result.warnings.some((w) => w.includes("implementer/xhigh"))).toBe(
+      false,
+    );
+    // Leaves that are newly assigned still get theirs.
+    expect(result.warnings.some((w) => w.includes("reviewer/xhigh"))).toBe(
+      true,
+    );
+  });
+
+  it("a recorded leaf is noted again when the provider is changed", async () => {
+    stubCatalog(FULL_CATALOG.filter((line) => !line.includes("fable")));
+    const previous = fakeManifest({
+      harnesses: ["opencode"],
+      tiers: true,
+      routing: {
+        opencode: {
+          implementer: {
+            xhigh: { model: "local/recorded-xhigh", effort: "high" },
+          },
+        },
+      },
+    });
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous,
+      opts: {
+        harness: "opencode",
+        tiers: true,
+        opencodeProvider: "github-copilot",
+      },
+    });
+    expect(result.warnings.some((w) => w.includes("implementer/xhigh"))).toBe(
+      true,
+    );
+  });
+
+  it("a message is printed only for a role whose resolved value is used", async () => {
+    // A 0.50.0 opencode install: every default-tier id recorded. The catalog
+    // lacks opus (reviewer) and fable (advisor); the re-install overrides the
+    // explorer only.
+    stubCatalog([
+      "github-copilot/claude-haiku-4.5",
+      "github-copilot/claude-sonnet-4.6",
+    ]);
+    const recorded = {
+      explorer: "github-copilot/claude-sonnet-4.5",
+      "task-slicer": "github-copilot/claude-sonnet-4.5",
+      implementer: "github-copilot/claude-sonnet-4.5",
+      reviewer: "github-copilot/claude-opus-4.8",
+      advisor: "github-copilot/claude-opus-4.8",
+    };
+    const previous = fakeManifest({
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS, advisor: "opus" },
+      opencodeModels: recorded,
+    });
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous,
+      opts: { harness: "opencode", models: "explorer=sonnet" },
+    });
+    expect(result.opencodeModels?.explorer).toBe(
+      "github-copilot/claude-sonnet-4.6",
+    );
+    expect(result.opencodeModels?.reviewer).toBe(recorded.reviewer);
+    expect(result.opencodeModels?.advisor).toBe(recorded.advisor);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("a message for an overridden role whose alias does not resolve is printed", async () => {
+    stubCatalog([
+      "github-copilot/claude-haiku-4.5",
+      "github-copilot/claude-sonnet-4.6",
+    ]);
+    const previous = fakeManifest({
+      harnesses: ["opencode"],
+      opencodeModels: {
+        explorer: "github-copilot/claude-sonnet-4.5",
+        reviewer: "github-copilot/claude-opus-4.8",
+      },
+    });
+    const result = await resolveInitInputs({
+      detected: ["opencode"],
+      interactive: false,
+      previous,
+      opts: { harness: "opencode", models: "reviewer=opus" },
+    });
+    expect(result.opencodeModels?.reviewer).toBeUndefined();
+    expect(result.warnings).toEqual([
+      'Warning: Role "reviewer": provider "github-copilot" has no "opus" model in the catalog; model: will be omitted.',
+    ]);
   });
 });

@@ -250,7 +250,7 @@ steps in the repository you were asked to install into.
      `model: <provider/model-id>` line when you have a fully-qualified id
      (i.e. the value contains a `/`, such as
      `github-copilot/claude-sonnet-4.6`). For a bare alias (`sonnet`, `opus`,
-     `haiku`) or any bare id without a provider prefix, **omit the `model:`
+     `haiku`, `fable`) or any bare id without a provider prefix, **omit the `model:`
      line entirely** — the subagent then inherits the session/default model,
      which is the safe portable fallback. The installed CLI resolves aliases
      to fully-qualified ids by running `opencode models` at install time; in a
@@ -294,10 +294,10 @@ steps in the repository you were asked to install into.
        "tiers": false,
        "models": {
          "explorer": "sonnet",
-         "task-slicer": "sonnet",
+         "task-slicer": "opus",
          "implementer": "sonnet",
          "reviewer": "opus",
-         "advisor": "opus"
+         "advisor": "fable"
        },
        "files": {},
        "installedAt": "<ISO 8601 timestamp of this install>"

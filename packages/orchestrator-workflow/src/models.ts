@@ -69,25 +69,9 @@ export function parseProfile(value: string): Profile {
   return trimmed;
 }
 
-export type ModelAlias = "sonnet" | "opus" | "haiku";
+export type ModelAlias = "sonnet" | "opus" | "haiku" | "fable";
 
-export const MODEL_ALIASES: ModelAlias[] = ["sonnet", "opus", "haiku"];
-
-/**
- * Per-role defaults. The orchestrator itself runs on the session model and is
- * deliberately not configured here.
- */
-export const DEFAULT_MODELS: Record<Role, string> = {
-  explorer: "sonnet",
-  "task-slicer": "sonnet",
-  implementer: "sonnet",
-  reviewer: "opus",
-  advisor: "opus",
-};
-
-export function isModelAlias(value: string): value is ModelAlias {
-  return (MODEL_ALIASES as string[]).includes(value);
-}
+export const MODEL_ALIASES: ModelAlias[] = ["sonnet", "opus", "haiku", "fable"];
 
 /**
  * Claude Code subagent frontmatter accepts the aliases directly as well as
@@ -187,26 +171,165 @@ export const DEFAULT_TIER: Record<Role, Tier> = {
   advisor: "high",
 };
 
-export type ModelClass = "small" | "medium" | "large";
+/**
+ * Model classes, ordered from the weakest to the strongest. The order is
+ * load-bearing: opencode falls back from an unresolved class to the next
+ * lower one that did resolve.
+ */
+export type ModelClass = "small" | "medium" | "large" | "xlarge";
 
-export const MODEL_CLASSES: ModelClass[] = ["small", "medium", "large"];
+export const MODEL_CLASSES: ModelClass[] = [
+  "small",
+  "medium",
+  "large",
+  "xlarge",
+];
 
-interface TierDef {
+export interface TierDef {
   modelClass: ModelClass;
-  /** Effort value requested from the harness for this tier. */
+  /**
+   * Effort value requested from the harness for this role and tier. It is
+   * not always the tier name: the implementer and reviewer `xhigh` variants
+   * run a stronger model at `high` effort.
+   */
   effort: Tier;
 }
 
-export const TIER_DEFS: Record<Tier, TierDef> = {
-  low: { modelClass: "small", effort: "low" },
-  medium: { modelClass: "medium", effort: "medium" },
-  high: { modelClass: "medium", effort: "high" },
-  xhigh: { modelClass: "large", effort: "xhigh" },
-};
-
-/** Which model alias backs each tier's model class. */
+/** Which model alias backs each model class on Claude Code. */
 export const CLASS_MODELS: Record<ModelClass, ModelAlias> = {
   small: "haiku",
   medium: "sonnet",
   large: "opus",
+  xlarge: "fable",
 };
+
+/**
+ * The declarative default routing for Claude Code and opencode: per role and
+ * tier, the model class and the effort. Each role lists exactly the tiers in
+ * `ROLE_TIERS`. Codex has its own alias table in `routing.ts`.
+ */
+export const ROLE_TIER_DEFS: Record<Role, Partial<Record<Tier, TierDef>>> = {
+  explorer: {
+    low: { modelClass: "small", effort: "low" },
+    medium: { modelClass: "medium", effort: "medium" },
+    high: { modelClass: "medium", effort: "high" },
+  },
+  "task-slicer": {
+    low: { modelClass: "medium", effort: "low" },
+    medium: { modelClass: "large", effort: "medium" },
+    high: { modelClass: "large", effort: "high" },
+  },
+  implementer: {
+    low: { modelClass: "medium", effort: "low" },
+    medium: { modelClass: "medium", effort: "medium" },
+    high: { modelClass: "medium", effort: "high" },
+    xhigh: { modelClass: "xlarge", effort: "high" },
+  },
+  reviewer: {
+    medium: { modelClass: "medium", effort: "medium" },
+    high: { modelClass: "large", effort: "high" },
+    xhigh: { modelClass: "xlarge", effort: "high" },
+  },
+  advisor: {
+    high: { modelClass: "xlarge", effort: "high" },
+    xhigh: { modelClass: "xlarge", effort: "xhigh" },
+  },
+};
+
+/**
+ * The tier-uniform routing that installs recorded before per-role routing
+ * existed (every role: low small, medium and high medium, xhigh large, with
+ * the effort equal to the tier name). It is only used to materialize the
+ * routing of a manifest that records none, so such an install keeps its
+ * routing on re-install.
+ */
+export const PRE_ROLE_TIER_DEFS: Record<
+  Role,
+  Partial<Record<Tier, TierDef>>
+> = Object.fromEntries(
+  ROLES.map((role) => [
+    role,
+    Object.fromEntries(
+      ROLE_TIERS[role].map((tier) => [
+        tier,
+        {
+          modelClass: (
+            {
+              low: "small",
+              medium: "medium",
+              high: "medium",
+              xhigh: "large",
+            } as const
+          )[tier],
+          effort: tier,
+        },
+      ]),
+    ),
+  ]),
+) as Record<Role, Partial<Record<Tier, TierDef>>>;
+
+/** The model class and effort of one role and tier. */
+export function tierDef(
+  role: Role,
+  tier: Tier,
+  defs: Record<Role, Partial<Record<Tier, TierDef>>> = ROLE_TIER_DEFS,
+): TierDef {
+  const def = defs[role][tier];
+  if (def === undefined) {
+    throw new Error(`Tier "${tier}" is not defined for role "${role}"`);
+  }
+  return def;
+}
+
+/**
+ * Per-role default model: the alias backing the class of the role's default
+ * tier. The orchestrator itself runs on the session model and is deliberately
+ * not configured here.
+ */
+export const DEFAULT_MODELS: Record<Role, string> = Object.fromEntries(
+  ROLES.map((role) => [
+    role,
+    CLASS_MODELS[tierDef(role, DEFAULT_TIER[role]).modelClass],
+  ]),
+) as Record<Role, string>;
+
+export function isModelAlias(value: string): value is ModelAlias {
+  return (MODEL_ALIASES as string[]).includes(value);
+}
+
+/**
+ * The lowest model class a role's opencode tier-variant leaf may fall back to
+ * when its own class has no model in the catalog. Roles that judge or advise
+ * never run on a class below their floor; a role without an entry may fall
+ * back as far as the lowest class.
+ */
+export const ROLE_CLASS_FLOOR: Partial<Record<Role, ModelClass>> =
+  Object.fromEntries(
+    (["reviewer", "advisor"] as const).map((role) => [role, "medium" as const]),
+  );
+
+/**
+ * Whether `model`, taken from the class map of an opencode install, is the
+ * model of a class below the role's floor. A class that fell back to a lower
+ * class shares that class's model id, and distinct classes never resolve to
+ * the same id on their own, so equality with a below-floor class entry marks
+ * a fall-back below the floor.
+ */
+export function belowRoleFloor(
+  role: Role,
+  model: string,
+  classModels: Partial<Record<ModelClass, string | undefined>> | undefined,
+): boolean {
+  const floor = ROLE_CLASS_FLOOR[role];
+  if (floor === undefined || classModels === undefined) return false;
+  return MODEL_CLASSES.slice(0, MODEL_CLASSES.indexOf(floor)).some(
+    (modelClass) => classModels[modelClass] === model,
+  );
+}
+
+/** The next lower model class, or `undefined` for the lowest. */
+export function lowerModelClass(
+  modelClass: ModelClass,
+): ModelClass | undefined {
+  return MODEL_CLASSES[MODEL_CLASSES.indexOf(modelClass) - 1];
+}

@@ -8,16 +8,67 @@ section.
 ## Default model routing
 
 `--models` is the backward-compatible, per-role input for Claude Code and
-opencode. It does not configure Codex. Existing manifests that contain only
-`models` continue to produce the same Claude Code and opencode defaults:
+opencode. It does not configure Codex. `--models role=x` sets the model of that
+role's default tier only (the unsuffixed agent file); the other tiers keep the
+model of their class in the table under [Effort tiers](#effort-tiers). When
+`--models` does not name a role, its default-tier model is the alias behind the
+model class of the role's default tier in that table, and a `models` value
+already recorded in an existing manifest wins over it for that install:
 
 | Role | Default | Why |
 |---|---|---|
 | explorer | `sonnet` | read-only terrain mapping is broad reading, not deep reasoning |
-| task-slicer | `sonnet` | structured decomposition, no deep reasoning needed |
+| task-slicer | `opus` | decomposition decides the quality of every later step |
 | implementer | `sonnet` | fast, cheap, good enough for narrow pre-sliced tasks |
-| reviewer | `opus` | skeptical review benefits from the strongest model |
-| advisor | `opus` | escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default |
+| reviewer | `opus` | skeptical review benefits from a strong model |
+| advisor | `fable` | escalations happen precisely when the situation is hard, so it gets the strongest model |
+
+**Existing installs keep their routing.** A re-install preserves every
+recorded routing leaf, so changed defaults reach only a fresh install, a leaf
+you change, or a leaf that was never recorded. The rule is: a recorded leaf is
+kept, and a leaf that was never recorded takes the current default. Its
+visible consequences:
+
+- A harness whose tier leaves were never recorded follows the current table.
+  Adding opencode to an install, or turning `--tiers` on for an opencode
+  install that never resolved its variants, gives the opencode variants the
+  current table while the Claude Code variants of the same install keep the
+  leaves recorded for them. The default-tier model of that role still comes
+  from the recorded `models` value.
+- Codex leaves are recorded by every version that knows routing, also on an
+  install that does not use Codex. Codex added to such an install keeps the
+  recorded Codex defaults. A manifest that records no routing is read with
+  the Codex leaves of the old table too (see below), so Codex added to it
+  takes those, not the current ones.
+- A partial recorded routing map is filled with the current default for every
+  leaf it lacks.
+
+A manifest recorded before routing existed, one that contains only `models`,
+is read as the routing derived with the tier-uniform table it was installed
+under (every role: `low` is `haiku`, `medium` and `high` are `sonnet`, `xhigh`
+is `opus`, with the effort equal to the tier name) and is then preserved like
+any recorded routing; the next write records it. This holds for every
+harness: the Codex leaves take the old aliases with the effort equal to the
+tier name as well, mapped to the bundled model ids, whichever harnesses are
+selected. It holds for the repository manifest and for the operator manifest
+alike, so `doctor` and `apply --sync` compare and project that routing
+instead of the current table. A new target applied from operator defaults
+that record no routing therefore gets the old tier-uniform table, not the
+current per-role defaults. To adopt the
+current defaults for a role on an existing install, patch its leaves with
+`--routing`, for example:
+
+```json
+{
+  "claude": {
+    "task-slicer": {
+      "medium": { "model": "opus", "effort": "medium" },
+      "high": { "model": "opus", "effort": "high" }
+    },
+    "advisor": { "high": { "model": "fable", "effort": "high" } }
+  }
+}
+```
 
 The orchestrator itself runs on the session's main model. For Codex, start the
 orchestrator on `gpt-6-astra` at `high` effort; use `xhigh` for demanding work.
@@ -50,7 +101,7 @@ leaf must name a tier its role supports (see [Effort tiers](#effort-tiers))
 and contain exactly `model` and `effort`, with `effort` one of `low`, `medium`,
 `high`, or `xhigh`. A model is a plain id without whitespace. opencode leaves
 need a `provider/model` id, and Codex leaves cannot use a Claude alias
-(`sonnet`, `opus`, `haiku`). Any other key is rejected, and the error names
+(`sonnet`, `opus`, `haiku`, `fable`). Any other key is rejected, and the error names
 the valid values.
 
 An omitted `--routing` preserves the exact persisted map on a re-install.
@@ -64,20 +115,25 @@ rewrites a preserved choice merely because another model exists.
 Codex uses native `.codex/agents/*.toml` custom agents. The file shape
 follows the
 [official Codex subagent configuration](https://learn.chatgpt.com/docs/agent-configuration/subagents).
-The shipped routing is:
+The defaults follow the vendor's model guidance
+([models](https://learn.chatgpt.com/docs/models),
+[subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)):
+the balanced model for most work, the small model for narrow, well-defined
+tasks at `high` effort, and the strong model for the most demanding work. The
+effort is not always the tier name. The shipped routing is:
 
 | Role | Tier | Model | Effort |
 |---|---|---|---|
-| explorer | low | `gpt-6-luna` | low |
+| explorer | low | `gpt-6-luna` | high |
 | explorer | medium (default) | `gpt-6.1-sol` | medium |
 | explorer | high | `gpt-6.1-sol` | high |
 | task-slicer | low | `gpt-6.1-sol` | low |
 | task-slicer | medium (default) | `gpt-6.1-sol` | medium |
 | task-slicer | high | `gpt-6.1-sol` | high |
-| implementer | low | `gpt-6-luna` | low |
+| implementer | low | `gpt-6-luna` | high |
 | implementer | medium (default) | `gpt-6.1-sol` | medium |
 | implementer | high | `gpt-6.1-sol` | high |
-| implementer | xhigh | `gpt-6-astra` | xhigh |
+| implementer | xhigh | `gpt-6-astra` | high |
 | reviewer | medium | `gpt-6.1-sol` | medium |
 | reviewer | high (default) | `gpt-6-astra` | high |
 | reviewer | xhigh | `gpt-6-astra` | xhigh |
@@ -105,7 +161,7 @@ installer inputs only: native agent files and manifests always record the
 resolved concrete ID. To migrate only selected classes, pass a sparse JSON
 file through `--codex-models <json-file>`, for example
 `{"balanced":"gpt-example"}`. It creates complete routing leaves with each
-matching tier's standard effort; it does not alter omitted aliases or a plain
+matching leaf's default effort from the table above; it does not alter omitted aliases or a plain
 reinstall. An explicit `--routing` leaf is applied afterward and has highest
 precedence, including when a custom effort must be retained.
 
@@ -118,10 +174,25 @@ provider to use (the one that offers Claude models). When exactly one such
 provider exists the aliases are resolved to the highest-version matching id in
 the catalog. When multiple providers offer Claude models the CLI warns and asks
 you to pass `--opencode-provider <id>` to disambiguate, or to supply
-fully-qualified ids per role via `--models`. If no resolution is possible
-(catalog empty, `opencode` binary absent, ambiguous provider) the `model:`
-frontmatter line is omitted entirely and the subagent inherits the
-session/default model, a safe, portable fallback. Fully-qualified ids in
+fully-qualified ids per role via `--models`. The alias `fable` resolves
+against ids that start with `claude-fable`, like the other aliases against
+their own family token. When the catalog has no model for a default-tier alias (the
+role's default, or an alias given through `--models`), the `model:` line is
+omitted, the subagent inherits the session model, and the installer prints a
+warning; no other model replaces the alias. A tier variant is keyed to a model
+class instead: when the catalog has no model for its class, the variant uses
+the next lower class that does have one (`fable` falls back to `opus`, then
+`sonnet`, then `haiku`) and the installer prints a note naming the role, the
+tier and the class used. A fall-back across more than one class is printed as
+a warning instead of a note. Reviewer and advisor variants never use a class
+below `medium`: when only a lower class resolves, the variant is not rendered
+and the installer prints a warning naming the role and the tier. Messages are
+printed for the leaves that this run assigns, not for recorded ones. A model already
+recorded for a leaf is kept and not re-resolved. If no class at or below
+resolves, or no resolution is possible at all (catalog empty, `opencode`
+binary absent, ambiguous provider), the `model:` frontmatter line is omitted
+entirely and the subagent inherits the session/default model, a safe,
+portable fallback. Fully-qualified ids in
 `--models` always pass through unchanged regardless of the catalog.
 Nested-path providers like `openrouter` (whose ids look like
 `openrouter/anthropic/claude-...`) are not auto-resolved from aliases and must
@@ -140,7 +211,7 @@ use `<role>.md` / `<role>-<tier>.md`; Codex uses `<role>.toml` /
 **Every default file carries its own pinned effort, independent of
 `--tiers`.** The harness composers add the role's own default routing
 selection to the unsuffixed file. In the legacy Claude/opencode path this is
-`TIER_DEFS[DEFAULT_TIER[role]].effort`: `effort: medium` for explorer,
+the effort of the role's default tier in the table below: `effort: medium` for explorer,
 task-slicer, and implementer; `effort: high` for reviewer and advisor
 (opencode: a `variant: high` line when the resolved model is Claude-family,
 following the same dispatch rule tier variants use, `reasoningEffort:
@@ -188,18 +259,40 @@ default tier: that would collide with, and duplicate, the default file.
 With `--profile full` and every tier rendered, that is 5 default files plus
 10 variant files: 15 files total per harness.
 
-**Tier to model class to effort.** Each tier resolves to a model class and an
-effort value:
+**Tier to model class to effort.** Each role and tier resolves to a model
+class and an effort value. The effort is not always the tier name: the
+implementer and reviewer `xhigh` variants run a stronger model at `high`.
 
-| Tier | Model class | Model alias | Effort requested |
-|---|---|---|---|
-| low | small | `haiku` | `low` |
-| medium | medium | `sonnet` | `medium` |
-| high | medium | `sonnet` | `high` |
-| xhigh | large | `opus` | `xhigh` |
+| Role | Tier | Model class | Model alias | Effort requested |
+|---|---|---|---|---|
+| explorer | low | small | `haiku` | `low` |
+| explorer | medium | medium | `sonnet` | `medium` |
+| explorer | high | medium | `sonnet` | `high` |
+| task-slicer | low | medium | `sonnet` | `low` |
+| task-slicer | medium | large | `opus` | `medium` |
+| task-slicer | high | large | `opus` | `high` |
+| implementer | low | medium | `sonnet` | `low` |
+| implementer | medium | medium | `sonnet` | `medium` |
+| implementer | high | medium | `sonnet` | `high` |
+| implementer | xhigh | xlarge | `fable` | `high` |
+| reviewer | medium | medium | `sonnet` | `medium` |
+| reviewer | high | large | `opus` | `high` |
+| reviewer | xhigh | xlarge | `fable` | `high` |
+| advisor | high | xlarge | `fable` | `high` |
+| advisor | xhigh | xlarge | `fable` | `xhigh` |
+
+The model classes, from the weakest to the strongest, back these aliases on
+Claude Code:
+
+| Model class | Model alias |
+|---|---|
+| small | `haiku` |
+| medium | `sonnet` |
+| large | `opus` |
+| xlarge | `fable` |
 
 Claude Code variants carry both a `model:` line (the class's alias) and an
-`effort: <tier>` line in frontmatter. Read-only roles (explorer, reviewer,
+`effort:` line in frontmatter. Read-only roles (explorer, reviewer,
 advisor) keep `disallowedTools: Edit, Write, NotebookEdit` on their variants
 too.
 
@@ -211,8 +304,8 @@ families:
   `anthropic/`, or whose segment after the provider prefix contains
   `claude-`, which covers `anthropic/claude-...` as well as a Claude model
   fronted by a different provider, e.g. `github-copilot/claude-sonnet-4.6`
-  or the nested `openrouter/anthropic/claude-opus-4.8`): only `high` and
-  `xhigh` get an effort field, as `variant: high` and `variant: max`
+  or the nested `openrouter/anthropic/claude-opus-4.8`): only the `high` and
+  `xhigh` efforts get an effort field, as `variant: high` and `variant: max`
   respectively; `low` and `medium` collapse to no effort field at all,
   since opencode's `variant:` option does not distinguish an effort below
   `high`. This collapse is deliberate and documented, not a bug: a
@@ -221,7 +314,7 @@ families:
 - **Ollama, or an id with no provider prefix**: no effort field at all.
   There is no known effort passthrough for Ollama, and an id with no `/`
   resolves to no provider to key the decision on.
-- **Every other non-Claude-family model**: a plain `reasoningEffort: <tier>`
+- **Every other non-Claude-family model**: a plain `reasoningEffort: <effort>`
   line, `xhigh` included (opencode's built-in OpenAI-style variants
   document an `xhigh` reasoning effort).
 
@@ -235,7 +328,7 @@ with no resolved model would carry neither a `model:` nor an effort line, an
 indistinguishable no-op duplicate of the base file with no ledger entry to
 compare it against, so `init` skips writing it entirely. This guard and its
 warning are opencode-scoped only; Claude Code variants resolve `model:` from
-a plain alias (`haiku`/`sonnet`/`opus`) and need no live catalog lookup, so
+a plain alias (`haiku`/`sonnet`/`opus`/`fable`) and need no live catalog lookup, so
 they are unaffected.
 
 Codex variants carry `model` and `model_reasoning_effort` from their exact

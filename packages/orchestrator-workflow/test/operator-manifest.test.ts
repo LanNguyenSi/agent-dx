@@ -69,11 +69,16 @@ afterEach(() => {
   else process.env[OPERATOR_HOME_ENV] = savedEnv;
 });
 
+// Carries an explicit routing: defaults that record none are read back as the
+// routing materialized from their legacy inputs (see the last describe).
 const defaults = (): OperatorManifestDefaults => ({
   harnesses: ["claude"],
   profile: "full",
   tiers: false,
   models: { implementer: "sonnet" },
+  routing: {
+    claude: { implementer: { medium: { model: "sonnet", effort: "medium" } } },
+  },
 });
 
 describe("resolveOperatorHome", () => {
@@ -1086,5 +1091,69 @@ describe("operator legacy opencode compatibility maps", () => {
     };
     writeFileSync(join(home, "manifest.json"), JSON.stringify(invalid));
     expect(readOperatorManifest(home)).toBeUndefined();
+  });
+});
+
+describe("readOperatorManifest: defaults recorded without routing", () => {
+  const seedRaw = (rawDefaults: Record<string, unknown>) =>
+    writeFileSync(
+      join(home, "manifest.json"),
+      JSON.stringify({
+        kit: "orchestrator-workflow",
+        schemaVersion: 1,
+        defaults: rawDefaults,
+        targets: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+  it("materializes the routing with the tier-uniform table of the time they were written", () => {
+    seedRaw({
+      harnesses: ["claude"],
+      profile: "full",
+      tiers: true,
+      models: { "task-slicer": "sonnet", advisor: "opus" },
+    });
+    const routing = readOperatorManifest(home)?.defaults.routing;
+    expect(routing?.claude?.["task-slicer"]).toEqual({
+      low: { model: "haiku", effort: "low" },
+      medium: { model: "sonnet", effort: "medium" },
+      high: { model: "sonnet", effort: "high" },
+    });
+    expect(routing?.claude?.advisor?.high).toEqual({
+      model: "opus",
+      effort: "high",
+    });
+    expect(routing?.claude?.implementer?.xhigh).toEqual({
+      model: "opus",
+      effort: "xhigh",
+    });
+  });
+
+  it("keeps an explicit routing as recorded and adds nothing to it", () => {
+    seedRaw({
+      harnesses: ["claude"],
+      profile: "full",
+      tiers: true,
+      models: {},
+      routing: {
+        claude: { reviewer: { high: { model: "sonnet", effort: "high" } } },
+      },
+    });
+    expect(readOperatorManifest(home)?.defaults.routing).toEqual({
+      claude: { reviewer: { high: { model: "sonnet", effort: "high" } } },
+    });
+  });
+
+  it("derives only the Codex leaves when no Claude Code or opencode harness is selected", () => {
+    seedRaw({ harnesses: [], profile: "full", tiers: false, models: {} });
+    const routing = readOperatorManifest(home)?.defaults.routing;
+    expect(routing?.claude).toBeUndefined();
+    expect(routing?.opencode).toBeUndefined();
+    expect(routing?.codex?.explorer?.low).toEqual({
+      model: "gpt-6-luna",
+      effort: "low",
+    });
   });
 });

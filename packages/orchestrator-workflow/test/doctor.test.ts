@@ -270,7 +270,12 @@ describe("runDoctor: per-target status", () => {
   it("(4b) tiers divergence: repo tiers true vs operator tiers false", () => {
     const repo = makeRepo();
     setManifestField(repo, { tiers: true });
-    registerHome(defaults({ tiers: false }), [repo]);
+    // The operator records the routing the repo was installed with (a
+    // routing-less operator manifest is a pre-routing record, see below).
+    registerHome(
+      defaults({ tiers: false, routing: readInstalledManifest(repo)?.routing }),
+      [repo],
+    );
     const report = runDoctor(home, {});
     expect(report.targets[0].status).toBe("divergent");
     expect(report.targets[0].divergence).toEqual({
@@ -1137,6 +1142,37 @@ describe("doctor routing normalization", () => {
       divergence: { models: false },
     });
     expect(runDoctor(home, {}).targets[0].divergence?.routing).toBeUndefined();
+  });
+
+  it("reports a pre-routing target as clean against a pre-routing operator manifest with equal models", () => {
+    const models = {
+      ...DEFAULT_MODELS,
+      "task-slicer": "sonnet",
+      advisor: "opus",
+    };
+    const repo = mkdtempSync(join(tmpdir(), "ow-doctor-repo-"));
+    repos.push(repo);
+    runInit({
+      targetDir: repo,
+      harnesses: ["claude"],
+      models,
+      tiers: true,
+    });
+    // Both manifests predate routing: neither records a `routing` field.
+    setManifestField(repo, { routing: undefined });
+    expect(
+      JSON.parse(
+        readFileSync(join(repo, ".ai", "workflow", "manifest.json"), "utf8"),
+      ).routing,
+    ).toBeUndefined();
+    registerHome(defaults({ tiers: true, models }), [realpathSync(repo)]);
+    expect(
+      JSON.parse(readFileSync(join(home, "manifest.json"), "utf8")).defaults
+        .routing,
+    ).toBeUndefined();
+    const target = runDoctor(home, {}).targets[0];
+    expect(target.divergence?.routing).toBeUndefined();
+    expect(target.status).toBe("clean");
   });
 
   it("ignores routing outside the installed harness, profile, and tier scope", () => {

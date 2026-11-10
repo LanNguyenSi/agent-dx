@@ -196,7 +196,12 @@ mechanics (including the `CLAUDE_CODE_EFFORT_LEVEL` environment override).
 
 The per-role default effort (`medium` for explorer, task-slicer, and
 implementer; `high` for reviewer and advisor) is pinned in each agent file
-on Claude Code and Codex; on opencode it depends on the resolved model.
+on Claude Code and Codex; on opencode it depends on the resolved model. The
+effort of a tier variant is not always its tier name (the implementer and
+reviewer `xhigh` variants run a stronger model at `high`). The default models
+are `sonnet` for explorer and implementer, `opus` for task-slicer and
+reviewer, and `fable` for advisor; a `models` value recorded in an existing
+manifest, and every recorded routing leaf, wins on a re-install.
 See [Model routing reference: Effort tiers](docs/model-routing-reference.md#effort-tiers)
 for the full role/tier table, the per-harness frontmatter shape, and the
 tier variants `--tiers` renders.
