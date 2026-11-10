@@ -677,7 +677,7 @@ spawn, and names split or redesign in `03-decisions.md`
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:336#"Halt at the first"`);
 the Round-2 halt rule's own cross-reference to step 8 states the identical
 scope
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:58#"Step 8 of the detailed workflow states the operational"`),
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:73#"Step 8 of the detailed workflow states the operational"`),
 no test pins either site's wording.
 Full treatment of the Round-2 halt rule and the escalation budget it
 feeds is out of this doc's lane; see
@@ -819,7 +819,7 @@ operator flags high-risk; `rigorous` for all other code and instruction
 changes; `normal` for docs-only deltas) and forbids pairing `adversarial` with
 the `-medium` reviewer tier as a budget mismatch that names probes
 without the effort to run them
-(`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:74#"a budget mismatch"`);
+(`packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md:97#"a budget mismatch"`);
 tiers themselves are unchanged by this axis.
 
 `rigorous` and `adversarial` carry a withdrawal rule: a finding that does

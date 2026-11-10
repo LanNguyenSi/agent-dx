@@ -407,19 +407,19 @@ run-base lines, shipped with its default value instead of a `TODO`
 (packages/orchestrator-workflow/assets/templates/00-goal.md:5#"<!-- solution-acceptance: mode = delegated -->").
 The value is `single`, `delegated`, or `batch`, and a missing or unrecognised
 value means `delegated`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:216#"The marker is a record for the orchestrator, the reviewer,"),
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:221#"The marker is a record for the orchestrator, the reviewer,"),
 so a run created from an older template is a `delegated` run without any
 edit. No reader enforces the marker
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:217#"and the operator; no reader enforces it."):
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:222#"and the operator; no reader enforces it."):
 it tells the reviewer and the operator who implemented, and it is what a
 briefing quotes. The three definitions, the selection rule by the shape of
 the work, the run files each mode requires, and the rule that a mode switch
 is a D-ID row and never a new run are stated once, in the reference's last
 section
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:211#"## Run mode");
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:216#"## Run mode");
 `SKILL.md` and the reference's Intent only point there. `single` makes
 `01-plan.md` and `02-tasks.md` optional (it records its runbook selection in `03-decisions.md` instead of `01-plan.md`'s `## Runbooks` section) and keeps `04-implementation-summary.md`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:241#"Run files per mode:"),
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:246#"Run files per mode:"),
 because the verification set, the mutation probes, and the run's own runbook consultation record
 (packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:87#"## Runbooks Consulted")
 live there; `batch` adds an Integration section to the same template

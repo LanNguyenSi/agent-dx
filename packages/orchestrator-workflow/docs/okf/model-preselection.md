@@ -586,7 +586,7 @@ validate native definitions.
 ## Orchestrator-runs-on-session-model policy
 
 The skill's `references/delegation-and-tiers.md` carries a `### Models`
-subsection (`assets/skill/references/delegation-and-tiers.md:115#"implementer, reviewer, advisor) are recorded in"`):
+subsection (`assets/skill/references/delegation-and-tiers.md:144#"implementer, reviewer, advisor) are recorded in"`):
 the orchestrator stays on the session model while exact role/tier routing is
 recorded in the repo manifest and agent definitions. Its further bullet makes
 upgrades deliberate and retains prior routing as rollback input. The three
