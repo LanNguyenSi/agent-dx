@@ -203,7 +203,7 @@ A present map, including an empty map, records session inheritance for missing
 slots unless an explicit routing leaf supplies that selection. An absent map
 means legacy resolution is unknown; updates and doctor retain this distinction
 (`routing-state.ts:90-109#"result[field] = bare;"`,
-`routing-state.ts:115-121#"delete result.opencode?.[role]?.[tier];"`). A manifest that records no `routing` (installed before routing existed) is materialized once, when `readInstalledManifest` reads it (and `readOperatorManifest` for the operator defaults), by `materializePreRoutingRouting` with the tier-uniform table it was installed under (`PRE_ROLE_TIER_DEFS`), so a re-install keeps that routing and `doctor`/`apply --sync` compare it instead of adopting the per-role defaults for its non-default tiers.
+`routing-state.ts:115-121#"delete result.opencode?.[role]?.[tier];"`). A manifest that records no `routing` (installed before routing existed) is materialized once, when `readInstalledManifest` reads it (and `readOperatorManifest` for the operator defaults), by `materializePreRoutingRouting` with the tier-uniform table it was installed under (`PRE_ROLE_TIER_DEFS`) and, whichever harnesses the manifest lists, the Codex aliases and efforts of that time (`PRE_ROUTING_CODEX_ALIASES`), so a re-install keeps that routing and `doctor`/`apply --sync` compare it instead of adopting the per-role defaults for its non-default tiers.
 
 Codex begins with a complete deterministic default map: Luna at low for
 explorer and implementer, run at high effort; balanced Sol at task-slicer low, explorer,
