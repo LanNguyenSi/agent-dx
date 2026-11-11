@@ -10,6 +10,8 @@ import {
   hygiene,
   isBackupPath,
   isTestPath,
+  listTestCases,
+  parseIntendedDeletion,
   readWorktreeFile,
   UNCOMMITTED_FILES_CAP,
 } from "../src/hygiene/index.js";
@@ -1374,9 +1376,9 @@ describe("hygiene intended deletions", () => {
     expect(r.warnings).toEqual([]);
   });
 
-  it("reports an undeclared drop exactly as before", () => {
+  it("reports an undeclared drop and lists the dropped test names", () => {
     const { repo, base } = twoTestFilesRepo();
-    write(repo, "test/a.test.ts", 'it("kept", () => {});\n');
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
     commitAll(repo, "drop two cases");
     const r = hygiene({ cwd: repo, base });
     expect(r.status).toBe("fail");
@@ -1384,9 +1386,10 @@ describe("hygiene intended deletions", () => {
       expect.objectContaining({
         kind: "test_cases_dropped",
         path: "test/a.test.ts",
-        detail: "test-case markers fell from 3 to 1",
+        detail: 'test-case markers fell from 3 to 1; dropped: "two", "three"',
         baseCases: 3,
         headCases: 1,
+        droppedNames: ["two", "three"],
       }),
     ]);
     expect(r.intendedDeletions).toEqual([]);
@@ -1401,7 +1404,7 @@ describe("hygiene intended deletions", () => {
     const r = hygiene({
       cwd: repo,
       base,
-      intendedDeletions: ["test/a.test.ts=all"],
+      intendedDeletions: ["test/a.test.ts=2"],
     });
     expect(r.status).toBe("fail");
     expect(r.findings).toEqual([
@@ -1417,7 +1420,7 @@ describe("hygiene intended deletions", () => {
 
   it("reports a drop above the declared count with that count in the detail", () => {
     const { repo, base } = twoTestFilesRepo();
-    write(repo, "test/a.test.ts", 'it("kept", () => {});\n');
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
     commitAll(repo, "drop two cases");
     const r = hygiene({
       cwd: repo,
@@ -1428,7 +1431,8 @@ describe("hygiene intended deletions", () => {
     expect(r.findings).toEqual([
       expect.objectContaining({
         kind: "test_cases_dropped",
-        detail: "test-case markers fell from 3 to 1 (declared 1)",
+        detail:
+          'test-case markers fell from 3 to 1 (declared 1); dropped: "two", "three"',
       }),
     ]);
     expect(r.intendedDeletions).toEqual([]);
@@ -1436,7 +1440,7 @@ describe("hygiene intended deletions", () => {
     expect(r.warnings).toEqual([]);
   });
 
-  it("allows every case of a deleted test file with all", () => {
+  it("does not let all excuse a deleted test file and lists its tests instead", () => {
     const { repo, base } = twoTestFilesRepo();
     git(repo, ["rm", "-q", "test/a.test.ts"]);
     commitAll(repo, "delete a test file");
@@ -1445,33 +1449,41 @@ describe("hygiene intended deletions", () => {
       base,
       intendedDeletions: ["test/a.test.ts=all"],
     });
-    expect(r.status).toBe("ok");
-    expect(r.findings).toEqual([]);
-    expect(r.intendedDeletions).toEqual([
-      {
+    expect(r.status).toBe("fail");
+    expect(r.intendedDeletions).toEqual([]);
+    expect(r.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
         path: "test/a.test.ts",
         baseCases: 3,
         headCases: 0,
-        dropped: 3,
-        declared: "all",
-      },
+        droppedNames: ["one", "two", "three"],
+        detail:
+          'test-case markers fell from 3 to 0 (file deleted) (declared all, which does not excuse a whole-file drop); dropped: "one", "two", "three"; excuse them with --intended-deletion \'test/a.test.ts::<test name>\' per test',
+      }),
     ]);
+    // Consulted, so the declaration is not reported stale as well.
+    expect(r.warnings).toEqual([]);
   });
 
-  it("treats a bare path as all", () => {
+  it("keeps a bare path parseable but lets it excuse no partial drop either", () => {
     const { repo, base } = twoTestFilesRepo();
-    write(repo, "test/a.test.ts", 'it("kept", () => {});\n');
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
     commitAll(repo, "drop two cases");
     const declared = hygiene({
       cwd: repo,
       base,
       intendedDeletions: ["test/a.test.ts"],
     });
-    expect(declared.status).toBe("ok");
+    expect(declared.status).toBe("fail");
     expect(declared.intendedDeclarations).toEqual([
       { path: "test/a.test.ts", declared: "all" },
     ]);
-    expect(declared.intendedDeletions[0]).toMatchObject({ dropped: 2 });
+    expect(declared.intendedDeletions).toEqual([]);
+    expect(declared.findings[0]?.detail).toContain(
+      "declared all, which does not excuse a drop",
+    );
+    expect(declared.findings[0]?.droppedNames).toEqual(["two", "three"]);
   });
 
   it("warns for a declaration that allowed nothing and leaves the status alone", () => {
@@ -1515,7 +1527,7 @@ describe("hygiene intended deletions", () => {
     const r = hygiene({
       cwd: repo,
       base,
-      intendedDeletions: ["./test/renamed.test.ts"],
+      intendedDeletions: ["./test/renamed.test.ts=1"],
     });
     expect(r.status).toBe("ok");
     expect(r.intendedDeletions).toEqual([
@@ -1524,14 +1536,25 @@ describe("hygiene intended deletions", () => {
         baseCases: 3,
         headCases: 2,
         dropped: 1,
-        declared: "all",
+        declared: 1,
       },
     ]);
+    const byName = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["./test/renamed.test.ts::three"],
+    });
+    expect(byName.status).toBe("ok");
+    expect(byName.intendedDeletions[0]).toMatchObject({
+      path: "test/renamed.test.ts",
+      declared: "names",
+      names: ["three"],
+    });
     // The old name is not the path the finding (or the allowance) uses.
     const oldName = hygiene({
       cwd: repo,
       base,
-      intendedDeletions: ["test/a.test.ts"],
+      intendedDeletions: ["test/a.test.ts=1"],
     });
     expect(oldName.status).toBe("fail");
     expect(oldName.findings[0]?.path).toBe("test/renamed.test.ts");
@@ -1630,6 +1653,751 @@ describe("hygiene intended deletions", () => {
       { path: "test/x=y.test.ts", declared: "all" },
       { path: "test/p=q.test.ts", declared: 2 },
     ]);
+  });
+});
+
+describe("listTestCases", () => {
+  it("names JS/TS markers by their title string, whatever the suffix or quote", () => {
+    const content = [
+      'it("plain", () => {});',
+      "test('single', () => {});",
+      "it(`template`, () => {});",
+      'it.skip("skipped", () => {});',
+      'it.only("focused", () => {});',
+      'it.each([1, 2])("each %s", (n) => {});',
+      'test.each([[1, 2]])("table, with a comma", () => {});',
+      'it("escaped \\"quote\\" inside", () => {});',
+      'it("sets x=3 and a :: colon", () => {});',
+      "it(",
+      '  "title on the next line",',
+      "  () => {},",
+      ");",
+    ].join("\n");
+    expect(listTestCases(content, "x.test.ts")).toEqual([
+      "plain",
+      "single",
+      "template",
+      "skipped",
+      "focused",
+      "each %s",
+      "table, with a comma",
+      'escaped "quote" inside',
+      "sets x=3 and a :: colon",
+      "title on the next line",
+    ]);
+  });
+
+  it("collapses every whitespace run in a title, a multi-line template literal included", () => {
+    const content =
+      "it(`first line\n   second\tline`, () => {});\nit('a   b', () => {});\n";
+    expect(listTestCases(content, "x.test.ts")).toEqual([
+      "first line second line",
+      "a b",
+    ]);
+  });
+
+  it("names a marker whose title is not a string literal by its own line", () => {
+    expect(listTestCases("  it(title, () => {});\n", "x.test.ts")).toEqual([
+      "it(title, () => {});",
+    ]);
+  });
+
+  it("names Python, Go and annotated tests by their function", () => {
+    expect(
+      listTestCases(
+        "def test_one():\n    pass\nasync def test_two(x):\n    pass\ndef helper():\n",
+        "test_a.py",
+      ),
+    ).toEqual(["test_one", "test_two"]);
+    expect(
+      listTestCases(
+        "func TestAlpha(t *testing.T) {}\nfunc helper() {}\nfunc TestBeta_x(t *testing.T) {}\n",
+        "a_test.go",
+      ),
+    ).toEqual(["TestAlpha", "TestBeta_x"]);
+    expect(
+      listTestCases(
+        "  @Test\n  void shouldWork() {}\n  @Test(timeout = 5)\n  @Disabled\n  public void other() {}\n  @test public void inline() {}\n",
+        "FooTest.java",
+      ),
+    ).toEqual(["shouldWork", "other", "inline"]);
+  });
+
+  it("lists PHPUnit methods by name and leaves the count as it was", () => {
+    const content = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function testOne(): void {}",
+      "  /** @test */",
+      "  public function it_does_things(): void {}",
+      "  #[Test]",
+      "  public function attributed(): void {}",
+      "  public function helper(): void {}",
+      "}",
+      "",
+    ].join("\n");
+    expect(listTestCases(content, "tests/FooTest.php")).toEqual([
+      "testOne",
+      "it_does_things",
+      "attributed",
+    ]);
+    expect(countTestCases(content, "tests/FooTest.php")).toBe(3);
+    expect(countPhpTestMethods(content)).toBe(3);
+  });
+
+  it("gives one entry per marker, so the list length is the count", () => {
+    const content =
+      'it("a", () => {});\nit(x, () => {});\nit("a", () => {});\n';
+    expect(listTestCases(content, "x.test.ts")).toHaveLength(
+      countTestCases(content, "x.test.ts"),
+    );
+    expect(countTestCases(content, "x.test.ts")).toBe(3);
+  });
+});
+
+describe("parseIntendedDeletion", () => {
+  it("reads <path>::<name> as a name, whatever the title holds", () => {
+    expect(parseIntendedDeletion("./test/a.test.ts::one")).toEqual({
+      path: "test/a.test.ts",
+      names: ["one"],
+    });
+    for (const title of [
+      "a, b, c",
+      "sets x=3",
+      "ends with =all",
+      "has :: inside",
+      "  padded  ",
+    ]) {
+      expect(parseIntendedDeletion(`test/a.test.ts::${title}`)).toEqual({
+        path: "test/a.test.ts",
+        names: [title.trim()],
+      });
+    }
+  });
+
+  it("collapses whitespace inside a declared name", () => {
+    expect(parseIntendedDeletion("p.test.ts::a \t  b\n c")).toEqual({
+      path: "p.test.ts",
+      names: ["a b c"],
+    });
+  });
+
+  it("keeps the count forms as they were", () => {
+    expect(parseIntendedDeletion("test/a.test.ts=2")).toEqual({
+      path: "test/a.test.ts",
+      declared: 2,
+    });
+    expect(parseIntendedDeletion("test/a.test.ts=all")).toEqual({
+      path: "test/a.test.ts",
+      declared: "all",
+    });
+    expect(parseIntendedDeletion("test/a.test.ts")).toEqual({
+      path: "test/a.test.ts",
+      declared: "all",
+    });
+  });
+
+  it("rejects an empty path or an empty name", () => {
+    for (const spec of ["::one", "test/a.test.ts::", "test/a.test.ts::   "]) {
+      expect(() => parseIntendedDeletion(spec)).toThrow(UsageError);
+    }
+  });
+});
+
+describe("hygiene whole-file drops are declared by name", () => {
+  /** `initRepo()` (test/a.test.ts: one, two, three) plus a file with
+   * awkward titles, a Go file and a Python file, committed as the base. */
+  function namedTestsRepo(): { repo: string; base: string } {
+    const repo = initRepo();
+    write(
+      repo,
+      "test/c.test.ts",
+      'it("handles a, b", () => {});\nit("sets x=3", () => {});\nit("has :: a colon", () => {});\n',
+    );
+    write(
+      repo,
+      "pkg/foo_test.go",
+      "package foo\n\nfunc TestAlpha(t *testing.T) {}\n\nfunc TestBeta(t *testing.T) {}\n",
+    );
+    write(
+      repo,
+      "py/test_sample.py",
+      "def test_one():\n    pass\n\nasync def test_two():\n    pass\n",
+    );
+    commitAll(repo, "more tests");
+    return { repo, base: git(repo, ["rev-parse", "HEAD"]).trim() };
+  }
+
+  function deleteFile(repo: string, rel: string): void {
+    git(repo, ["rm", "-q", rel]);
+    commitAll(repo, `delete ${rel}`);
+  }
+
+  it("excuses a deleted file whose tests are all named, and records the names", () => {
+    const { repo, base } = namedTestsRepo();
+    deleteFile(repo, "test/a.test.ts");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: [
+        "test/a.test.ts::one",
+        "test/a.test.ts::two",
+        "test/a.test.ts::three",
+      ],
+    });
+    expect(r.status).toBe("ok");
+    expect(r.findings).toEqual([]);
+    expect(r.intendedDeclarations).toEqual([
+      { path: "test/a.test.ts", names: ["one", "two", "three"] },
+    ]);
+    expect(r.intendedDeletions).toEqual([
+      {
+        path: "test/a.test.ts",
+        baseCases: 3,
+        headCases: 0,
+        dropped: 3,
+        declared: "names",
+        names: ["one", "two", "three"],
+      },
+    ]);
+    expect(r.counts).toMatchObject({ testCaseDrops: 0, intendedDeletions: 1 });
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("excuses a file emptied of its tests the same way as a deleted one", () => {
+    const { repo, base } = namedTestsRepo();
+    write(repo, "test/a.test.ts", "// everything moved elsewhere\n");
+    commitAll(repo, "empty the file");
+    const blanket = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts=all"],
+    });
+    expect(blanket.status).toBe("fail");
+    expect(blanket.findings[0]).toMatchObject({
+      headCases: 0,
+      droppedNames: ["one", "two", "three"],
+    });
+    expect(blanket.findings[0]?.detail).not.toContain("file deleted");
+    const named = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: [
+        "test/a.test.ts::one",
+        "test/a.test.ts::two",
+        "test/a.test.ts::three",
+      ],
+    });
+    expect(named.status).toBe("ok");
+  });
+
+  it("reports a dropped test the declaration leaves out and names it", () => {
+    const { repo, base } = namedTestsRepo();
+    deleteFile(repo, "test/a.test.ts");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts::one", "test/a.test.ts::two"],
+    });
+    expect(r.status).toBe("fail");
+    expect(r.intendedDeletions).toEqual([]);
+    expect(r.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
+        path: "test/a.test.ts",
+        droppedNames: ["one", "two", "three"],
+      }),
+    ]);
+    expect(r.findings[0]?.detail).toContain("2 of 3 dropped tests named");
+    expect(r.findings[0]?.detail).toContain('not named: "three"');
+    expect(r.counts).toMatchObject({ testCaseDrops: 1, intendedDeletions: 0 });
+  });
+
+  it("throws a usage error for a name that is not among the dropped tests", () => {
+    const { repo, base } = namedTestsRepo();
+    deleteFile(repo, "test/a.test.ts");
+    const all = [
+      "test/a.test.ts::one",
+      "test/a.test.ts::two",
+      "test/a.test.ts::three",
+    ];
+    expect(() =>
+      hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [...all, "test/a.test.ts::four"],
+      }),
+    ).toThrow(
+      /not dropped.*test\/a\.test\.ts: "four" declared 1 time\(s\), dropped 0 \(all dropped tests: "one", "two", "three"\)/,
+    );
+    // Misspelled while the rest are right: still an error, not a finding.
+    expect(() =>
+      hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["test/a.test.ts::One", ...all.slice(1)],
+      }),
+    ).toThrow(UsageError);
+  });
+
+  it("throws for an unknown name on a partial drop too", () => {
+    const { repo, base } = namedTestsRepo();
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
+    commitAll(repo, "keep one");
+    expect(() =>
+      hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["test/a.test.ts::one"],
+      }),
+    ).toThrow(UsageError);
+  });
+
+  it("does not let a count equal to the number of dropped tests excuse a whole-file drop", () => {
+    const { repo, base } = namedTestsRepo();
+    deleteFile(repo, "test/a.test.ts");
+    for (const n of [3, 99]) {
+      const r = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [`test/a.test.ts=${String(n)}`],
+      });
+      expect(r.status).toBe("fail");
+      expect(r.intendedDeletions).toEqual([]);
+      expect(r.findings[0]?.detail).toContain(
+        `declared ${String(n)}, a count does not excuse a whole-file drop`,
+      );
+      expect(r.findings[0]?.droppedNames).toEqual(["one", "two", "three"]);
+    }
+  });
+
+  it("lets the names decide when a count or all comes with them", () => {
+    const { repo, base } = namedTestsRepo();
+    deleteFile(repo, "test/a.test.ts");
+    const names = [
+      "test/a.test.ts::one",
+      "test/a.test.ts::two",
+      "test/a.test.ts::three",
+    ];
+    for (const extra of ["test/a.test.ts=3", "test/a.test.ts=all"]) {
+      const full = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [extra, ...names],
+      });
+      expect(full.status).toBe("ok");
+      expect(full.intendedDeletions[0]).toMatchObject({ declared: "names" });
+      const partial = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [extra, names[0] as string],
+      });
+      expect(partial.status).toBe("fail");
+    }
+  });
+
+  it("excuses a partial drop by naming every dropped test, or by a covering count", () => {
+    const { repo, base } = namedTestsRepo();
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
+    commitAll(repo, "keep one");
+    const named = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts::two", "test/a.test.ts::three"],
+    });
+    expect(named.status).toBe("ok");
+    expect(named.intendedDeletions).toEqual([
+      {
+        path: "test/a.test.ts",
+        baseCases: 3,
+        headCases: 1,
+        dropped: 2,
+        declared: "names",
+        names: ["two", "three"],
+      },
+    ]);
+    const incomplete = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts::two"],
+    });
+    expect(incomplete.status).toBe("fail");
+    expect(incomplete.findings[0]?.detail).toContain('not named: "three"');
+    // A covering count still excuses it, unchanged, and wins over names
+    // that leave one test out.
+    const counted = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts=2", "test/a.test.ts::two"],
+    });
+    expect(counted.status).toBe("ok");
+    expect(counted.intendedDeletions[0]).toMatchObject({ declared: 2 });
+    const tooSmall = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts=1"],
+    });
+    expect(tooSmall.status).toBe("fail");
+    expect(tooSmall.findings[0]?.detail).toContain("(declared 1)");
+  });
+
+  it("round-trips titles that hold commas, = and :: through the declaration", () => {
+    const { repo, base } = namedTestsRepo();
+    deleteFile(repo, "test/c.test.ts");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: [
+        "test/c.test.ts::handles a, b",
+        "test/c.test.ts::sets x=3",
+        "test/c.test.ts::has :: a colon",
+      ],
+    });
+    expect(r.status).toBe("ok");
+    expect(r.intendedDeletions[0]).toMatchObject({
+      declared: "names",
+      names: ["handles a, b", "sets x=3", "has :: a colon"],
+    });
+    // The finding spells the same titles out, JSON-quoted.
+    const undeclared = hygiene({ cwd: repo, base });
+    expect(undeclared.findings[0]?.droppedNames).toEqual([
+      "handles a, b",
+      "sets x=3",
+      "has :: a colon",
+    ]);
+    expect(undeclared.findings[0]?.detail).toContain(
+      '"handles a, b", "sets x=3", "has :: a colon"',
+    );
+  });
+
+  it("names Go and Python tests and rejects all for them as well", () => {
+    const { repo, base } = namedTestsRepo();
+    deleteFile(repo, "pkg/foo_test.go");
+    deleteFile(repo, "py/test_sample.py");
+    const blanket = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["pkg/foo_test.go=all", "py/test_sample.py"],
+    });
+    expect(blanket.status).toBe("fail");
+    expect(blanket.findings.map((f) => [f.path, f.droppedNames])).toEqual([
+      ["pkg/foo_test.go", ["TestAlpha", "TestBeta"]],
+      ["py/test_sample.py", ["test_one", "test_two"]],
+    ]);
+    const named = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: [
+        "pkg/foo_test.go::TestAlpha",
+        "pkg/foo_test.go::TestBeta",
+        "py/test_sample.py::test_one",
+        "py/test_sample.py::test_two",
+      ],
+    });
+    expect(named.status).toBe("ok");
+    expect(named.intendedDeletions.map((d) => d.path)).toEqual([
+      "pkg/foo_test.go",
+      "py/test_sample.py",
+    ]);
+  });
+
+  it("needs a duplicated title declared as often as it was dropped", () => {
+    const repo = initRepo();
+    write(
+      repo,
+      "test/d.test.ts",
+      'it("same", () => {});\nit("same", () => {});\nit("other", () => {});\n',
+    );
+    commitAll(repo, "duplicate titles");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["rm", "-q", "test/d.test.ts"]);
+    commitAll(repo, "delete");
+    const twice = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: [
+        "test/d.test.ts::same",
+        "test/d.test.ts::same",
+        "test/d.test.ts::other",
+      ],
+    });
+    expect(twice.status).toBe("ok");
+    expect(twice.intendedDeletions[0]).toMatchObject({
+      dropped: 3,
+      names: ["same", "same", "other"],
+    });
+    const once = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/d.test.ts::same", "test/d.test.ts::other"],
+    });
+    expect(once.status).toBe("fail");
+    expect(once.findings[0]?.droppedNames).toEqual(["same", "same", "other"]);
+    expect(once.findings[0]?.detail).toContain(
+      '(2 of 3 dropped tests named); not named: "same" x2 (named x1)',
+    );
+  });
+
+  describe("a title that more than one dropped case carries", () => {
+    /** a.test.ts: describe A { works, keeps } and describe B { works }; the
+     * change keeps only A's `keeps`, so B's unrelated `works` goes too. */
+    function worksTwiceRepo(): { repo: string; base: string } {
+      const repo = initRepo();
+      write(
+        repo,
+        "test/w.test.ts",
+        [
+          'describe("A", () => {',
+          '  it("works", () => {});',
+          '  it("keeps", () => {});',
+          "});",
+          'describe("B", () => {',
+          '  it("works", () => {});',
+          "});",
+          "",
+        ].join("\n"),
+      );
+      commitAll(repo, "works twice");
+      const base = git(repo, ["rev-parse", "HEAD"]).trim();
+      write(
+        repo,
+        "test/w.test.ts",
+        'describe("A", () => {\n  it("keeps", () => {});\n});\n',
+      );
+      commitAll(repo, "drop both works");
+      return { repo, base };
+    }
+
+    it("is a finding naming it twice when declared once, ok when declared twice", () => {
+      const { repo, base } = worksTwiceRepo();
+      const undeclared = hygiene({ cwd: repo, base });
+      expect(undeclared.findings[0]?.droppedNames).toEqual(["works", "works"]);
+      expect(undeclared.findings[0]?.detail).toContain('dropped: "works" x2');
+      const once = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["test/w.test.ts::works"],
+      });
+      expect(once.status).toBe("fail");
+      expect(once.intendedDeletions).toEqual([]);
+      expect(once.findings[0]?.droppedNames).toEqual(["works", "works"]);
+      expect(once.findings[0]?.detail).toContain(
+        'not named: "works" x2 (named x1)',
+      );
+      const twice = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["test/w.test.ts::works", "test/w.test.ts::works"],
+      });
+      expect(twice.status).toBe("ok");
+      expect(twice.intendedDeletions[0]).toMatchObject({
+        declared: "names",
+        names: ["works", "works"],
+      });
+    });
+
+    it("is a usage error when declared more often than it was dropped", () => {
+      const { repo, base } = worksTwiceRepo();
+      expect(() =>
+        hygiene({
+          cwd: repo,
+          base,
+          intendedDeletions: [
+            "test/w.test.ts::works",
+            "test/w.test.ts::works",
+            "test/w.test.ts::works",
+          ],
+        }),
+      ).toThrow(
+        /"works" declared 3 time\(s\), dropped 2 \(all dropped tests: "works" x2\)/,
+      );
+      // Dropped once, declared twice: the same error for a single case.
+      write(repo, "test/one.test.ts", 'it("solo", () => {});\n');
+      commitAll(repo, "solo");
+      const soloBase = git(repo, ["rev-parse", "HEAD"]).trim();
+      git(repo, ["rm", "-q", "test/one.test.ts"]);
+      commitAll(repo, "drop solo");
+      expect(() =>
+        hygiene({
+          cwd: repo,
+          base: soloBase,
+          intendedDeletions: [
+            "test/one.test.ts::solo",
+            "test/one.test.ts::solo",
+          ],
+        }),
+      ).toThrow(UsageError);
+    });
+
+    it("merges flag and file per name by the larger count, never the sum", () => {
+      const { repo, base } = worksTwiceRepo();
+      const w = "test/w.test.ts::works";
+      const names = (flag: string[], file: string[]): string[] | undefined =>
+        hygiene({
+          cwd: repo,
+          base,
+          intendedDeletions: flag,
+          intendedDeletionsFromFile: file,
+        }).intendedDeclarations[0]?.names;
+      // Once in each source counts once (a sum of 2 would excuse the drop).
+      const bothOnce = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [w],
+        intendedDeletionsFromFile: [w],
+      });
+      expect(bothOnce.intendedDeclarations[0]?.names).toEqual(["works"]);
+      expect(bothOnce.status).toBe("fail");
+      // Twice in one source, once in the other: two, whichever way round.
+      expect(names([w, w], [w])).toEqual(["works", "works"]);
+      expect(names([w], [w, w])).toEqual(["works", "works"]);
+      expect(names([w, w], [w, w])).toEqual(["works", "works"]);
+      // Flag only and file only.
+      expect(names([w, w], [])).toEqual(["works", "works"]);
+      expect(names([], [w])).toEqual(["works"]);
+      const ok = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [w],
+        intendedDeletionsFromFile: [w, w],
+      });
+      expect(ok.status).toBe("ok");
+    });
+
+    it("holds for a Python method name repeated across classes", () => {
+      const repo = initRepo();
+      write(
+        repo,
+        "py/test_dup.py",
+        [
+          "class A:",
+          "    def test_x(self):",
+          "        pass",
+          "",
+          "class B:",
+          "    def test_x(self):",
+          "        pass",
+          "",
+          "    def test_y(self):",
+          "        pass",
+          "",
+        ].join("\n"),
+      );
+      commitAll(repo, "python duplicates");
+      const base = git(repo, ["rev-parse", "HEAD"]).trim();
+      git(repo, ["rm", "-q", "py/test_dup.py"]);
+      commitAll(repo, "delete");
+      const once = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["py/test_dup.py::test_x", "py/test_dup.py::test_y"],
+      });
+      expect(once.status).toBe("fail");
+      expect(once.findings[0]?.droppedNames).toEqual([
+        "test_x",
+        "test_x",
+        "test_y",
+      ]);
+      const twice = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [
+          "py/test_dup.py::test_x",
+          "py/test_dup.py::test_x",
+          "py/test_dup.py::test_y",
+        ],
+      });
+      expect(twice.status).toBe("ok");
+    });
+  });
+
+  it("caps the names in the detail but keeps them all on the finding", () => {
+    const repo = initRepo();
+    const titles = Array.from({ length: 12 }, (_, i) => `case ${String(i)}`);
+    write(
+      repo,
+      "test/many.test.ts",
+      titles.map((t) => `it("${t}", () => {});\n`).join(""),
+    );
+    commitAll(repo, "many tests");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["rm", "-q", "test/many.test.ts"]);
+    commitAll(repo, "delete");
+    const r = hygiene({ cwd: repo, base });
+    expect(r.findings[0]?.droppedNames).toEqual(titles);
+    expect(r.findings[0]?.detail).toContain('"case 9", and 2 more');
+    expect(r.findings[0]?.detail).not.toContain("case 10");
+  });
+
+  it("lists every dropped name, with counts, in the stale-name error", () => {
+    const repo = initRepo();
+    const titles = Array.from({ length: 12 }, (_, i) => `case ${String(i)}`);
+    write(
+      repo,
+      "test/many.test.ts",
+      [...titles, "case 0"].map((t) => `it("${t}", () => {});\n`).join(""),
+    );
+    commitAll(repo, "many tests");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["rm", "-q", "test/many.test.ts"]);
+    commitAll(repo, "delete");
+    let message = "";
+    try {
+      hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["test/many.test.ts::nope"],
+      });
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).toContain('"case 0" x2');
+    expect(message).toContain('"case 11"');
+    expect(message).not.toContain("more");
+  });
+
+  it("warns for a names declaration on a path that dropped nothing", () => {
+    const { repo, base } = namedTestsRepo();
+    write(repo, "src/a.ts", "export const a = 2;\n");
+    commitAll(repo, "unrelated");
+    const r = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: ["test/a.test.ts::one"],
+    });
+    expect(r.status).toBe("ok");
+    expect(r.warnings).toEqual(["intended deletion not used: test/a.test.ts"]);
+  });
+
+  it("merges a count and names declared for one path in any order", () => {
+    const { repo, base } = namedTestsRepo();
+    const specs = [
+      "test/a.test.ts=all",
+      "test/a.test.ts=2",
+      "test/a.test.ts::one",
+    ];
+    for (const order of [specs, [...specs].reverse()]) {
+      const r = hygiene({ cwd: repo, base, intendedDeletions: order });
+      expect(r.intendedDeclarations).toEqual([
+        { path: "test/a.test.ts", declared: 2, names: ["one"] },
+      ]);
+    }
+    // The same name from the flag and from the file counts once; the
+    // sources swap without changing the result.
+    const one = "test/a.test.ts::one";
+    for (const [flag, file] of [
+      [[one], [one]],
+      [[one, "test/a.test.ts=3"], [one]],
+      [[one], [one, "test/a.test.ts=3"]],
+    ] as const) {
+      const r = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: flag,
+        intendedDeletionsFromFile: file,
+      });
+      expect(r.intendedDeclarations[0]?.names).toEqual(["one"]);
+    }
   });
 });
 
@@ -1738,21 +2506,22 @@ describe("hygiene intended deletions CLI", () => {
       intended_declarations: { path: string; declared: number | string }[];
       intended_deletions: { path: string; declared: number | string }[];
     };
-    // The file's 5 covers the 2-case drop the flag's 1 would not, and
-    // `all` beats a number; the flag's value is what loses.
+    // The file's 5 covers the 2-case drop the flag's 1 would not, and a
+    // number beats `all` (which excuses nothing); the smaller number and
+    // the `all` are what lose.
     expect(out.intended_declarations).toEqual([
       { path: "test/a.test.ts", declared: 5 },
-      { path: "test/b.test.ts", declared: "all" },
+      { path: "test/b.test.ts", declared: 1 },
     ]);
     expect(out.intended_deletions).toEqual([
       expect.objectContaining({ path: "test/a.test.ts", declared: 5 }),
-      expect.objectContaining({ path: "test/b.test.ts", declared: "all" }),
+      expect.objectContaining({ path: "test/b.test.ts", declared: 1 }),
     ]);
   });
 
   it("resolves a relative --intended-deletion-file against the -C directory", async () => {
     const { repo, base } = repoWithDrop();
-    write(repo, "intended.txt", "test/a.test.ts\n");
+    write(repo, "intended.txt", "test/a.test.ts=2\n");
     commitAll(repo, "declaration file");
     const run = await spawnCli([
       "-C",
@@ -1856,6 +2625,276 @@ describe("hygiene intended deletions CLI", () => {
       },
     ]);
     expect(cut.counts.intendedDeletions).toBe(cut.intended_deletions.length);
+  });
+});
+
+describe("hygiene named deletions CLI", () => {
+  /** test/a.test.ts (one, two, three) deleted, and test/c.test.ts with
+   * awkward titles deleted, after the base commit. */
+  function deletedRepo(): { repo: string; base: string } {
+    const repo = initRepo();
+    write(
+      repo,
+      "test/c.test.ts",
+      'it("handles a, b", () => {});\nit("sets x=3", () => {});\n',
+    );
+    commitAll(repo, "second test file");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["rm", "-q", "test/a.test.ts", "test/c.test.ts"]);
+    commitAll(repo, "delete both test files");
+    return { repo, base };
+  }
+
+  type Out = {
+    status: string;
+    intended_declarations: { path: string; names?: string[] }[];
+    intended_deletions: { path: string; declared: string; names?: string[] }[];
+    findings: { path: string; detail: string; droppedNames: string[] }[];
+  };
+
+  async function run(
+    repo: string,
+    base: string,
+    extra: string[],
+  ): Promise<{ code: number | null; out: Out }> {
+    const r = await spawnCli(["-C", repo, "hygiene", "--base", base, ...extra]);
+    return { code: r.code, out: JSON.parse(r.stdout) as Out };
+  }
+
+  const flag = (spec: string): string[] => ["--intended-deletion", spec];
+
+  it("flag only: every name on the flag excuses the deleted file", async () => {
+    const { repo, base } = deletedRepo();
+    const { code, out } = await run(repo, base, [
+      ...flag("test/a.test.ts::one"),
+      ...flag("test/a.test.ts::two"),
+      ...flag("test/a.test.ts::three"),
+      ...flag("test/c.test.ts::handles a, b"),
+      ...flag("test/c.test.ts::sets x=3"),
+    ]);
+    expect(code).toBe(0);
+    expect(out.intended_deletions).toEqual([
+      expect.objectContaining({
+        path: "test/a.test.ts",
+        declared: "names",
+        names: ["one", "two", "three"],
+      }),
+      expect.objectContaining({
+        path: "test/c.test.ts",
+        declared: "names",
+        names: ["handles a, b", "sets x=3"],
+      }),
+    ]);
+  });
+
+  it("file only: one name per line, commas and = in a title intact", async () => {
+    const { repo, base } = deletedRepo();
+    write(
+      repo,
+      "intended.txt",
+      [
+        "# the removed design",
+        "test/a.test.ts::one",
+        "test/a.test.ts::two",
+        "test/a.test.ts::three",
+        "test/c.test.ts::handles a, b",
+        "test/c.test.ts::sets x=3",
+        "",
+      ].join("\n"),
+    );
+    const { code, out } = await run(repo, base, [
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    expect(code).toBe(0);
+    expect(out.intended_deletions.map((d) => d.names)).toEqual([
+      ["one", "two", "three"],
+      ["handles a, b", "sets x=3"],
+    ]);
+  });
+
+  it("flag and file naming different tests merge: neither source wins", async () => {
+    const { repo, base } = deletedRepo();
+    write(
+      repo,
+      "intended.txt",
+      "test/a.test.ts::three\ntest/c.test.ts::sets x=3\n",
+    );
+    const common = [
+      ...flag("test/a.test.ts::one"),
+      ...flag("test/a.test.ts::two"),
+      ...flag("test/c.test.ts::handles a, b"),
+    ];
+    const { code, out } = await run(repo, base, [
+      ...common,
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    expect(code).toBe(0);
+    expect(out.intended_declarations).toEqual([
+      { path: "test/a.test.ts", names: ["one", "two", "three"] },
+      { path: "test/c.test.ts", names: ["handles a, b", "sets x=3"] },
+    ]);
+    // Either source alone leaves a test out, so each alone is a finding.
+    const flagOnly = await run(repo, base, common);
+    expect(flagOnly.code).toBe(1);
+    expect(flagOnly.out.findings.map((f) => f.path)).toEqual([
+      "test/a.test.ts",
+      "test/c.test.ts",
+    ]);
+    const fileOnly = await run(repo, base, [
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    expect(fileOnly.code).toBe(1);
+  });
+
+  it("flag and file naming the same test count it once", async () => {
+    const { repo, base } = deletedRepo();
+    write(repo, "intended.txt", "test/a.test.ts::one\ntest/a.test.ts::two\n");
+    const { code, out } = await run(repo, base, [
+      ...flag("test/a.test.ts::one"),
+      ...flag("test/a.test.ts::two"),
+      ...flag("test/a.test.ts::three"),
+      ...flag("test/c.test.ts::handles a, b"),
+      ...flag("test/c.test.ts::sets x=3"),
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    expect(code).toBe(0);
+    expect(out.intended_declarations[0]).toEqual({
+      path: "test/a.test.ts",
+      names: ["one", "two", "three"],
+    });
+  });
+
+  it("exits 1 with the dropped names for a blanket all, from the flag and from the file", async () => {
+    const { repo, base } = deletedRepo();
+    write(repo, "intended.txt", "test/a.test.ts=all\ntest/c.test.ts\n");
+    for (const extra of [
+      [...flag("test/a.test.ts=all"), ...flag("test/c.test.ts")],
+      ["--intended-deletion-file", "intended.txt"],
+    ]) {
+      const { code, out } = await run(repo, base, extra);
+      expect(code).toBe(1);
+      expect(out.findings.map((f) => [f.path, f.droppedNames])).toEqual([
+        ["test/a.test.ts", ["one", "two", "three"]],
+        ["test/c.test.ts", ["handles a, b", "sets x=3"]],
+      ]);
+      expect(out.findings[0]?.detail).toContain(
+        "does not excuse a whole-file drop",
+      );
+    }
+  });
+
+  it("declares a multi-line template title through the file", async () => {
+    const repo = initRepo();
+    write(
+      repo,
+      "test/m.test.ts",
+      "it(`first line\n    second line`, () => {});\n",
+    );
+    commitAll(repo, "multi-line title");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["rm", "-q", "test/m.test.ts"]);
+    commitAll(repo, "delete");
+    write(repo, "intended.txt", "test/m.test.ts::first line second line\n");
+    const viaFile = await run(repo, base, [
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    expect(viaFile.code).toBe(0);
+    expect(viaFile.out.intended_deletions[0]?.names).toEqual([
+      "first line second line",
+    ]);
+    const viaFlag = await run(repo, base, [
+      ...flag("test/m.test.ts::first  line   second line"),
+    ]);
+    expect(viaFlag.code).toBe(0);
+  });
+
+  it("counts a repeated title per source and takes the larger count", async () => {
+    const repo = initRepo();
+    write(
+      repo,
+      "test/w.test.ts",
+      'it("works", () => {});\nit("works", () => {});\n',
+    );
+    commitAll(repo, "works twice");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["rm", "-q", "test/w.test.ts"]);
+    commitAll(repo, "delete");
+    write(repo, "once.txt", "test/w.test.ts::works\n");
+    write(repo, "twice.txt", "test/w.test.ts::works\ntest/w.test.ts::works\n");
+    const w = "test/w.test.ts::works";
+    const bothOnce = await run(repo, base, [
+      ...flag(w),
+      "--intended-deletion-file",
+      "once.txt",
+    ]);
+    expect(bothOnce.code).toBe(1);
+    expect(bothOnce.out.findings[0]?.droppedNames).toEqual(["works", "works"]);
+    expect(bothOnce.out.findings[0]?.detail).toContain('"works" x2');
+    const flagTwiceFileOnce = await run(repo, base, [
+      ...flag(w),
+      ...flag(w),
+      "--intended-deletion-file",
+      "once.txt",
+    ]);
+    expect(flagTwiceFileOnce.code).toBe(0);
+    const flagOnceFileTwice = await run(repo, base, [
+      ...flag(w),
+      "--intended-deletion-file",
+      "twice.txt",
+    ]);
+    expect(flagOnceFileTwice.code).toBe(0);
+    const over = await run(repo, base, [...flag(w), ...flag(w), ...flag(w)]);
+    expect(over.code).toBe(2);
+    expect(over.out.status).toBe("usage_error");
+  });
+
+  it("exits 2 with a usage error for a name that was not dropped", async () => {
+    const { repo, base } = deletedRepo();
+    const { code, out } = await run(repo, base, [
+      ...flag("test/a.test.ts::nope"),
+    ]);
+    expect(code).toBe(2);
+    expect(out.status).toBe("usage_error");
+  });
+
+  it("spells the dropped names out in the text view", async () => {
+    const { repo, base } = deletedRepo();
+    const r = await spawnCli([
+      "-C",
+      repo,
+      "-f",
+      "text",
+      "hygiene",
+      "--base",
+      base,
+      ...flag("test/a.test.ts::one"),
+    ]);
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain(
+      'test_cases_dropped: test/a.test.ts: test-case markers fell from 3 to 0 (file deleted) (1 of 3 dropped tests named); not named: "two", "three"',
+    );
+    const ok = await spawnCli([
+      "-C",
+      repo,
+      "-f",
+      "text",
+      "hygiene",
+      "--base",
+      base,
+      ...flag("test/a.test.ts::one"),
+      ...flag("test/a.test.ts::two"),
+      ...flag("test/a.test.ts::three"),
+      ...flag("test/c.test.ts::handles a, b"),
+      ...flag("test/c.test.ts::sets x=3"),
+    ]);
+    expect(ok.stdout).toContain(
+      'intended deletion: test/a.test.ts: 3 -> 0 (3 dropped, declared by name: "one", "two", "three")',
+    );
   });
 });
 

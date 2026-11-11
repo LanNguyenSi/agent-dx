@@ -50,7 +50,9 @@ for teams shipping with AI agents.
   deleted or renamed.
 - `hygiene`: refuses staged or committed backup files (`*.bak`, `*.orig`,
   `*~`, and the BSD `sed -i` leftovers `*-e`, `*-E`, `*-n`, `*-r`, `*-s`)
-  and flags rewrites of extend-only files and dropped test cases, in a git
+  and flags rewrites of extend-only files and dropped test cases (each
+  finding lists the dropped tests by name; a whole-file drop is excused only
+  by naming every dropped test), in a git
   range, the index (`--staged`) or the working tree (`--worktree`); it warns
   about uncommitted changes to tracked files that the comparison did not
   cover.

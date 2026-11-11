@@ -2776,7 +2776,7 @@ function renderHygieneText(result: HygieneResult): string {
   }
   for (const d of result.intendedDeletions) {
     lines.push(
-      `intended deletion: ${d.path}: ${String(d.baseCases)} -> ${String(d.headCases)} (${String(d.dropped)} dropped, declared ${String(d.declared)})`,
+      `intended deletion: ${d.path}: ${String(d.baseCases)} -> ${String(d.headCases)} (${String(d.dropped)} dropped, declared ${d.declared === "names" ? `by name: ${(d.names ?? []).map((n) => JSON.stringify(n)).join(", ")}` : String(d.declared)})`,
     );
   }
   lines.push("");
@@ -2822,13 +2822,13 @@ program
   )
   .option(
     "--intended-deletion <path>",
-    "declare a test file's case drop intended: <path>, <path>=<n> (at most n dropped) or <path>=all; repeatable",
+    "declare a test file's case drop intended: <path>::<test name> (one per dropped test case, repeated for a title dropped several times; the only form that excuses a whole-file drop), <path>=<n> (at most n dropped, file keeps a test case); a bare <path> or <path>=all is parsed but excuses nothing; repeatable",
     collectAllow,
     [] as string[],
   )
   .option(
     "--intended-deletion-file <file>",
-    "file listing intended deletions, one declaration per line; blank lines and # comments ignored",
+    "file listing intended deletions, one declaration per line (same forms as --intended-deletion); blank lines and lines starting with # ignored",
   )
   .option(
     "--max-delete-percent <n>",
@@ -2856,17 +2856,15 @@ program
         ),
       );
     }
-    const intendedDeletions = [...opts.intendedDeletion];
-    if (opts.intendedDeletionFile !== undefined) {
-      intendedDeletions.push(
-        ...readListFile(
-          global.cwd,
-          "hygiene",
-          "--intended-deletion-file",
-          opts.intendedDeletionFile,
-        ),
-      );
-    }
+    const intendedDeletionsFromFile =
+      opts.intendedDeletionFile === undefined
+        ? []
+        : readListFile(
+            global.cwd,
+            "hygiene",
+            "--intended-deletion-file",
+            opts.intendedDeletionFile,
+          );
     const result = hygiene({
       cwd: global.cwd,
       base: opts.base,
@@ -2874,7 +2872,8 @@ program
       staged: Boolean(opts.staged),
       worktree: Boolean(opts.worktree),
       extendOnly,
-      intendedDeletions,
+      intendedDeletions: [...opts.intendedDeletion],
+      intendedDeletionsFromFile,
       maxDeletePercent: Number(opts.maxDeletePercent),
     });
     const envelopeInput: EnvelopeInput = {

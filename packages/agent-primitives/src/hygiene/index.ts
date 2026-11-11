@@ -28,18 +28,30 @@ export interface HygieneFinding {
   /** test_cases_dropped: marker counts at base and at head. */
   baseCases?: number;
   headCases?: number;
+  /** test_cases_dropped: the name of every test case present at base and
+   * gone at head, one entry per dropped case in base order, so a title
+   * dropped twice appears twice. A renamed test counts as dropped under its
+   * old name. */
+  droppedNames?: string[];
 }
 
 /**
- * One intended-deletion declaration (`--intended-deletion` /
- * `--intended-deletion-file`): a root-relative test path and how much of
- * its test-case drop the task declares as intended. `"all"` (a bare path)
- * allows a drop of any size; a number allows a drop of at most that many
- * counter units (JS/TS markers, or PHPUnit methods in a `.php` file).
+ * One intended-deletion declaration, merged per path from the flag and the
+ * file (`--intended-deletion` / `--intended-deletion-file`): a root-relative
+ * test path and what the task declares as intended for it.
+ *
+ * `declared` is the count form: `"all"` (a bare path or `=all`) or a number
+ * (`=<n>`), at most that many counter units. `"all"` never excuses a drop
+ * and a number never excuses a drop that empties the file (see
+ * `hygiene()`), so for a whole-file drop only `names` can. `names` lists
+ * tests by title (`<path>::<name>`), one entry per dropped case, so a title
+ * dropped twice must appear twice; a declaration with only names has no
+ * `declared`.
  */
 export interface IntendedDeletionDeclaration {
   path: string;
-  declared: number | "all";
+  declared?: number | "all";
+  names?: string[];
 }
 
 /** An applied allowance: one declaration that matched a real drop and
@@ -50,8 +62,13 @@ export interface IntendedDeletionApplied {
   headCases: number;
   /** `baseCases - headCases`. */
   dropped: number;
-  /** What the declaration allowed: a positive integer, or `"all"`. */
-  declared: number | "all";
+  /** What the declaration allowed: a positive integer for a count, or
+   * `"names"` when the declared test names covered every dropped test
+   * (listed in `names`). */
+  declared: number | "names";
+  /** `declared: "names"`: the declared names, one entry per dropped case
+   * (a title dropped twice appears twice). */
+  names?: string[];
 }
 
 export interface HygieneOptions {
@@ -70,10 +87,16 @@ export interface HygieneOptions {
   worktree?: boolean;
   /** Root-relative paths the task only extends. */
   extendOnly?: readonly string[];
-  /** Raw `--intended-deletion` specs (`<path>`, `<path>=<n>` or
-   * `<path>=all`), from the flag and from `--intended-deletion-file`
-   * alike; parsed and validated by `hygiene()`. */
+  /** Raw `--intended-deletion` specs (`<path>::<test name>`, `<path>=<n>`,
+   * or the legacy `<path>` / `<path>=all`) given on the command line;
+   * parsed and validated by `hygiene()`. A name repeated here counts once
+   * per repetition. */
   intendedDeletions?: readonly string[];
+  /** The same specs read from `--intended-deletion-file`, kept apart from
+   * `intendedDeletions` because the two sources merge per name by the
+   * larger count, not by sum: a name declared once in each counts once. A
+   * name repeated within the file counts once per repetition. */
+  intendedDeletionsFromFile?: readonly string[];
   maxDeletePercent?: number;
 }
 
@@ -93,8 +116,8 @@ export interface HygieneResult {
   maxDeletePercent: number;
   extendOnly: string[];
   /** The declarations this run was given, normalised: leading `./`
-   * stripped, duplicate paths collapsed to the one that wins (the larger
-   * count, `"all"` above any number). Always the effective set, so an
+   * stripped, duplicate paths merged (the larger count, any number above
+   * `"all"`; the union of the names). Always the effective set, so an
    * agent can see what was asked for even when nothing matched. */
   intendedDeclarations: IntendedDeletionDeclaration[];
   /** The declarations that were applied to a real drop. */
@@ -144,27 +167,107 @@ export function isTestPath(filePath: string): boolean {
   return TEST_PATH.test(filePath);
 }
 
-/** Test-case markers, one per line at most: JS/TS `it(`/`test(` (with
- * `.only`/`.skip`/`.each(...)` style suffixes), Python `def test_`,
- * Go `func Test`, and `@test`/`@Test` annotations. A `.php` file is
- * counted by `countPhpTestMethods` instead. A heuristic over text,
- * not a parser: it exists to notice a count going down. */
-export function countTestCases(content: string, filePath?: string): number {
-  if (filePath !== undefined && filePath.endsWith(".php")) {
-    return countPhpTestMethods(content);
+/** A JS/TS test-case marker: `it(`/`test(`, with `.only`/`.skip`/`.each(...)`
+ * style suffixes. */
+const JS_MARKER = /^\s*(?:it|test)(?:\.[A-Za-z]+(?:\([^)]*\))?)*\s*\(/;
+const PY_MARKER = /^\s*(?:async\s+)?def\s+test_/;
+const GO_MARKER = /^\s*func\s+Test[A-Za-z0-9_]*\s*\(/;
+const ANNOTATION_MARKER = /^\s*@[Tt]est\b/;
+
+/** The title in the first string literal of `text`, or `undefined` when the
+ * text does not start with a closed one. Only `\` before the quote character
+ * and before another `\` is unescaped. */
+function leadingStringLiteral(text: string): string | undefined {
+  const quote = text[0];
+  if (quote !== '"' && quote !== "'" && quote !== "`") return undefined;
+  let out = "";
+  for (let i = 1; i < text.length; i++) {
+    const ch = text[i] as string;
+    if (ch === "\\") {
+      const next = text[i + 1];
+      if (next === quote || next === "\\") {
+        out += next;
+        i += 1;
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+    if (ch === quote) return out;
+    if (ch === "\n" && quote !== "`") return undefined;
+    out += ch;
   }
-  let count = 0;
-  for (const line of content.split("\n")) {
+  return undefined;
+}
+
+/** The name of the test case a marker line starts. A name is never needed
+ * to count: a marker whose name cannot be read (a title in a variable, a
+ * computed one) is named by its own trimmed line. */
+function markerName(lines: readonly string[], index: number): string {
+  const line = lines[index] ?? "";
+  const fallback = line.trim();
+  const js = JS_MARKER.exec(line);
+  if (js !== null) {
+    // The title may open on a later line: `it(\n  "title",`.
+    const rest = [
+      line.slice(js[0].length),
+      ...lines.slice(index + 1, index + 4),
+    ]
+      .join("\n")
+      .trimStart();
+    const title = leadingStringLiteral(rest)?.trim();
+    return title !== undefined && title !== "" ? title : fallback;
+  }
+  const py = /^\s*(?:async\s+)?def\s+(test_[^\s(:]*)/.exec(line);
+  if (PY_MARKER.test(line)) return py?.[1] ?? fallback;
+  const go = /^\s*func\s+(Test[A-Za-z0-9_]*)/.exec(line);
+  if (GO_MARKER.test(line)) return go?.[1] ?? fallback;
+  // `@Test` style annotation: the method it annotates, on the same line or
+  // on one of the next lines.
+  const rest = line.replace(ANNOTATION_MARKER, "").replace(/^\s*\([^)]*\)/, "");
+  const candidates = [rest];
+  for (const next of lines.slice(index + 1, index + 5)) {
+    if (next.trim() === "" || /^\s*@/.test(next)) continue;
+    candidates.push(next);
+    break;
+  }
+  for (const candidate of candidates) {
+    const method = /([A-Za-z_$][\w$]*)\s*\(/.exec(candidate);
+    if (method !== null) return method[1] as string;
+  }
+  return fallback;
+}
+
+/** The test cases of a file, one name per marker, in file order: JS/TS
+ * `it(`/`test(` (with `.only`/`.skip`/`.each(...)` style suffixes; the name
+ * is the title string), Python `def test_` and Go `func Test` (the function
+ * name), and `@test`/`@Test` annotations (the annotated method). A `.php`
+ * file is listed by `listPhpTestMethods` instead. `describe(` blocks are
+ * no markers. A heuristic over text, not a parser: it exists to notice a
+ * count going down and to name what went. */
+export function listTestCases(content: string, filePath?: string): string[] {
+  if (filePath !== undefined && filePath.endsWith(".php")) {
+    return listPhpTestMethods(content);
+  }
+  const lines = content.split("\n");
+  const names: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
     if (
-      /^\s*(?:it|test)(?:\.[A-Za-z]+(?:\([^)]*\))?)*\s*\(/.test(line) ||
-      /^\s*(?:async\s+)?def\s+test_/.test(line) ||
-      /^\s*func\s+Test[A-Za-z0-9_]*\s*\(/.test(line) ||
-      /^\s*@[Tt]est\b/.test(line)
+      JS_MARKER.test(line) ||
+      PY_MARKER.test(line) ||
+      GO_MARKER.test(line) ||
+      ANNOTATION_MARKER.test(line)
     ) {
-      count += 1;
+      names.push(normalizeTestName(markerName(lines, i)));
     }
   }
-  return count;
+  return names;
+}
+
+/** Number of test-case markers in a file (see `listTestCases`). */
+export function countTestCases(content: string, filePath?: string): number {
+  return listTestCases(content, filePath).length;
 }
 
 /** A method line: optional leading attribute groups (`#[...]`, several),
@@ -225,7 +328,12 @@ function bracketDelta(line: string): number {
  * method; and a docblock or attribute that follows the modifiers on the
  * method line is not read. */
 export function countPhpTestMethods(content: string): number {
-  let count = 0;
+  return listPhpTestMethods(content).length;
+}
+
+/** The names of the methods `countPhpTestMethods` counts, in file order. */
+export function listPhpTestMethods(content: string): string[] {
+  const names: string[] = [];
   let pendingMarker = false;
   let inAttribute = false;
   let attributeDepth = 0;
@@ -238,7 +346,7 @@ export function countPhpTestMethods(content: string): number {
         PHP_TEST_ATTRIBUTE.test(prefix) ||
         (prefix.includes("/**") && PHP_DOC_TEST_TAG.test(prefix));
       if ((fn[2] ?? "").startsWith("test") || pendingMarker || sameLineMarker) {
-        count += 1;
+        names.push(fn[2] ?? "");
       }
       pendingMarker = false;
       inAttribute = false;
@@ -281,7 +389,7 @@ export function countPhpTestMethods(content: string): number {
     if (PHP_COMMENT_LINE.test(line)) continue;
     pendingMarker = false;
   }
-  return count;
+  return names;
 }
 
 interface ChangedFile {
@@ -294,45 +402,166 @@ function normalizePath(p: string): string {
   return p.replace(/^\.\//, "");
 }
 
-/** `true` when `a` allows at least as much of a drop as `b` does (`"all"`
- * above every number): the rule that decides which of two declarations of
- * the same path wins. */
+/** `true` when `a` ranks above `b` among two count declarations of one
+ * path: the larger number wins, and any number wins over `"all"`, which
+ * excuses nothing and so must never hide a count that would. */
 function declaresMore(a: number | "all", b: number | "all"): boolean {
-  if (a === "all") return b !== "all";
-  if (b === "all") return false;
+  if (a === "all") return false;
+  if (b === "all") return true;
   return a > b;
 }
 
+/** What the specs of one source say about one path: the larger count
+ * (`"all"` and numbers per `declaresMore`) and how many times each test
+ * name was declared. */
+interface DeclarationState {
+  declared?: number | "all";
+  nameCounts: Map<string, number>;
+}
+
+function mergeDeclared(
+  a: number | "all" | undefined,
+  b: number | "all" | undefined,
+): number | "all" | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return declaresMore(b, a) ? b : a;
+}
+
+/** Collects the specs of ONE source (the flag, or the file): a repeated
+ * name adds up (declare it as often as it was dropped), the larger count
+ * of a path wins. */
+function collectDeclarations(
+  raws: readonly string[],
+): Map<string, DeclarationState> {
+  const byPath = new Map<string, DeclarationState>();
+  for (const raw of raws) {
+    const parsed = parseIntendedDeletion(raw);
+    let state = byPath.get(parsed.path);
+    if (state === undefined) {
+      state = { nameCounts: new Map() };
+      byPath.set(parsed.path, state);
+    }
+    state.declared = mergeDeclared(state.declared, parsed.declared);
+    for (const name of parsed.names ?? []) {
+      state.nameCounts.set(name, (state.nameCounts.get(name) ?? 0) + 1);
+    }
+  }
+  return byPath;
+}
+
+/** Merges the two sources: per path the larger count, per name the larger
+ * number of declarations from either source (not their sum, not a set
+ * union), so neither source wins and the order never decides. */
+function mergeSources(
+  a: Map<string, DeclarationState>,
+  b: Map<string, DeclarationState>,
+): Map<string, DeclarationState> {
+  const merged = new Map<string, DeclarationState>();
+  for (const source of [a, b]) {
+    for (const [p, state] of source) {
+      let into = merged.get(p);
+      if (into === undefined) {
+        into = { nameCounts: new Map() };
+        merged.set(p, into);
+      }
+      into.declared = mergeDeclared(into.declared, state.declared);
+      for (const [name, count] of state.nameCounts) {
+        into.nameCounts.set(
+          name,
+          Math.max(into.nameCounts.get(name) ?? 0, count),
+        );
+      }
+    }
+  }
+  return merged;
+}
+
+/** The public form of a merged state: a name appears once per declaration
+ * that counts. */
+function toDeclaration(
+  declarationPath: string,
+  state: DeclarationState,
+): IntendedDeletionDeclaration {
+  const declaration: IntendedDeletionDeclaration = { path: declarationPath };
+  if (state.declared !== undefined) declaration.declared = state.declared;
+  const names: string[] = [];
+  for (const [name, count] of state.nameCounts) {
+    for (let i = 0; i < count; i++) names.push(name);
+  }
+  if (names.length > 0) declaration.names = names;
+  return declaration;
+}
+
+/** A test name as compared and declared: every run of whitespace, newlines
+ * included, collapsed to one space, and trimmed. A title that spans lines
+ * can therefore be declared on one line, in the file as well as the flag. */
+export function normalizeTestName(name: string): string {
+  return name.replace(/\s+/g, " ").trim();
+}
+
+/** Separates the path from the test title in a names declaration. The
+ * first occurrence splits, so a title may contain `::`, `=` and `,`; a path
+ * cannot contain `::`. */
+export const INTENDED_DELETION_NAME_SEPARATOR = "::";
+
 /**
- * Parses one raw intended-deletion spec: `<path>`, `<path>=<n>` (a
- * positive integer) or `<path>=all`. The count is read after the LAST
- * `=`, so a path whose own name contains `=` must always carry an
- * explicit `=<n>` or `=all` (the bare form is read as a count and
- * rejected); a bare path elsewhere means `"all"`. An empty path, `=0`,
- * a negative or a non-integer count is a usage error.
+ * Parses one raw intended-deletion spec:
+ *
+ * - `<path>::<test name>`: names one test case (repeat the declaration for
+ *   each case, also for a title that was dropped several times).
+ *   Everything after the first `::` is the title with whitespace collapsed
+ *   (`normalizeTestName`), so a title may hold `=`, `,` or `::`. The `::`
+ *   is looked for before anything else, so a title ending in `=3` is never
+ *   read as a count.
+ * - `<path>=<n>` (a positive integer): at most `n` dropped test cases. It
+ *   never excuses a drop that removes every test case of the file.
+ * - `<path>` or `<path>=all`: the legacy blanket form, parsed for
+ *   compatibility; it excuses nothing on its own.
+ *
+ * In the last two forms the count is read after the LAST `=`, so a path
+ * whose own name contains `=` must always carry an explicit `=<n>` or
+ * `=all` (the bare form is read as a count and rejected). An empty path or
+ * test name, `=0`, a negative or a non-integer count is a usage error.
  */
 export function parseIntendedDeletion(
   raw: string,
 ): IntendedDeletionDeclaration {
   const spec = raw.trim();
+  const sep = spec.indexOf(INTENDED_DELETION_NAME_SEPARATOR);
+  if (sep >= 0) {
+    const namedPath = normalizePath(spec.slice(0, sep).trim());
+    const name = normalizeTestName(
+      spec.slice(sep + INTENDED_DELETION_NAME_SEPARATOR.length),
+    );
+    if (namedPath === "") {
+      throw new UsageError(
+        `hygiene: --intended-deletion "${raw}" has an empty path`,
+      );
+    }
+    if (name === "") {
+      throw new UsageError(
+        `hygiene: --intended-deletion "${raw}" has an empty test name`,
+      );
+    }
+    return { path: namedPath, names: [name] };
+  }
   const eq = spec.lastIndexOf("=");
   let path = spec;
   let declared: number | "all" = "all";
+  const form =
+    "must be <path>::<test name>, <path>=<positive integer> or (legacy) <path>[=all]";
   if (eq >= 0) {
     path = spec.slice(0, eq);
     const value = spec.slice(eq + 1).trim();
     if (value === "all") {
       declared = "all";
     } else if (!/^\d+$/.test(value)) {
-      throw new UsageError(
-        `hygiene: --intended-deletion "${raw}" must be <path>, <path>=<positive integer> or <path>=all`,
-      );
+      throw new UsageError(`hygiene: --intended-deletion "${raw}" ${form}`);
     } else {
       const n = Number(value);
       if (!Number.isSafeInteger(n) || n < 1) {
-        throw new UsageError(
-          `hygiene: --intended-deletion "${raw}" must be <path>, <path>=<positive integer> or <path>=all`,
-        );
+        throw new UsageError(`hygiene: --intended-deletion "${raw}" ${form}`);
       }
       declared = n;
     }
@@ -344,6 +573,52 @@ export function parseIntendedDeletion(
     );
   }
   return { path, declared };
+}
+
+/** At most this many names are spelled out in a finding's `detail`; the
+ * finding's `droppedNames` carries all of them. */
+export const DROPPED_NAMES_IN_DETAIL = 10;
+
+/** How many times each name occurs, in first-seen order. */
+function countNames(names: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
+  return counts;
+}
+
+/** The names with a count per repeated one (`"works" x2`), JSON-quoted so a
+ * title with commas stays unambiguous; at most `cap` distinct names are
+ * spelled out, then `and N more`. `named` adds `(named xK)` for a name
+ * the declaration covers only in part. */
+function formatNames(
+  counts: ReadonlyMap<string, number>,
+  named?: ReadonlyMap<string, number>,
+  cap = DROPPED_NAMES_IN_DETAIL,
+): string {
+  const entries = [...counts];
+  const shown = entries.slice(0, cap).map(([name, count]) => {
+    const done = named?.get(name) ?? 0;
+    return `${JSON.stringify(name)}${count > 1 ? ` x${String(count)}` : ""}${done > 0 ? ` (named x${String(done)})` : ""}`;
+  });
+  const more = entries.length - shown.length;
+  return `${shown.join(", ")}${more > 0 ? `, and ${String(more)} more` : ""}`;
+}
+
+/** The cases present at base and gone at head, one entry per dropped case
+ * in base order: a title that base has twice and head once is dropped
+ * once. */
+function droppedTestNames(
+  baseNames: readonly string[],
+  headNames: readonly string[],
+): string[] {
+  const remaining = countNames(headNames);
+  const dropped: string[] = [];
+  for (const n of baseNames) {
+    const left = remaining.get(n) ?? 0;
+    if (left > 0) remaining.set(n, left - 1);
+    else dropped.push(n);
+  }
+  return dropped;
 }
 
 function parseNameStatus(out: string): ChangedFile[] {
@@ -484,8 +759,14 @@ export function readWorktreeFile(
  * changes. Throws `UsageError` outside a git work tree or for an
  * unresolvable revision, and for an unusable intended-deletion spec.
  * A `test_cases_dropped` drop the range declares with `intendedDeletions`
- * is allowed instead of reported (see `IntendedDeletionDeclaration`); no
- * other finding kind can be declared away.
+ * is allowed instead of reported; no other finding kind can be declared
+ * away. Every such finding lists the dropped test names. A drop is excused
+ * when the declaration names every dropped test (`<path>::<name>`), or, for
+ * a file that keeps at least one test case, when a count (`<path>=<n>`)
+ * covers it. `all` (and the bare path) and a count on a drop that removes
+ * every test case of the file excuse nothing: they stay a finding that
+ * names the dropped tests. A declared name that is not among the dropped
+ * tests of a file that dropped is a usage error (a stale declaration).
  */
 export function hygiene(options: HygieneOptions): HygieneResult {
   const staged = options.staged === true;
@@ -565,20 +846,17 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     ...new Set((options.extendOnly ?? []).map(normalizePath)),
   ];
 
-  // Declarations in first-seen order; a path declared twice keeps the
-  // declaration that allows more (`all` above any number, then the larger
-  // count), so `--intended-deletion p=3` together with a file line `p=5`
-  // allows 5, and the flag-versus-file order never decides the outcome.
+  // The flag and the file are collected apart and then merged: a path's
+  // count is the larger of the two (any number above `all`), a test name
+  // counts as often as the more generous source declares it (a repeated
+  // name adds up within one source, never across the two). Neither source
+  // wins and the order never decides the outcome.
   const declaredByPath = new Map<string, IntendedDeletionDeclaration>();
-  for (const raw of options.intendedDeletions ?? []) {
-    const declaration = parseIntendedDeletion(raw);
-    const existing = declaredByPath.get(declaration.path);
-    if (
-      existing === undefined ||
-      declaresMore(declaration.declared, existing.declared)
-    ) {
-      declaredByPath.set(declaration.path, declaration);
-    }
+  for (const [declarationPath, state] of mergeSources(
+    collectDeclarations(options.intendedDeletions ?? []),
+    collectDeclarations(options.intendedDeletionsFromFile ?? []),
+  )) {
+    declaredByPath.set(declarationPath, toDeclaration(declarationPath, state));
   }
   /** Declaration paths whose drop was looked at (allowed or not): a
    * declaration that matched no drop at all is reported stale. */
@@ -714,6 +992,7 @@ export function hygiene(options: HygieneOptions): HygieneResult {
   }
 
   const intendedDeletions: IntendedDeletionApplied[] = [];
+  const staleNames: string[] = [];
   for (const file of changed) {
     if (file.status === "A") continue;
     if (!isTestPath(file.oldPath)) continue;
@@ -721,20 +1000,71 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     if (baseContent === undefined) continue;
     const headContent = file.status === "D" ? "" : showHead(file.newPath);
     if (headContent === undefined) continue;
-    const baseCases = countTestCases(baseContent, file.oldPath);
-    const headCases = countTestCases(headContent, file.newPath);
+    const baseNames = listTestCases(baseContent, file.oldPath);
+    const headNames = listTestCases(headContent, file.newPath);
+    const baseCases = baseNames.length;
+    const headCases = headNames.length;
     if (headCases < baseCases) {
       // Matched on the head-side path: a renamed test file's declaration
       // names the path the file has at head, the one the finding names.
       const declaration = declaredByPath.get(normalizePath(file.newPath));
       const dropped = baseCases - headCases;
+      const wholeFile = headCases === 0;
+      const droppedNames = droppedTestNames(baseNames, headNames);
+      const declaredNames = declaration?.names ?? [];
       if (declaration !== undefined) {
         consultedDeclarations.add(normalizePath(file.newPath));
       }
-      const covered =
+      const droppedCounts = countNames(droppedNames);
+      const declaredCounts = countNames(declaredNames);
+      // A name declared more often than it was dropped (or not dropped at
+      // all) is a stale or misspelled declaration.
+      const over = [...declaredCounts].filter(
+        ([name, count]) => count > (droppedCounts.get(name) ?? 0),
+      );
+      if (over.length > 0) {
+        staleNames.push(
+          `${file.newPath}: ${over
+            .map(
+              ([name, count]) =>
+                `${JSON.stringify(name)} declared ${String(count)} time(s), dropped ${String(droppedCounts.get(name) ?? 0)}`,
+            )
+            .join(
+              ", ",
+            )} (all dropped tests: ${formatNames(droppedCounts, undefined, Infinity)})`,
+        );
+        continue;
+      }
+      const unnamedCounts = new Map<string, number>();
+      for (const [name, count] of droppedCounts) {
+        if (count > (declaredCounts.get(name) ?? 0)) {
+          unnamedCounts.set(name, count);
+        }
+      }
+      const unnamed = [...unnamedCounts.keys()];
+      // A drop is excused by naming every dropped test, or, when the file
+      // keeps some test cases, by a count that covers it. `all` and a
+      // whole-file count never excuse anything.
+      const countCovers =
+        !wholeFile &&
+        typeof declaration?.declared === "number" &&
+        dropped <= declaration.declared;
+      if (
         declaration !== undefined &&
-        (declaration.declared === "all" || dropped <= declaration.declared);
-      if (covered && declaration !== undefined) {
+        declaredNames.length > 0 &&
+        unnamed.length === 0
+      ) {
+        intendedDeletions.push({
+          path: file.newPath,
+          baseCases,
+          headCases,
+          dropped,
+          declared: "names",
+          names: declaredNames,
+        });
+        continue;
+      }
+      if (typeof declaration?.declared === "number" && countCovers) {
         intendedDeletions.push({
           path: file.newPath,
           baseCases,
@@ -744,14 +1074,42 @@ export function hygiene(options: HygieneOptions): HygieneResult {
         });
         continue;
       }
+      const notes: string[] = [];
+      const count = declaration?.declared;
+      if (count === "all") {
+        notes.push(
+          wholeFile
+            ? "declared all, which does not excuse a whole-file drop"
+            : "declared all, which does not excuse a drop",
+        );
+      } else if (typeof count === "number") {
+        notes.push(
+          wholeFile
+            ? `declared ${String(count)}, a count does not excuse a whole-file drop`
+            : `declared ${String(count)}`,
+        );
+      }
+      if (declaredNames.length > 0) {
+        notes.push(
+          `${String(declaredNames.length)} of ${String(droppedNames.length)} dropped tests named`,
+        );
+      }
+      const needsNames =
+        wholeFile || count === "all" || declaredNames.length > 0;
       findings.push({
         kind: "test_cases_dropped",
         path: file.newPath,
-        detail: `test-case markers fell from ${String(baseCases)} to ${String(headCases)}${file.status === "D" ? " (file deleted)" : ""}${declaration !== undefined ? ` (declared ${String(declaration.declared)})` : ""}`,
+        detail: `test-case markers fell from ${String(baseCases)} to ${String(headCases)}${file.status === "D" ? " (file deleted)" : ""}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}; ${declaredNames.length > 0 ? "not named" : "dropped"}: ${formatNames(unnamedCounts, declaredCounts)}${needsNames ? `; excuse them with --intended-deletion '${file.newPath}::<test name>' per test` : ""}`,
         baseCases,
         headCases,
+        droppedNames,
       });
     }
+  }
+  if (staleNames.length > 0) {
+    throw new UsageError(
+      `hygiene: --intended-deletion names tests that were not dropped (a stale or misspelled name): ${staleNames.join("; ")}`,
+    );
   }
 
   for (const [path] of declaredByPath) {
