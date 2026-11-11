@@ -2156,6 +2156,34 @@ describe("renderProbeSummary(): the detection lines outlast the mutant rows unde
       expect(lines.at(-1)).toBe(totals);
     });
 
+    it("without a detection line, rows that cannot all be kept still leave the heading and the omission line", () => {
+      const violated = (index: number) => ({
+        index,
+        file: "v.js",
+        expect: "fail",
+        status: "survived",
+        mutant: { file: "v.js", line: index + 1 },
+        mutation_probe: { result: "survived", expectation: "violated" },
+      });
+      const many = [
+        ...Array.from({ length: 3 }, (_, i) => survivor(i)),
+        ...Array.from({ length: 150 }, (_, i) => violated(3 + i)),
+      ];
+      const text = renderProbeSummary(
+        { status: "survived", plan: { results: many } },
+        3000,
+      );
+      const lines = linesOf(text);
+      expect(lines).toContain(HEADING);
+      expect(lines.filter((l) => OMISSION.test(l))).toHaveLength(1);
+      expect(lines.some((l) => l.startsWith("  #"))).toBe(false);
+      expect(text).not.toContain("build-failure detection");
+      // the last violated row did not fit, so no candidate kept every row
+      expect(text).not.toContain("#152 v.js:153");
+      expect(lines.filter((l) => MARKER.test(l))).toHaveLength(1);
+      expect(text.length).toBeLessThanOrEqual(3000);
+    });
+
     it("the marked row is kept, with its count line, when thinning the survivor lines is enough", () => {
       const few = [
         ...Array.from({ length: 3 }, (_, i) => survivor(i)),
