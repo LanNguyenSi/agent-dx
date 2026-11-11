@@ -362,11 +362,16 @@ flag-as-suffix family `*-e`, `*-E`, `*-n`, `*-r`, `*-s`, plus `*.bak`,
 `*.orig`, `*~`), flags a file you were asked only to extend that loses more
 than `--max-delete-percent` of its lines (default 20%; `--extend-only
 <path>`), and flags a changed test file with fewer test cases than before.
-A drop you intend is declared with `--intended-deletion <path>[=<n>|all]`
-(or `--intended-deletion-file <file>`): an at-most count in the counter's
-units, applied to `test_cases_dropped` only, echoed in the envelope as
-`intended_deletions` and on the `--summary` totals line; a declaration that
-matched nothing warns.
+Every `test_cases_dropped` finding lists the dropped tests by name
+(`droppedNames`). A drop you intend is declared with
+`--intended-deletion '<path>::<test name>'`, once per dropped test (or
+`--intended-deletion-file <file>`, one declaration per line); a file that
+lost every test case (deleted, or emptied) is excused only that way. A file
+that keeps a test case can also be excused with `<path>=<n>`, an at-most
+count in the counter's units. A bare `<path>` or `<path>=all` is parsed but
+excuses nothing, and a name that was not dropped is a usage error (exit `2`).
+Applied declarations are echoed in the envelope as `intended_deletions` and on
+the `--summary` totals line; a declaration that matched nothing warns.
 A warning `N tracked files have uncommitted changes not covered by this
 comparison` (`uncommitted=N` on the totals line) means the check did not look
 at them: to hand back with uncommitted changes, run `hygiene --base <rev>

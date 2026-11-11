@@ -163,8 +163,15 @@ argument or revision is a usage error (exit `2`).
   parser: it can miss a case written in an unusual shape, and it cannot
   tell a deliberately removed case from an accidental one, so a flagged
   drop is a prompt to explain it, not proof of a mistake. Carries
-  `baseCases` and `headCases`. A drop the caller declares with
-  `--intended-deletion` is allowed instead of reported; see "Intended
+  `baseCases`, `headCases` and `droppedNames`: the name of every test case
+  that is at the base and gone at the head, one entry per name, in base order
+  (the title string of a JS/TS `it(`/`test(`, the function name for
+  `def test_`, `func Test` and `@Test`, the method name in a `.php` file;
+  `describe(` is no marker; a marker whose title is not a string literal is
+  named by its own trimmed line). A renamed test counts as dropped under its
+  old name. The `detail` spells out at most 10 names (`and N more`); the
+  envelope's `droppedNames` carries all of them. A drop the caller declares
+  with `--intended-deletion` is allowed instead of reported; see "Intended
   deletions".
 
 ## Options
@@ -177,7 +184,7 @@ argument or revision is a usage error (exit `2`).
 | `--worktree` | Compare the merge-base of `--base` and `HEAD` with the working tree (tracked files). A usage error with `--staged` or `--head`. |
 | `--extend-only <path>` | A path the task may only extend; repeatable. |
 | `--extend-only-file <file>` | A file listing extend-only paths. |
-| `--intended-deletion <spec>` | Declare a test file's case drop intended; repeatable. |
+| `--intended-deletion <spec>` | Declare dropped test cases intended: `<path>::<test name>` or `<path>=<n>`; repeatable. |
 | `--intended-deletion-file <file>` | A file listing intended deletions, one per line. |
 | `--max-delete-percent <n>` | Threshold from `0` to `100`, default `20`. |
 
@@ -188,54 +195,94 @@ whole when the envelope is reduced to fit `--max-chars`.
 ## Intended deletions
 
 A task that really does mean to delete test cases declares them, and the
-declared drops are allowed instead of reported:
+declared drops are allowed instead of reported. A file that loses every one
+of its test cases (deleted, or left without a test case) is excused only by
+naming each dropped test; a file that keeps at least one test case can also
+be excused by a count.
 
 ```bash
 agent-primitives hygiene --base <rev> \
-  --intended-deletion test/deleted.test.ts \
+  --intended-deletion 'test/old-design.test.ts::builds the index' \
+  --intended-deletion 'test/old-design.test.ts::sorts, then merges' \
   --intended-deletion 'src/trim.test.ts=2' \
   --intended-deletion-file intended.txt
 ```
 
-A declaration is `<path>`, `<path>=<n>` or `<path>=all`. `--intended-deletion`
-is repeatable; `--intended-deletion-file` takes one declaration per line,
-ignoring blank lines and `#` comments, resolves the file itself against the
-`-C` directory like `--extend-only-file`, and keeps the paths inside it
-relative to the repository root. A bare path means `all`. The count is read
-after the LAST `=`, so a path whose own name contains `=` must always
-carry an explicit `=<n>` or `=all`; the bare form is read as a count and
-rejected. `=0`, a negative, a non-integer and an empty path are usage
-errors (exit `2`), like an out-of-range `--max-delete-percent`.
+A declaration is one of:
 
-The count is an at-most bound in the same units the counter uses: JS/TS
-test-case markers in a JavaScript or TypeScript file, PHPUnit methods in a
-`.php` file. A drop of at most `n` (any drop, with `all`) is allowed: no
-finding, and one entry in `intended_deletions` with `path`, `baseCases`,
-`headCases`, `dropped` and the `declared` bound that covered it. A drop
-above `n` is reported as before, with the declared bound named in `detail`
-(`... (declared 2)`). A renamed test file is matched on the path it has at
+- `<path>::<test name>`: names one dropped test; repeat it for each test.
+  Everything after the FIRST `::` is the title (trimmed), so a title may
+  contain `,`, `=`, `::`, or end in `=3` without being read as a count. The
+  `::` is looked for before anything else; a path therefore cannot contain
+  `::`. The name is what `droppedNames` shows: the title string of a JS/TS
+  `it(`/`test(`, the function name for Python, Go and `@Test`, the method
+  name in a `.php` file.
+- `<path>=<n>` (a positive integer): at most `n` dropped test cases, in the
+  counter's units. For a file that keeps at least one test case.
+- `<path>` or `<path>=all`: the legacy blanket form. It is still parsed, so
+  old declarations do not become usage errors, but it excuses nothing on its
+  own, for a whole-file drop and for a partial one.
+
+`--intended-deletion` is repeatable; `--intended-deletion-file` takes one
+declaration per line (so one name per line), ignoring blank lines and lines
+starting with `#`, resolves the file itself against the `-C` directory like
+`--extend-only-file`, and keeps the paths inside it relative to the
+repository root. Lines are trimmed, so a title cannot start or end with
+spaces. The count is read after the LAST `=`, so a path whose own name
+contains `=` must always carry an explicit `=<n>` or `=all`; the bare form is
+read as a count and rejected. `=0`, a negative, a non-integer, an empty path
+and an empty test name are usage errors (exit `2`), like an out-of-range
+`--max-delete-percent`.
+
+How a drop of a test file is judged:
+
+| The drop | Excused by | Otherwise |
+| --- | --- | --- |
+| Whole file (deleted, or no test case left) | Naming every dropped test | A finding that lists the dropped tests. `all`, the bare path and any `=<n>`, even one equal to the number of dropped tests, excuse nothing; the finding says so and shows the form to use. |
+| Partial (the file keeps a test case) | Naming every dropped test, or a count `=<n>` with `n` at least the number of dropped cases | A finding that lists the dropped tests. `all` and the bare path excuse nothing. A count that is too small is named in the `detail` as `(declared n)`. |
+
+Names are matched exactly, as a set: a name covers every case with that
+title in the file. A dropped test not named stays a finding (`detail` says
+`k of m dropped tests named` and lists the ones `not named`). A declared name
+that is not among the dropped tests of a file that did drop is a usage error
+(exit `2`), a stale or misspelled declaration; it is never silently
+ignored. With a partial drop, a renamed test is a dropped test under its old
+name, so name it too, or use a count. When names and a count are both
+declared for one path, full name coverage wins and is recorded as
+`declared: "names"`; otherwise a covering count on a partial drop applies.
+
+A drop that is excused is allowed: no finding, and one entry in
+`intended_deletions` with `path`, `baseCases`, `headCases`, `dropped` and
+`declared`: the count that covered it, or `"names"` together with `names`,
+the declared names. A renamed test file is matched on the path it has at
 head, the path the finding would name.
 
 Only `test_cases_dropped` can be declared away. `backup_file` and
 `extend_only_rewrite` never consult the declarations, so an extend-only
 file that loses cases is still flagged.
 
-Two declarations of the same path collapse to the one that allows more (the
-larger count, `all` above every number), so the flag and the file can be
-combined in any order and the larger count is what applies.
+Declarations of the same path are merged, whether they come from the flag
+or the file, and neither source wins: the names are unioned (a test named
+by both counts once), and of two counts the larger applies, any number above
+`all`. The order they are given in never decides the outcome.
 
 A declaration that allowed nothing - its path is not in the range, is not a
 test path, or dropped no cases - draws the warning
 `intended deletion not used: <path>` and leaves the status alone; a later
 version may make an unused declaration a finding, so treat the warning as
-a typo to fix. A declaration whose path did drop, but by more than it
-allowed, was consulted and is not reported stale.
+a typo to fix. A declaration whose path did drop was consulted and is not
+reported stale, even when it did not excuse the drop.
 
 The declarations are agent input, so they are always visible: the envelope
-echoes `intended_declarations` (the normalized, deduplicated set the run
-used) and `intended_deletions` (the ones it applied), and
-`intended_deletions` is kept whole when `--max-chars` reduction cuts
-`findings`.
+echoes `intended_declarations` (the normalized, merged set the run used,
+each with `declared` and/or `names`) and `intended_deletions` (the ones it
+applied), and `intended_deletions` is kept whole when `--max-chars`
+reduction cuts `findings`.
+
+Migrating a blanket declaration: `--intended-deletion test/old.test.ts` (or
+`=all`) no longer passes. Run `hygiene` once without it, read the dropped
+names in the finding, and declare each one with
+`--intended-deletion 'test/old.test.ts::<name>'`.
 
 ## Compact views: --summary and --print
 
