@@ -1412,6 +1412,14 @@ export interface PlanSummaryField {
    * but not to `violated`). */
   met: number;
   violated: number;
+  /** How many of the `killed` results carry `mutation_probe.build_detection:
+   * "ambiguous"` / `"skipped"`: kills build-failure detection could not
+   * settle (see `MutationProbeField.build_detection`). They stay counted
+   * in `killed` and in `met`/`violated`; these two say how many of those
+   * are not plain kills. `summary` is held out of the envelope reduction,
+   * so the counts survive when the marked rows themselves are cut. */
+  build_detection_ambiguous: number;
+  build_detection_skipped: number;
 }
 
 export interface ProbePlanResult {
@@ -1464,6 +1472,8 @@ function summarize(results: PlanMutantResult[]): PlanSummaryField {
     results.filter((r) => r.status === status && !isBuildFailed(r)).length;
   const countExpectation = (expectation: "met" | "violated"): number =>
     results.filter((r) => r.mutation_probe?.expectation === expectation).length;
+  const countDetection = (state: "ambiguous" | "skipped"): number =>
+    markedIndices(results, state).length;
   return {
     total: results.length,
     killed: count("killed"),
@@ -1473,7 +1483,56 @@ function summarize(results: PlanMutantResult[]): PlanSummaryField {
     build_failed: results.filter(isBuildFailed).length,
     met: countExpectation("met"),
     violated: countExpectation("violated"),
+    build_detection_ambiguous: countDetection("ambiguous"),
+    build_detection_skipped: countDetection("skipped"),
   };
+}
+
+/** The plan indices of the results whose kill carries the given
+ * `build_detection` marker, in plan order. */
+function markedIndices(
+  results: PlanMutantResult[],
+  state: "ambiguous" | "skipped",
+): number[] {
+  return results
+    .filter((r) => r.mutation_probe?.build_detection === state)
+    .map((r) => r.index);
+}
+
+/** Most mutant indices one kind lists in the plan warning below: top-level
+ * `warnings` are never cut by the envelope reduction, so the list is
+ * bounded here. */
+const MAX_MARKED_INDICES_LISTED = 20;
+
+/**
+ * The one top-level warning of a plan in which build-failure detection
+ * could not settle some kills, naming those mutants by plan index;
+ * `undefined` when there is none. Each such mutant's own warning (the
+ * matched line, the cause, the log) sits in `results[i].warnings`, which a
+ * reduced envelope cuts together with the row, so the plan says it once
+ * where the reduction never reaches.
+ */
+export function buildDetectionPlanWarning(
+  results: PlanMutantResult[],
+): string | undefined {
+  const kinds = (["ambiguous", "skipped"] as const).flatMap((state) => {
+    const indices = markedIndices(results, state);
+    if (indices.length === 0) return [];
+    const listed = indices
+      .slice(0, MAX_MARKED_INDICES_LISTED)
+      .map((index) => `#${String(index)}`)
+      .join(", ");
+    const more = indices.length - MAX_MARKED_INDICES_LISTED;
+    return [
+      {
+        count: indices.length,
+        text: `${state} for ${listed}${more > 0 ? ` (and ${String(more)} more)` : ""}`,
+      },
+    ];
+  });
+  if (kinds.length === 0) return undefined;
+  const total = kinds.reduce((sum, kind) => sum + kind.count, 0);
+  return `build-failure detection could not settle ${String(total)} killed mutant${total === 1 ? "" : "s"} (by plan index): ${kinds.map((kind) => kind.text).join("; ")}; each verdict stays killed, see the mutant's own warnings in plan.results (in the full result when the envelope is reduced) and its log, or use --no-build-detect`;
 }
 
 /**
@@ -2491,8 +2550,14 @@ export async function probePlan(
   opts: ProbePlanOptions,
 ): Promise<ProbePlanResult> {
   const result = await runProbePlanPipeline(opts);
+  // Added here, on the one way out every plan result takes, so a plan
+  // that stopped early says it for the kills it did collect too.
+  const unsettled = buildDetectionPlanWarning(result.results);
   return {
     ...result,
+    ...(unsettled !== undefined
+      ? { warnings: [...result.warnings, unsettled] }
+      : {}),
     ...(opts.env !== undefined && Object.keys(opts.env).length > 0
       ? { env: redactEnvOverrides(opts.env) }
       : {}),

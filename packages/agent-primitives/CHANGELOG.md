@@ -40,7 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose full log cannot be used (over 2 MiB, write failed, output may be
   incomplete, unreadable) is marked `skipped` the same way. The expected
   survivors lines give way before a row that is not a plain met
-  expectation.
+  expectation. The marker reaches every output: `--report
+  mutation-probes` keeps such an item `killed` and gives it the reason
+  `build detection ambiguous: <matched line>` or `build detection skipped:
+  <cause>`; `plan.summary` gains `build_detection_ambiguous` and
+  `build_detection_skipped`, and a plan carries one top-level warning
+  naming the marked mutants by index, both kept when the envelope is
+  reduced; under a short `-m`, `--summary` keeps the detection lines and
+  the line counting omitted survivor lines before survivor lines and
+  mutant rows, so a marked row cut by `-m` still leaves its count line. A
+  marked row is counted on its own detection line only, not on `not
+  available` as well. A failure marker printed by a wrapper script, a task
+  runner or a preflight step counts as a test having run (see the limits
+  in docs/probe.md).
 - `probe --no-build-detect` and the plan key `build_detect: false` (plan
   level and per mutant; a mutant's value wins, then the command line, then
   the plan's) turn that detection off, for a test command that is itself a

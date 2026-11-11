@@ -117,7 +117,20 @@ itself a compiler or type check (`tsc --noEmit` as the test) needs
 mutant), or its genuine kills read as `build_failed`. A `killed` row that
 reads `(build detection ambiguous)` or `(build detection skipped: ...)`
 could not be settled: read its log (the warning names the mutant and the
-line) before trusting the kill, and never report it as `build_failed`. Pass `--pre`
+line) before trusting the kill, and never report it as `build_failed`. Its
+`--report mutation-probes` item stays `result: killed` and carries the
+reason `build detection ambiguous: <matched line>` or `build detection
+skipped: <cause>`: paste it unchanged. In a `--plan` run that warning sits
+in the mutant's own `plan.results[i].warnings`; one top-level warning names
+the marked mutants by index and `plan.summary.build_detection_ambiguous` /
+`build_detection_skipped` count them, also when the envelope was reduced,
+and `--summary` keeps their count lines when `-m` cuts the rows. A failure
+marker printed by a wrapper script, a task runner or a preflight step
+(`echo 'FAILED: typecheck'`, an ora or listr `✖` line, a complete TAP
+stream) counts as a test having run, so a tsc error beside it stays a
+plain `killed`: run tsc via `--pre` or narrow the test command. When tests
+ran and passed before a later tsc step failed (`vitest run && tsc`), the
+row stays `killed` as well. Pass `--pre`
 whenever the test under probe executes built output rather than the
 source file being mutated, or a real mutant reads back as `survived`
 because it never reached the running code. The same `survived` reading

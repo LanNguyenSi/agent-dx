@@ -35,9 +35,12 @@ import { hasKnownTestSummary } from "./zero-tests.js";
  *   type-level test suite run as `tsc --noEmit`) prints exactly this
  *   output for a real kill: such a command must opt out
  *   (`--no-build-detect`). Not recognized: drive-letter absolute paths,
- *   output prefixed by a runner (`web:build: `, `@scope/pkg: `), global
- *   diagnostics without a path (`error TS6053:`) and ts-node's
- *   `TSError:`.
+ *   output prefixed by a runner (`web:build: `, `@scope/pkg: `) and global
+ *   diagnostics without a path (`error TS6053:`). A failure marker printed
+ *   by a wrapper script, a task runner or a preflight step counts as a test
+ *   having run, and so does a test that passed before a later tsc step
+ *   failed: both keep the kill (see "Mutants that do not compile" in
+ *   docs/probe.md).
  * - `vitest`: vitest could not load or transform a test file (`Transform
  *   failed`, `SyntaxError`, `Failed to load url`, `Failed to resolve
  *   import`, `Cannot find module`, or a `SyntaxError` without a stack frame
@@ -97,13 +100,15 @@ const TSC_DIAGNOSTIC_LINE =
   /^[^\s:][^:\n]*\(\d+,\d+\): error TS\d+:|^[^\s:][^:\n]*:\d+:\d+ - error TS\d+:/m;
 
 /** A line that says a test ran and failed, as `summary.ts` reads them for
- * its `failing=` column. The last alternative is PHPUnit's numbered
- * failure line, `1) Ns\Class::testMethod`: a number, `)`, a class name
- * (namespace separators allowed) and `::` before the method. PHPUnit's
- * closing `FAILURES!` and `Tests: ..., Failures: 1.` lines name no
- * test. */
+ * its `failing=` column and for nothing else (the build-failure reading
+ * has its own `STRONG_TEST_LINE` below). The marks include vitest's `×`,
+ * the line its default reporter prints first for a failed test. The last
+ * alternative is PHPUnit's numbered failure line, `1)
+ * Ns\Class::testMethod`: a number, `)`, a class name (namespace
+ * separators allowed) and `::` before the method. PHPUnit's closing
+ * `FAILURES!` and `Tests: ..., Failures: 1.` lines name no test. */
 export const FAILURE_LINE =
-  /^\s*(FAIL\b|FAILED\b|not ok\b|--- FAIL\b|[✗✖●]|(?:\w*Error|AssertionError)\b|\d+\) [\w\\]+::\w+)/;
+  /^\s*(FAIL\b|FAILED\b|not ok\b|--- FAIL\b|[✗×✖●]|(?:\w*Error|AssertionError)\b|\d+\) [\w\\]+::\w+)/;
 
 /** Lines that clearly say a test ran: a runner's failure marker (`FAIL`,
  * `not ok`, `--- FAIL`, a cross or bullet mark, an `AssertionError`), a

@@ -4,7 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { probe, probePlan, type ProbeOptions } from "../src/probe/index.js";
+import {
+  buildDetectionPlanWarning,
+  probe,
+  probePlan,
+  type PlanMutantResult,
+  type ProbeOptions,
+} from "../src/probe/index.js";
 import { parsePlanFile } from "../src/probe/plan.js";
 import {
   detectBuildFailure,
@@ -16,6 +22,7 @@ import {
 } from "../src/probe/build-failure.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 import {
+  firstFailingLine,
   mutationProbeReportItem,
   renderProbeSummary,
   type SummaryInput,
@@ -1157,6 +1164,8 @@ describe("probePlan(): build_failed is counted on its own", () => {
       inconclusive: 0,
       not_run: 0,
       build_failed: 1,
+      build_detection_ambiguous: 0,
+      build_detection_skipped: 0,
       met: 2,
       violated: 0,
     });
@@ -1804,5 +1813,686 @@ describe("mutationProbeReportItem(): build_failed", () => {
     expect(item.expectation).toBe("not_applicable");
     expect(item.reason).toBe("build failed, mutant not exercised");
     expect(item.restored_verified).toBe(true);
+  });
+});
+
+describe("mutationProbeReportItem(): a kill build detection could not settle", () => {
+  const killed = (probe: Record<string, unknown>, result = "killed") =>
+    mutationProbeReportItem(
+      {
+        mutant: { file: "a.ts", line: 4, before: "x", after: "y" },
+        mutation_probe: {
+          mutant: "m",
+          verified_applied_via: "v",
+          result,
+          expectation: "met",
+          restored_verified: true,
+          ...probe,
+        },
+      },
+      false,
+    );
+
+  it("an ambiguous kill stays killed and met, and its reason carries the matched line on one line", () => {
+    const item = killed({
+      build_detection: "ambiguous",
+      build_detection_detail: "TypeError:   x is not\ta function",
+    });
+    expect(item.result).toBe("killed");
+    expect(item.expectation).toBe("met");
+    expect(item.reason).toBe(
+      "build detection ambiguous: TypeError: x is not a function",
+    );
+  });
+
+  it("a skipped kill stays killed, and its reason carries the cause", () => {
+    const item = killed({
+      build_detection: "skipped",
+      build_detection_detail: "log too large",
+    });
+    expect(item.result).toBe("killed");
+    expect(item.expectation).toBe("met");
+    expect(item.reason).toBe("build detection skipped: log too large");
+  });
+
+  it("a marker without a detail still names its kind", () => {
+    expect(killed({ build_detection: "ambiguous" }).reason).toBe(
+      "build detection ambiguous: no line recorded",
+    );
+    expect(killed({ build_detection: "skipped" }).reason).toBe(
+      "build detection skipped: unknown cause",
+    );
+  });
+
+  it("a plain kill keeps the empty reason, and so does a marker on a row that is not killed", () => {
+    expect(killed({}).reason).toBe("");
+    expect(killed({ build_detection_detail: "stray detail" }).reason).toBe("");
+    const survived = killed(
+      { build_detection: "ambiguous", build_detection_detail: "TypeError: x" },
+      "survived",
+    );
+    expect(survived.result).toBe("survived");
+    expect(survived.reason).toBe("");
+  });
+});
+
+describe("renderProbeSummary(): a marked row is counted on one detection line", () => {
+  const killedRow = (index: number, probe: Record<string, unknown>) => ({
+    index,
+    file: "a.py",
+    expect: "fail",
+    status: "killed",
+    mutation_probe: { result: "killed", expectation: "met", ...probe },
+    // No recognized toolchain: the tail a truncated run of an unknown
+    // runner leaves behind.
+    test: { stdoutTail: "boom\n", stderrTail: "" },
+  });
+  const detectionLines = (results: Record<string, unknown>[]): string[] =>
+    renderProbeSummary({ status: "killed", plan: { results } })
+      .split("\n")
+      .filter((l) => l.startsWith("build-failure detection"));
+
+  it("a skipped row whose tail is unrecognized is counted on `skipped` only", () => {
+    expect(
+      detectionLines([
+        killedRow(0, {
+          build_detection: "skipped",
+          build_detection_detail: "log unreadable",
+        }),
+      ]),
+    ).toEqual([
+      "build-failure detection skipped for 1 killed mutant (truncated output, full log not usable); a compile error there still reads as killed, check their logs",
+    ]);
+  });
+
+  it("a row carrying any other marker value is left out of `not available` as well", () => {
+    expect(
+      detectionLines([killedRow(0, { build_detection: "other" })]),
+    ).toEqual([]);
+  });
+
+  it("an ambiguous row whose tail is unrecognized is counted on `ambiguous` only, beside a plain unrecognized row on `not available`", () => {
+    expect(
+      detectionLines([
+        killedRow(0, {}),
+        killedRow(1, {
+          build_detection: "ambiguous",
+          build_detection_detail: "TypeError: x",
+        }),
+        killedRow(2, {
+          build_detection: "skipped",
+          build_detection_detail: "log too large",
+        }),
+      ]),
+    ).toEqual([
+      "build-failure detection: not available for 1 killed mutant (recognized: go test, tsc, vitest output); a compile error there still reads as killed, check the log",
+      "build-failure detection ambiguous for 1 killed mutant; check their logs or use --no-build-detect",
+      "build-failure detection skipped for 1 killed mutant (truncated output, full log not usable); a compile error there still reads as killed, check their logs",
+    ]);
+  });
+});
+
+describe("renderProbeSummary(): the detection lines outlast the mutant rows under -m", () => {
+  const LOG = `/logs/exec-${"x".repeat(40)}.log`;
+  const VITEST_TAIL =
+    " FAIL  a.test.ts > a > b\n Test Files  1 failed (1)\n      Tests  1 failed (1)\n";
+  const plain = (index: number) => ({
+    index,
+    file: "a.ts",
+    expect: "fail",
+    status: "killed",
+    mutant: { file: "a.ts", line: index + 1 },
+    mutation_probe: {
+      result: "killed",
+      expectation: "met",
+      restored_verified: true,
+    },
+    test: { stdoutTail: VITEST_TAIL, stderrTail: "", logPath: LOG },
+  });
+  const marked = (index: number, state: string, detail: string) => ({
+    ...plain(index),
+    mutation_probe: {
+      ...plain(index).mutation_probe,
+      build_detection: state,
+      build_detection_detail: detail,
+    },
+    test: {
+      stdoutTail: "src/a.ts(1,1): error TS2322: x\nTypeError: y\n",
+      stderrTail: "",
+      logPath: LOG,
+    },
+  });
+  const unknown = (index: number) => ({
+    ...plain(index),
+    file: "a.py",
+    mutant: { file: "a.py", line: index + 1 },
+    test: { stdoutTail: "boom\n", stderrTail: "", logPath: LOG },
+  });
+  const AMBIGUOUS =
+    "build-failure detection ambiguous for 1 killed mutant; check their logs or use --no-build-detect";
+  const SKIPPED =
+    "build-failure detection skipped for 1 killed mutant (truncated output, full log not usable); a compile error there still reads as killed, check their logs";
+  const MARKER = /^\.\.\. \d+ more mutant lines? omitted \(-m \d+ characters\)/;
+  /** Longest marker line these plans print, with its line break. */
+  const MARKER_ROOM = 100;
+  const linesOf = (text: string): string[] => text.trimEnd().split("\n");
+
+  it("12 mutants with the ambiguous one last: at every -m that cuts a row, the count line is printed and the text fits", () => {
+    const results = [
+      ...Array.from({ length: 11 }, (_, i) => plain(i)),
+      marked(11, "ambiguous", "TypeError: y"),
+    ];
+    const input: SummaryInput = { status: "killed", plan: { results } };
+    const full = renderProbeSummary(input);
+    expect(linesOf(full)).toContain(AMBIGUOUS);
+    expect(full).toContain("#11 a.ts:12 | killed (build detection ambiguous)");
+    const totals = linesOf(full).at(-1)!;
+    const floor = AMBIGUOUS.length + 1 + totals.length + 1 + MARKER_ROOM;
+    let withoutTheRow = 0;
+    for (let budget = full.length - 1; budget >= floor; budget -= 1) {
+      const text = renderProbeSummary(input, budget);
+      const lines = linesOf(text);
+      expect(lines, `budget ${budget}`).toContain(AMBIGUOUS);
+      expect(lines.at(-1), `budget ${budget}`).toBe(totals);
+      expect(
+        lines.filter((l) => MARKER.test(l)),
+        `budget ${budget}`,
+      ).toHaveLength(1);
+      expect(text.length, `budget ${budget}`).toBeLessThanOrEqual(budget);
+      if (!text.includes("#11 a.ts:12")) withoutTheRow += 1;
+    }
+    // every one of those budgets cut the marked row itself
+    expect(withoutTheRow).toBe(full.length - floor);
+  });
+
+  it("a skipped row and an ambiguous row beyond the kept rows both leave their count lines", () => {
+    const results = [
+      ...Array.from({ length: 10 }, (_, i) => plain(i)),
+      marked(10, "skipped", "log too large"),
+      marked(11, "ambiguous", "TypeError: y"),
+    ];
+    const text = renderProbeSummary(
+      { status: "killed", plan: { results } },
+      1200,
+    );
+    const lines = linesOf(text);
+    expect(lines).toContain(AMBIGUOUS);
+    expect(lines).toContain(SKIPPED);
+    expect(text).not.toContain("#10 a.ts:11");
+    expect(text).not.toContain("#11 a.ts:12");
+    expect(text).toContain("#0 a.ts:1 | killed |");
+    expect(text.length).toBeLessThanOrEqual(1200);
+  });
+
+  it("a budget that fits the count line and the totals but not the marker beside them still prints the count line; one character less drops it", () => {
+    const results = [
+      ...Array.from({ length: 11 }, (_, i) => plain(i)),
+      marked(11, "ambiguous", "TypeError: y"),
+    ];
+    const input: SummaryInput = { status: "killed", plan: { results } };
+    const totals = linesOf(renderProbeSummary(input)).at(-1)!;
+    const budget = AMBIGUOUS.length + 1 + totals.length + 1;
+    const kept = linesOf(renderProbeSummary(input, budget));
+    expect(kept.slice(-2)).toEqual([AMBIGUOUS, totals]);
+    expect(kept.filter((l) => MARKER.test(l))).toHaveLength(1);
+    const dropped = linesOf(renderProbeSummary(input, budget - 1));
+    expect(dropped).not.toContain(AMBIGUOUS);
+    expect(dropped.at(-1)).toBe(totals);
+  });
+
+  const late: [string, Record<string, unknown>, string[]][] = [
+    [
+      "violated",
+      {
+        ...unknown(29),
+        status: "survived",
+        mutation_probe: { result: "survived", expectation: "violated" },
+      },
+      [],
+    ],
+    [
+      "build_failed",
+      {
+        ...unknown(29),
+        status: "inconclusive",
+        reason: "build_failed",
+        mutation_probe: { result: "build_failed", reason: "build_failed" },
+      },
+      [],
+    ],
+    ["skipped", marked(29, "skipped", "log too large"), [SKIPPED]],
+  ];
+  for (const [name, row, extra] of late) {
+    it(`30 rows at -m 2500 with a late ${name} row: the \`not available\` line is still printed`, () => {
+      const results = [
+        ...Array.from({ length: 29 }, (_, i) => unknown(i)),
+        row,
+      ];
+      const text = renderProbeSummary(
+        { status: "killed", plan: { results } },
+        2500,
+      );
+      const lines = linesOf(text);
+      expect(lines).toContain(
+        "build-failure detection: not available for 29 killed mutants (recognized: go test, tsc, vitest output); a compile error there still reads as killed, check the log",
+      );
+      for (const line of extra) expect(lines).toContain(line);
+      // the late row itself did not fit
+      expect(lines.some((l) => l.startsWith("#29 "))).toBe(false);
+      expect(lines.filter((l) => MARKER.test(l))).toHaveLength(1);
+      expect(text.length).toBeLessThanOrEqual(2500);
+    });
+  }
+
+  describe("beside expected survivors", () => {
+    const survivor = (index: number) => ({
+      index,
+      file: "b.js",
+      expect: "pass",
+      expect_reason: "r".repeat(700),
+      status: "survived",
+      mutant: { file: "b.js", line: index + 1 },
+      mutation_probe: { result: "survived", expectation: "met" },
+    });
+    const HEADING =
+      "expected survivors (expect: pass, survived, counted as met): 3";
+    const OMISSION = /^\.\.\. 3 expected-survivor lines omitted \(-m \d+\)$/;
+    // 3 survivors, 60 plain kills and the marked row last: no -m short of
+    // the whole text can print every row that must be kept.
+    const results = [
+      ...Array.from({ length: 3 }, (_, i) => survivor(i)),
+      ...Array.from({ length: 60 }, (_, i) => plain(3 + i)),
+      marked(63, "ambiguous", "TypeError: y"),
+    ];
+    const input: SummaryInput = { status: "killed", plan: { results } };
+    const totals = linesOf(renderProbeSummary(input)).at(-1)!;
+    /** The heading, the count line and the totals, nothing else. */
+    const bare = HEADING.length + 1 + AMBIGUOUS.length + 1 + totals.length + 1;
+
+    it("when the required rows cannot be kept, the survivor lines give way to the omission line and the count line stays", () => {
+      const text = renderProbeSummary(input, 3000);
+      const lines = linesOf(text);
+      expect(lines).toContain(HEADING);
+      expect(lines.filter((l) => OMISSION.test(l))).toHaveLength(1);
+      expect(lines).toContain(AMBIGUOUS);
+      expect(lines.some((l) => l.startsWith("  #"))).toBe(false);
+      expect(text).not.toContain("#63 a.ts:64");
+      expect(lines.at(-1)).toBe(totals);
+      expect(text.length).toBeLessThanOrEqual(3000);
+    });
+
+    it("from the heading, the count line and the totals upward, both are printed at every -m; the omission line joins when it fits or when nothing fits beside the marker", () => {
+      const seen = { fitsWithout: 0, fitsWith: 0, overWithout: 0, overWith: 0 };
+      for (let budget = bare; budget <= bare + 300; budget += 1) {
+        const text = renderProbeSummary(input, budget);
+        const lines = linesOf(text);
+        expect(lines, `budget ${budget}`).toContain(HEADING);
+        expect(lines, `budget ${budget}`).toContain(AMBIGUOUS);
+        expect(lines.at(-1), `budget ${budget}`).toBe(totals);
+        expect(
+          lines.some((l) => l.startsWith("  #")),
+          `budget ${budget}`,
+        ).toBe(false);
+        const omission = lines.some((l) => OMISSION.test(l));
+        const fits = text.length <= budget;
+        if (budget >= bare + MARKER_ROOM) {
+          expect(fits, `budget ${budget}`).toBe(true);
+        }
+        if (fits) seen[omission ? "fitsWith" : "fitsWithout"] += 1;
+        else seen[omission ? "overWith" : "overWithout"] += 1;
+      }
+      // the marker past -m with and without the omission line, then the
+      // count line within -m without and with it
+      expect(seen.overWithout).toBeGreaterThan(10);
+      expect(seen.overWith).toBeGreaterThan(10);
+      expect(seen.fitsWithout).toBeGreaterThan(10);
+      expect(seen.fitsWith).toBeGreaterThan(10);
+    });
+
+    it("one character short of the heading, the count line and the totals, the count line gives way and the heading stays", () => {
+      const lines = linesOf(renderProbeSummary(input, bare - 1));
+      expect(lines).toContain(HEADING);
+      expect(lines).not.toContain(AMBIGUOUS);
+      expect(lines.at(-1)).toBe(totals);
+    });
+
+    it("the marked row is kept, with its count line, when thinning the survivor lines is enough", () => {
+      const few = [
+        ...Array.from({ length: 3 }, (_, i) => survivor(i)),
+        plain(3),
+        marked(4, "ambiguous", "TypeError: y"),
+      ];
+      const fewInput: SummaryInput = {
+        status: "killed",
+        plan: { results: few },
+      };
+      const full = renderProbeSummary(fewInput);
+      // room for everything but one survivor line
+      const text = renderProbeSummary(fewInput, full.length - 100);
+      const lines = linesOf(text);
+      expect(text).toContain("#4 a.ts:5 | killed (build detection ambiguous)");
+      expect(lines).toContain(AMBIGUOUS);
+      expect(lines.filter((l) => l.startsWith("  #"))).toHaveLength(2);
+      expect(lines).toContain(
+        `... 1 expected-survivor line omitted (-m ${full.length - 100})`,
+      );
+      expect(lines.some((l) => MARKER.test(l))).toBe(false);
+    });
+  });
+});
+
+describe("firstFailingLine(): vitest's default reporter", () => {
+  it("names the `×` line of the failed test, in the helper and in the row's failing= column", () => {
+    const test = { stdoutTail: captured("vitest-fail"), stderrTail: "" };
+    expect(firstFailingLine(test)).toBe("× is wrong 2ms");
+    const text = renderProbeSummary({
+      status: "killed",
+      mutant: { file: "a.js", line: 1 },
+      mutation_probe: { result: "killed", expectation: "met" },
+      test,
+    });
+    expect(text.split("\n")[0]).toContain(" | failing=× is wrong 2ms | ");
+  });
+
+  it("pnpm's `×` footer under a tsc error is still no sign of a test: the run is a build failure", () => {
+    expect(
+      detectBuildFailure(captured("pnpm-filter-tsc-error"), "").detected,
+    ).toBe(true);
+  });
+});
+
+describe("buildDetectionPlanWarning()", () => {
+  const row = (index: number, state?: string): PlanMutantResult => ({
+    index,
+    file: "a.ts",
+    expect: "fail",
+    status: "killed",
+    warnings: [],
+    logs: [],
+    test_command: "npm test",
+    baseline_index: 0,
+    mutation_probe: {
+      mutant: "m",
+      verified_applied_via: "v",
+      result: "killed",
+      restored_verified: true,
+      expectation: "met",
+      ...(state !== undefined
+        ? { build_detection: state as "ambiguous" | "skipped" }
+        : {}),
+    },
+  });
+
+  it("is absent when no kill is marked", () => {
+    expect(buildDetectionPlanWarning([])).toBeUndefined();
+    expect(buildDetectionPlanWarning([row(0), row(1)])).toBeUndefined();
+  });
+
+  it("names the marked mutants by plan index, each kind on its own", () => {
+    expect(
+      buildDetectionPlanWarning([row(0), row(1), row(3, "ambiguous")]),
+    ).toBe(
+      "build-failure detection could not settle 1 killed mutant (by plan index): ambiguous for #3; each verdict stays killed, see the mutant's own warnings in plan.results (in the full result when the envelope is reduced) and its log, or use --no-build-detect",
+    );
+    expect(
+      buildDetectionPlanWarning([
+        row(0, "skipped"),
+        row(1, "ambiguous"),
+        row(2),
+        row(5, "ambiguous"),
+      ]),
+    ).toMatch(
+      /^build-failure detection could not settle 3 killed mutants \(by plan index\): ambiguous for #1, #5; skipped for #0; each verdict stays killed, /,
+    );
+    expect(buildDetectionPlanWarning([row(4, "skipped")])).toMatch(
+      /could not settle 1 killed mutant \(by plan index\): skipped for #4; /,
+    );
+  });
+
+  it("lists at most 20 indices per kind and counts the rest", () => {
+    const twenty = Array.from({ length: 20 }, (_, i) => row(i, "ambiguous"));
+    const exact = buildDetectionPlanWarning(twenty)!;
+    expect(exact).toContain("#18, #19; each verdict");
+    expect(exact).not.toContain("more)");
+    const many = buildDetectionPlanWarning([...twenty, row(20, "ambiguous")])!;
+    expect(many).toContain("could not settle 21 killed mutants");
+    expect(many).toContain("#18, #19 (and 1 more); each verdict");
+    expect(many).not.toContain("#20");
+  });
+});
+
+describe("a plan whose kills build detection could not settle", () => {
+  const AMBIGUOUS_REASON =
+    "build detection ambiguous: TypeError: Cannot read properties of undefined (reading 'load')";
+  const flip = {
+    file: "fixture.js",
+    line: 1,
+    replace: "module.exports = { broken: true };",
+  };
+
+  it("probePlan(): plan.summary counts each kind and one plan warning names the mutants", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const mutant = (testCommand: string) => ({
+      file: "fixture.js",
+      line: 1,
+      form: "replace" as const,
+      replaceText: "module.exports = { broken: true };",
+      testCommand,
+    });
+    const result = await probePlan({
+      mutants: [
+        mutant(commandFor("vitest-fail")),
+        mutant(commandFor("tsc-then-uncaught-typeerror")),
+        mutant(
+          `BF_RMLOGS=${logDir} ${commandFor("go-test-many-early-buildfail")}`,
+        ),
+      ],
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir,
+    });
+    expect(result.summary).toEqual({
+      total: 3,
+      killed: 3,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+      build_failed: 0,
+      met: 3,
+      violated: 0,
+      build_detection_ambiguous: 1,
+      build_detection_skipped: 1,
+    });
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.filter((w) =>
+        w.startsWith("build-failure detection could not settle"),
+      ),
+    ).toEqual([
+      "build-failure detection could not settle 2 killed mutants (by plan index): ambiguous for #1; skipped for #2; each verdict stays killed, see the mutant's own warnings in plan.results (in the full result when the envelope is reduced) and its log, or use --no-build-detect",
+    ]);
+    // each mutant's own warning stays on its row
+    expect(
+      result.results[1]?.warnings.some((w) =>
+        w.startsWith("build-failure detection is ambiguous for the mutant "),
+      ),
+    ).toBe(true);
+    expect(
+      result.results[2]?.warnings.some((w) =>
+        w.startsWith("build-failure detection was skipped"),
+      ),
+    ).toBe(true);
+  });
+
+  it("probePlan(): a plan of plain kills carries zero counts and no such warning", async () => {
+    const repo = initRepo();
+    const result = await probePlan({
+      mutants: [
+        {
+          file: "fixture.js",
+          line: 1,
+          form: "replace",
+          replaceText: "module.exports = { broken: true };",
+        },
+      ],
+      testCommand: commandFor("vitest-fail"),
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+    });
+    expect(result.summary.build_detection_ambiguous).toBe(0);
+    expect(result.summary.build_detection_skipped).toBe(0);
+    expect(result.warnings).toEqual([]);
+  });
+
+  describe("CLI", { timeout: 120000 }, () => {
+    function writePlan(mutants: Record<string, unknown>[]): string {
+      const file = path.join(makeTmpDir(), "plan.json");
+      fs.writeFileSync(file, JSON.stringify({ isolation: "inplace", mutants }));
+      return file;
+    }
+    /** Eleven plain kills, then the ambiguous one. */
+    const lateAmbiguous = (): string =>
+      writePlan([
+        ...Array.from({ length: 11 }, () => ({
+          ...flip,
+          test: commandFor("vitest-fail"),
+        })),
+        { ...flip, test: commandFor("tsc-then-uncaught-typeerror") },
+      ]);
+
+    it("the reduced envelope keeps the count and the plan warning when the marked row is cut", async () => {
+      const repo = initRepo();
+      const run = await spawnCli([
+        "-C",
+        repo,
+        "-l",
+        makeTmpDir(),
+        "-m",
+        "4000",
+        "probe",
+        "--plan",
+        lateAmbiguous(),
+      ]);
+      expect(run.code).toBe(0);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.truncated).toBe(true);
+      // the marked row is not in what was printed
+      expect(JSON.stringify(parsed.plan.results)).not.toContain(
+        "build_detection",
+      );
+      expect(parsed.plan.summary.build_detection_ambiguous).toBe(1);
+      expect(parsed.plan.summary.build_detection_skipped).toBe(0);
+      expect(
+        parsed.warnings.filter((w: string) =>
+          w.startsWith("build-failure detection could not settle"),
+        ),
+      ).toEqual([
+        "build-failure detection could not settle 1 killed mutant (by plan index): ambiguous for #11; each verdict stays killed, see the mutant's own warnings in plan.results (in the full result when the envelope is reduced) and its log, or use --no-build-detect",
+      ]);
+    });
+
+    it("--summary -m 4000 on the same plan cuts the marked row and still prints its count line", async () => {
+      const repo = initRepo();
+      const run = await spawnCli([
+        "-C",
+        repo,
+        "-l",
+        makeTmpDir(),
+        "-m",
+        "4000",
+        "probe",
+        "--plan",
+        lateAmbiguous(),
+        "--summary",
+      ]);
+      expect(run.code).toBe(0);
+      const lines = run.stdout.trimEnd().split("\n");
+      expect(lines.some((l) => l.startsWith("#11 "))).toBe(false);
+      expect(lines.some((l) => / more mutant lines? omitted /.test(l))).toBe(
+        true,
+      );
+      expect(lines).toContain(
+        "build-failure detection ambiguous for 1 killed mutant; check their logs or use --no-build-detect",
+      );
+      expect(lines.at(-1)).toMatch(
+        /^totals: status=killed total=12 killed=12 /,
+      );
+      expect(run.stdout.length).toBeLessThanOrEqual(4000);
+    });
+
+    it("--report mutation-probes, single form: the ambiguous kill carries its reason", async () => {
+      const repo = initRepo();
+      const run = await spawnCli([
+        "-C",
+        repo,
+        "-l",
+        makeTmpDir(),
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "1",
+        "-r",
+        "module.exports = { broken: true };",
+        "-i",
+        "inplace",
+        "-t",
+        commandFor("tsc-then-uncaught-typeerror"),
+        "--report",
+        "mutation-probes",
+      ]);
+      expect(run.code).toBe(0);
+      const items = JSON.parse(run.stdout);
+      expect(items).toHaveLength(1);
+      expect(items[0].result).toBe("killed");
+      expect(items[0].expectation).toBe("met");
+      expect(items[0].reason).toBe(AMBIGUOUS_REASON);
+    });
+
+    it("--report mutation-probes, plan form: a plain kill, an ambiguous one and a skipped one read differently", async () => {
+      const repo = initRepo();
+      const logDir = makeTmpDir();
+      const run = await spawnCli([
+        "-C",
+        repo,
+        "-l",
+        logDir,
+        "-m",
+        "100000",
+        "probe",
+        "--plan",
+        writePlan([
+          { ...flip, test: commandFor("vitest-fail") },
+          { ...flip, test: commandFor("tsc-then-uncaught-typeerror") },
+          {
+            ...flip,
+            test: `BF_RMLOGS=${logDir} ${commandFor("go-test-many-early-buildfail")}`,
+          },
+        ]),
+        "--report",
+        "mutation-probes",
+      ]);
+      expect(run.code).toBe(0);
+      const items = JSON.parse(run.stdout);
+      expect(
+        items.map((item: { result: string; expectation: string }) => [
+          item.result,
+          item.expectation,
+        ]),
+      ).toEqual([
+        ["killed", "met"],
+        ["killed", "met"],
+        ["killed", "met"],
+      ]);
+      expect(items.map((item: { reason: string }) => item.reason)).toEqual([
+        "",
+        AMBIGUOUS_REASON,
+        "build detection skipped: log unreadable",
+      ]);
+    });
   });
 });
