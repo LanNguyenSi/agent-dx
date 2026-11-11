@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildDetectionPlanWarning,
   probe,
@@ -39,6 +39,12 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CAPTURED = path.join(__dirname, "fixtures", "captured");
+
+// Many tests here run real probes (git, node, one process per baseline and
+// per mutant). Three of them in a row run past vitest's 5 s default on a
+// loaded machine, so the file sets its own bound; a describe that names a
+// timeout keeps it.
+vi.setConfig({ testTimeout: 60000 });
 
 function captured(name: string): string {
   return fs.readFileSync(path.join(CAPTURED, `${name}.txt`), "utf8");
