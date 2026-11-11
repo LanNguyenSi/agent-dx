@@ -43,17 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expectation. A marked kill is always carried by these: the envelope's
   top-level `warnings` (a plan carries one warning naming the marked
   mutants by index); in a plan, `plan.summary`, which gains
-  `build_detection_ambiguous` and `build_detection_skipped` (warnings and
-  `plan.summary` are both kept when the envelope is reduced);
+  `build_detection_ambiguous` and `build_detection_skipped` (kept when the
+  envelope is reduced; when it is cut back to its fixed fields, only the
+  full result has `plan.summary` and the top-level warning remains);
   `mutation_probe.build_detection` on the mutant's row; the reason of its
   `--report mutation-probes` item, which stays `killed` and reads `build
   detection ambiguous: <matched line>` or `build detection skipped:
   <cause>`; and the `--summary` totals line, which ends in
   `build_detection_ambiguous=N` and `build_detection_skipped=N`, each only
   when non-zero, and is printed under every `-m`. The row text and the
-  detection lines of `--summary` are printed when they fit `-m`: they come
-  before survivor lines and mutant rows, and give way before a baseline
-  line or the note does. `--print` shows only the fields it names, and a
+  detection lines of `--summary` are printed when they fit `-m`: the
+  detection lines come before survivor lines and mutant rows, a marked row
+  before survivor lines, and all of them give way before a baseline line
+  or the note does. `--print` shows only the fields it names, and a
   `--report` array cut by `-m` drops whole items and says so on stderr. A
   marked row is counted on its own detection line only, not on `not
   available` as well. A failure marker printed by a wrapper script, a task

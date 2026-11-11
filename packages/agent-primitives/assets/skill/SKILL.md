@@ -123,7 +123,8 @@ reason `build detection ambiguous: <matched line>` or `build detection
 skipped: <cause>`: paste it unchanged. In a `--plan` run that warning sits
 in the mutant's own `plan.results[i].warnings`; one top-level warning names
 the marked mutants by index and `plan.summary.build_detection_ambiguous` /
-`build_detection_skipped` count them, also when the envelope was reduced,
+`build_detection_skipped` count them (when the envelope is cut back to
+its fixed fields, only in the full result; the top-level warning stays),
 and the `--summary` totals line ends in `build_detection_ambiguous=N` /
 `build_detection_skipped=N` (each only when non-zero) under every `-m`,
 also when the rows and the detection lines above it did not fit. A failure

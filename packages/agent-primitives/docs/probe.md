@@ -2251,7 +2251,8 @@ whether `--file` was given explicitly or is derived from the patch.
   A marked kill (ambiguous, or skipped as described next) is always
   carried by these: the envelope's top-level `warnings`; in a `--plan`
   run, `plan.summary.build_detection_ambiguous` /
-  `build_detection_skipped`; `mutation_probe.build_detection` on its row
+  `build_detection_skipped` (in the full result when the envelope is
+  cut back to its fixed fields, where the top-level warning remains); `mutation_probe.build_detection` on its row
   (in the full result when the reduction cut the row); the `reason` of
   its `--report mutation-probes` item; and the `--summary` totals line.
   The row text and the detection lines of `--summary` are printed when

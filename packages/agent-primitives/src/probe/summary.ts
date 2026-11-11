@@ -674,7 +674,8 @@ function undetectedBuildFailureLine(count: number): string {
 }
 
 /** Killed rows whose tsc diagnostic sat beside a line that may or may not
- * come from a test: kept as killed, never upgraded, never silent. */
+ * come from a test: kept as killed and never upgraded; this line is best effort, the totals
+ * line always counts them. */
 function ambiguousBuildFailureLine(count: number): string {
   return `build-failure detection ambiguous for ${count} killed mutant${count === 1 ? "" : "s"}; check their logs or use --no-build-detect`;
 }
