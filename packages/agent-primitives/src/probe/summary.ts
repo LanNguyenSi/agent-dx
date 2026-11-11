@@ -284,6 +284,9 @@ function baselineLine(entry: SummaryBaselineLike, position: number): string {
  * reason on the totals line alone. A plan naming more than one test
  * command also ends every mutant line in a `test=` column and prints one
  * line per baseline above the totals; a plan naming one prints neither.
+ * The totals line ends in `build_detection_ambiguous=N` and
+ * `build_detection_skipped=N`, each only when non-zero: the killed rows
+ * build-failure detection could not settle.
  *
  * `maxChars` bounds the mutant lines only: the totals line (and the note
  * and baseline lines, when they fit) always survive, and a marker line
@@ -438,7 +441,22 @@ export function renderProbeSummary(
     };
   }
   const head = `status=${input.status}${input.reason !== undefined ? ` reason=${input.reason}` : ""}`;
-  const totals = `totals: ${head} total=${counts.total} killed=${counts.killed} survived=${counts.survived} inconclusive=${counts.inconclusive} not_run=${counts.not_run} met=${counts.met} violated=${counts.violated} build_failed=${counts.build_failed}`;
+  // The killed rows build-failure detection could not settle, counted on
+  // the one line no `-m` drops: their rows and the detection lines give
+  // way under a short budget, and the totals would then read as plain
+  // kills. Each key is printed only when non-zero, so a run without such a
+  // row prints the totals line it always printed. The counts come from the
+  // rows, like the detection lines, so the two agree and the single form
+  // (which has no `plan.summary`) carries them too.
+  const ambiguousTotal =
+    ambiguousBuildFailures > 0
+      ? ` build_detection_ambiguous=${ambiguousBuildFailures}`
+      : "";
+  const skippedTotal =
+    skippedBuildFailures > 0
+      ? ` build_detection_skipped=${skippedBuildFailures}`
+      : "";
+  const totals = `totals: ${head} total=${counts.total} killed=${counts.killed} survived=${counts.survived} inconclusive=${counts.inconclusive} not_run=${counts.not_run} met=${counts.met} violated=${counts.violated} build_failed=${counts.build_failed}${ambiguousTotal}${skippedTotal}`;
   /** The whole printed summary with `extras` (the expected-survivors
    * block, the build-failure-detection line) ahead of the baseline lines. */
   const layout = (
@@ -558,8 +576,8 @@ export function renderProbeSummary(
   //
   // The detection lines and the line counting omitted survivor lines come
   // before survivor lines and before mutant rows: a row cut by `-m` may be
-  // the very one a count line is about, and without the line the totals
-  // would read as plain kills.
+  // the very one a count line is about. They are printed when they fit;
+  // what no budget drops is the count on the totals line.
   //
   // 1. Detection lines beside as many survivor lines as leave every
   //    required row printed.

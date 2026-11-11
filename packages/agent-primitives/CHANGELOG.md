@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mutants the detection did not cover on a `build-failure detection: not
   available` line. For vitest, narrow the test command to the test files
   that import the mutated module: a load failure beside other files whose
-  tests ran still reads as killed. An ambiguous case is never silent: a
+  tests ran still reads as killed. An ambiguous case is marked: a
   tsc diagnostic beside only weak evidence (a named error line such as
   `TypeError:`) stays `killed`, but its row reads `killed (build detection
   ambiguous)`, `mutation_probe.build_detection` says so, a warning names
@@ -40,15 +40,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose full log cannot be used (over 2 MiB, write failed, output may be
   incomplete, unreadable) is marked `skipped` the same way. The expected
   survivors lines give way before a row that is not a plain met
-  expectation. The marker reaches every output: `--report
-  mutation-probes` keeps such an item `killed` and gives it the reason
-  `build detection ambiguous: <matched line>` or `build detection skipped:
-  <cause>`; `plan.summary` gains `build_detection_ambiguous` and
-  `build_detection_skipped`, and a plan carries one top-level warning
-  naming the marked mutants by index, both kept when the envelope is
-  reduced; under a short `-m`, `--summary` keeps the detection lines and
-  the line counting omitted survivor lines before survivor lines and
-  mutant rows, so a marked row cut by `-m` still leaves its count line. A
+  expectation. A marked kill is always carried by these: the envelope's
+  top-level `warnings` (a plan carries one warning naming the marked
+  mutants by index); in a plan, `plan.summary`, which gains
+  `build_detection_ambiguous` and `build_detection_skipped` (warnings and
+  `plan.summary` are both kept when the envelope is reduced);
+  `mutation_probe.build_detection` on the mutant's row; the reason of its
+  `--report mutation-probes` item, which stays `killed` and reads `build
+  detection ambiguous: <matched line>` or `build detection skipped:
+  <cause>`; and the `--summary` totals line, which ends in
+  `build_detection_ambiguous=N` and `build_detection_skipped=N`, each only
+  when non-zero, and is printed under every `-m`. The row text and the
+  detection lines of `--summary` are printed when they fit `-m`: they come
+  before survivor lines and mutant rows, and give way before a baseline
+  line or the note does. `--print` shows only the fields it names, and a
+  `--report` array cut by `-m` drops whole items and says so on stderr. A
   marked row is counted on its own detection line only, not on `not
   available` as well. A failure marker printed by a wrapper script, a task
   runner or a preflight step counts as a test having run (see the limits
@@ -104,7 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mutant_inconclusive`. Rewrite the mutant so it compiles, or pass
   `--no-build-detect` when the test command is a compiler or type check.
 - The `--summary` totals line of `probe` ends in a new `build_failed=N`
-  field, always printed.
+  field, always printed, followed by `build_detection_ambiguous=N` and
+  `build_detection_skipped=N` when a killed mutant is marked (a run
+  without one prints neither).
 
 ### Fixed
 

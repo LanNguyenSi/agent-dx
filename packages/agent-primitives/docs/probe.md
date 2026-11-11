@@ -2226,11 +2226,12 @@ whether `--file` was given explicitly or is derived from the patch.
   bare `Error:` line, pnpm's `ERR_PNPM_*` footer and `×` line, and a
   `ok 1 - ...` line outside a TAP stream. Only weak evidence, a named
   error line such as `TypeError:` or `TSError:`, is the third outcome: the
-  run stays `killed` but is never silent. The row reads `killed (build
+  run stays `killed` but is marked. The row reads `killed (build
   detection ambiguous)`, `mutation_probe.build_detection` is
   `"ambiguous"` with the matched line in `build_detection_detail`, a
   warning names the mutant and that line, `--summary` counts it on a
-  `build-failure detection ambiguous for N killed mutants` line, and its
+  `build-failure detection ambiguous for N killed mutants` line and in
+  `build_detection_ambiguous=N` on its totals line, and its
   `--report mutation-probes` item carries the reason `build detection
   ambiguous: <the matched line>`. An ambiguous run is never turned into
   `build_failed`; check its log, or use the opt-out below.
@@ -2247,12 +2248,25 @@ whether `--file` was given explicitly or is derived from the patch.
   both held out of the reduction, so a marked row that was cut from
   `plan.results` is still named and counted.
 
+  A marked kill (ambiguous, or skipped as described next) is always
+  carried by these: the envelope's top-level `warnings`; in a `--plan`
+  run, `plan.summary.build_detection_ambiguous` /
+  `build_detection_skipped`; `mutation_probe.build_detection` on its row
+  (in the full result when the reduction cut the row); the `reason` of
+  its `--report mutation-probes` item; and the `--summary` totals line.
+  The row text and the detection lines of `--summary` are printed when
+  they fit `-m`, a `--print` projection shows only the fields it names,
+  and a `--report` array cut by `-m` drops whole items and says so on
+  stderr (see [Compact
+  views](#compact-views---summary---print-and---report)).
+
   When a tail was truncated the full run log is read instead of the
   tail, and a log that cannot be used leaves the verdict `killed` but
   marked: `mutation_probe.build_detection` is `"skipped"`, the row reads
   `killed (build detection skipped: <cause>)`, `--summary` counts it on a
   `build-failure detection skipped for N killed mutants` line (and not on
-  the `not available` line as well, whatever its truncated tail shows),
+  the `not available` line as well, whatever its truncated tail shows)
+  and in `build_detection_skipped=N` on its totals line,
   its `--report mutation-probes` item carries the reason `build detection
   skipped: <cause>`, and the warning (placed as described above) names the
   cause: the log is larger than the 2 MiB read bound
@@ -2371,7 +2385,7 @@ value cannot carry. `hygiene`, `drift` and `verify` have `--summary` and
 
 ```text
 <file>:<line> | <verdict> | expectation=<met|violated|-> | restored=<true|false|-> | failing=<first failing test line|-> | log=<path>
-totals: status=<status> [reason=<reason>] total=N killed=N survived=N inconclusive=N not_run=N met=N violated=N build_failed=N
+totals: status=<status> [reason=<reason>] total=N killed=N survived=N inconclusive=N not_run=N met=N violated=N build_failed=N [build_detection_ambiguous=N] [build_detection_skipped=N]
 ```
 
 `<file>` is relative to `-C` when it lies under it. A `--plan` line is
@@ -2381,7 +2395,12 @@ a mutant that never reached a verdict shows its status instead, with the
 reason in parentheses (`not_run(pre_failed)`). A `build_failed` row reads
 `build_failed(build failed, mutant not exercised)`, and the totals line
 counts it in `build_failed=N`, not in `inconclusive` (so `total` is
-`killed + survived + inconclusive + not_run + build_failed`). `failing=` is the first line of the
+`killed + survived + inconclusive + not_run + build_failed`). The
+totals line ends in `build_detection_ambiguous=N` and
+`build_detection_skipped=N`, each only when non-zero: the killed mutants
+build-failure detection could not settle (see "Mutants that do not
+compile" above). They are counted in `killed` as well, and a run without
+one prints neither key. `failing=` is the first line of the
 test's captured output tails that looks like a failing test (`FAIL`,
 `not ok`, `AssertionError`, a leading cross mark and similar), `-` when
 none does or the verdict is not `killed` (a survived mutant passed, so
@@ -2405,7 +2424,9 @@ naming how many were omitted and, when the run saved one, the path of the
 full result (`result-full-*.json`) if it fits within `-m` beside the totals
 line (otherwise the marker says the path did not fit); without a saved full
 result the marker says so. The `totals:` line is always printed (the `note:` line is dropped
-before the totals line if even those two do not fit).
+before the totals line if even those two do not fit), and with it the
+`build_detection_ambiguous` and `build_detection_skipped` counts: no `-m`
+drops them.
 
 Above the baseline lines and the totals, a `--plan` summary adds up to
 two blocks. An `expected survivors (expect: pass, survived, counted as
@@ -2425,19 +2446,25 @@ its own line only). The single form prints the detection lines too.
 
 When `-m` is short, the detection lines and the omission line come before
 the survivor lines and before the mutant rows: a row cut by `-m` may be
-the one a detection line counts, and the totals alone would read it as a
-plain kill. In order: the detection lines beside as many survivor lines
+the one a detection line counts. They are printed when they fit; what no
+`-m` drops is the count on the totals line. In order: the detection lines beside as many survivor lines
 as still leave every mutant row printed that is not a plain met
 expectation (violated, `build_failed`, inconclusive, not run, or a killed
 row marked ambiguous or skipped); when no number of survivor lines leaves
 room for those rows, the heading, the omission line and the detection
 lines, then the heading and the detection lines, with as many mutant rows
-as fit and the marker for the rest. The detection lines are given up in
+as fit and the marker for the rest. The detection lines, the `not
+available` one included, are given up in
 two cases only. One: they do not fit `-m` even with every mutant row
 omitted, while the survivor lines and every such row fit without them;
 then those rows are printed, a marked one with its `(build detection
-...)` text. Two: they would cost a baseline line or the note; then the
-heading and the omission line stay, or the heading alone. In the narrow
+...)` text. Two: they do not fit `-m` beside the totals line, the
+baseline lines and the note, since they give way before a baseline line
+or the note does; then the
+heading and the omission line stay, or the heading alone. The
+`build_detection_ambiguous` and `build_detection_skipped` counts on the
+totals line are given up in neither case. The `not available` line has
+no such count: it says what the detection covers and marks no mutant. In the narrow
 range where the detection lines and the totals fit but the marker for the
 omitted mutant lines does not fit beside them, they are printed and the
 marker runs past `-m`.
@@ -2456,7 +2483,11 @@ reduction warnings beside it). A top-level name outside the envelope's field lis
 `usage_error` raised before the probe runs, naming the field and listing
 the known ones; a known field this run did not produce (for example
 `test` after a failing baseline) prints `null`, as does a dotted path
-that does not resolve.
+that does not resolve. A projection shows only what it names:
+`--print mutation_probe.result` prints a kill that build-failure
+detection marked ambiguous or skipped as `killed` like any other, so name
+`mutation_probe` whole (or `warnings`, or `plan.summary` for a plan) to
+see the mark.
 
 `--report <kind>` prints a ready-to-paste report instead of the
 envelope; `mutation-probes` is the only kind, and an unknown kind is a

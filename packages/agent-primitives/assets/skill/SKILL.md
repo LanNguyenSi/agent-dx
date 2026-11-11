@@ -124,7 +124,9 @@ skipped: <cause>`: paste it unchanged. In a `--plan` run that warning sits
 in the mutant's own `plan.results[i].warnings`; one top-level warning names
 the marked mutants by index and `plan.summary.build_detection_ambiguous` /
 `build_detection_skipped` count them, also when the envelope was reduced,
-and `--summary` keeps their count lines when `-m` cuts the rows. A failure
+and the `--summary` totals line ends in `build_detection_ambiguous=N` /
+`build_detection_skipped=N` (each only when non-zero) under every `-m`,
+also when the rows and the detection lines above it did not fit. A failure
 marker printed by a wrapper script, a task runner or a preflight step
 (`echo 'FAILED: typecheck'`, an ora or listr `✖` line, a complete TAP
 stream) counts as a test having run, so a tsc error beside it stays a
@@ -258,7 +260,7 @@ To read a probe's verdict, add `--summary` to any `probe` form instead
 of writing a python or jq reader of the JSON: one line per mutant (id as
 `file:line`, verdict, `expectation`, `restored_verified`, the first
 failing test line, the log path) plus a `totals:` line. `--print
-status,mutation_probe.result,logs` prints just those envelope fields as
+status,mutation_probe,logs` prints just those envelope fields as
 one JSON object (an unknown field is a usage error; a field this run
 lacks prints `null`). Both leave the exit code and the saved full result
 unchanged.
