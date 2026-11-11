@@ -1,0 +1,4 @@
+# example.com/m [example.com/m.test]
+./m.go:4:2: declared and not used: unused
+FAIL	example.com/m [build failed]
+FAIL

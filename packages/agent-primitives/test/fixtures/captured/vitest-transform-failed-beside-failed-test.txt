@@ -1,0 +1,52 @@
+
+ RUN  v4.1.12 /project
+
+ ❯ test/add.test.ts (1 test | 1 failed) 5ms
+   × add 4ms
+ ❯ test/bad.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/bad.test.ts [ test/bad.test.ts ]
+Error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mUnexpected token
+   [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/bad.ts:1:18 [38;5;246m][0m
+   [38;5;246m│[0m
+ [38;5;246m1 │[0m [38;5;249me[0m[38;5;249mx[0m[38;5;249mp[0m[38;5;249mo[0m[38;5;249mr[0m[38;5;249mt[0m[38;5;249m [0m[38;5;249mc[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249m [0m[38;5;249mx[0m[38;5;249m [0m[38;5;249m=[0m[38;5;249m [0m;
+ [38;5;240m  │[0m                  ┬  
+ [38;5;240m  │[0m                  ╰── 
+[38;5;246m───╯[0m
+
+  Plugin: vite:oxc
+  File: /project/src/bad.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/add.test.ts > add
+AssertionError: expected -1 to be 3 // Object.is equality
+
+- Expected
++ Received
+
+- 3
++ -1
+
+ ❯ test/add.test.ts:3:39
+      1| import { expect, test } from "vitest";
+      2| import { add } from "../src/add.js";
+      3| test("add", () => { expect(add(1, 2)).toBe(3); });
+       |                                       ^
+      4|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  1 failed (1)
+   Start at  00:00:00
+   Duration  [elided]
+

@@ -86,6 +86,78 @@ plugin, of a scoped, slash-separated rule id
 carry an inline regex literal (`/^_/u`) right before the rule id column,
 exercising the rule id capture's grammar against both shapes at once.
 
+### Build-failure captures (`go-test-*`, `tsc-*`, `pnpm-*`, `vitest-*`, `node-*`)
+
+Real outputs of a test command whose BUILD broke, or that only looks like
+it, used by `probe-build-failure.test.ts`. Each was captured once in a
+throwaway project under a scratch directory (never committed) with go
+1.27.3, typescript 5.9.3, vitest 4.1.12, eslint 10.9.1, pnpm 12.16.1, npm
+11 and node 26.13, then trimmed of the capture directory's absolute path
+(`/project`), stack frames that name the developer's `node_modules` path,
+wall-clock times (`Start at`, `Duration`) and Go's package timings
+(normalized to `0.001s`, the shape matters, not the value).
+
+- `go-test-build-failed.txt`: `go test ./...` on a package whose source
+  declares an unused variable (`declared and not used`). Exit `1`.
+- `go-test-setup-failed.txt`: the same command on a package importing a
+  module that is not in `go.mod` (`FAIL <pkg> [setup failed]`). Exit `1`.
+- `go-test-assert-failed.txt`: the same package with a failing assertion
+  instead (`--- FAIL:` and a `FAIL <pkg> <time>` line), the negative
+  control. Exit `1`.
+- `go-test-build-failed-beside-ok.txt`: two packages, one of which fails to
+  build while the other passes (`ok` line next to `[build failed]`). Exit
+  `1`.
+- `go-test-build-failed-beside-failed-test.txt`: two packages, one failing
+  to build and the other with a failing assertion. Exit `1`.
+- `go-test-many-testfail-and-buildfail.txt`: `go test ./...` over 70
+  one-function packages, `p02` with a failing assertion and `p70` with an
+  unused variable (76 lines: the test failure is more than 60 lines from
+  the end). Exit `1`.
+- `go-test-many-early-buildfail.txt`: the same module with only `p02`
+  failing to build (73 lines: the `[build failed]` marker is more than 60
+  lines from the end). Exit `1`. `(cached)` timings were normalized to
+  `0.001s` like the others.
+- `tsc-pretest-build-failed.txt`: `npm test` in a project whose
+  `pretest` script is `tsc -p .` and whose source has a type error, so
+  `npm` stops before vitest starts. Exit `2`.
+- `tsc-type-test-killed.txt`: `tsc --noEmit -p .` as the test command of a
+  type-level suite whose `@ts-expect-error` directive became unused
+  (TS2578). Exit `2`.
+- `tsc-eslint-warning-then-tsc.txt`: `npm test` whose `pretest` is
+  `eslint src/lint.js && tsc -p .`: eslint prints one warning and its
+  `✖ 1 problem (0 errors, 1 warning)` line, then tsc fails. Exit `1`.
+- `tsc-apperror-root-diagnostic.txt`: `tsc -p .` on a root-level
+  `AppError.ts` with a type error, so the diagnostic line itself starts
+  with a name ending in `Error`. Exit `1`.
+- `tsc-pretest-ok-line-then-tsc.txt`: a `pretest` that prints
+  `ok 1 - env check` and then runs `tsc -p .`, which fails. Exit `1`.
+- `tsc-then-uncaught-typeerror.txt`: `tsc -p . ; node check.js` where tsc
+  fails and the script then throws an uncaught `TypeError` (a named error
+  line beside a diagnostic: the ambiguous shape). Exit `1`.
+- `pnpm-filter-tsc-error.txt`: `pnpm --filter @scope/a test` where the
+  package's test is `tsc -p .` and fails (`[ELIFECYCLE]`, `Error:
+  ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, the `×` footer). Exit `1`.
+- `pnpm-recursive-tsc-error.txt`: `pnpm -r test` over two packages, the
+  failing one's lines prefixed `packages/a test: ` (a prefixed shape the
+  detection does not recognize). Exit `1`.
+- `vitest-transform-failed.txt`: `vitest run` where the imported source
+  file has a syntax error (`Transform failed with 1 error`, `Tests  no
+  tests`), ANSI escapes kept as captured. Exit `1`.
+- `vitest-transform-failed-beside-failed-test.txt`: the same, with a
+  second test file that loads and fails an assertion. Exit `1`.
+- `vitest-runtime-syntaxerror-at-import.txt`: `vitest run` where the
+  imported source calls `JSON.parse("{bad")` at import (`SyntaxError` with
+  a frame in user code, `Tests  no tests`). Exit `1`.
+- `vitest-tap-assert-error-ts.txt`, `vitest-junit-assert-error-ts.txt`:
+  `vitest run --reporter=tap` / `--reporter=junit` on a failing assertion
+  whose message contains `src/add.ts(2,9): error TS2322: ...`. Exit `1`.
+- `node-dot-assert-error-ts.txt`, `node-junit-assert-error-ts.txt`:
+  `node --test --test-reporter=dot` / `junit` on a failing
+  `assert.strictEqual` with the same message. Exit `1`.
+
+The vitest missing-module case reuses `vitest-collection-error.txt`
+above.
+
 ### PHP captures (`phpunit-*`, `phpstan-*`, `phpcs-*`)
 
 No PHP toolchain lives on the dev machine these were captured on: each

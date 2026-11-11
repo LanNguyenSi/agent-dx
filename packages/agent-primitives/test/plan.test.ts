@@ -571,6 +571,9 @@ describe("probePlan(): one baseline, every mutant against it (I1)", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      build_failed: 0,
+      build_detection_ambiguous: 0,
+      build_detection_skipped: 0,
       met: 3,
       violated: 0,
     });
@@ -1276,6 +1279,9 @@ describe("probePlan(): a restore failure is terminal (I3)", () => {
       survived: 0,
       inconclusive: 1,
       not_run: 2,
+      build_failed: 0,
+      build_detection_ambiguous: 0,
+      build_detection_skipped: 0,
       met: 0,
       violated: 0,
     });
@@ -1936,6 +1942,9 @@ describe("probePlan(): an unexpected error while a mutant is applied", () => {
       survived: 0,
       inconclusive: 1,
       not_run: 1,
+      build_failed: 0,
+      build_detection_ambiguous: 0,
+      build_detection_skipped: 0,
       met: 1,
       violated: 0,
     });
@@ -2533,6 +2542,9 @@ describe("probePlan(): the plan's own top-level status is an expectation aggrega
       survived: 1,
       inconclusive: 0,
       not_run: 0,
+      build_failed: 0,
+      build_detection_ambiguous: 0,
+      build_detection_skipped: 0,
       met: 1,
       violated: 0,
     });
@@ -2567,6 +2579,9 @@ describe("probePlan(): the plan's own top-level status is an expectation aggrega
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      build_failed: 0,
+      build_detection_ambiguous: 0,
+      build_detection_skipped: 0,
       met: 0,
       violated: 1,
     });
@@ -2953,6 +2968,9 @@ describe("probePlan(): one baseline per distinct test command", () => {
       survived: 1,
       inconclusive: 0,
       not_run: 1,
+      build_failed: 0,
+      build_detection_ambiguous: 0,
+      build_detection_skipped: 0,
       met: 1,
       violated: 1,
     });

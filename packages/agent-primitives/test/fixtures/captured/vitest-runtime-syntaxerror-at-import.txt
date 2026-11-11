@@ -1,0 +1,23 @@
+
+ RUN  v4.1.12 /project
+
+ ❯ test/add.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/add.test.ts [ test/add.test.ts ]
+SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+ ❯ src/add.ts:1:26
+      1| export const data = JSON.parse("{bad");
+       |                          ^
+      2| export function add(a: number, b: number): number {
+      3|   return a + b;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  00:00:00
+   Duration  [elided]
+

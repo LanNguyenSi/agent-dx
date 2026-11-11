@@ -39,6 +39,11 @@ import {
   detectKnownZeroTestsEvidence,
   hasKnownTestSummary,
 } from "./zero-tests.js";
+import {
+  readBuildFailure,
+  skipCauseLabel,
+  skipWarning,
+} from "./build-failure.js";
 
 /**
  * The per-mutant step of the probe pipeline: `prepareMutant` (compute a
@@ -71,6 +76,11 @@ export interface MutantStepSpec {
   withText?: string;
   patchPath?: string;
   expect: ExpectVerdict;
+  /** Whether a failing mutant run is checked for a build failure
+   * (`build-failure.ts`). `false` is the opt-out for a test command that
+   * IS a compiler or type check, whose diagnostics are the kill; absent
+   * means on. */
+  buildDetect?: boolean;
 }
 
 export type PreparedMutant =
@@ -629,6 +639,11 @@ export async function runMutantAttempt(
   // the same as a baseline-stage zero-tests refusal would have (see
   // `REFUSAL_RESULT_SHAPE.no_tests_executed` in `session.ts`).
   let mutationProbeResult: string;
+  // A killed reading build-failure detection could not settle: the row is
+  // marked and the warning names it, so the reading is never silent.
+  let buildDetection:
+    | { state: "ambiguous" | "skipped"; detail: string; warning: string }
+    | undefined;
   if (testResult.aborted) {
     // The run was stopped (a SIGINT/SIGTERM this probe handled, or a
     // caller's abort) before the test could say anything about the
@@ -929,7 +944,47 @@ export async function runMutantAttempt(
       ) &&
       testResult.stdoutTail === baselineOutput.stdoutTail &&
       testResult.stderrTail === baselineOutput.stderrTail;
-    if (mutantZeroTests.detected || genericFallback) {
+    // Build-failure detection, mutant side: a run that failed (`killed`)
+    // because the build broke measured nothing about the suite. Decided
+    // before the zero-tests reading below, so output that also shows a
+    // zero-tests shape (an all-skipped vitest summary beside a go build
+    // failure, say) is reported as the build failure, the more precise
+    // cause. `status` is read, not
+    // `testPassed`: the truncated-tail `--pass-regex` correction above
+    // can already have turned a `killed` reading into `survived`.
+    // A truncated tail is not read: the marker or the failing test may
+    // have scrolled out of it, so the full log is (as the `--pass-regex`
+    // correction above does), and an unreadable log leaves the verdict
+    // alone with a warning.
+    const buildFailure =
+      status === "killed" && spec.buildDetect !== false
+        ? readBuildFailure(testResult, FULL_LOG_READ_BOUND_BYTES)
+        : { detected: false as const };
+    if ("skipped" in buildFailure && buildFailure.skipped) {
+      buildDetection = {
+        state: "skipped",
+        detail: skipCauseLabel(buildFailure.skipped),
+        warning: skipWarning(
+          buildFailure.skipped,
+          FULL_LOG_READ_BOUND_BYTES,
+          testResult.logPath,
+        ),
+      };
+    } else if ("ambiguous" in buildFailure && buildFailure.ambiguous) {
+      buildDetection = {
+        state: "ambiguous",
+        detail: buildFailure.ambiguous.evidence,
+        warning: `build-failure detection is ambiguous for the mutant ${mutantSummary}: the output has a tsc diagnostic and a line that may or may not come from a test (${buildFailure.ambiguous.evidence}); the verdict stays killed, check ${testResult.logPath} or use --no-build-detect`,
+      };
+    }
+    if (buildFailure.detected) {
+      status = "inconclusive";
+      reason = "build_failed";
+      mutationProbeResult = "build_failed";
+      warnings.push(
+        `the mutant run's own output shows the build failed (${buildFailure.via}), so no test measured this mutant; rewrite it as a change that still compiles (see "Mutants that do not compile" in docs/probe.md); see ${testResult.logPath}`,
+      );
+    } else if (mutantZeroTests.detected || genericFallback) {
       status = "inconclusive";
       // `mutantZeroTests.ambiguous` is set only on the phpunit branch of
       // `detectKnownZeroTestsEvidence`, and only `true` for
@@ -975,15 +1030,21 @@ export async function runMutantAttempt(
   // of `--expect`, and possibly overridden to `inconclusive` by one of
   // the branches above) matched what `spec.expect` called for. Only
   // meaningful once a real verdict was reached: `aborted`, `timeout`,
-  // `no_tests_executed` and `zero_tests_ambiguous` all leave `status` at
-  // `inconclusive`, which measured nothing to compare against an
-  // expectation.
+  // `no_tests_executed`, `zero_tests_ambiguous` and `build_failed` all
+  // leave `status` at `inconclusive`, which measured nothing to compare
+  // against an expectation: a `build_failed` mutant is neither met nor
+  // violated under `--expect fail` and, under `--expect pass`, is not
+  // met either (a mutant that never ran did not survive).
   const expectation: "met" | "violated" | undefined =
     status === "killed" || status === "survived"
       ? (spec.expect === "fail") === (status === "killed")
         ? "met"
         : "violated"
       : undefined;
+
+  // Only a verdict that is still `killed` carries the marker.
+  const marker = status === "killed" ? buildDetection : undefined;
+  if (marker !== undefined) warnings.push(marker.warning);
 
   return {
     status,
@@ -994,7 +1055,15 @@ export async function runMutantAttempt(
       verified_applied_via: verifiedAppliedVia,
       result: mutationProbeResult,
       restored_verified: restoredVerified,
-      ...(reason === "no_tests_executed" || reason === "zero_tests_ambiguous"
+      ...(marker !== undefined
+        ? {
+            build_detection: marker.state,
+            build_detection_detail: marker.detail,
+          }
+        : {}),
+      ...(reason === "no_tests_executed" ||
+      reason === "zero_tests_ambiguous" ||
+      reason === "build_failed"
         ? { reason }
         : {}),
       ...(expectation !== undefined ? { expectation } : {}),

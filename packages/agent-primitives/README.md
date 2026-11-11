@@ -140,7 +140,13 @@ agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
 Mutates line 12 of `src/foo.js` to `return false;`, confirms `npm test`
 passes first (the baseline), reruns it against the mutant, restores the
 file, and reports whether the test caught it (`killed`) or missed it
-(`survived`).
+(`survived`). A mutant that broke the build instead of a test is
+reported `build_failed` rather than `killed` when the output of the
+mutant run (its tail, or the full log when the tail was truncated) shows
+it in go test, tsc or vitest output. Limits: other toolchains keep
+`killed`, a vitest command should be narrowed to the test files that
+import the mutated module, and a test command that is itself a compiler
+or type check needs `--no-build-detect` (see [`probe`](docs/probe.md)).
 
 ## Documentation
 

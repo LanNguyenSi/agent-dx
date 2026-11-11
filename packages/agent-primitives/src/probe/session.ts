@@ -84,9 +84,18 @@ export interface MutationProbeField {
    * when it passed) independent of `--expect` -- this field is the only
    * place the expectation comparison is reported, so a reader does not
    * have to already know `--expect` to read `result` correctly. Present
-   * only alongside a real `killed`/`survived` `result`: `"inconclusive"`
-   * or `"not_run"` measured nothing to compare against an expectation. */
+   * only alongside a real `killed`/`survived` `result`: `"inconclusive"`,
+   * `"not_run"` and `"build_failed"` measured nothing to compare against
+   * an expectation. */
   expectation?: "met" | "violated";
+  /** Present only on a `killed` result that build-failure detection could
+   * not settle: `"ambiguous"` (a tsc diagnostic beside a line that may or
+   * may not come from a test; `build_detection_detail` is that line) or
+   * `"skipped"` (the output was truncated and its full log was no basis;
+   * `build_detection_detail` names the cause). The verdict stays
+   * `killed`; the marker is what stops that being silent. */
+  build_detection?: "ambiguous" | "skipped";
+  build_detection_detail?: string;
 }
 
 export interface ExecPhaseField {

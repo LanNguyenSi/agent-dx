@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe` reports a mutant whose test command failed because the build
+  broke as `mutation_probe.result: "build_failed"` (`status:
+  "inconclusive"`, `reason: "build_failed"`, exit `2`). A compile error
+  exits non-zero before any test runs, which the exit code alone reads as
+  a kill. Recognized from the output of the mutant run (its captured tails,
+  or the full run log when a tail was truncated; an unreadable log leaves
+  the verdict as it was, with a warning): `go test`'s `FAIL <pkg> [build
+  failed]` and `[setup failed]` (unless a test also failed in the same
+  run), a `tsc` diagnostic in tsc's own line format in output with no
+  test-runner summary and no sign of a test having run, and a vitest run
+  that could not transform or load a test file (a `SyntaxError` only
+  without a user stack frame) and ran no test. Output that also shows a
+  zero-tests shape is still reported as the build failure. A
+  `build_failed` mutant carries no `expectation` (neither met nor
+  violated under `--expect fail`, not met under `--expect pass`) and keeps
+  a plan from concluding. `plan.summary` gains `build_failed`, which is
+  left out of `inconclusive` so `total` stays the sum of the counts;
+  `--report mutation-probes` prints such an item as `not_applicable` with
+  the reason `build failed, mutant not exercised`. Any other toolchain
+  keeps its old reading (`killed`), and `--summary` names how many killed
+  mutants the detection did not cover on a `build-failure detection: not
+  available` line. For vitest, narrow the test command to the test files
+  that import the mutated module: a load failure beside other files whose
+  tests ran still reads as killed. An ambiguous case is marked: a
+  tsc diagnostic beside only weak evidence (a named error line such as
+  `TypeError:`) stays `killed`, but its row reads `killed (build detection
+  ambiguous)`, `mutation_probe.build_detection` says so, a warning names
+  the mutant and the line, and `--summary` counts it; a truncated run
+  whose full log cannot be used (over 2 MiB, write failed, output may be
+  incomplete, unreadable) is marked `skipped` the same way. The expected
+  survivors lines give way before a row that is not a plain met
+  expectation. A marked kill is always carried by these: the envelope's
+  top-level `warnings` (a plan carries one warning naming the marked
+  mutants by index); in a plan, `plan.summary`, which gains
+  `build_detection_ambiguous` and `build_detection_skipped` (kept when the
+  envelope is reduced; when it is cut back to its fixed fields, only the
+  full result has `plan.summary` and the top-level warning remains);
+  `mutation_probe.build_detection` on the mutant's row; the reason of its
+  `--report mutation-probes` item, which stays `killed` and reads `build
+  detection ambiguous: <matched line>` or `build detection skipped:
+  <cause>`; and the `--summary` totals line, which ends in
+  `build_detection_ambiguous=N` and `build_detection_skipped=N`, each only
+  when non-zero, and is printed under every `-m`. The row text and the
+  detection lines of `--summary` are printed when they fit `-m`: the
+  detection lines come before survivor lines and mutant rows, a marked row
+  before survivor lines, and all of them give way before a baseline line
+  or the note does. `--print` shows only the fields it names, and a
+  `--report` array cut by `-m` drops whole items and says so on stderr. A
+  marked row is counted on its own detection line only, not on `not
+  available` as well. A failure marker printed by a wrapper script, a task
+  runner or a preflight step counts as a test having run (see the limits
+  in docs/probe.md).
+- `probe --no-build-detect` and the plan key `build_detect: false` (plan
+  level and per mutant; a mutant's value wins, then the command line, then
+  the plan's) turn that detection off, for a test command that is itself a
+  compiler or type check (`tsc --noEmit` as a type-level test suite), whose
+  diagnostics are the kill.
+- A `--plan` mutant takes an optional `reason` (a non-empty string, carried
+  as `expect_reason` in its result). `--summary` lists every mutant that
+  declared `expect: "pass"` and survived under an `expected survivors`
+  heading with that reason (capped at 200 characters; `(no reason given)`
+  without one), so it cannot hide among the met expectations; it still
+  counts as met. The heading with the count is always printed; lines that
+  do not fit `-m` give way to a `... N expected-survivor lines omitted`
+  line.
+
 ### Changed
 
 - `hygiene`: a test file deleted entirely (or left without a test case) is
@@ -36,6 +104,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Migration: run `hygiene` without the old declaration, read the names in the
   finding, and replace `--intended-deletion test/old.test.ts[=all]` with one
   `--intended-deletion 'test/old.test.ts::<name>'` per dropped test.
+
+- A mutant run that failed because the build broke used to read `killed`
+  (exit `0` under the default `--expect fail`); it now reads
+  `build_failed` (`inconclusive`, exit `2`) when go test, tsc or vitest
+  output shows it, and a plan containing one ends `inconclusive` /
+  `mutant_inconclusive`. Rewrite the mutant so it compiles, or pass
+  `--no-build-detect` when the test command is a compiler or type check.
+- The `--summary` totals line of `probe` ends in a new `build_failed=N`
+  field, always printed, followed by `build_detection_ambiguous=N` and
+  `build_detection_skipped=N` when a killed mutant is marked (a run
+  without one prints neither).
 
 ### Fixed
 

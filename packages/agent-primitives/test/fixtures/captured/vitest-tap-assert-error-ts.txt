@@ -1,0 +1,14 @@
+TAP version 13
+1..1
+not ok 1 - test/add.test.ts # time=1ms {
+    1..1
+    not ok 1 - add # time=1ms
+        ---
+        error:
+            name: "AssertionError"
+            message: "src/add.ts(2,9): error TS2322: Type 'number' is not assignable to type 'string'.: expected -1 to be 3 // Object.is equality"
+        at: "/project/test/add.test.ts:4:105"
+        actual: "-1"
+        expected: "3"
+        ...
+}

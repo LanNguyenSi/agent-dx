@@ -1,0 +1,5 @@
+# example.com/m
+m.go:3:8: no required module provides package example.com/nope/missing; to add it:
+	go get example.com/nope/missing
+FAIL	example.com/m [setup failed]
+FAIL

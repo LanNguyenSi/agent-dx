@@ -35,6 +35,12 @@ function makeRepo(): { repo: string; logs: string } {
   return { repo, logs };
 }
 
+/** The line `--summary` adds when a killed mutant's output belongs to no
+ * toolchain the build-failure detection recognizes (these tests' own
+ * `FAIL fixture is false` script is one). */
+const detectionLine = (count: number): string =>
+  `build-failure detection: not available for ${count} killed mutant${count === 1 ? "" : "s"} (recognized: go test, tsc, vitest output); a compile error there still reads as killed, check the log`;
+
 const TEST_CMD =
   "node -e \"if (!require('./fixture.js')) { console.log('FAIL fixture is false'); process.exit(1) }\"";
 
@@ -78,14 +84,15 @@ describe("probe --summary (CLI)", { timeout: 60000 }, () => {
     expect(json.code).toBe(0);
     expect(view.code).toBe(json.code);
     const lines = view.stdout.trimEnd().split("\n");
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
     expect(lines[0]).toMatch(/fixture\.js:1 \| killed \|/);
     expect(lines[0]).toContain("expectation=met");
     expect(lines[0]).toContain("restored=true");
     expect(lines[0]).toContain("failing=FAIL fixture is false");
     expect(lines[0]).toMatch(/log=\S*exec-\S+\.log$/);
-    expect(lines[1]).toBe(
-      "totals: status=killed total=1 killed=1 survived=0 inconclusive=0 not_run=0 met=1 violated=0",
+    expect(lines[1]).toBe(detectionLine(1));
+    expect(lines[2]).toBe(
+      "totals: status=killed total=1 killed=1 survived=0 inconclusive=0 not_run=0 met=1 violated=0 build_failed=0",
     );
   });
 
@@ -154,7 +161,7 @@ describe("probe --summary (CLI)", { timeout: 60000 }, () => {
     expect(run.stdout.length).toBeLessThanOrEqual(600);
     expect(run.stdout).toMatch(/\.\.\. \d+ more mutant lines? omitted/);
     expect(run.stdout.trimEnd().split("\n").pop()).toBe(
-      "totals: status=killed total=6 killed=6 survived=0 inconclusive=0 not_run=0 met=6 violated=0",
+      "totals: status=killed total=6 killed=6 survived=0 inconclusive=0 not_run=0 met=6 violated=0 build_failed=0",
     );
   });
 
@@ -198,11 +205,12 @@ describe("probe --summary (CLI)", { timeout: 60000 }, () => {
     expect(json.code).toBe(1);
     expect(view.code).toBe(1);
     const lines = view.stdout.trimEnd().split("\n");
-    expect(lines).toHaveLength(3);
+    expect(lines).toHaveLength(4);
     expect(lines[0]).toMatch(/^#0 \S*fixture\.js:1 \| killed /);
     expect(lines[1]).toMatch(/^#1 \S*fixture\.js:1 \| survived /);
-    expect(lines[2]).toBe(
-      "totals: status=survived total=2 killed=1 survived=1 inconclusive=0 not_run=0 met=1 violated=1",
+    expect(lines[2]).toBe(detectionLine(1));
+    expect(lines[3]).toBe(
+      "totals: status=survived total=2 killed=1 survived=1 inconclusive=0 not_run=0 met=1 violated=1 build_failed=0",
     );
   });
 
@@ -257,7 +265,7 @@ describe("probe --summary (CLI)", { timeout: 60000 }, () => {
     expect(view.code).toBe(2);
     const lines = view.stdout.trimEnd().split("\n");
     expect(lines[0]).toBe(
-      "totals: status=inconclusive reason=mutant_not_applicable total=1 killed=0 survived=0 inconclusive=1 not_run=0 met=0 violated=0",
+      "totals: status=inconclusive reason=mutant_not_applicable total=1 killed=0 survived=0 inconclusive=1 not_run=0 met=0 violated=0 build_failed=0",
     );
     expect(lines[lines.length - 1]).toBe(
       "note: substring not found on line 1 line=module.exports = true;",
@@ -291,7 +299,8 @@ describe("probe --summary (CLI)", { timeout: 60000 }, () => {
     expect(lines[1]).toMatch(
       /^#1 fixture\.js:1 \| killed \| expectation=met \| restored=true \| failing=FAIL fixture is false \| log=\S+\.log$/,
     );
-    expect(lines[2]).toContain(
+    expect(lines[2]).toBe(detectionLine(1));
+    expect(lines[3]).toContain(
       "status=inconclusive reason=mutant_inconclusive total=2 killed=1 survived=0 inconclusive=1",
     );
   });
@@ -758,7 +767,7 @@ describe("summary helpers", () => {
       line_content: "  return a + b; ",
     });
     expect(text.trimEnd().split("\n")).toEqual([
-      "totals: status=inconclusive reason=mutant_not_applicable total=1 killed=0 survived=0 inconclusive=1 not_run=0 met=0 violated=0",
+      "totals: status=inconclusive reason=mutant_not_applicable total=1 killed=0 survived=0 inconclusive=1 not_run=0 met=0 violated=0 build_failed=0",
       "note: substring not found on line 45 line=return a + b;",
     ]);
   });
@@ -1656,9 +1665,10 @@ describe("renderProbeSummary: a plan naming more than one test command", () => {
     expect(text.trimEnd().split("\n")).toEqual([
       "#0 a.ts:1 | killed | expectation=met | restored=true | failing=- | log=/logs/m0.log | test=npm test",
       "#1 a.ts | not_run(baseline_failed) | expectation=- | restored=- | failing=- | log=/logs/b1.log | test=npm run test:b",
+      detectionLine(1),
       "baseline[0] | passed | entries=0 | log=/logs/b0.log | test=npm test",
       "baseline[1] | failed(baseline_failed) | entries=1 | log=/logs/b1.log | test=npm run test:b",
-      "totals: status=inconclusive reason=mutant_inconclusive total=2 killed=1 survived=0 inconclusive=0 not_run=1 met=1 violated=0",
+      "totals: status=inconclusive reason=mutant_inconclusive total=2 killed=1 survived=0 inconclusive=0 not_run=1 met=1 violated=0 build_failed=0",
     ]);
   });
 
@@ -1744,16 +1754,17 @@ describe(
       );
       expect(view.code).toBe(json.code);
       const lines = view.stdout.trimEnd().split("\n");
-      expect(lines).toHaveLength(5);
+      expect(lines).toHaveLength(6);
       expect(lines[0]).toMatch(/^#0 \S*fixture\.js:1 \| killed /);
       expect(lines[0].endsWith(` | test=${TEST_CMD}`)).toBe(true);
-      expect(lines[2]).toMatch(/^baseline\[0\] \| passed \| entries=0 \| log=/);
-      expect(lines[3]).toMatch(
+      expect(lines[2]).toBe(detectionLine(1));
+      expect(lines[3]).toMatch(/^baseline\[0\] \| passed \| entries=0 \| log=/);
+      expect(lines[4]).toMatch(
         /^baseline\[1\] \| failed\(baseline_failed\) \| entries=1 \| log=/,
       );
       // The never-run mutant's log= is its own command's baseline log,
       // read from the same output (each spawned run logs to its own file).
-      const secondBaselineLog = /\| log=(\S+) \|/.exec(lines[3])?.[1];
+      const secondBaselineLog = /\| log=(\S+) \|/.exec(lines[4])?.[1];
       expect(secondBaselineLog).toMatch(/\.log$/);
       expect(lines[1]).toMatch(
         /^#1 \S*fixture\.js \| not_run\(baseline_failed\) /,
@@ -1763,8 +1774,8 @@ describe(
           ` | log=${secondBaselineLog} | test=node -e "process.exit(1)"`,
         ),
       ).toBe(true);
-      expect(lines[4]).toBe(
-        "totals: status=inconclusive reason=mutant_inconclusive total=2 killed=1 survived=0 inconclusive=0 not_run=1 met=1 violated=0",
+      expect(lines[5]).toBe(
+        "totals: status=inconclusive reason=mutant_inconclusive total=2 killed=1 survived=0 inconclusive=0 not_run=1 met=1 violated=0 build_failed=0",
       );
     });
 

@@ -1,0 +1,29 @@
+
+ RUN  v4.1.12 /project
+
+ ❯ test/add.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/add.test.ts [ test/add.test.ts ]
+Error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mUnexpected token
+   [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/add.ts:2:14 [38;5;246m][0m
+   [38;5;246m│[0m
+ [38;5;246m2 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249mt[0m[38;5;249mu[0m[38;5;249mr[0m[38;5;249mn[0m[38;5;249m [0m[38;5;249ma[0m[38;5;249m [0m[38;5;249m+[0m[38;5;249m [0m;
+ [38;5;240m  │[0m              ┬  
+ [38;5;240m  │[0m              ╰── 
+[38;5;246m───╯[0m
+
+  Plugin: vite:oxc
+  File: /project/src/add.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  00:00:00
+   Duration  [elided]
+

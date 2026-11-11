@@ -1,0 +1,8 @@
+# example.com/m/b [example.com/m/b.test]
+b/b.go:4:2: declared and not used: unused
+--- FAIL: TestAdd (0.00s)
+    a_test.go:7: bad
+FAIL
+FAIL	example.com/m/a	0.001s
+FAIL	example.com/m/b [build failed]
+FAIL

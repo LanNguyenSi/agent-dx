@@ -124,6 +124,10 @@ export interface ProbeOptions {
   preCommand?: string;
   isolation: IsolationMode;
   expect: ExpectVerdict;
+  /** `false` (`--no-build-detect`) turns build-failure detection off:
+   * a failing mutant run keeps its plain `killed` reading. For a test
+   * command that is itself a compiler or type check. Absent means on. */
+  buildDetect?: boolean;
   /** Timeout in milliseconds, applied to every `--pre`/`-t` invocation
    * and to every `git apply` the `patch` form runs. Omitted, the
    * commands run unbounded and `git apply` keeps
@@ -909,6 +913,7 @@ async function runProbePipeline(
     withText: opts.withText,
     patchPath,
     expect: opts.expect,
+    buildDetect: opts.buildDetect,
   };
 
   try {
@@ -1245,6 +1250,11 @@ export interface ProbePlanOptions {
   isolation: IsolationMode;
   /** The plan-level default; a mutant's own `expect` wins over it. */
   expect: ExpectVerdict;
+  /** The plan-level build-detection default (`false` turns it off);
+   * a mutant's own `buildDetect` wins over it. The CLI resolves
+   * `--no-build-detect` and the plan file's `build_detect` into this
+   * value. Absent means on. */
+  buildDetect?: boolean;
   timeoutMs?: number;
   /** `--link`, relative to `cwd`: an operator's own values. */
   links?: string[];
@@ -1314,6 +1324,11 @@ export interface PlanMutantResult {
   index: number;
   file: string;
   expect: ExpectVerdict;
+  /** The plan entry's own `reason` for its `expect`, when it gave one
+   * (see `PlanMutantSpec.expectReason`); carried so the summary can show
+   * why an `expect: "pass"` mutant is expected to survive. Absent when
+   * the entry gave none. */
+  expect_reason?: string;
   status: PlanMutantStatus;
   reason?: string;
   /** This mutant's own warnings; the plan's setup and teardown warnings
@@ -1370,8 +1385,19 @@ export interface PlanSummaryField {
   total: number;
   killed: number;
   survived: number;
+  /** Mutants that ran to an inconclusive end, EXCEPT the `build_failed`
+   * ones below: those are counted on their own, so `total` is `killed +
+   * survived + inconclusive + not_run + build_failed`. */
   inconclusive: number;
   not_run: number;
+  /** How many of `results` carry `mutation_probe.result:
+   * "build_failed"`: the mutant's test command failed because the build
+   * broke (a compile error), so nothing measured the mutant. Never
+   * folded into `killed` (the exit code alone would read it as a kill)
+   * and, like every inconclusive result, it carries no `expectation`
+   * and keeps a plan from concluding. Only the go, tsc and vitest
+   * output shapes are recognized (see `build-failure.ts`). */
+  build_failed: number;
   /** How many of `results` carry `mutation_probe.expectation: "met"` /
    * `"violated"` -- present alongside a real `killed`/`survived`
    * verdict only. Every attempted mutant runs under some expect (its
@@ -1386,6 +1412,14 @@ export interface PlanSummaryField {
    * but not to `violated`). */
   met: number;
   violated: number;
+  /** How many of the `killed` results carry `mutation_probe.build_detection:
+   * "ambiguous"` / `"skipped"`: kills build-failure detection could not
+   * settle (see `MutationProbeField.build_detection`). They stay counted
+   * in `killed` and in `met`/`violated`; these two say how many of those
+   * are not plain kills. `summary` is held out of the envelope reduction,
+   * so the counts survive when the marked rows themselves are cut. */
+  build_detection_ambiguous: number;
+  build_detection_skipped: number;
 }
 
 export interface ProbePlanResult {
@@ -1432,19 +1466,73 @@ export interface ProbePlanResult {
 }
 
 function summarize(results: PlanMutantResult[]): PlanSummaryField {
+  const isBuildFailed = (r: PlanMutantResult): boolean =>
+    r.mutation_probe?.result === "build_failed";
   const count = (status: PlanMutantStatus): number =>
-    results.filter((r) => r.status === status).length;
+    results.filter((r) => r.status === status && !isBuildFailed(r)).length;
   const countExpectation = (expectation: "met" | "violated"): number =>
     results.filter((r) => r.mutation_probe?.expectation === expectation).length;
+  const countDetection = (state: "ambiguous" | "skipped"): number =>
+    markedIndices(results, state).length;
   return {
     total: results.length,
     killed: count("killed"),
     survived: count("survived"),
     inconclusive: count("inconclusive"),
     not_run: count("not_run"),
+    build_failed: results.filter(isBuildFailed).length,
     met: countExpectation("met"),
     violated: countExpectation("violated"),
+    build_detection_ambiguous: countDetection("ambiguous"),
+    build_detection_skipped: countDetection("skipped"),
   };
+}
+
+/** The plan indices of the results whose kill carries the given
+ * `build_detection` marker, in plan order. */
+function markedIndices(
+  results: PlanMutantResult[],
+  state: "ambiguous" | "skipped",
+): number[] {
+  return results
+    .filter((r) => r.mutation_probe?.build_detection === state)
+    .map((r) => r.index);
+}
+
+/** Most mutant indices one kind lists in the plan warning below: top-level
+ * `warnings` are never cut by the envelope reduction, so the list is
+ * bounded here. */
+const MAX_MARKED_INDICES_LISTED = 20;
+
+/**
+ * The one top-level warning of a plan in which build-failure detection
+ * could not settle some kills, naming those mutants by plan index;
+ * `undefined` when there is none. Each such mutant's own warning (the
+ * matched line, the cause, the log) sits in `results[i].warnings`, which a
+ * reduced envelope cuts together with the row, so the plan says it once
+ * where the reduction never reaches.
+ */
+export function buildDetectionPlanWarning(
+  results: PlanMutantResult[],
+): string | undefined {
+  const kinds = (["ambiguous", "skipped"] as const).flatMap((state) => {
+    const indices = markedIndices(results, state);
+    if (indices.length === 0) return [];
+    const listed = indices
+      .slice(0, MAX_MARKED_INDICES_LISTED)
+      .map((index) => `#${String(index)}`)
+      .join(", ");
+    const more = indices.length - MAX_MARKED_INDICES_LISTED;
+    return [
+      {
+        count: indices.length,
+        text: `${state} for ${listed}${more > 0 ? ` (and ${String(more)} more)` : ""}`,
+      },
+    ];
+  });
+  if (kinds.length === 0) return undefined;
+  const total = kinds.reduce((sum, kind) => sum + kind.count, 0);
+  return `build-failure detection could not settle ${String(total)} killed mutant${total === 1 ? "" : "s"} (by plan index): ${kinds.map((kind) => kind.text).join("; ")}; each verdict stays killed, see the mutant's own warnings in plan.results (in the full result when the envelope is reduced) and its log, or use --no-build-detect`;
 }
 
 /**
@@ -1555,6 +1643,8 @@ async function runProbePlanPipeline(
     /** `groups[group]` is the baseline this mutant is measured against. */
     group: number;
     spec: MutantStepSpec;
+    /** See `PlanMutantSpec.expectReason`. */
+    expectReason?: string;
   }
   const planned: PlannedMutant[] = opts.mutants.map((mutant, index) => {
     const displayFile = path.resolve(cwd, mutant.file);
@@ -1591,7 +1681,11 @@ async function runProbePlanPipeline(
             ? undefined
             : path.resolve(cwd, mutant.patchPath),
         expect: mutant.expect ?? opts.expect,
+        buildDetect: mutant.buildDetect ?? opts.buildDetect,
       },
+      ...(mutant.expectReason !== undefined
+        ? { expectReason: mutant.expectReason }
+        : {}),
     };
   });
   // The plan's own setup logs (the worktree sync), folded into every
@@ -1601,9 +1695,15 @@ async function runProbePlanPipeline(
   /** The two fields every result carries about its baseline group. */
   const groupFields = (
     item: PlannedMutant,
-  ): Pick<PlanMutantResult, "test_command" | "baseline_index"> => ({
+  ): Pick<
+    PlanMutantResult,
+    "test_command" | "baseline_index" | "expect_reason"
+  > => ({
     test_command: groups[item.group].command,
     baseline_index: item.group,
+    ...(item.expectReason !== undefined
+      ? { expect_reason: item.expectReason }
+      : {}),
   });
   /** `reason` only for a mutant whose own group's baseline failed: a
    * mutant a terminal failure stopped the plan before reaching carries
@@ -2261,7 +2361,11 @@ async function runProbePlanPipeline(
     let expectation: "met" | "violated" | undefined;
     if (terminal !== undefined) {
       status = "inconclusive";
-    } else if (summary.inconclusive > 0 || summary.not_run > 0) {
+    } else if (
+      summary.inconclusive > 0 ||
+      summary.not_run > 0 ||
+      summary.build_failed > 0
+    ) {
       status = "inconclusive";
       reason = "mutant_inconclusive";
     } else if (violatedCount > 0) {
@@ -2446,8 +2550,14 @@ export async function probePlan(
   opts: ProbePlanOptions,
 ): Promise<ProbePlanResult> {
   const result = await runProbePlanPipeline(opts);
+  // Added here, on the one way out every plan result takes, so a plan
+  // that stopped early says it for the kills it did collect too.
+  const unsettled = buildDetectionPlanWarning(result.results);
   return {
     ...result,
+    ...(unsettled !== undefined
+      ? { warnings: [...result.warnings, unsettled] }
+      : {}),
     ...(opts.env !== undefined && Object.keys(opts.env).length > 0
       ? { env: redactEnvOverrides(opts.env) }
       : {}),

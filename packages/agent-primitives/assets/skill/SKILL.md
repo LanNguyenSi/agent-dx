@@ -102,7 +102,38 @@ failed with it applied, `survived` when it passed), independent of
 `"met"`/`"violated"` value, which says whether that outcome matched it
 -- `result` alone does not.
 `inconclusive` is not a result: fix whatever it names (a failing baseline,
-a mutant that did not apply, a stale marker) and probe again. Pass `--pre`
+a mutant that did not apply, a stale marker) and probe again. The same
+goes for `build_failed` (`reason: "build_failed"`): the mutant's test
+command failed because the build broke (`go test` `[build failed]`, a
+`tsc` error before the tests, vitest unable to load a file), so no test
+measured it; it is not a kill. Report it with `result: not_applicable`
+and rewrite the mutant so it compiles. Detection covers go test, tsc
+and vitest output only; for another toolchain a compile error still
+reads as `killed`, and `--summary` says so. For vitest, narrow the test
+command to the test files that import the mutated module, or a load
+failure beside passing files reads as `killed`. A test command that is
+itself a compiler or type check (`tsc --noEmit` as the test) needs
+`--no-build-detect` (plan: `build_detect: false`, plan-wide or per
+mutant), or its genuine kills read as `build_failed`. A `killed` row that
+reads `(build detection ambiguous)` or `(build detection skipped: ...)`
+could not be settled: read its log (the warning names the mutant and the
+line) before trusting the kill, and never report it as `build_failed`. Its
+`--report mutation-probes` item stays `result: killed` and carries the
+reason `build detection ambiguous: <matched line>` or `build detection
+skipped: <cause>`: paste it unchanged. In a `--plan` run that warning sits
+in the mutant's own `plan.results[i].warnings`; one top-level warning names
+the marked mutants by index and `plan.summary.build_detection_ambiguous` /
+`build_detection_skipped` count them (when the envelope is cut back to
+its fixed fields, only in the full result; the top-level warning stays),
+and the `--summary` totals line ends in `build_detection_ambiguous=N` /
+`build_detection_skipped=N` (each only when non-zero) under every `-m`,
+also when the rows and the detection lines above it did not fit. A failure
+marker printed by a wrapper script, a task runner or a preflight step
+(`echo 'FAILED: typecheck'`, an ora or listr `✖` line, a complete TAP
+stream) counts as a test having run, so a tsc error beside it stays a
+plain `killed`: run tsc via `--pre` or narrow the test command. When tests
+ran and passed before a later tsc step failed (`vitest run && tsc`), the
+row stays `killed` as well. Pass `--pre`
 whenever the test under probe executes built output rather than the
 source file being mutated, or a real mutant reads back as `survived`
 because it never reached the running code. The same `survived` reading
@@ -146,7 +177,8 @@ example `Tests +4 passed`), or read the baseline's own output (the log at
 `baseline.logPath`) to confirm the tests you expect actually ran. (b) A
 mutant must still compile under the project's build when `--pre` builds:
 a build failure there is `pre_failed`, an inconclusive result, never a
-verdict. A condition the compiler uses for
+verdict (and one inside the test command itself is `build_failed`, see
+above). A condition the compiler uses for
 type narrowing is better mutated in its substance (change a comparison
 operator, make a predicate's callback return a constant, change the
 value the branch returns) than replaced outright by a bare literal
@@ -229,7 +261,7 @@ To read a probe's verdict, add `--summary` to any `probe` form instead
 of writing a python or jq reader of the JSON: one line per mutant (id as
 `file:line`, verdict, `expectation`, `restored_verified`, the first
 failing test line, the log path) plus a `totals:` line. `--print
-status,mutation_probe.result,logs` prints just those envelope fields as
+status,mutation_probe,logs` prints just those envelope fields as
 one JSON object (an unknown field is a usage error; a field this run
 lacks prints `null`). Both leave the exit code and the saved full result
 unchanged.
@@ -242,8 +274,11 @@ plus a `summary`. A mutant may carry its own `test`, which wins over the
 plan-level `test` (left out when every mutant has one); mutants whose
 commands are the same string share one baseline, every baseline runs before
 the first mutant through the same gate, and a failing later baseline marks
-only its own mutants `not_run`. The plan is JSON, its paths resolved against the
-invocation cwd:
+only its own mutants `not_run`. A mutant may also carry a `reason` (why it
+expects what it expects): `--summary` lists every `expect: "pass"` mutant that
+survived under an `expected survivors` heading with that reason, so an expected
+survivor cannot hide among the met expectations. The plan is JSON, its paths
+resolved against the invocation cwd:
 
 ```json
 {

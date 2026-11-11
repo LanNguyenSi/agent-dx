@@ -1,5 +1,6 @@
 import path from "node:path";
 import { combinedOutput } from "../exec.js";
+import { FAILURE_LINE, recognizesBuildToolchain } from "./build-failure.js";
 
 /**
  * Compact renderings of a finished probe for `probe --summary`,
@@ -102,11 +103,18 @@ interface SummaryMutantLike {
   status?: string;
   reason?: string;
   mutant?: { file?: string; line?: number };
+  /** The plan entry's `expect` and its optional `reason` (a plan row
+   * carries both; the single form has no per-row `expect`). */
+  expect?: string;
+  expect_reason?: string;
   mutation_probe?: {
     result?: string;
     expectation?: string;
     restored_verified?: boolean;
     reason?: string;
+    /** See `MutationProbeField.build_detection`. */
+    build_detection?: string;
+    build_detection_detail?: string;
   };
   test?: { stdoutTail?: string; stderrTail?: string; logPath?: string };
   logs?: string[];
@@ -161,13 +169,6 @@ export interface SummaryInput {
   };
 }
 
-// The last alternative is PHPUnit's numbered failure line,
-// `1) Ns\Class::testMethod`: a number, `)`, a class name (namespace
-// separators allowed) and `::` before the method. PHPUnit's closing
-// `FAILURES!` and `Tests: ..., Failures: 1.` lines name no test.
-const FAILURE_LINE =
-  /^\s*(FAIL\b|FAILED\b|not ok\b|--- FAIL\b|[✗×✖●]|(?:\w*Error|AssertionError)\b|\d+\) [\w\\]+::\w+)/;
-
 /** The first line of the test's output tails that looks like a failing
  * test, else `-`. A heuristic over free text: the envelope has no
  * structured failing-test field, and runners differ. */
@@ -211,7 +212,12 @@ function mutantLine(
   const id = row.index !== undefined ? `#${row.index} ${where}` : where;
   const probe = row.mutation_probe;
   const verdict = probe?.result ?? row.status ?? "inconclusive";
-  const reason = probe?.reason ?? row.reason;
+  // A build-failed row always names what it means, whatever `reason`
+  // string the record carries (`build_failed`, a machine cause).
+  const reason =
+    verdict === "build_failed"
+      ? BUILD_FAILED_REASON
+      : (probe?.reason ?? row.reason);
   // A `mutant_not_applicable` mutant never applied and never ran, so it
   // has no log of its own: print a dash rather than point at a baseline
   // log as though it were the mutant's run. A dry run that did produce
@@ -228,15 +234,23 @@ function mutantLine(
         ? row.logs[row.logs.length - 1]
         : undefined) ??
       baselineLog);
+  // A killed row build-failure detection could not settle says so.
+  const detection =
+    verdict === "killed" && probe?.build_detection === "ambiguous"
+      ? " (build detection ambiguous)"
+      : verdict === "killed" && probe?.build_detection === "skipped"
+        ? ` (build detection skipped: ${probe.build_detection_detail ?? "unknown cause"})`
+        : "";
   const parts = [
     id,
     reason !== undefined && verdict !== "killed" && verdict !== "survived"
       ? `${verdict}(${reason})`
-      : verdict,
+      : `${verdict}${detection}`,
     `expectation=${probe?.expectation ?? "-"}`,
     `restored=${probe?.restored_verified === undefined ? "-" : String(probe.restored_verified)}`,
     // Only a killed mutant has a failing test to name: a survived one
-    // passed, so an error-shaped line in its output is noise.
+    // passed, so an error-shaped line in its output is noise, and a
+    // build-failed one never ran a test at all.
     `failing=${verdict === "killed" ? firstFailingLine(row.test) : "-"}`,
     `log=${log || "-"}`,
     ...(testCommand !== undefined ? [`test=${oneLine(testCommand)}`] : []),
@@ -270,6 +284,9 @@ function baselineLine(entry: SummaryBaselineLike, position: number): string {
  * reason on the totals line alone. A plan naming more than one test
  * command also ends every mutant line in a `test=` column and prints one
  * line per baseline above the totals; a plan naming one prints neither.
+ * The totals line ends in `build_detection_ambiguous=N` and
+ * `build_detection_skipped=N`, each only when non-zero: the killed rows
+ * build-failure detection could not settle.
  *
  * `maxChars` bounds the mutant lines only: the totals line (and the note
  * and baseline lines, when they fit) always survive, and a marker line
@@ -282,6 +299,65 @@ export function renderProbeSummary(
   const lines: string[] = [];
   const baselineLines: string[] = [];
   let counts: Record<string, number>;
+  /** Plan rows that declared `expect: "pass"` and survived: counted as
+   * met, listed on their own so they cannot hide among the met ones. */
+  let survivorHeading: string | undefined;
+  let survivorEntries: string[] = [];
+  /** Killed rows whose output belongs to no toolchain the build-failure
+   * detection speaks for. */
+  let undetectedBuildFailures = 0;
+  /** Killed rows carrying the `build_detection` marker. */
+  let ambiguousBuildFailures = 0;
+  let skippedBuildFailures = 0;
+  const rowsSeen: SummaryMutantLike[] =
+    input.plan !== undefined
+      ? input.plan.results
+      : [
+          {
+            mutation_probe: input.mutation_probe,
+            test: input.test,
+            status: input.status,
+          },
+        ];
+  for (const row of rowsSeen) {
+    const result = row.mutation_probe?.result ?? row.status;
+    if (result !== "killed") continue;
+    // One line per row: a row carrying the marker is counted on its own
+    // line and never on `not available` as well, whatever its tail shows.
+    const marker = row.mutation_probe?.build_detection;
+    if (marker === "ambiguous") ambiguousBuildFailures += 1;
+    if (marker === "skipped") skippedBuildFailures += 1;
+    if (
+      marker === undefined &&
+      row.test !== undefined &&
+      !recognizesBuildToolchain(
+        row.test.stdoutTail ?? "",
+        row.test.stderrTail ?? "",
+      )
+    ) {
+      undetectedBuildFailures += 1;
+    }
+  }
+  if (input.plan !== undefined) {
+    const survivors = input.plan.results.filter(
+      (row) =>
+        row.expect === "pass" && row.mutation_probe?.result === "survived",
+    );
+    if (survivors.length > 0) {
+      survivorHeading = `expected survivors (expect: pass, survived, counted as met): ${survivors.length}`;
+      survivorEntries = survivors.map((row) => {
+        const rawFile = row.mutant?.file ?? row.file;
+        const file =
+          rawFile === undefined
+            ? "(no mutant)"
+            : relativeTo(input.cwd, rawFile);
+        const where =
+          row.mutant?.line !== undefined ? `${file}:${row.mutant.line}` : file;
+        const id = row.index !== undefined ? `#${row.index} ${where}` : where;
+        return `  ${id} | reason: ${row.expect_reason !== undefined ? cappedReason(row.expect_reason) : "(no reason given)"}`;
+      });
+    }
+  }
   if (input.plan !== undefined) {
     const baselineLog = input.plan.baseline?.logPath ?? "";
     const baselines = input.plan.baselines ?? [];
@@ -316,6 +392,7 @@ export function renderProbeSummary(
       survived: s.survived ?? 0,
       inconclusive: s.inconclusive ?? 0,
       not_run: s.not_run ?? 0,
+      build_failed: s.build_failed ?? 0,
       met: s.met ?? 0,
       violated: s.violated ?? 0,
     };
@@ -353,78 +430,260 @@ export function renderProbeSummary(
         (hasMutant || refusedNotApplicable) &&
         result !== "killed" &&
         result !== "survived" &&
-        result !== "not_run"
+        result !== "not_run" &&
+        result !== "build_failed"
           ? 1
           : 0,
       not_run: hasMutant && result === "not_run" ? 1 : 0,
+      build_failed: hasMutant && result === "build_failed" ? 1 : 0,
       met: input.mutation_probe?.expectation === "met" ? 1 : 0,
       violated: input.mutation_probe?.expectation === "violated" ? 1 : 0,
     };
   }
   const head = `status=${input.status}${input.reason !== undefined ? ` reason=${input.reason}` : ""}`;
-  const totals = `totals: ${head} total=${counts.total} killed=${counts.killed} survived=${counts.survived} inconclusive=${counts.inconclusive} not_run=${counts.not_run} met=${counts.met} violated=${counts.violated}`;
-  const tail: string[] = [...baselineLines, totals];
-  const note = input.message ?? input.warnings?.[0];
-  // The refused line's content rides on the note (the single form prints
-  // no mutant line for a refusal, so this is where `line=` appears); a
-  // note carrying it survives even with a mutant counted, unlike a bare
-  // warning note that only explains a zero-mutant run.
-  const linePart =
-    input.line_content !== undefined
-      ? `line=${oneLine(input.line_content)}`
-      : undefined;
-  const noteText = [note !== undefined ? oneLine(note) : undefined, linePart]
-    .filter((part): part is string => part !== undefined)
-    .join(" ");
-  if (
-    noteText !== "" &&
-    (counts.total === 0 ||
-      linePart !== undefined ||
-      input.reason === MUTANT_NOT_APPLICABLE)
-  ) {
-    tail.push(`note: ${noteText}`);
-  }
-  const size = (rows: string[]): number =>
-    rows.reduce((n, r) => n + r.length + 1, 0);
-  // Drop the note, then the baseline lines (last first), before the
-  // totals when even the tail does not fit.
-  while (tail.length > 1 && size(tail) > maxChars) {
-    const totalsAt = tail.indexOf(totals);
-    tail.splice(totalsAt < tail.length - 1 ? tail.length - 1 : totalsAt - 1, 1);
-  }
-  const markerWith = (omitted: number, hint: string): string =>
-    `... ${omitted} more mutant line${omitted === 1 ? "" : "s"} omitted (-m ${maxChars} characters); ${hint}`;
-  // The path joins the marker only when the marker with it fits beside the
-  // tail even with no mutant line kept: a long path must not push the
-  // summary past -m. Otherwise a short hint says the path did not fit.
-  const pathHint =
-    input.fullResult !== undefined
-      ? `raise -m or read the full result: ${input.fullResult}`
-      : undefined;
-  const hint =
-    pathHint !== undefined &&
-    markerWith(lines.length, pathHint).length + 1 + size(tail) <= maxChars
-      ? pathHint
-      : input.fullResult !== undefined
-        ? "raise -m; the full result path did not fit"
-        : "raise -m (no full result file was written)";
-  const marker = (omitted: number): string => markerWith(omitted, hint);
-  let kept = lines.length;
-  if (size(lines) + size(tail) > maxChars) {
-    while (
-      kept > 0 &&
-      size(lines.slice(0, kept)) +
-        marker(lines.length - kept).length +
-        1 +
-        size(tail) >
-        maxChars
+  // The killed rows build-failure detection could not settle, counted on
+  // the one line no `-m` drops: their rows and the detection lines give
+  // way under a short budget, and the totals would then read as plain
+  // kills. Each key is printed only when non-zero, so a run without such a
+  // row prints the totals line it always printed. The counts come from the
+  // rows, like the detection lines, so the two agree and the single form
+  // (which has no `plan.summary`) carries them too.
+  const ambiguousTotal =
+    ambiguousBuildFailures > 0
+      ? ` build_detection_ambiguous=${ambiguousBuildFailures}`
+      : "";
+  const skippedTotal =
+    skippedBuildFailures > 0
+      ? ` build_detection_skipped=${skippedBuildFailures}`
+      : "";
+  const totals = `totals: ${head} total=${counts.total} killed=${counts.killed} survived=${counts.survived} inconclusive=${counts.inconclusive} not_run=${counts.not_run} met=${counts.met} violated=${counts.violated} build_failed=${counts.build_failed}${ambiguousTotal}${skippedTotal}`;
+  /** The whole printed summary with `extras` (the expected-survivors
+   * block, the build-failure-detection line) ahead of the baseline lines. */
+  const layout = (
+    extras: string[],
+  ): { text: string; intact: boolean; keptRows: number } => {
+    const tail: string[] = [...extras, ...baselineLines, totals];
+    const note = input.message ?? input.warnings?.[0];
+    // The refused line's content rides on the note (the single form prints
+    // no mutant line for a refusal, so this is where `line=` appears); a
+    // note carrying it survives even with a mutant counted, unlike a bare
+    // warning note that only explains a zero-mutant run.
+    const linePart =
+      input.line_content !== undefined
+        ? `line=${oneLine(input.line_content)}`
+        : undefined;
+    const noteText = [note !== undefined ? oneLine(note) : undefined, linePart]
+      .filter((part): part is string => part !== undefined)
+      .join(" ");
+    if (
+      noteText !== "" &&
+      (counts.total === 0 ||
+        linePart !== undefined ||
+        input.reason === MUTANT_NOT_APPLICABLE)
     ) {
-      kept -= 1;
+      tail.push(`note: ${noteText}`);
+    }
+    const size = (rows: string[]): number =>
+      rows.reduce((n, r) => n + r.length + 1, 0);
+    const tailLength = tail.length;
+    // Drop the note, then the lines before the totals (last first), when
+    // even the tail does not fit. The survivors heading is never dropped.
+    while (size(tail) > maxChars) {
+      const totalsAt = tail.indexOf(totals);
+      let victim = totalsAt < tail.length - 1 ? tail.length - 1 : -1;
+      for (let at = totalsAt - 1; victim < 0 && at >= 0; at -= 1) {
+        if (tail[at] !== survivorHeading) victim = at;
+      }
+      if (victim < 0) break;
+      tail.splice(victim, 1);
+    }
+    const markerWith = (omitted: number, hint: string): string =>
+      `... ${omitted} more mutant line${omitted === 1 ? "" : "s"} omitted (-m ${maxChars} characters); ${hint}`;
+    // The path joins the marker only when the marker with it fits beside the
+    // tail even with no mutant line kept: a long path must not push the
+    // summary past -m. Otherwise a short hint says the path did not fit.
+    const pathHint =
+      input.fullResult !== undefined
+        ? `raise -m or read the full result: ${input.fullResult}`
+        : undefined;
+    const hint =
+      pathHint !== undefined &&
+      markerWith(lines.length, pathHint).length + 1 + size(tail) <= maxChars
+        ? pathHint
+        : input.fullResult !== undefined
+          ? "raise -m; the full result path did not fit"
+          : "raise -m (no full result file was written)";
+    const marker = (omitted: number): string => markerWith(omitted, hint);
+    let kept = lines.length;
+    if (size(lines) + size(tail) > maxChars) {
+      while (
+        kept > 0 &&
+        size(lines.slice(0, kept)) +
+          marker(lines.length - kept).length +
+          1 +
+          size(tail) >
+          maxChars
+      ) {
+        kept -= 1;
+      }
+    }
+    const out = lines.slice(0, kept);
+    if (kept < lines.length) out.push(marker(lines.length - kept));
+    return {
+      text: [...out, ...tail].join("\n") + "\n",
+      intact: tail.length === tailLength,
+      keptRows: kept,
+    };
+  };
+  const detectionLine = [
+    ...(undetectedBuildFailures > 0
+      ? [undetectedBuildFailureLine(undetectedBuildFailures)]
+      : []),
+    ...(ambiguousBuildFailures > 0
+      ? [ambiguousBuildFailureLine(ambiguousBuildFailures)]
+      : []),
+    ...(skippedBuildFailures > 0
+      ? [skippedBuildFailureLine(skippedBuildFailures)]
+      : []),
+  ];
+  // How many leading mutant rows a candidate with survivor lines must
+  // keep: through the last row that is not a plain met expectation
+  // (violated, build_failed, inconclusive, not run, or a killed row marked
+  // ambiguous or skipped). It decides only how many survivor lines stay:
+  // they give way before such a row is dropped.
+  let requiredRows = 0;
+  for (const [at, row] of rowsSeen.entries()) {
+    const probe = row.mutation_probe;
+    if (probe?.expectation !== "met" || probe.build_detection !== undefined) {
+      requiredRows = at + 1;
     }
   }
-  const out = lines.slice(0, kept);
-  if (kept < lines.length) out.push(marker(lines.length - kept));
-  return [...out, ...tail].join("\n") + "\n";
+  const heading = survivorHeading !== undefined ? [survivorHeading] : [];
+  const omission = (omitted: number): string =>
+    `... ${omitted} expected-survivor line${omitted === 1 ? "" : "s"} omitted (-m ${maxChars})`;
+  /** The heading, the first `kept` survivor lines and, when some are left
+   * out, the line counting them. */
+  const survivorBlock = (kept: number): string[] => [
+    ...heading,
+    ...survivorEntries.slice(0, kept),
+    ...(kept < survivorEntries.length
+      ? [omission(survivorEntries.length - kept)]
+      : []),
+  ];
+  // What is printed above the baseline lines, tried in order. No candidate
+  // costs a baseline line or the note (`intact`), and the survivors heading
+  // is in every one, so a plan's expected survivors cannot vanish.
+  //
+  // The detection lines and the line counting omitted survivor lines come
+  // before survivor lines and before mutant rows: a row cut by `-m` may be
+  // the very one a count line is about. They are printed when they fit;
+  // what no budget drops is the count on the totals line.
+  //
+  // 1. Detection lines beside as many survivor lines as leave every
+  //    required row printed.
+  // 2. Detection lines with no survivor line, whatever rows still fit.
+  // 3. No detection line (it does not fit `-m` even with every row
+  //    omitted): the survivor lines, again as many as leave every
+  //    required row printed.
+  // 4. Detection lines although the marker counting the omitted mutant
+  //    lines then runs past `-m`, the way the minimal form below does.
+  // 5. The minimal form: heading and omission line, else the heading.
+  interface Candidate {
+    extras: string[];
+    /** Every required row must be printed. */
+    rows: boolean;
+    /** The whole text must fit `-m`. */
+    fits: boolean;
+  }
+  const candidates: Candidate[] = [];
+  for (let kept = survivorEntries.length; kept >= 0; kept -= 1) {
+    candidates.push({
+      extras: [...survivorBlock(kept), ...detectionLine],
+      rows: true,
+      fits: true,
+    });
+  }
+  if (detectionLine.length > 0) {
+    const withoutSurvivorLines = [
+      [...survivorBlock(0), ...detectionLine],
+      [...heading, ...detectionLine],
+    ];
+    for (const extras of withoutSurvivorLines) {
+      candidates.push({ extras, rows: false, fits: true });
+    }
+    for (let kept = survivorEntries.length; kept >= 0; kept -= 1) {
+      candidates.push({ extras: survivorBlock(kept), rows: true, fits: true });
+    }
+    for (const extras of withoutSurvivorLines) {
+      candidates.push({ extras, rows: false, fits: false });
+    }
+  }
+  candidates.push({ extras: survivorBlock(0), rows: false, fits: false });
+  for (const candidate of candidates) {
+    const attempt = layout(candidate.extras);
+    if (
+      attempt.intact &&
+      (!candidate.rows || attempt.keptRows >= requiredRows) &&
+      (!candidate.fits || attempt.text.length <= maxChars)
+    ) {
+      return attempt.text;
+    }
+  }
+  return layout(heading).text;
+}
+
+/** Longest printed `reason` of an expected survivor. */
+const MAX_REASON_CHARS = 200;
+
+function cappedReason(reason: string): string {
+  const text = oneLine(reason);
+  return text.length > MAX_REASON_CHARS
+    ? `${text.slice(0, MAX_REASON_CHARS - 3)}...`
+    : text;
+}
+
+/** What a `build_failed` mutant means, in the words the summary and the
+ * `--report mutation-probes` reason both use. */
+const BUILD_FAILED_REASON = "build failed, mutant not exercised";
+
+/** The `--report mutation-probes` reason of a killed mutant build-failure
+ * detection could not settle (`mutation_probe.build_detection`), else
+ * `undefined`: the item stays `killed`, and this is what keeps it from
+ * reading as a plain kill once pasted. The detail is the matched line
+ * for `ambiguous` and the cause for `skipped`. */
+function buildDetectionReason(
+  probe: ReportProbeRecord | undefined,
+): string | undefined {
+  const detail =
+    probe?.build_detection_detail !== undefined
+      ? oneLine(probe.build_detection_detail)
+      : undefined;
+  if (probe?.build_detection === "ambiguous") {
+    return `build detection ambiguous: ${detail ?? "no line recorded"}`;
+  }
+  if (probe?.build_detection === "skipped") {
+    return `build detection skipped: ${detail ?? "unknown cause"}`;
+  }
+  return undefined;
+}
+
+/** The one line that says build-failure detection did not cover some
+ * killed mutants: only go test, tsc and vitest output is recognized. */
+function undetectedBuildFailureLine(count: number): string {
+  return `build-failure detection: not available for ${count} killed mutant${count === 1 ? "" : "s"} (recognized: go test, tsc, vitest output); a compile error there still reads as killed, check the log`;
+}
+
+/** Killed rows whose tsc diagnostic sat beside a line that may or may not
+ * come from a test: kept as killed and never upgraded; this line is best effort, the totals
+ * line always counts them. */
+function ambiguousBuildFailureLine(count: number): string {
+  return `build-failure detection ambiguous for ${count} killed mutant${count === 1 ? "" : "s"}; check their logs or use --no-build-detect`;
+}
+
+/** Killed rows whose truncated output could not be checked against the
+ * full log (too large, write failed, may be incomplete, unreadable). */
+function skippedBuildFailureLine(count: number): string {
+  return `build-failure detection skipped for ${count} killed mutant${count === 1 ? "" : "s"} (truncated output, full log not usable); a compile error there still reads as killed, check their logs`;
 }
 
 /** The internal refusal reason that says the dry run found the mutant
@@ -504,6 +763,9 @@ type ReportProbeRecord = {
   restored_verified?: boolean;
   reason?: string;
   expectation?: string;
+  /** See `MutationProbeField.build_detection`. */
+  build_detection?: string;
+  build_detection_detail?: string;
 };
 
 /**
@@ -527,8 +789,14 @@ type ReportProbeRecord = {
  * - `expectation` is the probe's `met`/`violated`, and always
  *   `not_applicable` when `result` is `not_applicable` (nothing was
  *   measured to compare against an expectation);
- * - `reason` is the empty string unless `result` is `not_applicable`;
- *   then `mutant_not_applicable` becomes the contract's canonical
+ * - `reason` is the empty string for a measured verdict, with one
+ *   exception: a `killed` result build-failure detection could not settle
+ *   carries `build detection ambiguous: <the matched line>` or `build
+ *   detection skipped: <the cause>` (from `mutation_probe.build_detection`
+ *   and its detail), so the pasted item never reads as a plain kill. When
+ *   `result` is `not_applicable`, a `build_failed` result carries `build
+ *   failed, mutant not exercised`, `mutant_not_applicable` becomes the
+ *   contract's canonical
  *   `target text no longer present` (that code's several causes are
  *   named by the default envelope's `warnings`), and any other internal
  *   reason string is carried verbatim. A row that carries neither a
@@ -564,10 +832,12 @@ export function mutationProbeReportItem(
   const internalReason = probe?.reason ?? recordReason ?? fallbackReason;
   const reason =
     result === "not_applicable"
-      ? internalReason === MUTANT_NOT_APPLICABLE
-        ? TARGET_TEXT_NO_LONGER_PRESENT
-        : (internalReason ?? "")
-      : "";
+      ? measured === "build_failed"
+        ? BUILD_FAILED_REASON
+        : internalReason === MUTANT_NOT_APPLICABLE
+          ? TARGET_TEXT_NO_LONGER_PRESENT
+          : (internalReason ?? "")
+      : ((result === "killed" ? buildDetectionReason(probe) : undefined) ?? "");
   return {
     mutant: probe?.mutant ?? "",
     file: mutant?.file ?? file ?? definition?.file ?? "",
