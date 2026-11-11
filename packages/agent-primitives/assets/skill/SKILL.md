@@ -364,12 +364,14 @@ than `--max-delete-percent` of its lines (default 20%; `--extend-only
 <path>`), and flags a changed test file with fewer test cases than before.
 Every `test_cases_dropped` finding lists the dropped tests by name
 (`droppedNames`). A drop you intend is declared with
-`--intended-deletion '<path>::<test name>'`, once per dropped test (or
+`--intended-deletion '<path>::<test name>'`, once per dropped test case
+(a title dropped twice is declared twice; or
 `--intended-deletion-file <file>`, one declaration per line); a file that
 lost every test case (deleted, or emptied) is excused only that way. A file
 that keeps a test case can also be excused with `<path>=<n>`, an at-most
 count in the counter's units. A bare `<path>` or `<path>=all` is parsed but
-excuses nothing, and a name that was not dropped is a usage error (exit `2`).
+excuses nothing, and a name declared more often than it was dropped is a
+usage error (exit `2`).
 Applied declarations are echoed in the envelope as `intended_deletions` and on
 the `--summary` totals line; a declaration that matched nothing warns.
 A warning `N tracked files have uncommitted changes not covered by this

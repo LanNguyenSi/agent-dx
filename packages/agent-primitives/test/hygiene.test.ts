@@ -1687,6 +1687,15 @@ describe("listTestCases", () => {
     ]);
   });
 
+  it("collapses every whitespace run in a title, a multi-line template literal included", () => {
+    const content =
+      "it(`first line\n   second\tline`, () => {});\nit('a   b', () => {});\n";
+    expect(listTestCases(content, "x.test.ts")).toEqual([
+      "first line second line",
+      "a b",
+    ]);
+  });
+
   it("names a marker whose title is not a string literal by its own line", () => {
     expect(listTestCases("  it(title, () => {});\n", "x.test.ts")).toEqual([
       "it(title, () => {});",
@@ -1764,6 +1773,13 @@ describe("parseIntendedDeletion", () => {
         names: [title.trim()],
       });
     }
+  });
+
+  it("collapses whitespace inside a declared name", () => {
+    expect(parseIntendedDeletion("p.test.ts::a \t  b\n c")).toEqual({
+      path: "p.test.ts",
+      names: ["a b c"],
+    });
   });
 
   it("keeps the count forms as they were", () => {
@@ -1912,7 +1928,7 @@ describe("hygiene whole-file drops are declared by name", () => {
         intendedDeletions: [...all, "test/a.test.ts::four"],
       }),
     ).toThrow(
-      /not dropped.*test\/a\.test\.ts: "four" \(dropped tests: "one", "two", "three"\)/,
+      /not dropped.*test\/a\.test\.ts: "four" declared 1 time\(s\), dropped 0 \(all dropped tests: "one", "two", "three"\)/,
     );
     // Misspelled while the rest are right: still an error, not a finding.
     expect(() =>
@@ -2085,7 +2101,7 @@ describe("hygiene whole-file drops are declared by name", () => {
     ]);
   });
 
-  it("names a duplicated title once for every case that carries it", () => {
+  it("needs a duplicated title declared as often as it was dropped", () => {
     const repo = initRepo();
     write(
       repo,
@@ -2096,13 +2112,203 @@ describe("hygiene whole-file drops are declared by name", () => {
     const base = git(repo, ["rev-parse", "HEAD"]).trim();
     git(repo, ["rm", "-q", "test/d.test.ts"]);
     commitAll(repo, "delete");
-    const r = hygiene({
+    const twice = hygiene({
+      cwd: repo,
+      base,
+      intendedDeletions: [
+        "test/d.test.ts::same",
+        "test/d.test.ts::same",
+        "test/d.test.ts::other",
+      ],
+    });
+    expect(twice.status).toBe("ok");
+    expect(twice.intendedDeletions[0]).toMatchObject({
+      dropped: 3,
+      names: ["same", "same", "other"],
+    });
+    const once = hygiene({
       cwd: repo,
       base,
       intendedDeletions: ["test/d.test.ts::same", "test/d.test.ts::other"],
     });
-    expect(r.status).toBe("ok");
-    expect(r.intendedDeletions[0]).toMatchObject({ dropped: 3 });
+    expect(once.status).toBe("fail");
+    expect(once.findings[0]?.droppedNames).toEqual(["same", "same", "other"]);
+    expect(once.findings[0]?.detail).toContain(
+      '(2 of 3 dropped tests named); not named: "same" x2 (named x1)',
+    );
+  });
+
+  describe("a title that more than one dropped case carries", () => {
+    /** a.test.ts: describe A { works, keeps } and describe B { works }; the
+     * change keeps only A's `keeps`, so B's unrelated `works` goes too. */
+    function worksTwiceRepo(): { repo: string; base: string } {
+      const repo = initRepo();
+      write(
+        repo,
+        "test/w.test.ts",
+        [
+          'describe("A", () => {',
+          '  it("works", () => {});',
+          '  it("keeps", () => {});',
+          "});",
+          'describe("B", () => {',
+          '  it("works", () => {});',
+          "});",
+          "",
+        ].join("\n"),
+      );
+      commitAll(repo, "works twice");
+      const base = git(repo, ["rev-parse", "HEAD"]).trim();
+      write(
+        repo,
+        "test/w.test.ts",
+        'describe("A", () => {\n  it("keeps", () => {});\n});\n',
+      );
+      commitAll(repo, "drop both works");
+      return { repo, base };
+    }
+
+    it("is a finding naming it twice when declared once, ok when declared twice", () => {
+      const { repo, base } = worksTwiceRepo();
+      const undeclared = hygiene({ cwd: repo, base });
+      expect(undeclared.findings[0]?.droppedNames).toEqual(["works", "works"]);
+      expect(undeclared.findings[0]?.detail).toContain('dropped: "works" x2');
+      const once = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["test/w.test.ts::works"],
+      });
+      expect(once.status).toBe("fail");
+      expect(once.intendedDeletions).toEqual([]);
+      expect(once.findings[0]?.droppedNames).toEqual(["works", "works"]);
+      expect(once.findings[0]?.detail).toContain(
+        'not named: "works" x2 (named x1)',
+      );
+      const twice = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["test/w.test.ts::works", "test/w.test.ts::works"],
+      });
+      expect(twice.status).toBe("ok");
+      expect(twice.intendedDeletions[0]).toMatchObject({
+        declared: "names",
+        names: ["works", "works"],
+      });
+    });
+
+    it("is a usage error when declared more often than it was dropped", () => {
+      const { repo, base } = worksTwiceRepo();
+      expect(() =>
+        hygiene({
+          cwd: repo,
+          base,
+          intendedDeletions: [
+            "test/w.test.ts::works",
+            "test/w.test.ts::works",
+            "test/w.test.ts::works",
+          ],
+        }),
+      ).toThrow(
+        /"works" declared 3 time\(s\), dropped 2 \(all dropped tests: "works" x2\)/,
+      );
+      // Dropped once, declared twice: the same error for a single case.
+      write(repo, "test/one.test.ts", 'it("solo", () => {});\n');
+      commitAll(repo, "solo");
+      const soloBase = git(repo, ["rev-parse", "HEAD"]).trim();
+      git(repo, ["rm", "-q", "test/one.test.ts"]);
+      commitAll(repo, "drop solo");
+      expect(() =>
+        hygiene({
+          cwd: repo,
+          base: soloBase,
+          intendedDeletions: [
+            "test/one.test.ts::solo",
+            "test/one.test.ts::solo",
+          ],
+        }),
+      ).toThrow(UsageError);
+    });
+
+    it("merges flag and file per name by the larger count, never the sum", () => {
+      const { repo, base } = worksTwiceRepo();
+      const w = "test/w.test.ts::works";
+      const names = (flag: string[], file: string[]): string[] | undefined =>
+        hygiene({
+          cwd: repo,
+          base,
+          intendedDeletions: flag,
+          intendedDeletionsFromFile: file,
+        }).intendedDeclarations[0]?.names;
+      // Once in each source counts once (a sum of 2 would excuse the drop).
+      const bothOnce = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [w],
+        intendedDeletionsFromFile: [w],
+      });
+      expect(bothOnce.intendedDeclarations[0]?.names).toEqual(["works"]);
+      expect(bothOnce.status).toBe("fail");
+      // Twice in one source, once in the other: two, whichever way round.
+      expect(names([w, w], [w])).toEqual(["works", "works"]);
+      expect(names([w], [w, w])).toEqual(["works", "works"]);
+      expect(names([w, w], [w, w])).toEqual(["works", "works"]);
+      // Flag only and file only.
+      expect(names([w, w], [])).toEqual(["works", "works"]);
+      expect(names([], [w])).toEqual(["works"]);
+      const ok = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [w],
+        intendedDeletionsFromFile: [w, w],
+      });
+      expect(ok.status).toBe("ok");
+    });
+
+    it("holds for a Python method name repeated across classes", () => {
+      const repo = initRepo();
+      write(
+        repo,
+        "py/test_dup.py",
+        [
+          "class A:",
+          "    def test_x(self):",
+          "        pass",
+          "",
+          "class B:",
+          "    def test_x(self):",
+          "        pass",
+          "",
+          "    def test_y(self):",
+          "        pass",
+          "",
+        ].join("\n"),
+      );
+      commitAll(repo, "python duplicates");
+      const base = git(repo, ["rev-parse", "HEAD"]).trim();
+      git(repo, ["rm", "-q", "py/test_dup.py"]);
+      commitAll(repo, "delete");
+      const once = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["py/test_dup.py::test_x", "py/test_dup.py::test_y"],
+      });
+      expect(once.status).toBe("fail");
+      expect(once.findings[0]?.droppedNames).toEqual([
+        "test_x",
+        "test_x",
+        "test_y",
+      ]);
+      const twice = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: [
+          "py/test_dup.py::test_x",
+          "py/test_dup.py::test_x",
+          "py/test_dup.py::test_y",
+        ],
+      });
+      expect(twice.status).toBe("ok");
+    });
   });
 
   it("caps the names in the detail but keeps them all on the finding", () => {
@@ -2121,6 +2327,33 @@ describe("hygiene whole-file drops are declared by name", () => {
     expect(r.findings[0]?.droppedNames).toEqual(titles);
     expect(r.findings[0]?.detail).toContain('"case 9", and 2 more');
     expect(r.findings[0]?.detail).not.toContain("case 10");
+  });
+
+  it("lists every dropped name, with counts, in the stale-name error", () => {
+    const repo = initRepo();
+    const titles = Array.from({ length: 12 }, (_, i) => `case ${String(i)}`);
+    write(
+      repo,
+      "test/many.test.ts",
+      [...titles, "case 0"].map((t) => `it("${t}", () => {});\n`).join(""),
+    );
+    commitAll(repo, "many tests");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["rm", "-q", "test/many.test.ts"]);
+    commitAll(repo, "delete");
+    let message = "";
+    try {
+      hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: ["test/many.test.ts::nope"],
+      });
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).toContain('"case 0" x2');
+    expect(message).toContain('"case 11"');
+    expect(message).not.toContain("more");
   });
 
   it("warns for a names declaration on a path that dropped nothing", () => {
@@ -2142,13 +2375,28 @@ describe("hygiene whole-file drops are declared by name", () => {
       "test/a.test.ts=all",
       "test/a.test.ts=2",
       "test/a.test.ts::one",
-      "test/a.test.ts::one",
     ];
     for (const order of [specs, [...specs].reverse()]) {
       const r = hygiene({ cwd: repo, base, intendedDeletions: order });
       expect(r.intendedDeclarations).toEqual([
         { path: "test/a.test.ts", declared: 2, names: ["one"] },
       ]);
+    }
+    // The same name from the flag and from the file counts once; the
+    // sources swap without changing the result.
+    const one = "test/a.test.ts::one";
+    for (const [flag, file] of [
+      [[one], [one]],
+      [[one, "test/a.test.ts=3"], [one]],
+      [[one], [one, "test/a.test.ts=3"]],
+    ] as const) {
+      const r = hygiene({
+        cwd: repo,
+        base,
+        intendedDeletions: flag,
+        intendedDeletionsFromFile: file,
+      });
+      expect(r.intendedDeclarations[0]?.names).toEqual(["one"]);
     }
   });
 });
@@ -2537,6 +2785,72 @@ describe("hygiene named deletions CLI", () => {
         "does not excuse a whole-file drop",
       );
     }
+  });
+
+  it("declares a multi-line template title through the file", async () => {
+    const repo = initRepo();
+    write(
+      repo,
+      "test/m.test.ts",
+      "it(`first line\n    second line`, () => {});\n",
+    );
+    commitAll(repo, "multi-line title");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["rm", "-q", "test/m.test.ts"]);
+    commitAll(repo, "delete");
+    write(repo, "intended.txt", "test/m.test.ts::first line second line\n");
+    const viaFile = await run(repo, base, [
+      "--intended-deletion-file",
+      "intended.txt",
+    ]);
+    expect(viaFile.code).toBe(0);
+    expect(viaFile.out.intended_deletions[0]?.names).toEqual([
+      "first line second line",
+    ]);
+    const viaFlag = await run(repo, base, [
+      ...flag("test/m.test.ts::first  line   second line"),
+    ]);
+    expect(viaFlag.code).toBe(0);
+  });
+
+  it("counts a repeated title per source and takes the larger count", async () => {
+    const repo = initRepo();
+    write(
+      repo,
+      "test/w.test.ts",
+      'it("works", () => {});\nit("works", () => {});\n',
+    );
+    commitAll(repo, "works twice");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["rm", "-q", "test/w.test.ts"]);
+    commitAll(repo, "delete");
+    write(repo, "once.txt", "test/w.test.ts::works\n");
+    write(repo, "twice.txt", "test/w.test.ts::works\ntest/w.test.ts::works\n");
+    const w = "test/w.test.ts::works";
+    const bothOnce = await run(repo, base, [
+      ...flag(w),
+      "--intended-deletion-file",
+      "once.txt",
+    ]);
+    expect(bothOnce.code).toBe(1);
+    expect(bothOnce.out.findings[0]?.droppedNames).toEqual(["works", "works"]);
+    expect(bothOnce.out.findings[0]?.detail).toContain('"works" x2');
+    const flagTwiceFileOnce = await run(repo, base, [
+      ...flag(w),
+      ...flag(w),
+      "--intended-deletion-file",
+      "once.txt",
+    ]);
+    expect(flagTwiceFileOnce.code).toBe(0);
+    const flagOnceFileTwice = await run(repo, base, [
+      ...flag(w),
+      "--intended-deletion-file",
+      "twice.txt",
+    ]);
+    expect(flagOnceFileTwice.code).toBe(0);
+    const over = await run(repo, base, [...flag(w), ...flag(w), ...flag(w)]);
+    expect(over.code).toBe(2);
+    expect(over.out.status).toBe("usage_error");
   });
 
   it("exits 2 with a usage error for a name that was not dropped", async () => {

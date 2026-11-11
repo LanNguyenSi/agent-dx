@@ -29,8 +29,9 @@ export interface HygieneFinding {
   baseCases?: number;
   headCases?: number;
   /** test_cases_dropped: the name of every test case present at base and
-   * gone at head (one entry per name, in base order). A renamed test counts
-   * as dropped under its old name. */
+   * gone at head, one entry per dropped case in base order, so a title
+   * dropped twice appears twice. A renamed test counts as dropped under its
+   * old name. */
   droppedNames?: string[];
 }
 
@@ -43,7 +44,8 @@ export interface HygieneFinding {
  * (`=<n>`), at most that many counter units. `"all"` never excuses a drop
  * and a number never excuses a drop that empties the file (see
  * `hygiene()`), so for a whole-file drop only `names` can. `names` lists
- * tests by title (`<path>::<name>`); a declaration with only names has no
+ * tests by title (`<path>::<name>`), one entry per dropped case, so a title
+ * dropped twice must appear twice; a declaration with only names has no
  * `declared`.
  */
 export interface IntendedDeletionDeclaration {
@@ -64,8 +66,8 @@ export interface IntendedDeletionApplied {
    * `"names"` when the declared test names covered every dropped test
    * (listed in `names`). */
   declared: number | "names";
-  /** `declared: "names"`: the declared names, every one of them a test
-   * dropped from this file. */
+  /** `declared: "names"`: the declared names, one entry per dropped case
+   * (a title dropped twice appears twice). */
   names?: string[];
 }
 
@@ -86,10 +88,15 @@ export interface HygieneOptions {
   /** Root-relative paths the task only extends. */
   extendOnly?: readonly string[];
   /** Raw `--intended-deletion` specs (`<path>::<test name>`, `<path>=<n>`,
-   * or the legacy `<path>` / `<path>=all`), from the flag and from
-   * `--intended-deletion-file` alike; parsed and validated by
-   * `hygiene()`. */
+   * or the legacy `<path>` / `<path>=all`) given on the command line;
+   * parsed and validated by `hygiene()`. A name repeated here counts once
+   * per repetition. */
   intendedDeletions?: readonly string[];
+  /** The same specs read from `--intended-deletion-file`, kept apart from
+   * `intendedDeletions` because the two sources merge per name by the
+   * larger count, not by sum: a name declared once in each counts once. A
+   * name repeated within the file counts once per repetition. */
+  intendedDeletionsFromFile?: readonly string[];
   maxDeletePercent?: number;
 }
 
@@ -252,7 +259,7 @@ export function listTestCases(content: string, filePath?: string): string[] {
       GO_MARKER.test(line) ||
       ANNOTATION_MARKER.test(line)
     ) {
-      names.push(markerName(lines, i));
+      names.push(normalizeTestName(markerName(lines, i)));
     }
   }
   return names;
@@ -404,24 +411,93 @@ function declaresMore(a: number | "all", b: number | "all"): boolean {
   return a > b;
 }
 
-/** Merges two declarations of one path: the larger count (a number above
- * `"all"`) and the union of the names, so neither the flag nor the
- * file wins and the order they come in does not matter. */
-function mergeDeclarations(
-  a: IntendedDeletionDeclaration,
-  b: IntendedDeletionDeclaration,
-): IntendedDeletionDeclaration {
-  const merged: IntendedDeletionDeclaration = { path: a.path };
-  if (a.declared !== undefined && b.declared !== undefined) {
-    merged.declared = declaresMore(b.declared, a.declared)
-      ? b.declared
-      : a.declared;
-  } else if (a.declared !== undefined || b.declared !== undefined) {
-    merged.declared = a.declared ?? b.declared;
+/** What the specs of one source say about one path: the larger count
+ * (`"all"` and numbers per `declaresMore`) and how many times each test
+ * name was declared. */
+interface DeclarationState {
+  declared?: number | "all";
+  nameCounts: Map<string, number>;
+}
+
+function mergeDeclared(
+  a: number | "all" | undefined,
+  b: number | "all" | undefined,
+): number | "all" | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return declaresMore(b, a) ? b : a;
+}
+
+/** Collects the specs of ONE source (the flag, or the file): a repeated
+ * name adds up (declare it as often as it was dropped), the larger count
+ * of a path wins. */
+function collectDeclarations(
+  raws: readonly string[],
+): Map<string, DeclarationState> {
+  const byPath = new Map<string, DeclarationState>();
+  for (const raw of raws) {
+    const parsed = parseIntendedDeletion(raw);
+    let state = byPath.get(parsed.path);
+    if (state === undefined) {
+      state = { nameCounts: new Map() };
+      byPath.set(parsed.path, state);
+    }
+    state.declared = mergeDeclared(state.declared, parsed.declared);
+    for (const name of parsed.names ?? []) {
+      state.nameCounts.set(name, (state.nameCounts.get(name) ?? 0) + 1);
+    }
   }
-  const names = [...new Set([...(a.names ?? []), ...(b.names ?? [])])];
-  if (names.length > 0) merged.names = names;
+  return byPath;
+}
+
+/** Merges the two sources: per path the larger count, per name the larger
+ * number of declarations from either source (not their sum, not a set
+ * union), so neither source wins and the order never decides. */
+function mergeSources(
+  a: Map<string, DeclarationState>,
+  b: Map<string, DeclarationState>,
+): Map<string, DeclarationState> {
+  const merged = new Map<string, DeclarationState>();
+  for (const source of [a, b]) {
+    for (const [p, state] of source) {
+      let into = merged.get(p);
+      if (into === undefined) {
+        into = { nameCounts: new Map() };
+        merged.set(p, into);
+      }
+      into.declared = mergeDeclared(into.declared, state.declared);
+      for (const [name, count] of state.nameCounts) {
+        into.nameCounts.set(
+          name,
+          Math.max(into.nameCounts.get(name) ?? 0, count),
+        );
+      }
+    }
+  }
   return merged;
+}
+
+/** The public form of a merged state: a name appears once per declaration
+ * that counts. */
+function toDeclaration(
+  declarationPath: string,
+  state: DeclarationState,
+): IntendedDeletionDeclaration {
+  const declaration: IntendedDeletionDeclaration = { path: declarationPath };
+  if (state.declared !== undefined) declaration.declared = state.declared;
+  const names: string[] = [];
+  for (const [name, count] of state.nameCounts) {
+    for (let i = 0; i < count; i++) names.push(name);
+  }
+  if (names.length > 0) declaration.names = names;
+  return declaration;
+}
+
+/** A test name as compared and declared: every run of whitespace, newlines
+ * included, collapsed to one space, and trimmed. A title that spans lines
+ * can therefore be declared on one line, in the file as well as the flag. */
+export function normalizeTestName(name: string): string {
+  return name.replace(/\s+/g, " ").trim();
 }
 
 /** Separates the path from the test title in a names declaration. The
@@ -433,9 +509,11 @@ export const INTENDED_DELETION_NAME_SEPARATOR = "::";
  * Parses one raw intended-deletion spec:
  *
  * - `<path>::<test name>`: names one test case (repeat the declaration for
- *   each). Everything after the first `::` is the title, trimmed, so a
- *   title may hold `=`, `,` or `::`. The `::` is looked for before anything
- *   else, so a title ending in `=3` is never read as a count.
+ *   each case, also for a title that was dropped several times).
+ *   Everything after the first `::` is the title with whitespace collapsed
+ *   (`normalizeTestName`), so a title may hold `=`, `,` or `::`. The `::`
+ *   is looked for before anything else, so a title ending in `=3` is never
+ *   read as a count.
  * - `<path>=<n>` (a positive integer): at most `n` dropped test cases. It
  *   never excuses a drop that removes every test case of the file.
  * - `<path>` or `<path>=all`: the legacy blanket form, parsed for
@@ -453,9 +531,9 @@ export function parseIntendedDeletion(
   const sep = spec.indexOf(INTENDED_DELETION_NAME_SEPARATOR);
   if (sep >= 0) {
     const namedPath = normalizePath(spec.slice(0, sep).trim());
-    const name = spec
-      .slice(sep + INTENDED_DELETION_NAME_SEPARATOR.length)
-      .trim();
+    const name = normalizeTestName(
+      spec.slice(sep + INTENDED_DELETION_NAME_SEPARATOR.length),
+    );
     if (namedPath === "") {
       throw new UsageError(
         `hygiene: --intended-deletion "${raw}" has an empty path`,
@@ -501,27 +579,44 @@ export function parseIntendedDeletion(
  * finding's `droppedNames` carries all of them. */
 export const DROPPED_NAMES_IN_DETAIL = 10;
 
-function formatNames(names: readonly string[]): string {
-  const shown = names
-    .slice(0, DROPPED_NAMES_IN_DETAIL)
-    .map((n) => JSON.stringify(n));
-  const more = names.length - shown.length;
+/** How many times each name occurs, in first-seen order. */
+function countNames(names: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
+  return counts;
+}
+
+/** The names with a count per repeated one (`"works" x2`), JSON-quoted so a
+ * title with commas stays unambiguous; at most `cap` distinct names are
+ * spelled out, then `and N more`. `named` adds `(named xK)` for a name
+ * the declaration covers only in part. */
+function formatNames(
+  counts: ReadonlyMap<string, number>,
+  named?: ReadonlyMap<string, number>,
+  cap = DROPPED_NAMES_IN_DETAIL,
+): string {
+  const entries = [...counts];
+  const shown = entries.slice(0, cap).map(([name, count]) => {
+    const done = named?.get(name) ?? 0;
+    return `${JSON.stringify(name)}${count > 1 ? ` x${String(count)}` : ""}${done > 0 ? ` (named x${String(done)})` : ""}`;
+  });
+  const more = entries.length - shown.length;
   return `${shown.join(", ")}${more > 0 ? `, and ${String(more)} more` : ""}`;
 }
 
-/** The names present at base and gone at head, each once, in base order: a
- * name counts as gone when head has fewer cases of that name than base. */
+/** The cases present at base and gone at head, one entry per dropped case
+ * in base order: a title that base has twice and head once is dropped
+ * once. */
 function droppedTestNames(
   baseNames: readonly string[],
   headNames: readonly string[],
 ): string[] {
-  const remaining = new Map<string, number>();
-  for (const n of headNames) remaining.set(n, (remaining.get(n) ?? 0) + 1);
+  const remaining = countNames(headNames);
   const dropped: string[] = [];
   for (const n of baseNames) {
     const left = remaining.get(n) ?? 0;
     if (left > 0) remaining.set(n, left - 1);
-    else if (!dropped.includes(n)) dropped.push(n);
+    else dropped.push(n);
   }
   return dropped;
 }
@@ -751,20 +846,17 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     ...new Set((options.extendOnly ?? []).map(normalizePath)),
   ];
 
-  // Declarations in first-seen order; a path declared twice (the flag and
-  // the file alike) is merged: the larger count (any number above `all`)
-  // and the union of the names. Neither source wins and the order they
-  // come in never decides the outcome.
+  // The flag and the file are collected apart and then merged: a path's
+  // count is the larger of the two (any number above `all`), a test name
+  // counts as often as the more generous source declares it (a repeated
+  // name adds up within one source, never across the two). Neither source
+  // wins and the order never decides the outcome.
   const declaredByPath = new Map<string, IntendedDeletionDeclaration>();
-  for (const raw of options.intendedDeletions ?? []) {
-    const declaration = parseIntendedDeletion(raw);
-    const existing = declaredByPath.get(declaration.path);
-    declaredByPath.set(
-      declaration.path,
-      existing === undefined
-        ? declaration
-        : mergeDeclarations(existing, declaration),
-    );
+  for (const [declarationPath, state] of mergeSources(
+    collectDeclarations(options.intendedDeletions ?? []),
+    collectDeclarations(options.intendedDeletionsFromFile ?? []),
+  )) {
+    declaredByPath.set(declarationPath, toDeclaration(declarationPath, state));
   }
   /** Declaration paths whose drop was looked at (allowed or not): a
    * declaration that matched no drop at all is reported stale. */
@@ -923,14 +1015,33 @@ export function hygiene(options: HygieneOptions): HygieneResult {
       if (declaration !== undefined) {
         consultedDeclarations.add(normalizePath(file.newPath));
       }
-      const unknown = declaredNames.filter((n) => !droppedNames.includes(n));
-      if (unknown.length > 0) {
+      const droppedCounts = countNames(droppedNames);
+      const declaredCounts = countNames(declaredNames);
+      // A name declared more often than it was dropped (or not dropped at
+      // all) is a stale or misspelled declaration.
+      const over = [...declaredCounts].filter(
+        ([name, count]) => count > (droppedCounts.get(name) ?? 0),
+      );
+      if (over.length > 0) {
         staleNames.push(
-          `${file.newPath}: ${formatNames(unknown)} (dropped tests: ${formatNames(droppedNames)})`,
+          `${file.newPath}: ${over
+            .map(
+              ([name, count]) =>
+                `${JSON.stringify(name)} declared ${String(count)} time(s), dropped ${String(droppedCounts.get(name) ?? 0)}`,
+            )
+            .join(
+              ", ",
+            )} (all dropped tests: ${formatNames(droppedCounts, undefined, Infinity)})`,
         );
         continue;
       }
-      const unnamed = droppedNames.filter((n) => !declaredNames.includes(n));
+      const unnamedCounts = new Map<string, number>();
+      for (const [name, count] of droppedCounts) {
+        if (count > (declaredCounts.get(name) ?? 0)) {
+          unnamedCounts.set(name, count);
+        }
+      }
+      const unnamed = [...unnamedCounts.keys()];
       // A drop is excused by naming every dropped test, or, when the file
       // keeps some test cases, by a count that covers it. `all` and a
       // whole-file count never excuse anything.
@@ -988,7 +1099,7 @@ export function hygiene(options: HygieneOptions): HygieneResult {
       findings.push({
         kind: "test_cases_dropped",
         path: file.newPath,
-        detail: `test-case markers fell from ${String(baseCases)} to ${String(headCases)}${file.status === "D" ? " (file deleted)" : ""}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}; ${declaredNames.length > 0 ? "not named" : "dropped"}: ${formatNames(unnamed)}${needsNames ? `; excuse them with --intended-deletion '${file.newPath}::<test name>' per test` : ""}`,
+        detail: `test-case markers fell from ${String(baseCases)} to ${String(headCases)}${file.status === "D" ? " (file deleted)" : ""}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}; ${declaredNames.length > 0 ? "not named" : "dropped"}: ${formatNames(unnamedCounts, declaredCounts)}${needsNames ? `; excuse them with --intended-deletion '${file.newPath}::<test name>' per test` : ""}`,
         baseCases,
         headCases,
         droppedNames,

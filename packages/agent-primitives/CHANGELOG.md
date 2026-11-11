@@ -16,17 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared for. Every `test_cases_dropped` finding now lists the dropped
   tests by name (`droppedNames` in the envelope, at most 10 names in the
   `detail` followed by `and N more`), and a new declaration form names them:
-  `--intended-deletion '<path>::<test name>'`, once per test, also as one
-  line per name in `--intended-deletion-file`. Everything after the first
-  `::` is the title, so commas, `=` and `::` in a title are safe. A drop is
-  excused when its declaration names every dropped test; a dropped test left
-  out stays a finding, and a declared name that is not among the dropped
-  tests is a usage error (exit `2`). For a file that keeps a test case, a
+  `--intended-deletion '<path>::<test name>'`, once per dropped test case,
+  also as one line per name in `--intended-deletion-file`. Everything after
+  the first `::` is the title with whitespace runs collapsed, so commas, `=`
+  and `::` in a title are safe. A drop is excused when its declaration names
+  every dropped test, by multiplicity: a title that two dropped cases carry
+  is declared twice (`droppedNames` has one entry per dropped case and the
+  detail shows `"works" x2`). A dropped test left out stays a finding, and a
+  name declared more often than it was dropped, or not dropped at all, is a
+  usage error (exit `2`) that lists every dropped test of the file. For a file that keeps a test case, a
   count `<path>=<n>` works as before, while `all` and the bare path now
   excuse nothing there either. They are still parsed, so an old declaration
   produces a finding that lists the names rather than a usage error.
-  Declarations of one path from the flag and the file are merged (names
-  unioned, the larger count kept, any number above `all`). An applied
+  Declarations of one path from the flag and the file are merged: per name
+  the larger number of declarations from either source (not their sum), the
+  larger count, any number above `all`. An applied
   name declaration appears in `intended_deletions` as `declared: "names"` with
   `names`; `intended_declarations` carries `names` next to `declared`.
   Migration: run `hygiene` without the old declaration, read the names in the

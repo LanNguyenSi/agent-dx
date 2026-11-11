@@ -164,13 +164,15 @@ argument or revision is a usage error (exit `2`).
   tell a deliberately removed case from an accidental one, so a flagged
   drop is a prompt to explain it, not proof of a mistake. Carries
   `baseCases`, `headCases` and `droppedNames`: the name of every test case
-  that is at the base and gone at the head, one entry per name, in base order
-  (the title string of a JS/TS `it(`/`test(`, the function name for
+  that is at the base and gone at the head, one entry per dropped case in
+  base order, so a title dropped twice appears twice (the title string of a JS/TS `it(`/`test(`, the function name for
   `def test_`, `func Test` and `@Test`, the method name in a `.php` file;
   `describe(` is no marker; a marker whose title is not a string literal is
-  named by its own trimmed line). A renamed test counts as dropped under its
-  old name. The `detail` spells out at most 10 names (`and N more`); the
-  envelope's `droppedNames` carries all of them. A drop the caller declares
+  named by its own trimmed line; every run of whitespace in a name, a
+  multi-line template literal included, is collapsed to one space). A
+  renamed test counts as dropped under its old name. The `detail` spells out
+  at most 10 distinct names with a count per repeated one (`"works" x2`),
+  then `and N more`; the envelope's `droppedNames` carries every entry. A drop the caller declares
   with `--intended-deletion` is allowed instead of reported; see "Intended
   deletions".
 
@@ -210,8 +212,11 @@ agent-primitives hygiene --base <rev> \
 
 A declaration is one of:
 
-- `<path>::<test name>`: names one dropped test; repeat it for each test.
-  Everything after the FIRST `::` is the title (trimmed), so a title may
+- `<path>::<test name>`: names one dropped test case; repeat it for each
+  case, so a title that two dropped cases carry is declared twice.
+  Everything after the FIRST `::` is the title with every whitespace run
+  collapsed to one space and trimmed (the same form `droppedNames` shows, so
+  a title that spans lines is declared on one line), so a title may
   contain `,`, `=`, `::`, or end in `=3` without being read as a count. The
   `::` is looked for before anything else; a path therefore cannot contain
   `::`. The name is what `droppedNames` shows: the title string of a JS/TS
@@ -227,8 +232,7 @@ A declaration is one of:
 declaration per line (so one name per line), ignoring blank lines and lines
 starting with `#`, resolves the file itself against the `-C` directory like
 `--extend-only-file`, and keeps the paths inside it relative to the
-repository root. Lines are trimmed, so a title cannot start or end with
-spaces. The count is read after the LAST `=`, so a path whose own name
+repository root. Lines are trimmed. The count is read after the LAST `=`, so a path whose own name
 contains `=` must always carry an explicit `=<n>` or `=all`; the bare form is
 read as a count and rejected. `=0`, a negative, a non-integer, an empty path
 and an empty test name are usage errors (exit `2`), like an out-of-range
@@ -241,12 +245,16 @@ How a drop of a test file is judged:
 | Whole file (deleted, or no test case left) | Naming every dropped test | A finding that lists the dropped tests. `all`, the bare path and any `=<n>`, even one equal to the number of dropped tests, excuse nothing; the finding says so and shows the form to use. |
 | Partial (the file keeps a test case) | Naming every dropped test, or a count `=<n>` with `n` at least the number of dropped cases | A finding that lists the dropped tests. `all` and the bare path excuse nothing. A count that is too small is named in the `detail` as `(declared n)`. |
 
-Names are matched exactly, as a set: a name covers every case with that
-title in the file. A dropped test not named stays a finding (`detail` says
-`k of m dropped tests named` and lists the ones `not named`). A declared name
-that is not among the dropped tests of a file that did drop is a usage error
-(exit `2`), a stale or misspelled declaration; it is never silently
-ignored. With a partial drop, a renamed test is a dropped test under its old
+Names are matched exactly and by multiplicity: a name must be declared as
+often as it was dropped, so one `<path>::works` does not excuse two dropped
+cases titled `works` (say, in two `describe` blocks or two classes). A
+dropped test not named stays a finding (`detail` says `k of m dropped tests
+named` and lists the ones `not named`, with `xN` for a title dropped N times
+and `(named xK)` for the part already declared). A name declared more often
+than it was dropped, or not dropped at all, in a file that did drop is a
+usage error (exit `2`), a stale or misspelled declaration; it is never
+silently ignored. The error message lists every dropped test of the file
+with its count. With a partial drop, a renamed test is a dropped test under its old
 name, so name it too, or use a count. When names and a count are both
 declared for one path, full name coverage wins and is recorded as
 `declared: "names"`; otherwise a covering count on a partial drop applies.
@@ -262,9 +270,12 @@ Only `test_cases_dropped` can be declared away. `backup_file` and
 file that loses cases is still flagged.
 
 Declarations of the same path are merged, whether they come from the flag
-or the file, and neither source wins: the names are unioned (a test named
-by both counts once), and of two counts the larger applies, any number above
-`all`. The order they are given in never decides the outcome.
+or the file, and neither source wins. Within one source a repeated name adds
+up (that is how a title dropped twice is declared). Across the two sources
+each name counts as often as the more generous source declares it: the larger
+of the two, not their sum, so declaring `<path>::works` once in the flag and
+once in the file counts once. Of two counts the larger applies, any number
+above `all`. The order they are given in never decides the outcome.
 
 A declaration that allowed nothing - its path is not in the range, is not a
 test path, or dropped no cases - draws the warning
