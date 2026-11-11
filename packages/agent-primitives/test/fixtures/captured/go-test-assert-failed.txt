@@ -1,0 +1,5 @@
+--- FAIL: TestAdd (0.00s)
+    m_test.go:7: bad
+FAIL
+FAIL	example.com/m	0.001s
+FAIL

@@ -1,0 +1,6 @@
+$ tsc -p .
+src/x.ts(1,14): error TS2322: Type 'number' is not assignable to type 'string'.
+[ELIFECYCLE] Test failed. See above for more details.
+Error: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL
+
+  × "pnpm recursive run" failed in /project/packages/a

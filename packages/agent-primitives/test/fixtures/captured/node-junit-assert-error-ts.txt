@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testcase name="add" time="0.001" classname="test" file="/project/a.test.js" failure="src/add.ts(2,9): error TS2322: Type 'number' is not assignable to type 'string'.&#10;&#10;1 !== 2&#10;">
+		<failure type="testCodeFailure" message="src/add.ts(2,9): error TS2322: Type 'number' is not assignable to type 'string'.&#10;&#10;1 !== 2">
+[Error [ERR_TEST_FAILURE]: src/add.ts(2,9): error TS2322: Type 'number' is not assignable to type 'string'.
+
+1 !== 2
+] {
+  code: 'ERR_TEST_FAILURE',
+  failureType: 'testCodeFailure',
+  cause: AssertionError [ERR_ASSERTION]: src/add.ts(2,9): error TS2322: Type 'number' is not assignable to type 'string'.
+  
+  1 !== 2
+  
+      at TestContext.&lt;anonymous> (/project/a.test.js:4:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+}
+		</failure>
+	</testcase>
+	<!-- tests 1 -->
+	<!-- suites 0 -->
+	<!-- pass 0 -->
+	<!-- fail 1 -->
+	<!-- cancelled 0 -->
+	<!-- skipped 0 -->
+	<!-- todo 0 -->
+	<!-- duration_ms 93.413709 -->
+</testsuites>

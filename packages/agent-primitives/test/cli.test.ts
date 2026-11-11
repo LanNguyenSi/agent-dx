@@ -5943,6 +5943,7 @@ describe("cli: probe --plan", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      build_failed: 0,
       met: 2,
       violated: 0,
     });
@@ -6266,6 +6267,7 @@ describe("cli: probe --plan", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      build_failed: 0,
       met: count,
       violated: 0,
     });
@@ -6310,6 +6312,7 @@ describe("cli: probe --plan", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      build_failed: 0,
       met: count,
       violated: 0,
     });
@@ -6380,6 +6383,7 @@ describe("cli: probe --plan", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      build_failed: 0,
       met: count,
       violated: 0,
     });
@@ -6860,6 +6864,7 @@ describe("cli: probe --plan with a test command per mutant", () => {
         survived: 1,
         inconclusive: 0,
         not_run: 0,
+        build_failed: 0,
         met: 1,
         violated: 1,
       },

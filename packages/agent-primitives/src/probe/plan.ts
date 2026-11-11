@@ -33,6 +33,14 @@ export interface PlanMutantSpec {
   /** This mutant's own `expect`, when the plan gave it one; it wins over
    * the plan-level default and over a `--expect` on the command line. */
   expect?: ExpectVerdict;
+  /** The entry's optional `reason`: why it expects what it expects. It
+   * changes nothing about the run; the summary prints it beside an
+   * `expect: "pass"` mutant that survived, so a mutant a plan declares
+   * an expected survivor says why. */
+  expectReason?: string;
+  /** This mutant's own `build_detect`, when the plan gave it one; it
+   * wins over the plan-level value and over `--no-build-detect`. */
+  buildDetect?: boolean;
   /** This mutant's own test command (the entry's `test` key), when the
    * plan gave it one; it wins over the plan-level `test`, which a mutant
    * without one inherits. Mutants whose commands are the same string
@@ -49,6 +57,9 @@ export interface ProbePlanSpec {
   preCommand?: string;
   isolation?: IsolationMode;
   expect?: ExpectVerdict;
+  /** From `build_detect`: `false` turns build-failure detection off for
+   * every mutant that does not carry its own value. */
+  buildDetect?: boolean;
   /** Milliseconds, converted from the file's `timeout` (seconds, the
    * unit `--timeout` itself takes). */
   timeoutMs?: number;
@@ -96,6 +107,7 @@ const PLAN_KEYS = [
   "pre",
   "isolation",
   "expect",
+  "build_detect",
   "timeout",
   "link",
   "passWhen",
@@ -112,6 +124,8 @@ const MUTANT_KEYS = [
   "with",
   "patch",
   "expect",
+  "reason",
+  "build_detect",
   "test",
 ] as const;
 
@@ -401,6 +415,12 @@ export function validatePlan(
     if (!expect.ok) return expect.result;
     plan.expect = expect.value;
   }
+  if (parsed.build_detect !== undefined) {
+    if (typeof parsed.build_detect !== "boolean") {
+      return invalid(planPath, "plan.build_detect", "must be true or false");
+    }
+    plan.buildDetect = parsed.build_detect;
+  }
   if (parsed.timeout !== undefined) {
     if (
       typeof parsed.timeout !== "number" ||
@@ -507,6 +527,17 @@ export function validatePlan(
       );
       if (!expect.ok) return expect.result;
       mutant.expect = expect.value;
+    }
+    if (raw.build_detect !== undefined) {
+      if (typeof raw.build_detect !== "boolean") {
+        return invalid(planPath, `${at}.build_detect`, "must be true or false");
+      }
+      mutant.buildDetect = raw.build_detect;
+    }
+    if (raw.reason !== undefined) {
+      const reason = readString(raw.reason, planPath, `${at}.reason`);
+      if (!reason.ok) return reason.result;
+      mutant.expectReason = reason.value;
     }
     if (raw.test !== undefined) {
       const test = readString(raw.test, planPath, `${at}.test`);

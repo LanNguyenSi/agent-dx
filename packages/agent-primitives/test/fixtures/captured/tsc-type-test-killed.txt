@@ -1,0 +1,1 @@
+src/types.ts(4,1): error TS2578: Unused '@ts-expect-error' directive.

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="1" failures="1" errors="0" time="0.001">
+    <testsuite name="test/add.test.ts" timestamp="2000-01-01T00:00:00.000Z" hostname="host" tests="1" failures="1" errors="0" skipped="0" time="0.001">
+        <testcase classname="test/add.test.ts" name="add" time="0.001">
+            <failure message="src/add.ts(2,9): error TS2322: Type &apos;number&apos; is not assignable to type &apos;string&apos;.: expected -1 to be 3 // Object.is equality" type="AssertionError">
+AssertionError: src/add.ts(2,9): error TS2322: Type &apos;number&apos; is not assignable to type &apos;string&apos;.: expected -1 to be 3 // Object.is equality
+
+- Expected
++ Received
+
+- 3
++ -1
+
+ ❯ test/add.test.ts:4:105
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

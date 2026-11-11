@@ -1,0 +1,21 @@
+X
+
+Failed tests:
+
+✖ add (1ms)
+  AssertionError [ERR_ASSERTION]: src/add.ts(2,9): error TS2322: Type 'number' is not assignable to type 'string'.
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (/project/a.test.js:4:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

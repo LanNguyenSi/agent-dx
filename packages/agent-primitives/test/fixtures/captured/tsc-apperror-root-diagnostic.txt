@@ -1,0 +1,5 @@
+
+> test
+> tsc -p .
+
+AppError.ts(1,14): error TS2322: Type 'number' is not assignable to type 'string'.

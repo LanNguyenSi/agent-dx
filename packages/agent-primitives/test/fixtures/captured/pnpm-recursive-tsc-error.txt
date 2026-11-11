@@ -1,0 +1,11 @@
+Scope: 2 of 3 workspace projects
+packages/a test$ tsc -p .
+packages/b test$ echo b ok
+packages/b test: b ok
+packages/b test: Done
+packages/a test: src/x.ts(1,14): error TS2322: Type 'number' is not assignable to type 'string'.
+packages/a test: Failed
+[ELIFECYCLE] Test failed. See above for more details.
+Error: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL
+
+  × "pnpm recursive run" failed in /project/packages/a

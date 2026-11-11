@@ -28,6 +28,7 @@ every command.
 | `--pass-regex <regex>` | a match against a run's combined output is a pass, in place of the exit code | off (the exit code decides) |
 | `-i, --isolation <mode>` | `worktree` (mutates a detached git worktree) or `inplace` | `worktree` |
 | `--expect <verdict>` | `fail` (the mutant should break the test) or `pass` | `fail` |
+| `--no-build-detect` | keep a failing mutant run's exit code as a kill instead of reading its output for a build failure (`build_failed`); for a test command that is itself a compiler or type check; a plan sets `build_detect: false` | off (detection on) |
 | `--timeout <seconds>` | bound for every `--pre` and `-t` invocation | none |
 | `--plan <path>` | JSON file with a list of mutants and their test command (the plan's, or each mutant's own), run against one baseline per distinct test command | none |
 | `--link <dirs>` | comma-separated extra directories to link into the `-i worktree` copy | none |
@@ -143,8 +144,11 @@ Only then is the mutant applied (`runMutantAttempt` in
 A mutant run whose output shows no test ran, or matches the baseline's
 output byte for byte with no test summary either detector recognizes,
 is reported `inconclusive` (`no_tests_executed`, `zero_tests_ambiguous`)
-instead of a verdict. The diagram shows that mutant step up to its
-verdict or refusal.
+instead of a verdict. A failing run whose output shows the build broke
+(`go test` `[build failed]`, a `tsc` error, vitest unable to load a file)
+is `build_failed`, also instead of `killed`; see "Mutants that do not
+compile". The diagram shows that mutant step up to its verdict or
+refusal.
 
 ```mermaid
 flowchart TD
@@ -157,7 +161,9 @@ flowchart TD
   K -->|no| R14["timeout"]
   K -->|yes| Z{"Did any test run?<br/>(mutant output)"}
   Z -->|"no, or unreadable"| R15["no_tests_executed or<br/>zero_tests_ambiguous"]
-  Z -->|yes| V["killed or survived,<br/>expectation met or violated"]
+  Z -->|yes| BF{"Failed because<br/>the build broke?<br/>(go, tsc, vitest output)"}
+  BF -->|yes| R16["build_failed"]
+  BF -->|no| V["killed or survived,<br/>expectation met or violated"]
 ```
 
 A run that got past the lock ends in the same teardown after a verdict
@@ -2185,6 +2191,86 @@ whether `--file` was given explicitly or is derived from the patch.
   change a literal the code compares against (`.endsWith(".php")` to
   `.endsWith(".nophp")`).
 
+  Build failures inside the test command: a mutant that does not
+  compile can also fail the test command itself (`go test` compiles the
+  package first; a `pretest` `tsc` step; vitest transforming a file),
+  and a non-zero exit would read as a kill although no test ran. The
+  probe reads the output of the mutant run (the captured tails, or the
+  full run log when a tail was truncated; see below for when that log
+  cannot be used) and, when it shows the build broke, reports
+  `mutation_probe.result: "build_failed"` (`status: "inconclusive"`,
+  `reason: "build_failed"`, exit `2`) instead of `killed`. Three output
+  shapes are recognized: `go test`'s `FAIL <pkg> [build failed]` /
+  `[setup failed]` (unless a test also failed somewhere in the same run,
+  in which case a test observed the mutant); a `tsc` diagnostic in tsc's
+  own format at the start of a line (`path(line,col): error TS<code>:` or
+  `path:line:col - error TS<code>:`, the path carrying no colon) in
+  output that carries no test-runner summary and no clear sign of a test
+  having run; and a vitest run that
+  could not transform or load a test file (`Transform failed`,
+  `[PARSE_ERROR]`, `Failed to load url`, `Failed to resolve import`,
+  `Cannot find module`, or a `SyntaxError` with no stack frame in user
+  code, so a `JSON.parse` failing at import stays a kill) and ran no test
+  at all (`Tests  no tests`). Output that also shows a zero-tests shape is
+  still reported as the build failure.
+
+  What counts as a sign of a test having run, for the tsc rule, in three
+  outcomes. No sign: a build failure. Clear evidence: the run stays
+  `killed`. These are clear: a failure marker line (`FAIL`, `FAILED`,
+  `not ok`, `--- FAIL`, a `✗`, `✖` or `●` mark, an `AssertionError`), a
+  PHPUnit numbered failure, JUnit `<testcase>` or `<failure>`, a jest
+  `Tests:` totals line, and a TAP `ok N` line inside a TAP stream (a
+  `TAP version` line, a `1..N` plan, `# pass` or `# fail`). Not
+  evidence: lines that are themselves tsc diagnostics (a root-level
+  `AppError.ts` is a path, not an error), eslint's `✖ N problems` line, a
+  bare `Error:` line, pnpm's `ERR_PNPM_*` footer and `×` line, and a
+  `ok 1 - ...` line outside a TAP stream. Only weak evidence, a named
+  error line such as `TypeError:` or `TSError:`, is the third outcome: the
+  run stays `killed` but is never silent. The row reads `killed (build
+  detection ambiguous)`, `mutation_probe.build_detection` is
+  `"ambiguous"` with the matched line in `build_detection_detail`, the
+  envelope carries a warning naming the mutant and that line, and
+  `--summary` counts it on a `build-failure detection ambiguous for N
+  killed mutants` line. An ambiguous run is never turned into
+  `build_failed`; check its log, or use the opt-out below.
+
+  When a tail was truncated the full run log is read instead of the
+  tail, and a log that cannot be used leaves the verdict `killed` but
+  marked: `mutation_probe.build_detection` is `"skipped"`, the row reads
+  `killed (build detection skipped: <cause>)`, `--summary` counts it on a
+  `build-failure detection skipped for N killed mutants` line, and the
+  warning names the cause: the log is larger than the 2 MiB read bound
+  (`log too large`), writing it failed (`logWriteFailed`, `log write
+  failed`), the output may be incomplete (`outputMayBeIncomplete`,
+  `output may be incomplete`), or it could not be read (`log
+  unreadable`).
+
+  Limits follow from reading output. For vitest, narrow the test
+  command to the test files that import the mutated module: a load
+  failure beside other files whose tests ran reads as `killed`, because
+  some test ran. A test command that IS a compiler or type check (a
+  type-level test suite run as `tsc --noEmit`) prints exactly the
+  diagnostics a real kill prints, so it needs the opt-out,
+  `--no-build-detect` (a plan: `build_detect: false`, plan-wide or on a
+  mutant; a mutant's value wins, then the command line, then the plan's,
+  then on); with it a failing run keeps the plain `killed` reading. (The
+  `go test` markers are not a compiler's diagnostics, so a plain
+  `go build` or `go vet` step carries no marker and the opt-out changes
+  nothing there.) These tsc shapes are not recognized, so the run stays
+  `killed` and `--summary` says the toolchain was not covered: drive-letter
+  absolute paths (`C:\src\a.ts(1,2): error TS...`), output prefixed
+  by a runner (`web:build: `, `@scope/pkg: `, `packages/a test: ` from
+  `pnpm -r`), global diagnostics without a path (`error TS6053:`) and
+  ts-node's `TSError:`. A `build_failed` mutant is neither met nor
+  violated under `--expect fail`, and not met under `--expect pass`
+  either (a mutant that never ran did not survive): it carries no
+  `expectation`, is not counted in `met`, and keeps a plan from
+  concluding. Rewrite it into a mutant that compiles. For any other
+  toolchain the old reading stays (a compile error is a failing exit
+  code, so `killed`); `--summary` says so on a
+  `build-failure detection: not available for N killed mutants` line
+  whenever a killed mutant's output matches none of the three.
+
 ## Compact views: --summary, --print and --report
 
 Callers that only need the verdict used to parse the JSON envelope with
@@ -2261,14 +2347,17 @@ value cannot carry. `hygiene`, `drift` and `verify` have `--summary` and
 
 ```text
 <file>:<line> | <verdict> | expectation=<met|violated|-> | restored=<true|false|-> | failing=<first failing test line|-> | log=<path>
-totals: status=<status> [reason=<reason>] total=N killed=N survived=N inconclusive=N not_run=N met=N violated=N
+totals: status=<status> [reason=<reason>] total=N killed=N survived=N inconclusive=N not_run=N met=N violated=N build_failed=N
 ```
 
 `<file>` is relative to `-C` when it lies under it. A `--plan` line is
 prefixed with the mutant's `#<index>`. `<verdict>` is
-`mutation_probe.result` (`killed`, `survived`, `not_run`); a mutant that
-never reached a verdict shows its status instead, with the reason in
-parentheses (`not_run(pre_failed)`). `failing=` is the first line of the
+`mutation_probe.result` (`killed`, `survived`, `not_run`, `build_failed`);
+a mutant that never reached a verdict shows its status instead, with the
+reason in parentheses (`not_run(pre_failed)`). A `build_failed` row reads
+`build_failed(build failed, mutant not exercised)`, and the totals line
+counts it in `build_failed=N`, not in `inconclusive` (so `total` is
+`killed + survived + inconclusive + not_run + build_failed`). `failing=` is the first line of the
 test's captured output tails that looks like a failing test (`FAIL`,
 `not ok`, `AssertionError`, a leading cross mark and similar), `-` when
 none does or the verdict is not `killed` (a survived mutant passed, so
@@ -2293,6 +2382,26 @@ full result (`result-full-*.json`) if it fits within `-m` beside the totals
 line (otherwise the marker says the path did not fit); without a saved full
 result the marker says so. The `totals:` line is always printed (the `note:` line is dropped
 before the totals line if even those two do not fit).
+
+Above the baseline lines and the totals, a `--plan` summary adds up to
+two blocks. An `expected survivors (expect: pass, survived, counted as
+met): N` heading with one `  #<index> <file>:<line> | reason: <text>`
+line per mutant that declared `expect: "pass"` and survived (the entry's
+optional `reason` key, capped at 200 characters with a trailing `...`,
+`(no reason given)` without one), so a survivor a plan calls expected
+cannot hide among the met expectations; it still counts as met. The
+heading with the count is never dropped; when the lines do not fit `-m`,
+fewer are printed followed by `... N expected-survivor lines omitted (-m
+<n>)`. The survivor lines give way before any mutant row that is not a
+plain met expectation (violated, `build_failed`, inconclusive, not run, or
+a killed row marked ambiguous or skipped): the fullest candidate that
+keeps every such row is printed, and when none does, the heading and the
+omission line. And, when a killed mutant's output matches no build-failure
+shape (go test, tsc, vitest), one `build-failure detection: not available
+for N killed mutants ...` line; one `build-failure detection ambiguous` and
+one `build-failure detection skipped` line for the marked rows (see "Mutants
+that do not compile" above). These lines are dropped before the baseline
+lines when `-m` is short.
 
 `--print <field,...>` prints one JSON object on one line, one key per
 requested field in the order given. A name is a top-level envelope field
@@ -2346,7 +2455,8 @@ every other internal value (`not_run`, `inconclusive`) and an absent
 `mutation_probe` map to `not_applicable`; `expectation` is
 `not_applicable` whenever `result` is, and the `met`/`violated` value
 otherwise. `reason` is the empty string unless `result` is
-`not_applicable`; then the internal `mutant_not_applicable` prints
+`not_applicable`; a `build_failed` result prints exactly `build failed,
+mutant not exercised`; then the internal `mutant_not_applicable` prints
 exactly `target text no longer present` for every cause of that code
 (the target text no longer in the file, a replacement identical to the
 original line or to the matched text, an empty `-M`, a line out of
@@ -2418,8 +2528,8 @@ exactly which `reason` is which).
 | `status` | string | always | `"killed"`, `"survived"`, `"inconclusive"`, `"usage_error"`, or `"baseline_failed"`. The last is the CLI envelope's own literal status for a failing baseline (the library's `probe()` itself still returns `status: "inconclusive"`, `reason: "baseline_failed"`; the CLI remaps it so a consumer does not also have to read `reason` to tell a failing baseline apart from every other inconclusive outcome). Same exit-code class either way (`cannot-conclude`, exit `2`), so a caller gating on the exit code alone sees no difference. `"killed"`/`"survived"` are always this mutant's actual, measured outcome (see the `--expect` paragraph above) -- under a non-default `--expect`, the exit code follows `mutation_probe.expectation` instead of this field's own word (`0` for `"met"`, `1` for `"violated"`), so a caller gating on the exit code alone still sees `--expect` honored even though `status` itself no longer flips. |
 | `reason` | string | whenever `status` is not a clean verdict | machine-readable cause, e.g. `"baseline_failed"`, `"pre_failed"`, `"restore_failed"`, `"aborted"`, `"target_changed_during_baseline"`, `"mutant_not_applicable"` |
 | `message` | string | top-level usage error only (see above) | the human-readable message commander (or this CLI's own pre-`probe()` check) produced; `reason` is still present alongside it, so a consumer can key off `reason` without also reading `message` |
-| `mutant` | `{ file, line, before, after, form, diff?, deleted? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly eight of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `zero_tests_ambiguous`, `baseline_evidence_not_matched`, `pycache_isolation_failed`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). `deleted` (boolean) only for a `-p/--patch` mutant whose applied result deletes the target file outright (see the `-p, --patch` paragraph above); absent (never `false`) for every other mutant. A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"` (or, for a phpunit mutant run whose own output reads `"ambiguous"` rather than a stated `"zero"`, `"inconclusive"`/`"zero_tests_ambiguous"`), and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. |
-| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason?, expectation? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same eight setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the eight setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `zero_tests_ambiguous`, `baseline_evidence_not_matched`, `pycache_isolation_failed`), `reason` naming which, and for the mutant-phase zero-tests override described just above. `expectation` (`"met"`/`"violated"`) is present only alongside a `result` of `"killed"` or `"survived"`: whether that actual outcome matched the `--expect` this mutant ran under (see the `--expect` paragraph above); absent for `"not_run"`/`"inconclusive"`, which measured nothing to compare against an expectation. ABSENT (both `result` and `expectation`) for every other setup-phase refusal (see the table below), none of which ever computed a mutant. See the mapping below for an implementer report. |
+| `mutant` | `{ file, line, before, after, form, diff?, deleted? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly eight of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `zero_tests_ambiguous`, `baseline_evidence_not_matched`, `pycache_isolation_failed`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). `deleted` (boolean) only for a `-p/--patch` mutant whose applied result deletes the target file outright (see the `-p, --patch` paragraph above); absent (never `false`) for every other mutant. A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"` (or, for a phpunit mutant run whose own output reads `"ambiguous"` rather than a stated `"zero"`, `"inconclusive"`/`"zero_tests_ambiguous"`), and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. A mutant run whose test command failed because the build broke (see "Mutants that do not compile" above) reports `status`/`reason` `"inconclusive"`/`"build_failed"` and `mutation_probe.result: "build_failed"` with `mutation_probe.reason: "build_failed"`, in place of `"killed"`. |
+| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason?, expectation? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same eight setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the eight setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `zero_tests_ambiguous`, `baseline_evidence_not_matched`, `pycache_isolation_failed`), `reason` naming which, and for the mutant-phase zero-tests override described just above. `expectation` (`"met"`/`"violated"`) is present only alongside a `result` of `"killed"` or `"survived"`: whether that actual outcome matched the `--expect` this mutant ran under (see the `--expect` paragraph above); absent for `"not_run"`/`"inconclusive"`/`"build_failed"`, which measured nothing to compare against an expectation. ABSENT (both `result` and `expectation`) for every other setup-phase refusal (see the table below), none of which ever computed a mutant. See the mapping below for an implementer report. |
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. Under `--plan`, this same `env` row appears on the plan's own top-level envelope (`plan`'s sibling, not inside it), applied to the shared baseline and every mutant's own run, echoed once the same way. |
@@ -2635,7 +2745,13 @@ its own section above), and a command-line `--pass-regex` given
 alongside a plan wins over this key when both are given. Each mutant needs `file` and
 exactly one form: `replace` (with `line`), `match` together with `with`
 (with `line`), or `patch` (whose line comes from the diff, as with `-p`);
-`expect` and `test` are its optional per-mutant keys.
+`expect`, `reason` and `test` are its optional per-mutant keys. `reason` is
+a non-empty string saying why the mutant expects what it expects; it
+changes nothing about the run and is printed by `--summary` beside an
+`expect: "pass"` mutant that survived. `build_detect` is a boolean, at
+the plan level and on a mutant, that turns build-failure detection off
+(`false`) the way `--no-build-detect` does; see "Mutants that do not
+compile".
 Unlike the single-probe `-p`, a plan mutant's `file` is never derived
 from the patch: every path in the plan is known before the run starts, so
 the containment check below can cover all of them up front. Paths in a
@@ -2706,24 +2822,29 @@ when the plan names one test command. `baselines` has one entry per
 distinct test command (one entry for a plan naming one; see [A test
 command per mutant](#a-test-command-per-mutant) below for its fields).
 `results` has one entry per plan mutant, in plan order, carrying `index`,
-`file`, `expect`, `status` (`killed`, `survived`, `inconclusive` or
+`file`, `expect`, `expect_reason` (the plan entry's `reason`, when it
+gave one), `status` (`killed`, `survived`, `inconclusive` or
 `not_run` -- this mutant's own actual, measured outcome, independent of
 `expect`; see the `--expect` paragraph above), `reason` (when there is
-one), that mutant's own `warnings` and `logs`, `test_command` and
+one; `build_failed` for a mutant whose test command failed because the
+build broke, whose `mutation_probe.result` is `"build_failed"` while its
+`status` stays `inconclusive`), that mutant's own `warnings` and `logs`, `test_command` and
 `baseline_index` (the command it ran and its baseline's position in
 `baselines`), and -- for a mutant that
 was actually applied -- `mutant`, `mutation_probe` (the same fields to
 paste into a `mutation_probes` report, `expectation` included) and
 `test`. `summary` counts `total`/`killed`/`survived`/`inconclusive`/
-`not_run` by that same actual-outcome `status`, so its `killed`/
+`not_run` by that same actual-outcome `status` (`build_failed` is a
+sixth count, for the mutants whose `mutation_probe.result` is
+`"build_failed"`; they are left out of `inconclusive`), so its `killed`/
 `survived` counts are not what decides the plan's own exit code below
 when any mutant declares a non-default `expect`; `summary` also counts
 `met`/`violated`, mirroring `results[].mutation_probe.expectation`
 (present alongside a real `killed`/`survived` verdict only; every
 attempted mutant runs under some expect, its own, else the plan's, else
 the CLI default `fail`, so `met + violated` always equals `killed +
-survived`, and `inconclusive`/`not_run` account for the whole difference
-from `total`) -- this pair, not the raw `killed`/`survived` counts, is
+survived`, and `inconclusive`/`not_run`/`build_failed` account for the
+whole difference from `total`) -- this pair, not the raw `killed`/`survived` counts, is
 what actually explains a plan-level `status: "survived"` when it
 disagrees with them. Note that the plan's own `status` word is an
 expectation aggregate (`killed` means every expectation was met,

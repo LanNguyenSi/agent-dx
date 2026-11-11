@@ -1501,6 +1501,8 @@ interface ProbeCliOptions {
   plan?: string;
   isolation: IsolationMode;
   expect: ExpectVerdict;
+  /** `--no-build-detect` makes it `false`; commander's default is `true`. */
+  buildDetect: boolean;
   timeout?: string;
   link?: string[];
   allowOutside?: boolean;
@@ -2066,6 +2068,13 @@ async function runProbePlanCommand(
   const expect = explicitlyGiven(command, "expect")
     ? opts.expect
     : (plan.expect ?? opts.expect);
+  // Build detection, the same precedence as the other run-shaping
+  // options: `--no-build-detect` wins over the plan's `build_detect`,
+  // which wins over the default (on); a mutant's own `build_detect` wins
+  // over both inside `probePlan`.
+  const buildDetect = explicitlyGiven(command, "buildDetect")
+    ? opts.buildDetect
+    : (plan.buildDetect ?? opts.buildDetect);
   const timeoutMs =
     opts.timeout !== undefined ? Number(opts.timeout) * 1000 : plan.timeoutMs;
   // `--pass-regex` has no default value (unlike `isolation`/`expect`
@@ -2086,6 +2095,7 @@ async function runProbePlanCommand(
       preCommand: plan.preCommand,
       isolation,
       expect,
+      buildDetect,
       timeoutMs,
       env: opts.env,
       // The plan's own `link` stays SEPARATE from `--link` all the way
@@ -2274,6 +2284,10 @@ program
     "fail",
   )
   .option(
+    "--no-build-detect",
+    "do not read a failing mutant run's output for a build failure (go test [build failed], a tsc error, a vitest load failure): the failing exit code stays a kill. For a test command that is itself a compiler or type check; a plan sets it as build_detect: false, plan-wide or per mutant",
+  )
+  .option(
     "--timeout <seconds>",
     "timeout for --pre and -t",
     parseTimeoutSeconds,
@@ -2374,6 +2388,7 @@ program
         passRegex: opts.passRegex,
         isolation: opts.isolation,
         expect: opts.expect,
+        buildDetect: opts.buildDetect,
         timeoutMs:
           opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
         links: opts.link ?? [],
