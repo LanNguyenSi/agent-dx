@@ -2458,9 +2458,9 @@ available` one included, are given up in
 two cases only. One: they do not fit `-m` even with every mutant row
 omitted, while the survivor lines and every such row fit without them;
 then those rows are printed, a marked one with its `(build detection
-...)` text. Two: they do not fit `-m` beside the totals line, the
-baseline lines and the note, since they give way before a baseline line
-or the note does; then the
+...)` text. Two: they do not fit `-m` beside the survivors heading, the
+baseline lines, the note and the totals line, since they give way before
+a baseline line or the note does; then the
 heading and the omission line stay, or the heading alone. The
 `build_detection_ambiguous` and `build_detection_skipped` counts on the
 totals line are given up in neither case. The `not available` line has
