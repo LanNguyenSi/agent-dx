@@ -276,6 +276,10 @@ each name counts as often as the more generous source declares it: the larger
 of the two, not their sum, so declaring `<path>::works` once in the flag and
 once in the file counts once. Of two counts the larger applies, any number
 above `all`. The order they are given in never decides the outcome.
+Programmatic callers of `hygiene()` pass the file lines as
+`intendedDeletionsFromFile` and the flag values as `intendedDeletions`; a
+file line placed in `intendedDeletions` counts as a flag line, so its repeats
+add up with the other flag lines instead of being merged by the larger count.
 
 A declaration that allowed nothing - its path is not in the range, is not a
 test path, or dropped no cases - draws the warning
