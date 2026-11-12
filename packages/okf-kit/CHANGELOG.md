@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `citations-resolve` and `prose-line-references` now recognise `.go` among
+  their citation target extensions: a `` `path:N` ``/`` `path:N-M` ``
+  citation into a `.go` file is collected and checked like the same
+  citation into `.ts` or `.json`, and a `foo.go` file mention binds a
+  prose line reference the same way, while `foo.gox` is still not matched
+  as `foo.go`. Before, nothing was ever checked against `.go` files: a
+  bundle in a Go repo carried 129 citations into `.go` files and a
+  `check --require-anchors` run stayed silent even for a citation past the
+  last line of an existing file. The recognised set is now `.ts`, `.js`,
+  `.mjs`, `.md`, `.yml`, `.yaml`, `.json`, `.prisma`, `.go`, the same set
+  both rules use (two regexes kept in step); `.go` is also a closing-brace
+  target (Go blocks end in `}`), so a citation starting on a lone `}` is
+  flagged `closing-brace-start-line` like in a `.ts` file.
+
+### Changed
+
+- A backtick-delimited `` `path.ext:N` ``/`` `path.ext:N-M` `` citation
+  whose extension is not recognised now reports an `extension-unrecognised`
+  `notice` naming the extension and saying the citation is not checked, so
+  a language this rule does not cover yet cannot read as a clean pass. It
+  fires only when the whole span between one pair of backticks is such a
+  citation, only for a directory-qualified relative path (which is what
+  keeps `host:port` from firing), and only for an extension of 1-10
+  letters/digits with at least one letter; the optional `#anchor` of the
+  anchored (recommended) citation form is accepted before the closing
+  backtick, so `` `src/lib.rs:1#"main"` `` fires exactly like the bare
+  `` `src/lib.rs:1` ``; bare prose, a URL with a port,
+  and a digits-only extension fire nothing. A notice was chosen over a
+  configurable extension list because okf-kit has no bundle-level config
+  file today and a notice is advisory, never counted toward `--strict`, so
+  it surfaces the gap without changing any bundle's exit status. See
+  [Citation resolution](docs/citations.md).
+
 ## [0.20.0] - 2026-11-01
 
 ### Added

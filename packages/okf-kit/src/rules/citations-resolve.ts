@@ -43,7 +43,12 @@ const RULE_ID = "citations-resolve";
  *
  * What it does NOT check: whether the cited line is semantically the right
  * one (that needs the actual symbol; out of scope for a warn-only mechanical
- * rule), nor citations without a file extension this rule recognises.
+ * rule), nor citations without a file extension this rule recognises -- but
+ * an unrecognised extension is no longer silently skipped: a backtick-
+ * delimited `` `path.ext:N` ``/`` `path.ext:N-M` `` span whose extension is
+ * unrecognised reports an `extension-unrecognised` `notice` (see
+ * `UNRECOGNISED_EXT_CITATION_RE` below for the shape it accepts and the
+ * shapes it deliberately refuses).
  *
  * Hard-wrapped prose. Some docs hard-wrap prose at a fixed column, which can
  * split a hyphenated filename like `run-state-lifecycle-and-markers.md`
@@ -672,7 +677,7 @@ function checkAnchor(
 // can exclude a real citations-resolve citation span from its own
 // extraction, rather than re-deriving this grammar itself.
 export const CITATION_RE =
-  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json|prisma)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
+  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json|prisma|go)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
 
 /**
  * Heading-section citations. A CHANGELOG.md that grows by insertion at the
@@ -771,8 +776,73 @@ const CLOSING_ONLY_EXTS = new Set([
   "yaml",
   "json",
   "prisma",
+  "go",
 ]);
 const CLOSING_BRACE_RE = /^[)\]}][;,]?$/;
+// `extension-unrecognised` (notice): the extension set CITATION_RE
+// recognises, spelled out as a set for the no-silent-skip scan below, kept
+// in step with CITATION_RE's alternation (and with FILE_MENTION_RE in
+// prose-line-references.ts) by the same convention that kept them in step
+// until now: this list, the two regexes, and their tests change together.
+// Matching is case-sensitive here exactly as in CITATION_RE: a `.GO` span
+// is not a recognised citation there either, so it is reported here.
+const RECOGNISED_EXTS = new Set([
+  "ts",
+  "js",
+  "mjs",
+  "md",
+  "yml",
+  "yaml",
+  "json",
+  "prisma",
+  "go",
+]);
+/**
+ * `extension-unrecognised` (notice): a backtick-delimited
+ * `` `path.ext:N` ``/`` `path.ext:N-M` `` whose extension is not in
+ * `RECOGNISED_EXTS`, reported as a `notice` so a bundle in a repo whose
+ * language this rule does not cover yet (the `.go` bundle that motivated
+ * this: 129 citations into `.go` files, nothing checked them) cannot read
+ * as "clean" in silence. The shape accepted, chosen so the notice fires on
+ * citations and never on the prose look-alikes:
+ *   - the WHOLE span between one pair of backticks must match, so only a
+ *     backticked citation fires: prose `version 1.2:3` is never collected,
+ *     and neither is a backticked URL -- `:` and everything a scheme or a
+ *     path separator needs after it are outside the path character class,
+ *     so `` `https://host.example:8443` `` has no complete path.ext:N
+ *     reading between its backticks;
+ *   - the path must contain a `/` (a directory-qualified relative path) and
+ *     end on a word char before the extension's dot. This is what keeps a
+ *     `host:port` (`db.internal:5432`) from firing: a hostname never
+ *     contains `/`. A path may not start at `/` either: `CITATION_RE` treats
+ *     an absolute citedPath as out of scope without a finding, and the
+ *     notice stays silent where the main scan is silent. The accepted cost:
+ *     a bare, directory-less filename (`main.rs:12`) stays silent -- such a
+ *     single-segment `stem.ext:N` token is indistinguishable from
+ *     `host.tld:port` without a TLD table, and this rule's posture is never
+ *     to guess;
+ *   - the extension is letters/digits, 1-10 chars, at least one letter --
+ *     so `.123` (a version tail, not an extension) never fires -- and not
+ *     already in `RECOGNISED_EXTS`, which makes this scan exactly the
+ *     complement of `CITATION_RE` on this shape: a span this rule already
+ *     checks can never also produce the notice.
+ *   - an optional trailing anchor, the exact group `CITATION_RE` accepts
+ *     (a bracketed/bare word or a quoted string), before the closing
+ *     backtick: the anchored form is the recommended citation form, so
+ *     `` `src/lib.rs:1#"main"` `` must produce the notice just like the
+ *     bare `` `src/lib.rs:1` ``; reusing `CITATION_RE`'s group verbatim
+ *     keeps one grammar, and an anchor with no closing backtick after it
+ *     still produces no notice, exactly as an unparseable anchor produces
+ *     no `CITATION_RE` match.
+ * Chosen as a fixed notice, not a configurable extension list: okf-kit has
+ * no bundle-level config today (see docs/citations.md's note on
+ * `--require-anchors`), and a notice is advisory, never counted toward
+ * `--strict`, so it can surface the gap without breaking any existing
+ * bundle's exit status.
+ */
+const UNRECOGNISED_EXT_CITATION_RE =
+  /`(?!\/)([\w./-]*\/[\w./-]*\w)\.([A-Za-z0-9]{1,10}):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?`/g;
+const HAS_LETTER_RE = /[A-Za-z]/;
 // Short-form (paragraph-bound) citation form, see the "Short-form
 // citations" doc block below. Requires an explicit N-M range: a bare single
 // number (`:5`) is not matched -- see that doc block for why. Only the
@@ -2909,6 +2979,34 @@ function scanDoc(
     );
   }
 
+  // extension-unrecognised (notice): see UNRECOGNISED_EXT_CITATION_RE's doc
+  // block above. The label, like heading-section-malformed's, drops the
+  // delimiting backticks the match itself carries. Unlike the short-form
+  // scan below, reserved docs are NOT carved out: a full citation in
+  // index.md/log.md is checked unconditionally, so an unrecognised one is
+  // reported unconditionally too.
+  {
+    const unrecognisedRe = new RegExp(
+      UNRECOGNISED_EXT_CITATION_RE.source,
+      UNRECOGNISED_EXT_CITATION_RE.flags,
+    );
+    let um: RegExpExecArray | null;
+    while ((um = unrecognisedRe.exec(content)) !== null) {
+      const ext = um[2];
+      if (RECOGNISED_EXTS.has(ext)) continue;
+      if (!HAS_LETTER_RE.test(ext)) continue;
+      pushDrift(
+        findings,
+        doc.relPath,
+        um[0].slice(1, -1),
+        "extension-unrecognised",
+        `extension ".${ext}" is not a recognised citation target extension; the citation is not checked`,
+        undefined,
+        "notice",
+      );
+    }
+  }
+
   // Short-form (paragraph-bound) citations -- see that doc block above.
   // Deliberately independent of `governing`/`lastStartLine`: short-form
   // binding is paragraph-scoped by design, not chained through the
@@ -3168,7 +3266,7 @@ export function collectResolvedCitations(
 export const citationsResolveRule: Rule = {
   id: RULE_ID,
   description:
-    "`path:N`/`path:N-M` citations (recognised target extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json, .prisma; and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. Under spec v0.2 the backticked line numbers or ranges (`N`, `N-M`, `L42-57`) in a footnote definition are also checked against the file named by that footnote's `sources` entry. Mechanical only: does not verify the cited line is semantically correct.",
+    "`path:N`/`path:N-M` citations (recognised target extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json, .prisma, .go; and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. A backtick-delimited `` `path.ext:N` ``/`` `path.ext:N-M` `` whose extension is not recognised (directory-qualified path, extension of 1-10 letters/digits with at least one letter) is reported as an `extension-unrecognised` `notice` saying the citation is not checked; bare prose, URLs and `host:port` shapes are never collected. Under spec v0.2 the backticked line numbers or ranges (`N`, `N-M`, `L42-57`) in a footnote definition are also checked against the file named by that footnote's `sources` entry. Mechanical only: does not verify the cited line is semantically correct.",
   run(ctx) {
     if (!ctx.repoRoot) {
       // Never silently skip: mirrors sources-fresh's posture so a "clean"
