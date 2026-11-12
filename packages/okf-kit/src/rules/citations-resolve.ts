@@ -826,6 +826,14 @@ const RECOGNISED_EXTS = new Set([
  *     already in `RECOGNISED_EXTS`, which makes this scan exactly the
  *     complement of `CITATION_RE` on this shape: a span this rule already
  *     checks can never also produce the notice.
+ *   - an optional trailing anchor, the exact group `CITATION_RE` accepts
+ *     (a bracketed/bare word or a quoted string), before the closing
+ *     backtick: the anchored form is the recommended citation form, so
+ *     `` `src/lib.rs:1#"main"` `` must produce the notice just like the
+ *     bare `` `src/lib.rs:1` ``; reusing `CITATION_RE`'s group verbatim
+ *     keeps one grammar, and an anchor with no closing backtick after it
+ *     still produces no notice, exactly as an unparseable anchor produces
+ *     no `CITATION_RE` match.
  * Chosen as a fixed notice, not a configurable extension list: okf-kit has
  * no bundle-level config today (see docs/citations.md's note on
  * `--require-anchors`), and a notice is advisory, never counted toward
@@ -833,7 +841,7 @@ const RECOGNISED_EXTS = new Set([
  * bundle's exit status.
  */
 const UNRECOGNISED_EXT_CITATION_RE =
-  /`(?!\/)([\w./-]*\/[\w./-]*\w)\.([A-Za-z0-9]{1,10}):(\d+)(?:-(\d+))?`/g;
+  /`(?!\/)([\w./-]*\/[\w./-]*\w)\.([A-Za-z0-9]{1,10}):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?`/g;
 const HAS_LETTER_RE = /[A-Za-z]/;
 // Short-form (paragraph-bound) citation form, see the "Short-form
 // citations" doc block below. Requires an explicit N-M range: a bare single

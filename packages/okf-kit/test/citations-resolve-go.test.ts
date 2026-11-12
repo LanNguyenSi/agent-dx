@@ -12,8 +12,9 @@ import { FIXTURES_DIR, loadFixture } from "./helpers.js";
  * repo carried 129 citations into `.go` files that no check ever looked at,
  * so a warn-only CI job read "clean" without checking them. The fixture
  * bundles the `.go` shapes in the same order as the `.prisma` fixture
- * mirrors the `.ts` controls, plus one backticked `.rs` citation and the
- * look-alike shapes the notice must refuse.
+ * mirrors the `.ts` controls, backticked `.rs`/`.tsx` citations in both the
+ * bare and the recommended anchored form, the anchored recognised forms the
+ * notice must refuse, and the look-alike shapes the notice must refuse.
  */
 
 const GO_ROOT = path.join(FIXTURES_DIR, "citations-resolve-go");
@@ -33,6 +34,20 @@ function findingFor(
 
 function unrecognisedFindings(findings: Finding[]): Finding[] {
   return findings.filter((f) => f.message.includes("[extension-unrecognised]"));
+}
+
+/** `unrecognisedFindings` further narrowed to one exact citation label. */
+function noticesFor(findings: Finding[], citation: string): Finding[] {
+  const prefix = `\`${citation}\`: `;
+  return unrecognisedFindings(findings).filter((f) =>
+    f.message.startsWith(prefix),
+  );
+}
+
+/** Every finding (of any kind) whose label is this exact citation. */
+function findingsFor(findings: Finding[], citation: string): Finding[] {
+  const prefix = `\`${citation}\`: `;
+  return findings.filter((f) => f.message.startsWith(prefix));
 }
 
 describe("citations-resolve .go targets", () => {
@@ -88,9 +103,8 @@ describe("citations-resolve .go targets", () => {
 describe("citations-resolve extension-unrecognised notice", () => {
   it("a backticked `path.ext:N` with an unrecognised extension produces exactly one notice naming the extension and saying the citation is not checked", () => {
     const findings = citationsResolveRule.run(loadGo());
-    const notices = unrecognisedFindings(findings);
+    const notices = noticesFor(findings, "src/lib.rs:12");
     expect(notices).toHaveLength(1);
-    expect(notices[0]?.message).toContain("`src/lib.rs:12`");
     expect(notices[0]?.message).toContain(".rs");
     expect(notices[0]?.message).toContain("the citation is not checked");
     expect(notices[0]?.severity).toBe("notice");
@@ -102,7 +116,7 @@ describe("citations-resolve extension-unrecognised notice", () => {
     // dropped the backtick requirement is visible here under its own label,
     // not hidden behind the backticked one's identical label.
     const findings = citationsResolveRule.run(loadGo());
-    expect(unrecognisedFindings(findings)).toHaveLength(1);
+    expect(noticesFor(findings, "src/lib.rs:12")).toHaveLength(1);
     expect(findings.some((f) => f.message.includes("src/lib.rs:34"))).toBe(
       false,
     );
@@ -143,8 +157,79 @@ describe("citations-resolve extension-unrecognised notice", () => {
 
   it("a recognised .go citation never produces the notice, only its own drift findings", () => {
     const findings = citationsResolveRule.run(loadGo());
+    // Quoted `".go"` (the extension as the notice message spells it) rather
+    // than a bare `.go` substring: the fixture's look-alike labels
+    // (`src/x.gomod:3`, `src/x.go.bak:3`, `src/x.golden:3`) all contain
+    // `.go` as a substring without being `.go` citations.
     expect(
-      unrecognisedFindings(findings).some((f) => f.message.includes(".go")),
+      unrecognisedFindings(findings).some((f) => f.message.includes('".go"')),
     ).toBe(false);
+  });
+
+  it("an anchored .rs citation with a quoted anchor produces exactly one notice", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    const notices = noticesFor(findings, 'src/lib.rs:1#"main"');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.message).toContain('".rs"');
+    expect(notices[0]?.severity).toBe("notice");
+  });
+
+  it("an anchored .rs citation with a bare-word anchor produces exactly one notice", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    const notices = noticesFor(findings, "src/lib.rs:2#main");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.message).toContain('".rs"');
+    expect(notices[0]?.severity).toBe("notice");
+  });
+
+  it("the recommended-form anchored .tsx citation with a punctuation-bearing quoted anchor produces exactly one notice", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    const citation = `src/app/page.tsx:31-33#"router.replace('/login')"`;
+    expect(noticesFor(findings, citation)).toHaveLength(1);
+    expect(
+      findings.some(
+        (f) =>
+          f.message.startsWith(`\`${citation}\`: `) &&
+          !f.message.includes("[extension-unrecognised]"),
+      ),
+    ).toBe(false);
+  });
+
+  it("an anchored recognised .go citation produces no notice and no other finding", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    expect(
+      findingsFor(findings, 'internal/main.go:9-12#"needle in helper"'),
+    ).toHaveLength(0);
+  });
+
+  it("an anchored recognised .ts citation produces no notice and no other finding", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    expect(
+      findingsFor(findings, 'web/app.ts:1-2#"needle in app"'),
+    ).toHaveLength(0);
+  });
+
+  it("`src/x.gomod:3` is never a .go citation: exactly one .gomod notice, nothing else", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    const all = findingsFor(findings, "src/x.gomod:3");
+    expect(all).toHaveLength(1);
+    expect(all[0]?.message).toContain("[extension-unrecognised]");
+    expect(all[0]?.message).toContain('".gomod"');
+  });
+
+  it("`src/x.go.bak:3` is never a .go citation: exactly one .bak notice, nothing else", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    const all = findingsFor(findings, "src/x.go.bak:3");
+    expect(all).toHaveLength(1);
+    expect(all[0]?.message).toContain("[extension-unrecognised]");
+    expect(all[0]?.message).toContain('".bak"');
+  });
+
+  it("`src/x.golden:3` is never a .go citation: exactly one .golden notice, nothing else", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    const all = findingsFor(findings, "src/x.golden:3");
+    expect(all).toHaveLength(1);
+    expect(all[0]?.message).toContain("[extension-unrecognised]");
+    expect(all[0]?.message).toContain('".golden"');
   });
 });

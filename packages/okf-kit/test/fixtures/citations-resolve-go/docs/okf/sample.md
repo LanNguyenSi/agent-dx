@@ -3,6 +3,7 @@ type: reference
 title: Fixture doc for okf-citations-resolve .go targets and the extension-unrecognised notice
 sources:
   - internal/main.go
+  - web/app.ts
 ---
 
 # Sample
@@ -34,3 +35,15 @@ An absolute path (out of scope for the main scan too), no notice: `/srv/src/lib.
 A directory-less single-segment token, no notice: `a.b:3`.
 
 A digits-only extension, no notice: `scripts/tool.123:45`.
+
+Anchored unrecognised `.rs` citation, quoted anchor, exactly one notice: `src/lib.rs:1#"main"`.
+
+Anchored unrecognised `.rs` citation, bare-word anchor, one notice: `src/lib.rs:2#main`.
+
+Anchored unrecognised `.tsx` citation, quoted anchor with punctuation, one notice: `src/app/page.tsx:31-33#"router.replace('/login')"`.
+
+Anchored recognised `.go` citation, no notice: `internal/main.go:9-12#"needle in helper"`.
+
+Anchored recognised `.ts` citation, no notice: `web/app.ts:1-2#"needle in app"`.
+
+CITATION_RE prefix look-alikes, never a `.go` citation: `src/x.gomod:3` gets a `.gomod` notice, `src/x.go.bak:3` gets a `.bak` notice, `src/x.golden:3` gets a `.golden` notice.

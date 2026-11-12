@@ -32,7 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fires only when the whole span between one pair of backticks is such a
   citation, only for a directory-qualified relative path (which is what
   keeps `host:port` from firing), and only for an extension of 1-10
-  letters/digits with at least one letter; bare prose, a URL with a port,
+  letters/digits with at least one letter; the optional `#anchor` of the
+  anchored (recommended) citation form is accepted before the closing
+  backtick, so `` `src/lib.rs:1#"main"` `` fires exactly like the bare
+  `` `src/lib.rs:1` ``; bare prose, a URL with a port,
   and a digits-only extension fire nothing. A notice was chosen over a
   configurable extension list because okf-kit has no bundle-level config
   file today and a notice is advisory, never counted toward `--strict`, so
