@@ -51,5 +51,13 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "overrides": {
+    "eslint": {
+      "minimatch": "11.0.4"
+    },
+    "@eslint/config-array": {
+      "minimatch": "11.0.4"
+    }
   }
 }
