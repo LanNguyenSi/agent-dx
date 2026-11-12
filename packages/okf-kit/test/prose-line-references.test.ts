@@ -23,6 +23,7 @@ const AMBIGUOUS_ROOT = path.join(
 const NEGATIVE_ROOT = path.join(FIXTURES_DIR, "prose-line-references-negative");
 const JSON_EXT_ROOT = path.join(FIXTURES_DIR, "prose-line-references-json-ext");
 const PRISMA_EXT_ROOT = path.join(FIXTURES_DIR, "prose-line-references-prisma");
+const GO_EXT_ROOT = path.join(FIXTURES_DIR, "prose-line-references-go");
 const BINDER_ROOT = path.join(FIXTURES_DIR, "prose-line-references-binder");
 const RANGES_ROOT = path.join(FIXTURES_DIR, "prose-line-references-ranges");
 const RESERVED_ROOT = path.join(FIXTURES_DIR, "prose-line-references-reserved");
@@ -58,6 +59,10 @@ function loadJsonExt() {
 
 function loadPrismaExt() {
   return loadFixture("prose-line-references-prisma/docs/okf", PRISMA_EXT_ROOT);
+}
+
+function loadGoExt() {
+  return loadFixture("prose-line-references-go/docs/okf", GO_EXT_ROOT);
 }
 
 function loadBinder() {
@@ -223,6 +228,40 @@ describe("prose-line-references", () => {
     const findings = proseLineReferencesRule.run(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.message).toContain("[out-of-bounds]");
+  });
+
+  // The `.go` entry in FILE_MENTION_RE's extension alternation must stay in
+  // step with CITATION_RE (see the comment at its definition): a `foo.go`
+  // mention resolves like any other, and `foo.gox` -- an extension this
+  // rule knows nothing about -- must not be matched as a truncated `foo.go`
+  // bound to the real `cmd/old.go` file sitting next to it (the `(?!\w)`
+  // lookahead is what refuses that truncated match).
+  it("a `.go` file mention resolves and its drifted line reference is reported out-of-bounds", () => {
+    const ctx = loadGoExt();
+    ctx.proseLineReferences = { strict: false };
+    const findings = proseLineReferencesRule.run(ctx);
+    const oob = findingsFor("out-of-bounds", findings);
+    expect(oob).toHaveLength(1);
+    expect(oob[0]?.message).toContain("bound to `cmd/server.go`");
+    expect(oob[0]?.severity).toBe("warning");
+  });
+
+  it("a `.gox` file mention is not matched as `.go`: its line reference stays unresolvable, never bound to the real cmd/old.go", () => {
+    const ctx = loadGoExt();
+    ctx.proseLineReferences = { strict: false };
+    const findings = proseLineReferencesRule.run(ctx);
+    const unresolvable = findingsFor("unresolvable", findings);
+    expect(unresolvable).toHaveLength(1);
+    expect(unresolvable[0]?.message).toContain("line 999");
+    expect(unresolvable[0]?.message).toContain(
+      "no file mention could be bound",
+    );
+    expect(unresolvable[0]?.severity).toBe("notice");
+    // The truncated-match mutant binds this reference to the real
+    // `cmd/old.go` instead, producing an `out-of-bounds` warning that names
+    // it; neither may exist for the `.gox` reference.
+    expect(findings.some((f) => f.message.includes("cmd/old.go"))).toBe(false);
+    expect(findings).toHaveLength(2);
   });
 
   // -- binding-rule discrimination (nearest-in-sentence vs. paragraph
