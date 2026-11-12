@@ -98,7 +98,7 @@ Pin the exact version and use a full (non-shallow) checkout; [CI usage](docs/ci.
   with:
     fetch-depth: 0
 - name: OKF bundle check
-  run: npx okf-kit@0.20.0 check path/to/bundle
+  run: npx okf-kit@0.21.0 check path/to/bundle
 ```
 
 ## Documentation

@@ -3,7 +3,7 @@ name: OKF staleness
 # GENERATED FROM THE OKF-KIT TEMPLATE `templates/okf-staleness.yml` of the
 # okf-kit package (LanNguyenSi/agent-dx, packages/okf-kit; the template
 # first ships in the okf-kit release after 0.16.0), pinned to okf-kit
-# 0.20.0 below. Do not hand-edit this file outside the lines marked
+# 0.21.0 below. Do not hand-edit this file outside the lines marked
 # "REPO-SPECIFIC": re-sync it from the template whenever the pin moves.
 # A repo that deviates documents the deviation in a comment block at the
 # deviating spot, next to the REPO-SPECIFIC marker.
@@ -89,7 +89,7 @@ jobs:
         # Evidence: see packages/orchestrator-workflow/docs/okf/log.md.
         shell: bash
         run: |
-          install_cmd=(npm install -g okf-kit@0.20.0 --no-audit --no-fund)
+          install_cmd=(npm install -g okf-kit@0.21.0 --no-audit --no-fund)
           pin="${install_cmd[3]#*okf-kit@}"
 
           view_out="$(mktemp)"
@@ -241,7 +241,7 @@ jobs:
               echo "closing-brace-start-line, missing-file, inverted-range,"
               echo "range-exceeds-file, path-traversal-rejected) means a"
               echo "\`path:N\`/\`path:N-M\` citation (recognised"
-              echo "extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json, .prisma)"
+              echo "extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json, .prisma, .go)"
               echo "in the doc's prose no longer points at real content, even"
               echo "though the source file itself is not stale: re-check the"
               echo "citation against the file's current line numbers and"
