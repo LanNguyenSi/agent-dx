@@ -528,7 +528,7 @@ program
 program
   .command("init [dir]")
   .description(
-    "Scaffold a starter OKF v0.1 knowledge bundle (default target: docs/okf)",
+    "Scaffold a starter OKF knowledge bundle (v0.1 by default, v0.2 with --spec v0.2; default target: docs/okf)",
   )
   .option(
     "-f, --force",

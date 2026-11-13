@@ -64,7 +64,7 @@ workflows' outcome.
 flowchart TD
   subgraph PUBWF["publish-npm.yml"]
     TAG["push one tag pkg/vX.Y.Z"] --> PARSE["parse job:<br/>semver, PUBLISHABLE"]
-    PARSE -->|"needs: parse"| PUB["publish job:<br/>version equals tag, build, test"]
+    PARSE -->|"needs: parse"| PUB["publish job:<br/>tag commit on master, version equals tag, build, test"]
     PUB -.->|version already on the registry| ATT["assert dist.attestations"]
     PUB --> OIDC["npm publish --provenance<br/>OIDC, no token"]
     OIDC -.->|non-zero exit but version landed| ATT
@@ -95,7 +95,9 @@ Every package that `publish-npm.yml` publishes is released the same way:
 3. `node scripts/check-release-changelogs.mjs --base origin/master` from the
    repo root and confirm it exits 0.
 4. Open the PR and squash merge.
-5. Push one annotated tag `<package>/v<new-version>` per `git push`. GitHub
+5. Push one annotated tag `<package>/v<new-version>` per `git push`, pointing
+   at the squash-merged commit on master; a tag on any other commit fails the
+   publish job before `npm ci`. GitHub
    turns a multi-tag push into one push event, and `publish-npm.yml` then
    publishes only one of the tags.
 6. If `latest` ends up on an older version because two publish runs finished

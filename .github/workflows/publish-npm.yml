@@ -102,12 +102,15 @@ jobs:
           fetch-depth: 0
 
       - name: Verify tagged commit is on master
-        # Runs before any repository code executes (npm ci, build, test), so
-        # a tag pushed on a side branch cannot reach the publish step or run
-        # its scripts with the id-token. HEAD is the commit the tag resolves
-        # to (checkout ref above), for the push and the workflow_dispatch
-        # path alike. Master is fetched explicitly rather than trusting what
-        # the checkout happened to bring.
+        # Runs before any repository code executes (npm ci, build, test).
+        # It stops an accidental or unmodified side-branch tag from
+        # publishing. It is not a boundary against someone with write access
+        # who edits this workflow on the tagged ref; operator-side controls
+        # are a tag ruleset and/or a protected environment bound in the npm
+        # Trusted Publisher entry. HEAD is the commit the tag resolves to
+        # (checkout ref above), for the push and the workflow_dispatch path
+        # alike. Master is fetched explicitly rather than trusting what the
+        # checkout happened to bring.
         run: |
           git fetch --no-tags origin master:refs/remotes/origin/master
           head_sha=$(git rev-parse HEAD)
