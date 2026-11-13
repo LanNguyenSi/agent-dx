@@ -1953,6 +1953,18 @@ escape codes break the anchored summary line, so such output keeps the
 old fallback behaviour (the generic byte-identical comparison)
 unchanged.
 
+`go test`'s package result line is recognized too: `ok <pkg> <time>s`,
+`ok <pkg> (cached)`, `FAIL <pkg> <time>s`, with or without the `-cover`
+tail, at a line start and with both separators inside the line. A second
+run of the same plan prints the `(cached)` form on both sides, so the two
+tails are byte-identical; recognizing the line keeps the generic fallback
+away and a green go mutant reads `survived` on every run. Go has no
+zero-tests detector: a filter that selects no tests (`ok <pkg> 0.1s [no
+tests to run]`) is recognized as a package line as well and reads
+`survived`, not `not_run`. A go package line also counts as a test runner
+summary for the tsc build-failure rule, so a type error printed next to it
+is not reported as a build failure.
+
 With no `--timeout` given and a test command that looks like a whole test
 suite rather than one targeted file -- `npm test`, `npm run test`/`npm
 run test:<anything>`, `yarn test`, `pnpm test` (each with nothing after
