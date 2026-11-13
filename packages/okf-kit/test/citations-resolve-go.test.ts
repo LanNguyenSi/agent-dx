@@ -12,9 +12,11 @@ import { FIXTURES_DIR, loadFixture } from "./helpers.js";
  * repo carried 129 citations into `.go` files that no check ever looked at,
  * so a warn-only CI job read "clean" without checking them. The fixture
  * bundles the `.go` shapes in the same order as the `.prisma` fixture
- * mirrors the `.ts` controls, backticked `.rs`/`.tsx` citations in both the
- * bare and the recommended anchored form, the anchored recognised forms the
- * notice must refuse, and the look-alike shapes the notice must refuse.
+ * mirrors the `.ts` controls, backticked `.rs` citations in both the
+ * bare and the recommended anchored form (and a `.tsx` one, kept to show
+ * the recognised extension set now absorbs it), the anchored recognised
+ * forms the notice must refuse, and the look-alike shapes the notice must
+ * refuse.
  */
 
 const GO_ROOT = path.join(FIXTURES_DIR, "citations-resolve-go");
@@ -182,17 +184,18 @@ describe("citations-resolve extension-unrecognised notice", () => {
     expect(notices[0]?.severity).toBe("notice");
   });
 
-  it("the recommended-form anchored .tsx citation with a punctuation-bearing quoted anchor produces exactly one notice", () => {
+  it("the recommended-form anchored .tsx citation is now a RECOGNISED target: no notice, only the main scan's own finding", () => {
+    // `.tsx` joined the recognised extension set (see
+    // citations-resolve-tsx.test.ts); this fixture has no page.tsx file, so
+    // the citation goes through the ordinary path and lands on
+    // missing-file -- proof that a `.tsx` span is no longer diverted to the
+    // unrecognised scan.
     const findings = citationsResolveRule.run(loadGo());
     const citation = `src/app/page.tsx:31-33#"router.replace('/login')"`;
-    expect(noticesFor(findings, citation)).toHaveLength(1);
-    expect(
-      findings.some(
-        (f) =>
-          f.message.startsWith(`\`${citation}\`: `) &&
-          !f.message.includes("[extension-unrecognised]"),
-      ),
-    ).toBe(false);
+    expect(noticesFor(findings, citation)).toHaveLength(0);
+    const all = findingsFor(findings, citation);
+    expect(all).toHaveLength(1);
+    expect(all[0]?.message).toContain("[missing-file]");
   });
 
   it("an anchored recognised .go citation produces no notice and no other finding", () => {

@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `citations-resolve` and `prose-line-references` now recognise `.tsx`
+  among their citation target extensions, the same way `.go` joined them:
+  a `` `path:N` ``/`` `path:N-M` `` citation into a `.tsx` file is
+  collected and checked like the same citation into `.ts`, a `foo.tsx`
+  file mention binds a prose line reference the same way, and `foo.tsx2`
+  is still not matched as `foo.tsx`. `.tsx` is also a closing-brace
+  target, and the closing-only grammar now covers the JSX shapes a cited
+  line can land on: a start line that is only `/>`, a `</div>`-style
+  named closer, `</>`, or `)}` is flagged `closing-brace-start-line`
+  exactly like a lone `}`, and the same tokens are closing boilerplate
+  for the opt-in `anchor-not-on-last-line` check exactly like `}`.
+  `TEST_FILE_RE` grew to match `.test.tsx`/`.spec.tsx` and Go's `_test.go`
+  naming convention, so the short-form test-range boundary check applies
+  to those targets too (Go test files are checked against the existing
+  `describe(`/`it(` head grammar; Go's `func TestXxx` heads are a known
+  gap).
+
+### Fixed
+
+- Three citation shapes `citations-resolve` used to skip in silence now
+  report the `extension-unrecognised` `notice` (same code as the
+  directory-qualified one -- every one of these spans is the same fact, a
+  backticked citation whose extension this rule does not check -- so
+  triage stays a single grep): a directory-less citation in RANGE form
+  (`` `install.sh:561-618` ``) or ANCHORED form, the same shapes with a
+  malformed `#anchor` (an unterminated quote or a trailing bare `#`,
+  mirroring `anchor-malformed`'s posture for recognised extensions), and
+  a continuation (`` `:20` ``, `` -`30` ``, `` (`40`) ``) written after an
+  unrecognised citation, which used to be silently checked against
+  whatever recognised file was cited before it and now, like a
+  continuation after any citation this rule refused, resolves against
+  nothing. The bare directory-less single number (`` `foo.sh:12` ``)
+  stays silent, because it is the `host:port` shape; a directory-less
+  RANGE whose extension is one of the original seven generic TLDs or the
+  reserved `.internal` pseudo-TLD   stays silent unanchored too, so
+  `` `example.com:80-90` `` does not fire, while `install.sh` keeps
+  firing -- two-letter extensions are deliberately outside the silent
+  list because `.sh`, this feature's motivating example, is also a
+  country code. See [Citation resolution](docs/citations.md).
+
 ### Changed
 
 - The `templates/okf-staleness.yml` job now sets `timeout-minutes: 10`, so a

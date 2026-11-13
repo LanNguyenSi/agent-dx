@@ -38,8 +38,9 @@ const RULE_ID = "citations-resolve";
  *   - the start line is blank
  *   - for non-markdown targets only, the start line is only a closing
  *     brace/bracket/paren (`}`, `)`, `]`, optionally with a trailing `,`/`;`)
- *     -- a common signature of "the cited block moved and this now points at
- *     the line right after it used to end"
+ *     or a JSX closing-only token (`/>`, `</>`, `</div>`-style closer,
+ *     `)}`) -- a common signature of "the cited block moved and this now
+ *     points at the line right after it used to end"
  *
  * What it does NOT check: whether the cited line is semantically the right
  * one (that needs the actual symbol; out of scope for a warn-only mechanical
@@ -48,7 +49,8 @@ const RULE_ID = "citations-resolve";
  * delimited `` `path.ext:N` ``/`` `path.ext:N-M` `` span whose extension is
  * unrecognised reports an `extension-unrecognised` `notice` (see
  * `UNRECOGNISED_EXT_CITATION_RE` below for the shape it accepts and the
- * shapes it deliberately refuses).
+ * shapes it deliberately refuses, including the directory-less and
+ * malformed-anchor forms added alongside `.tsx`).
  *
  * Hard-wrapped prose. Some docs hard-wrap prose at a fixed column, which can
  * split a hyphenated filename like `run-state-lifecycle-and-markers.md`
@@ -135,9 +137,13 @@ const RULE_ID = "citations-resolve";
  * Each of these resolves against `governing`: the nearest *preceding*
  * citation (full or itself a continuation) that resolved to a real file,
  * scanned in document order. `governing` resets to none whenever the
- * citation immediately before it failed to resolve, was ambiguous, or was
- * out of scope (leading `/`) -- a continuation never silently inherits a
- * stale or unrelated path from further up the doc. In `log.md` only,
+ * citation immediately before it failed to resolve, was ambiguous, was
+ * out of scope (leading `/`), or was an `extension-unrecognised` citation
+ * (see `collectUnrecognisedExtMatches` -- this rule knows the citation is
+ * there and refuses to check it, so it must not let its continuation be
+ * checked against the previous, unrelated file either) -- a continuation
+ * never silently inherits a stale or unrelated path from further up the
+ * doc. In `log.md` only,
  * `governing` is additionally scoped per entry (the same entry boundary as
  * step 5 above): a continuation in one entry never chains to a citation in
  * another, so a full path in a newer entry does not govern an older entry's
@@ -565,15 +571,27 @@ function findEnclosingHeading(
   return null;
 }
 
+// The JSX/TSX closing-only tokens -- a self-closing `/>`, a fragment
+// closer `</>`, a named element/component closer such as `</div>` or
+// `</Foo>`, and the `)}` that closes a JSX expression container opened on
+// an earlier line -- treated as closing boilerplate exactly the way a lone
+// `}` is: the same four token shapes are repeated, by the same
+// change-together convention that keeps the extension regexes in step, in
+// both `CLOSING_BOILERPLATE_RE` below and `CLOSING_BRACE_RE` further
+// down. Each appears here as a whole trimmed line, optionally with a
+// trailing `,`/`;`.
+//
 // A trimmed line composed of nothing but closing brackets/braces/parens
-// plus an optional trailing `,`/`;` -- bare closing boilerplate like `}`,
-// `});`, `]);`, `}),`. Used only by `lastContentLineInRange` (opt-in
+// (or one of the JSX closing-only tokens) plus an optional trailing
+// `,`/`;` -- bare closing boilerplate like `}`, `});`, `]);`, `}),`, `/>`,
+// `</div>`, `</>`, `)}`. Used only by `lastContentLineInRange` (opt-in
 // `anchor-not-on-last-line`, see there): a range that ends on such a line
 // (the common shape of a `});` that closes a whole cited `describe`/`it`
 // block) should not force the anchor onto that boilerplate line itself --
 // the last CONTENT line before it is the meaningful place for an anchor
 // to live.
-const CLOSING_BOILERPLATE_RE = /^[\]\)\};,]*$/;
+const CLOSING_BOILERPLATE_RE =
+  /^(?:[\]\)\};,]*|(?:\/>|<\/>|\)\}|<\/[A-Za-z][\w.:-]*>)[;,]?)$/;
 
 function isContentLine(text: string): boolean {
   const trimmed = text.trim();
@@ -677,7 +695,7 @@ function checkAnchor(
 // can exclude a real citations-resolve citation span from its own
 // extraction, rather than re-deriving this grammar itself.
 export const CITATION_RE =
-  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json|prisma|go)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
+  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json|prisma|go|tsx)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
 
 /**
  * Heading-section citations. A CHANGELOG.md that grows by insertion at the
@@ -777,8 +795,16 @@ const CLOSING_ONLY_EXTS = new Set([
   "json",
   "prisma",
   "go",
+  "tsx",
 ]);
-const CLOSING_BRACE_RE = /^[)\]}][;,]?$/;
+// `}`-family closing tokens (an optional trailing `,`/`;`), plus the
+// JSX/TSX closing-only tokens `/>`, `</>`, `</div>`-style named closers and
+// `)}` -- a citation whose START line is only one of these is flagged
+// `closing-brace-start-line` in a CLOSING_ONLY_EXTS target, JSX closers
+// treated exactly like the lone `}` they close down to. `});` (a full
+// block close) deliberately stays outside this grammar, as before: only
+// the single-token shapes are the drift signature here.
+const CLOSING_BRACE_RE = /^(?:[)\]}]|\/>|<\/>|\)\}|<\/[A-Za-z][\w.:-]*>)[;,]?$/;
 // `extension-unrecognised` (notice): the extension set CITATION_RE
 // recognises, spelled out as a set for the no-silent-skip scan below, kept
 // in step with CITATION_RE's alternation (and with FILE_MENTION_RE in
@@ -796,6 +822,7 @@ const RECOGNISED_EXTS = new Set([
   "json",
   "prisma",
   "go",
+  "tsx",
 ]);
 /**
  * `extension-unrecognised` (notice): a backtick-delimited
@@ -811,16 +838,25 @@ const RECOGNISED_EXTS = new Set([
  *     path separator needs after it are outside the path character class,
  *     so `` `https://host.example:8443` `` has no complete path.ext:N
  *     reading between its backticks;
- *   - the path must contain a `/` (a directory-qualified relative path) and
- *     end on a word char before the extension's dot. This is what keeps a
- *     `host:port` (`db.internal:5432`) from firing: a hostname never
- *     contains `/`. A path may not start at `/` either: `CITATION_RE` treats
- *     an absolute citedPath as out of scope without a finding, and the
- *     notice stays silent where the main scan is silent. The accepted cost:
- *     a bare, directory-less filename (`main.rs:12`) stays silent -- such a
- *     single-segment `stem.ext:N` token is indistinguishable from
- *     `host.tld:port` without a TLD table, and this rule's posture is never
- *     to guess;
+ *   - a directory-qualified path (one containing a `/`, ending on a word
+ *     char before the extension's dot) fires in every numeric form. A path
+ *     may not start at `/` either: `CITATION_RE` treats an absolute
+ *     citedPath as out of scope without a finding, and the notice stays
+ *     silent where the main scan is silent.
+ *   - a directory-LESS path (`install.sh:561-618`) fires in the RANGE form
+ *     and in the ANCHORED form (`` `deploy.sh:5#"install"` ``), but NOT in
+ *     the bare single-number form: a single-segment `stem.ext:N` token is
+ *     indistinguishable from `host.tld:port` (`db.internal:5432`) and this
+ *     rule's posture is never to guess. A range is a weaker collision --
+ *     `host:port-range` prose is rare -- so it fires, with one carve-out:
+ *     an extension that is one of the original seven generic TLDs (or the
+ *     reserved `.internal` pseudo-TLD), spelled `HOSTNAME_TLD_RE` below,
+ *     stays silent unanchored, because `` `example.com:80-90` `` is far
+ *     more likely a host with a port range than a file named `example.com`
+ *     with 90 lines. Country-code and new gTLDs are deliberately NOT in
+ *     the list: `.sh` scripts are this feature's motivating example and
+ *     `.sh` is also a ccTLD, so trusting two-letter extensions would
+ *     silence the case the notice exists for.
  *   - the extension is letters/digits, 1-10 chars, at least one letter --
  *     so `.123` (a version tail, not an extension) never fires -- and not
  *     already in `RECOGNISED_EXTS`, which makes this scan exactly the
@@ -831,17 +867,61 @@ const RECOGNISED_EXTS = new Set([
  *     backtick: the anchored form is the recommended citation form, so
  *     `` `src/lib.rs:1#"main"` `` must produce the notice just like the
  *     bare `` `src/lib.rs:1` ``; reusing `CITATION_RE`'s group verbatim
- *     keeps one grammar, and an anchor with no closing backtick after it
- *     still produces no notice, exactly as an unparseable anchor produces
- *     no `CITATION_RE` match.
+ *     keeps one grammar.
+ *   - an anchor that is there but does NOT parse (`` `src/lib.rs:1#"unterm` ``
+ *     with its unterminated quote, or a lone trailing `#`) also fires, via
+ *     `UNRECOGNISED_EXT_MALFORMED_ANCHOR_RE`: the no-silent-skip posture
+ *     applies to a malformed citation attempt just as much as to a
+ *     well-formed one, and this mirrors `anchor-malformed`'s and
+ *     `heading-section-malformed`'s "still-visible-as-a-notice" stance for
+ *     recognised extensions. A span already collected by the well-formed
+ *     regexes is gated out, so one citation yields at most one notice. An
+ *     `#` with no closing backtick after it still produces no notice,
+ *     exactly as an unparseable anchor produces no `CITATION_RE` match.
+ * The notice also resets the continuation governor (see the atom loop in
+ * `scanDoc`): a `` `:20` `` written after an unrecognised citation must
+ * not be silently checked against whatever recognised file was cited
+ * before it.
  * Chosen as a fixed notice, not a configurable extension list: okf-kit has
  * no bundle-level config today (see docs/citations.md's note on
  * `--require-anchors`), and a notice is advisory, never counted toward
  * `--strict`, so it can surface the gap without breaking any existing
- * bundle's exit status.
+ * bundle's exit status. The directory-less range/anchor and
+ * malformed-anchor forms deliberately REUSE this same
+ * `extension-unrecognised` code rather than minting new ones: every one
+ * of these spans is the same fact -- a backticked citation whose
+ * extension this rule does not check -- and one code keeps bundle
+ * authors' triage (`rg extension-unrecognised`) down to a single grep.
  */
 const UNRECOGNISED_EXT_CITATION_RE =
   /`(?!\/)([\w./-]*\/[\w./-]*\w)\.([A-Za-z0-9]{1,10}):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?`/g;
+/**
+ * Companion to `UNRECOGNISED_EXT_CITATION_RE` for the DIRECTORY-LESS form
+ * (same groups, path class without `/`). Only RANGE and ANCHORED matches
+ * survive -- a bare single number is the `host:port` shape (see the doc
+ * block above), and the HOSTNAME_TLD_RE carve-out below silences the
+ * range-only `example.com:80-90` look-alike.
+ */
+const UNRECOGNISED_EXT_DIRLESS_RE =
+  /`(?!\/)([\w.-]*\w)\.([A-Za-z0-9]{1,10}):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?`/g;
+// The original seven generic TLDs plus the reserved `.internal` pseudo-TLD
+// (a hostname convention this package's own docs already use). See the
+// doc block above for why nothing two-letter/new-gTLD is in here.
+const HOSTNAME_TLD_RE = /^(?:com|edu|gov|int|mil|net|org|internal)$/i;
+/**
+ * Third companion of the scan: an unrecognised-extension citation whose
+ * `#` anchor is present but unparseable (unterminated quote, trailing
+ * bare `#`, stray text after a closed quote). Like
+ * `HEADING_SECTION_MALFORMED_RE` for the heading-section form, it accepts
+ * anything up to the closing backtick after the `#`, so the attempt is
+ * reported instead of silently vanishing; matches whose span overlaps a
+ * well-formed match (a well-formed anchored citation also matches this
+ * regex) are gated out. Both path shapes are in scope; a directory-less
+ * match here always carries a `#`, which is the anchored form the
+ * directory-less scan accepts.
+ */
+const UNRECOGNISED_EXT_MALFORMED_ANCHOR_RE =
+  /`(?!\/)([\w./-]*\w)\.([A-Za-z0-9]{1,10}):(\d+)(?:-(\d+))?#([^`\n]*)`/g;
 const HAS_LETTER_RE = /[A-Za-z]/;
 // Short-form (paragraph-bound) citation form, see the "Short-form
 // citations" doc block below. Requires an explicit N-M range: a bare single
@@ -851,10 +931,16 @@ const HAS_LETTER_RE = /[A-Za-z]/;
 // dropped rather than gated.
 const SHORT_FORM_COLON_RE = /:(\d+)-(\d+)/g;
 // Test-file block-boundary check (see checkRangeBoundary): a citation's
-// range into a `.test.ts`/`.spec.ts` (or `.js`/`.mjs` equivalent) target
-// must start on a describe(/it( head line and end on its matching closing
-// `});` line.
-const TEST_FILE_RE = /\.(test|spec)\.(ts|js|mjs)$/i;
+// range into a `.test.ts`/`.spec.ts` target (`.js`/`.mjs`/`.tsx`
+// equivalents, and Go's `_test.go` naming convention) must start on a
+// describe(/it( head line and end on its matching closing `});` line. A
+// `_test.go` target is therefore held to that same JS/TS-shaped head and
+// closing grammar -- Go's `func TestXxx(t *testing.T)` heads are not (yet)
+// recognised, so a short-form range into a Go test file is reported
+// `test-range-start-not-head` unless it happens to sit on a describe/it
+// line: treating the file as a test file at all is the point, the
+// Go-shaped head grammar is a known gap.
+const TEST_FILE_RE = /(\.(test|spec)\.(ts|js|mjs|tsx)|_test\.go)$/i;
 const TEST_HEAD_LINE_RE = /^\s*(?:describe|it)\s*\(/;
 const TEST_CLOSING_LINE_RE = /^\s*\}\)\s*;\s*$/;
 // Block-head detection for test-range-straddles-block (see the doc block
@@ -987,6 +1073,17 @@ type Atom =
       index: number;
       value: number;
       // See "cont-fresh"'s `raw` above -- e.g. `` -`85` `` or `` `:85` ``.
+      raw: string;
+    }
+  | {
+      kind: "unrecognised";
+      index: number;
+      // A backticked citation with an extension this rule does not check
+      // (see collectUnrecognisedExtMatches). It carries no lines and
+      // produces no findings of its own from the atom loop -- it exists in
+      // `atoms` only so its document position can RESET the continuation
+      // governor: a `:N` continuation written after it must not be
+      // attributed to the last recognised citation instead.
       raw: string;
     };
 
@@ -1955,6 +2052,71 @@ function collectContinuationAtoms(content: string): Atom[] {
 }
 
 /**
+ * Every `extension-unrecognised` notice candidate in `content`, in document
+ * order: the directory-qualified forms, the directory-less RANGE/ANCHORED
+ * forms (with the `host:port` and HOSTNAME_TLD refusals), and the
+ * malformed-anchor companions, gated against double-reporting a span a
+ * well-formed scan already claimed -- all three regexes' shared filters
+ * (recognised extension, digits-only extension) applied here so the
+ * `RECOGNISED_EXTS` complement holds for every one of them. Collected once
+ * per doc so the same list both feeds the atom loop (as governor-reset
+ * points, see the "unrecognised" Atom variant) and drives the notice
+ * emission in scanDoc, rather than the regexes being re-scanned twice with
+ * a chance to drift.
+ */
+function collectUnrecognisedExtMatches(
+  content: string,
+): Array<{ index: number; end: number; label: string; ext: string }> {
+  const out: Array<{ index: number; end: number; label: string; ext: string }> =
+    [];
+  const wellFormedSpans: Array<[number, number]> = [];
+  for (const spec of [
+    { re: UNRECOGNISED_EXT_CITATION_RE, dirless: false },
+    { re: UNRECOGNISED_EXT_DIRLESS_RE, dirless: true },
+  ]) {
+    const re = new RegExp(spec.re.source, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content)) !== null) {
+      const ext = m[2];
+      if (RECOGNISED_EXTS.has(ext)) continue;
+      if (!HAS_LETTER_RE.test(ext)) continue;
+      if (spec.dirless) {
+        const hasAnchor = m[5] !== undefined;
+        if (m[4] === undefined && !hasAnchor) continue; // bare `foo.sh:12`: the host:port shape, stays silent
+        if (!hasAnchor && HOSTNAME_TLD_RE.test(ext)) continue; // `example.com:80-90`
+      }
+      wellFormedSpans.push([m.index, m.index + m[0].length]);
+      out.push({
+        index: m.index,
+        end: m.index + m[0].length,
+        // The label, like heading-section-malformed's, drops the
+        // delimiting backticks the match itself carries.
+        label: m[0].slice(1, -1),
+        ext,
+      });
+    }
+  }
+  const malformedRe = new RegExp(
+    UNRECOGNISED_EXT_MALFORMED_ANCHOR_RE.source,
+    "g",
+  );
+  let mm: RegExpExecArray | null;
+  while ((mm = malformedRe.exec(content)) !== null) {
+    if (isWithinAnySpan(mm.index, wellFormedSpans)) continue;
+    const ext = mm[2];
+    if (RECOGNISED_EXTS.has(ext)) continue;
+    if (!HAS_LETTER_RE.test(ext)) continue;
+    out.push({
+      index: mm.index,
+      end: mm.index + mm[0].length,
+      label: mm[0].slice(1, -1),
+      ext,
+    });
+  }
+  return out.sort((a, b) => a.index - b.index);
+}
+
+/**
  * Short-form citations. A BARE (no surrounding backtick) colon-range
  * `:N-M`, distinct from the backtick continuations above. Unlike a
  * continuation, which chains off `governing` -- the nearest PRECEDING
@@ -2539,6 +2701,15 @@ function scanDoc(
     headingSectionSpans.push([hm.index, hm.end]);
   }
 
+  // Unrecognised-extension citations are collected up front so their
+  // document positions can join the atom loop below: each one RESETS the
+  // continuation governor, the same way a failed/skipped/ambiguous
+  // citation already does -- a continuation written right after a citation
+  // this rule refused to check must not be attributed to whatever
+  // recognised file was cited before it. The same list drives the
+  // `extension-unrecognised` notice emission further down.
+  const unrecognisedMatches = collectUnrecognisedExtMatches(content);
+
   const fullAtoms: Atom[] = [];
   // Char spans of every matched full citation, used to keep short-form
   // matching (see collectShortFormMatches) from re-matching the tail of a
@@ -2586,9 +2757,15 @@ function scanDoc(
     fullSpans.push([m.index, matchEnd]);
   }
 
-  const atoms = [...fullAtoms, ...collectContinuationAtoms(content)].sort(
-    (a, b) => a.index - b.index,
-  );
+  const atoms = [
+    ...fullAtoms,
+    ...collectContinuationAtoms(content),
+    ...unrecognisedMatches.map((u): Atom => ({
+      kind: "unrecognised",
+      index: u.index,
+      raw: u.label,
+    })),
+  ].sort((a, b) => a.index - b.index);
 
   // `governing`: nearest preceding citation (full or continuation) that
   // resolved to a real file; see the "Continuation citations" doc block
@@ -2625,6 +2802,20 @@ function scanDoc(
       governing = null;
       lastStartLine = null;
       governingScopeStart = null;
+    }
+
+    // An `extension-unrecognised` citation is a governor reset, not an
+    // atom to check (its notice is pushed from `unrecognisedMatches` after
+    // the loop): a continuation written after it must not be attributed to
+    // the last RECOGNISED citation, which may name an entirely different
+    // file -- checking `:99` against it would report drift the doc never
+    // claimed. Same posture as a failed/ambiguous/out-of-scope citation
+    // above; the notice itself says the citation is not checked.
+    if (atom.kind === "unrecognised") {
+      governing = null;
+      lastStartLine = null;
+      governingScopeStart = null;
+      continue;
     }
 
     if (atom.kind === "cont-ext") {
@@ -2980,31 +3171,24 @@ function scanDoc(
   }
 
   // extension-unrecognised (notice): see UNRECOGNISED_EXT_CITATION_RE's doc
-  // block above. The label, like heading-section-malformed's, drops the
-  // delimiting backticks the match itself carries. Unlike the short-form
-  // scan below, reserved docs are NOT carved out: a full citation in
-  // index.md/log.md is checked unconditionally, so an unrecognised one is
-  // reported unconditionally too.
-  {
-    const unrecognisedRe = new RegExp(
-      UNRECOGNISED_EXT_CITATION_RE.source,
-      UNRECOGNISED_EXT_CITATION_RE.flags,
+  // block above; `collectUnrecognisedExtMatches` (called up front, so the
+  // atom loop could use the same spans as governor resets) has already
+  // applied the RECOGNISED_EXTS/HAS_LETTER filters and the directory-less
+  // host:port and malformed-anchor gating. The label, like
+  // heading-section-malformed's, drops the delimiting backticks the match
+  // itself carries. Unlike the short-form scan below, reserved docs are NOT
+  // carved out: a full citation in index.md/log.md is checked
+  // unconditionally, so an unrecognised one is reported unconditionally too.
+  for (const um of unrecognisedMatches) {
+    pushDrift(
+      findings,
+      doc.relPath,
+      um.label,
+      "extension-unrecognised",
+      `extension ".${um.ext}" is not a recognised citation target extension; the citation is not checked`,
+      undefined,
+      "notice",
     );
-    let um: RegExpExecArray | null;
-    while ((um = unrecognisedRe.exec(content)) !== null) {
-      const ext = um[2];
-      if (RECOGNISED_EXTS.has(ext)) continue;
-      if (!HAS_LETTER_RE.test(ext)) continue;
-      pushDrift(
-        findings,
-        doc.relPath,
-        um[0].slice(1, -1),
-        "extension-unrecognised",
-        `extension ".${ext}" is not a recognised citation target extension; the citation is not checked`,
-        undefined,
-        "notice",
-      );
-    }
   }
 
   // Short-form (paragraph-bound) citations -- see that doc block above.
@@ -3266,7 +3450,7 @@ export function collectResolvedCitations(
 export const citationsResolveRule: Rule = {
   id: RULE_ID,
   description:
-    "`path:N`/`path:N-M` citations (recognised target extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json, .prisma, .go; and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. A backtick-delimited `` `path.ext:N` ``/`` `path.ext:N-M` `` whose extension is not recognised (directory-qualified path, extension of 1-10 letters/digits with at least one letter) is reported as an `extension-unrecognised` `notice` saying the citation is not checked; bare prose, URLs and `host:port` shapes are never collected. Under spec v0.2 the backticked line numbers or ranges (`N`, `N-M`, `L42-57`) in a footnote definition are also checked against the file named by that footnote's `sources` entry. Mechanical only: does not verify the cited line is semantically correct.",
+    "`path:N`/`path:N-M` citations (recognised target extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json, .prisma, .go, .tsx; and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. A backtick-delimited `` `path.ext:N` ``/`` `path.ext:N-M` `` whose extension is not recognised (directory-qualified path in any form; a directory-less one in the range or anchored form, except a `host.tld:port-range` look-alike) is reported as an `extension-unrecognised` `notice` saying the citation is not checked; a malformed `#anchor` on such a citation is reported the same way; bare prose, URLs, the bare directory-less single number and `host:port` shapes are never collected. Under spec v0.2 the backticked line numbers or ranges (`N`, `N-M`, `L42-57`) in a footnote definition are also checked against the file named by that footnote's `sources` entry. Mechanical only: does not verify the cited line is semantically correct.",
   run(ctx) {
     if (!ctx.repoRoot) {
       // Never silently skip: mirrors sources-fresh's posture so a "clean"
