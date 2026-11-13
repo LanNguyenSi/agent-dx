@@ -4,6 +4,7 @@ title: Fixture doc for okf-citations-resolve .tsx targets, JSX closing lines, di
 sources:
   - src/App.tsx
   - src/App.test.tsx
+  - src/tmpl.ts
   - internal/main_test.go
 ---
 
@@ -43,8 +44,18 @@ Directory-less single-number citation stays silent, it is the host:port shape: `
 
 Host and port look-alikes stay silent, single and range form: `localhost:8080`, `db.internal:5432`, `example.com:80-90`, `db.internal:1-1024`.
 
+Directory-less ANCHORED citation on a TLD extension, anchored so the host carve-out does not apply, one notice: `example.com:5#"x"`.
+
 Malformed anchors on unrecognised extensions, notices rather than silence: `src/lib.rs:1#"unterminated` and `src/lib.rs:2#`.
 
 Test-file targets: `src/App.test.tsx:3-7`, and :3-7, and :5-6, and :4-5.
 
-Go test files count as test files too: `internal/main_test.go:5`, and :9-13.
+Go test files count as test files too, with Go's own head/closing grammar: `internal/main_test.go:5`, and :9-13, and :10-12, and :9-11, and :9-12, and :15-19, and :21-23, and :25-27.
+
+Under `--require-anchors` a full Go range that runs from one func head into the next straddles a block: `internal/main_test.go:9-19`, while the whole-func `internal/main_test.go:9-13` and `internal/main_test.go:21-23` do not.
+
+A silent directory-less single-number token still resets the chain without a notice: `src/App.tsx:5`, then `foo.sh:12`, then `:999` must not be attributed to the `.tsx` file.
+
+A TLD-silenced range resets the chain without a notice too: `src/App.tsx:5`, then `example.com:80-90`, then `:996` must not be attributed to the `.tsx` file.
+
+A JSX closer start line is flagged in a non-JSX `.ts` target too, it is closing-only content in a template literal: `src/tmpl.ts:3`.

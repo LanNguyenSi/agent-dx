@@ -22,9 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for the opt-in `anchor-not-on-last-line` check exactly like `}`.
   `TEST_FILE_RE` grew to match `.test.tsx`/`.spec.tsx` and Go's `_test.go`
   naming convention, so the short-form test-range boundary check applies
-  to those targets too (Go test files are checked against the existing
-  `describe(`/`it(` head grammar; Go's `func TestXxx` heads are a known
-  gap).
+  to those targets too, each held to its own file kind's grammar: Go test
+  files to a `func TestXxx(`/`Benchmark`/`Fuzz`/`Example` head line and a
+  closing line that is exactly `}` once trimmed (instead of the JS/TS
+  `describe(`/`it(` head and `});` close), and the opt-in
+  `test-range-straddles-block` check selects the same grammar by file kind.
 
 ### Fixed
 
@@ -47,7 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `` `example.com:80-90` `` does not fire, while `install.sh` keeps
   firing -- two-letter extensions are deliberately outside the silent
   list because `.sh`, this feature's motivating example, is also a
-  country code. See [Citation resolution](docs/citations.md).
+  country code. These two notice-silent shapes also reset the
+  continuation chain like the noticed ones do, so a continuation after
+  `` `foo.sh:12` `` or `` `example.com:80-90` `` resolves against nothing
+  either. See [Citation resolution](docs/citations.md).
 
 ### Changed
 

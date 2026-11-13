@@ -803,7 +803,12 @@ const CLOSING_ONLY_EXTS = new Set([
 // `closing-brace-start-line` in a CLOSING_ONLY_EXTS target, JSX closers
 // treated exactly like the lone `}` they close down to. `});` (a full
 // block close) deliberately stays outside this grammar, as before: only
-// the single-token shapes are the drift signature here.
+// the single-token shapes are the drift signature here. The JSX
+// alternatives are deliberately NOT restricted to `.tsx` targets: the
+// check judges the start LINE, not the target's language -- a lone
+// `</div>` start line is closing-only content in a `.ts` template literal
+// exactly as in a `.tsx` render tree, and a citation that begins there is
+// the same drift signature either way.
 const CLOSING_BRACE_RE = /^(?:[)\]}]|\/>|<\/>|\)\}|<\/[A-Za-z][\w.:-]*>)[;,]?$/;
 // `extension-unrecognised` (notice): the extension set CITATION_RE
 // recognises, spelled out as a set for the no-silent-skip scan below, kept
@@ -881,7 +886,10 @@ const RECOGNISED_EXTS = new Set([
  * The notice also resets the continuation governor (see the atom loop in
  * `scanDoc`): a `` `:20` `` written after an unrecognised citation must
  * not be silently checked against whatever recognised file was cited
- * before it.
+ * before it. The two directory-less refusals that stay silent (the bare
+ * single number and the unanchored HOSTNAME_TLD range) reset the governor
+ * too, without emitting a notice: the author still wrote a backticked
+ * token where a citation could go, so the chain is just as broken there.
  * Chosen as a fixed notice, not a configurable extension list: okf-kit has
  * no bundle-level config today (see docs/citations.md's note on
  * `--require-anchors`), and a notice is advisory, never counted toward
@@ -932,24 +940,36 @@ const HAS_LETTER_RE = /[A-Za-z]/;
 const SHORT_FORM_COLON_RE = /:(\d+)-(\d+)/g;
 // Test-file block-boundary check (see checkRangeBoundary): a citation's
 // range into a `.test.ts`/`.spec.ts` target (`.js`/`.mjs`/`.tsx`
-// equivalents, and Go's `_test.go` naming convention) must start on a
-// describe(/it( head line and end on its matching closing `});` line. A
-// `_test.go` target is therefore held to that same JS/TS-shaped head and
-// closing grammar -- Go's `func TestXxx(t *testing.T)` heads are not (yet)
-// recognised, so a short-form range into a Go test file is reported
-// `test-range-start-not-head` unless it happens to sit on a describe/it
-// line: treating the file as a test file at all is the point, the
-// Go-shaped head grammar is a known gap.
+// equivalents) must start on a describe(/it( head line and end on its
+// matching closing `});` line; a Go `_test.go` target is held to Go's own
+// head and closing grammar instead (GO_TEST_HEAD_LINE_RE /
+// GO_TEST_CLOSING_LINE_RE below). The file kind picks the grammar; every
+// use of one grammar is selected by isGoTestFile (see there).
 const TEST_FILE_RE = /(\.(test|spec)\.(ts|js|mjs|tsx)|_test\.go)$/i;
 const TEST_HEAD_LINE_RE = /^\s*(?:describe|it)\s*\(/;
 const TEST_CLOSING_LINE_RE = /^\s*\}\)\s*;\s*$/;
+// The Go half of the same check: `_test.go` is Go's test-file naming
+// convention, its blocks are top-level `func TestXxx(t *testing.T)`-style
+// functions, so the head is `func` at column 0 followed by one of Go's
+// four test-function prefixes and an optional name suffix (`func Example()`
+// with no suffix is a valid Go test head, hence `\w*`, not `\w+`), and the
+// closing line is a line that is exactly `}` once trimmed -- a func's
+// closing brace, nested or not: like the JS grammar's `});`, which likewise
+// matches a nested block's close, this is a lexical approximation of "the
+// range is a whole block", not an AST check. A method-form head is
+// deliberately not recognised: Go test entry points are functions.
+const GO_TEST_FILE_RE = /_test\.go$/i;
+const GO_TEST_HEAD_LINE_RE = /^func\s+(?:Test|Benchmark|Fuzz|Example)\w*\(/;
+const GO_TEST_CLOSING_LINE_RE = /^\}$/;
 // Block-head detection for test-range-straddles-block (see the doc block
 // above and checkTestRangeStraddle below): a wider set of head shapes than
 // TEST_HEAD_LINE_RE (which stays short-form-only, unchanged, via
 // checkRangeBoundary/checkShortFormTarget) -- describe/it/test, each with
 // an optional .only/.skip/.each modifier. A leading `export `/`async ` is
 // deliberately not handled: not needed for any bundle this rule has been
-// measured against.
+// measured against. A `_test.go` target gets GO_TEST_HEAD_LINE_RE instead
+// (a Go file has no describe/it/test heads; the Go straddle grammar is the
+// Go head grammar, the same func heads the boundary check already knows).
 const TEST_BLOCK_HEAD_RE =
   /^\s*(?:describe|it|test)(?:\.(?:only|skip|each))?\s*\(/;
 // Markdown block-boundary check (see checkRangeBoundary): a range boundary
@@ -1083,7 +1103,9 @@ type Atom =
       // produces no findings of its own from the atom loop -- it exists in
       // `atoms` only so its document position can RESET the continuation
       // governor: a `:N` continuation written after it must not be
-      // attributed to the last recognised citation instead.
+      // attributed to the last recognised citation instead. This includes
+      // the two silent directory-less refusals (no notice is emitted for
+      // those; see collectUnrecognisedExtMatches's `notice` flag).
       raw: string;
     };
 
@@ -1465,8 +1487,10 @@ function checkFullTarget(
   const problems: Problem[] = [];
   // test-range-straddles-block, opt-in only (see "Anchor strictness
   // (opt-in)" above and checkTestRangeStraddle): a full citation's own
-  // range into a .test./.spec. target (.ts, .js, .mjs) must not cross
-  // into another block's head after its own first line. Deliberately
+  // range into a .test./.spec. target (.ts, .js, .mjs) or a Go _test.go
+  // target must not cross into another block's head after its own first
+  // line, against the grammar the file kind selects (GO_TEST_HEAD_LINE_RE
+  // for Go, TEST_BLOCK_HEAD_RE otherwise). Deliberately
   // scoped to test-file targets only (isTestFile), not also a markdown
   // branch: a
   // full citation into a markdown target legitimately cites a couple of
@@ -1477,7 +1501,12 @@ function checkFullTarget(
   // (endLine !== null); a single-line citation trivially starts and ends
   // on the same line and has nothing to straddle.
   if (requireAnchors && endLine !== null && isTestFile(citedPath)) {
-    const straddle = checkTestRangeStraddle(startLine, endLine, lines);
+    const straddle = checkTestRangeStraddle(
+      startLine,
+      endLine,
+      lines,
+      isGoTestFile(citedPath) ? GO_TEST_HEAD_LINE_RE : TEST_BLOCK_HEAD_RE,
+    );
     if (straddle) problems.push(straddle);
   }
   // The anchor check is run independently of the straddle check above
@@ -1756,6 +1785,16 @@ function isTestFile(citedPath: string): boolean {
 }
 
 /**
+ * True for a Go test target (`_test.go`, the subset of isTestFile with the
+ * Go naming convention): selects the Go head/closing/straddle grammar over
+ * the JS/TS describe/it one everywhere the test-file grammar is applied
+ * (checkRangeBoundary, checkFullTarget's straddle call).
+ */
+function isGoTestFile(citedPath: string): boolean {
+  return GO_TEST_FILE_RE.test(citedPath);
+}
+
+/**
  * True when the line at `lines[lineIndex]` is a fence delimiter
  * (```` ``` ```` or `~~~`, optionally with a trailing language tag) that
  * *opens* a fenced code block, as opposed to closing one -- determined by
@@ -1819,11 +1858,15 @@ function isMatchingFenceClosingLine(
  *
  * Test-file targets (`.test.ts`/`.spec.ts`, and their `.js`/`.mjs`
  * equivalents): the range must start on a `describe(`/`it(` head line and
- * end on a matching closing `});` line. Severity split, by evidence
+ * end on a matching closing `});` line; a Go `_test.go` target gets Go's
+ * own grammar instead: a `func TestXxx(`-style head line and a closing
+ * line that is exactly `}` once trimmed (see GO_TEST_HEAD_LINE_RE /
+ * GO_TEST_CLOSING_LINE_RE). Severity split, by evidence
  * strength: a wrong START line is a
  * *warning* (`test-range-start-not-head`) -- the range beginning somewhere
  * other than a block head is strong drift evidence. A range whose start IS
- * correct but whose END is not the matching `});` is only a *notice*
+ * correct but whose END is not the matching `});` (or `}`) is only a
+ * *notice*
  * (`test-range-end-not-closing`): this also matches a deliberate partial
  * citation (citing from a block's head to partway through it), which is not
  * drift. The start is checked first and returned alone, matching
@@ -1853,18 +1896,33 @@ function checkRangeBoundary(
   lines: string[],
 ): Problem | null {
   if (isTestFile(citedPath)) {
+    // The file kind picks the grammar: Go's `_test.go` targets are held to
+    // the Go func head/closing grammar, everything else (the
+    // describe/it-shaped targets TEST_FILE_RE also matches) to the JS/TS
+    // one -- unchanged from before the Go grammar existed.
+    const goTarget = isGoTestFile(citedPath);
     const startText = lines[startLine - 1] ?? "";
-    if (!TEST_HEAD_LINE_RE.test(startText)) {
+    const startIsHead = goTarget
+      ? GO_TEST_HEAD_LINE_RE.test(startText)
+      : TEST_HEAD_LINE_RE.test(startText);
+    if (!startIsHead) {
       return {
         rule: "test-range-start-not-head",
-        message: `range start is not a "describe(" or "it(" head line ("${startText.trim()}")`,
+        message: goTarget
+          ? `range start is not a "func TestXxx(" head line ("${startText.trim()}")`
+          : `range start is not a "describe(" or "it(" head line ("${startText.trim()}")`,
       };
     }
     const endText = lines[endLine - 1] ?? "";
-    if (!TEST_CLOSING_LINE_RE.test(endText)) {
+    const endIsClosing = goTarget
+      ? GO_TEST_CLOSING_LINE_RE.test(endText.trim())
+      : TEST_CLOSING_LINE_RE.test(endText);
+    if (!endIsClosing) {
       return {
         rule: "test-range-end-not-closing",
-        message: `range end is not a matching closing "});" line ("${endText.trim()}")`,
+        message: goTarget
+          ? `range end is not a closing "}" line ("${endText.trim()}")`
+          : `range end is not a matching closing "});" line ("${endText.trim()}")`,
         severity: "notice",
       };
     }
@@ -1921,12 +1979,15 @@ function leadingWhitespaceWidth(text: string): number {
 
 /**
  * `test-range-straddles-block` (opt-in, warning): a FULL citation's own
- * range into a `.test.`/`.spec.` target (`.ts`, `.js`, `.mjs`), see the
- * "Anchor strictness (opt-in)" doc block above for the full rule text.
- * Checks every line of `[startLine, endLine]` EXCEPT the range's own
+ * range into a `.test.`/`.spec.` target (`.ts`, `.js`, `.mjs`) or a Go
+ * `_test.go` target, see the "Anchor strictness (opt-in)" doc block above
+ * for the full rule text. Checks every line of `[startLine, endLine]`
+ * EXCEPT the range's own
  * first line (`startLine`
  * itself is never checked -- see that doc block for why) against
- * `TEST_BLOCK_HEAD_RE`; the first hit (in document order) is reported,
+ * `headRe` (TEST_BLOCK_HEAD_RE for JS/TS test targets, GO_TEST_HEAD_LINE_RE
+ * for `_test.go` ones, selected by the caller via isGoTestFile); the first
+ * hit (in document order) is reported,
  * matching this file's "one problem per citation" pattern. A block-head
  * line indented STRICTLY DEEPER than the range's own start line is a
  * NESTED block (e.g. the `it(`s inside a `describe(` the range cites in
@@ -1943,11 +2004,12 @@ function checkTestRangeStraddle(
   startLine: number,
   endLine: number,
   lines: string[],
+  headRe: RegExp,
 ): Problem | null {
   const startIndent = leadingWhitespaceWidth(lines[startLine - 1] ?? "");
   for (let i = startLine; i <= endLine - 1 && i < lines.length; i++) {
     const text = lines[i] ?? "";
-    if (!TEST_BLOCK_HEAD_RE.test(text)) continue;
+    if (!headRe.test(text)) continue;
     if (leadingWhitespaceWidth(text) > startIndent) continue; // nested block
     return {
       rule: "test-range-straddles-block",
@@ -2063,12 +2125,30 @@ function collectContinuationAtoms(content: string): Atom[] {
  * points, see the "unrecognised" Atom variant) and drives the notice
  * emission in scanDoc, rather than the regexes being re-scanned twice with
  * a chance to drift.
+ * The two directory-less refusals are still COLLECTED, with `notice:
+ * false`: the bare single number (`foo.sh:12`, the `host:port` shape) and
+ * the unanchored HOSTNAME_TLD range (`example.com:80-90`) stay silent
+ * exactly as before -- no notice is ever emitted for them -- but they are
+ * still backticked tokens the author wrote where a citation could go, so
+ * they reset the continuation governor like every recognised or
+ * noticed citation does: a continuation written after one of them is not
+ * attributed to whatever file was cited before it. Only `notice: true`
+ * spans are emitted as findings.
  */
-function collectUnrecognisedExtMatches(
-  content: string,
-): Array<{ index: number; end: number; label: string; ext: string }> {
-  const out: Array<{ index: number; end: number; label: string; ext: string }> =
-    [];
+function collectUnrecognisedExtMatches(content: string): Array<{
+  index: number;
+  end: number;
+  label: string;
+  ext: string;
+  notice: boolean;
+}> {
+  const out: Array<{
+    index: number;
+    end: number;
+    label: string;
+    ext: string;
+    notice: boolean;
+  }> = [];
   const wellFormedSpans: Array<[number, number]> = [];
   for (const spec of [
     { re: UNRECOGNISED_EXT_CITATION_RE, dirless: false },
@@ -2080,12 +2160,19 @@ function collectUnrecognisedExtMatches(
       const ext = m[2];
       if (RECOGNISED_EXTS.has(ext)) continue;
       if (!HAS_LETTER_RE.test(ext)) continue;
+      let notice = true;
       if (spec.dirless) {
         const hasAnchor = m[5] !== undefined;
-        if (m[4] === undefined && !hasAnchor) continue; // bare `foo.sh:12`: the host:port shape, stays silent
-        if (!hasAnchor && HOSTNAME_TLD_RE.test(ext)) continue; // `example.com:80-90`
+        // The two refusals: silent (no notice) but still a governor
+        // reset -- a continuation after `foo.sh:12` or `example.com:80-90`
+        // must not be attributed to the file cited before them either.
+        if (m[4] === undefined && !hasAnchor)
+          notice = false; // bare `foo.sh:12`: the host:port shape
+        else if (!hasAnchor && HOSTNAME_TLD_RE.test(ext)) notice = false; // `example.com:80-90`
       }
-      wellFormedSpans.push([m.index, m.index + m[0].length]);
+      if (notice) {
+        wellFormedSpans.push([m.index, m.index + m[0].length]);
+      }
       out.push({
         index: m.index,
         end: m.index + m[0].length,
@@ -2093,6 +2180,7 @@ function collectUnrecognisedExtMatches(
         // delimiting backticks the match itself carries.
         label: m[0].slice(1, -1),
         ext,
+        notice,
       });
     }
   }
@@ -2111,6 +2199,7 @@ function collectUnrecognisedExtMatches(
       end: mm.index + mm[0].length,
       label: mm[0].slice(1, -1),
       ext,
+      notice: true,
     });
   }
   return out.sort((a, b) => a.index - b.index);
@@ -2707,7 +2796,9 @@ function scanDoc(
   // citation already does -- a continuation written right after a citation
   // this rule refused to check must not be attributed to whatever
   // recognised file was cited before it. The same list drives the
-  // `extension-unrecognised` notice emission further down.
+  // `extension-unrecognised` notice emission further down; the two silent
+  // directory-less refusals are in it with `notice: false`, resetting the
+  // governor without producing a finding.
   const unrecognisedMatches = collectUnrecognisedExtMatches(content);
 
   const fullAtoms: Atom[] = [];
@@ -2805,8 +2896,10 @@ function scanDoc(
     }
 
     // An `extension-unrecognised` citation is a governor reset, not an
-    // atom to check (its notice is pushed from `unrecognisedMatches` after
-    // the loop): a continuation written after it must not be attributed to
+    // atom to check (its notice, for `notice: true` entries, is pushed
+    // from `unrecognisedMatches` after the loop; the two silent
+    // directory-less refusals reset here and emit nothing): a continuation
+    // written after it must not be attributed to
     // the last RECOGNISED citation, which may name an entirely different
     // file -- checking `:99` against it would report drift the doc never
     // claimed. Same posture as a failed/ambiguous/out-of-scope citation
@@ -3174,12 +3267,15 @@ function scanDoc(
   // block above; `collectUnrecognisedExtMatches` (called up front, so the
   // atom loop could use the same spans as governor resets) has already
   // applied the RECOGNISED_EXTS/HAS_LETTER filters and the directory-less
-  // host:port and malformed-anchor gating. The label, like
+  // host:port and malformed-anchor gating -- the two silent directory-less
+  // refusals carry `notice: false` and reset the governor without ever
+  // being emitted here. The label, like
   // heading-section-malformed's, drops the delimiting backticks the match
   // itself carries. Unlike the short-form scan below, reserved docs are NOT
   // carved out: a full citation in index.md/log.md is checked
   // unconditionally, so an unrecognised one is reported unconditionally too.
   for (const um of unrecognisedMatches) {
+    if (!um.notice) continue;
     pushDrift(
       findings,
       doc.relPath,
