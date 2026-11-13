@@ -96,8 +96,8 @@ Every package that `publish-npm.yml` publishes is released the same way:
    repo root and confirm it exits 0.
 4. Open the PR and squash merge.
 5. Push one annotated tag `<package>/v<new-version>` per `git push`, pointing
-   at the squash-merged commit on master; a tag on any other commit fails the
-   publish job before `npm ci`. GitHub
+   at the squash-merged commit on master; a tag on a commit that is not on
+   master fails the publish job before `npm ci`. GitHub
    turns a multi-tag push into one push event, and `publish-npm.yml` then
    publishes only one of the tags.
 6. If `latest` ends up on an older version because two publish runs finished
