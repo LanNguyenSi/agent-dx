@@ -1,9 +1,6 @@
 import fs from "node:fs";
 import { combinedOutput } from "../exec.js";
-import {
-  GO_PACKAGE_RESULT_LINE,
-  hasKnownTestSummary,
-} from "./zero-tests.js";
+import { GO_PACKAGE_RESULT_LINE, hasKnownTestSummary } from "./zero-tests.js";
 
 /**
  * Detects when a mutant run's test command failed because the BUILD

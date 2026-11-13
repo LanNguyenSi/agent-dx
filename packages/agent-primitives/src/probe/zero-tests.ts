@@ -356,8 +356,9 @@ function hasNodeTestSummaryLine(combined: string): boolean {
  * line. `--- FAIL: TestName (0.00s)` (a test line, not a package line,
  * anchored away by the `^` here) is recognized only by
  * `probe/build-failure.ts`'s `GO_RUN_SHAPE`, which ORs this exact
- * source with its own test-line alternative -- the one go-line pattern
- * shared by both modules so they can never drift.
+ * source with its own test-line alternative, so that package-line
+ * alternative cannot drift between the two. (GO_BUILD_FAILED_LINE and
+ * GO_TEST_FAILED in build-failure.ts still restate go lines on their own.)
  */
 export const GO_PACKAGE_RESULT_LINE =
   /^(?:ok|FAIL)[ \t]+\S+[ \t]+(?:[\d.]+s|\(cached\)|\[)/m;

@@ -845,19 +845,26 @@ describe("hasKnownTestSummary(): go (captured real go test)", () => {
   it("go: a lone `ok` or `FAIL` word does not count, not even at a line start followed by a package-shaped next line: the separator class stays inside one line, so the bare word cannot absorb the following line's first token (a `\\s`-class separator would match this exact pair)", () => {
     expect(hasKnownTestSummary("ok\n", "")).toBe(false);
     expect(hasKnownTestSummary("FAIL\n", "")).toBe(false);
-    expect(
-      hasKnownTestSummary("ok\nexample.com/m 0.329s\n", ""),
-    ).toBe(false);
+    expect(hasKnownTestSummary("ok\nexample.com/m 0.329s\n", "")).toBe(false);
     expect(hasKnownTestSummary("FAIL\nsee output above\n", "")).toBe(false);
+    // the second separator stays inside the line too: a package name on
+    // the status line followed by the time on the next line is not a
+    // package result line
+    expect(hasKnownTestSummary("ok  \texample.com/m\n0.329s\n", "")).toBe(
+      false,
+    );
+    expect(hasKnownTestSummary("FAIL\texample.com/m\n0.435s\n", "")).toBe(
+      false,
+    );
   });
 
   it("go: an indented or log-prefixed package line is NOT recognized: the `^` anchor is load-bearing, the same as for every other runner here", () => {
     expect(hasKnownTestSummary("  ok  \texample.com/m\t0.329s\n", "")).toBe(
       false,
     );
-    expect(
-      hasKnownTestSummary("pkg1: ok  \texample.com/m\t0.329s\n", ""),
-    ).toBe(false);
+    expect(hasKnownTestSummary("pkg1: ok  \texample.com/m\t0.329s\n", "")).toBe(
+      false,
+    );
   });
 });
 
@@ -1324,7 +1331,14 @@ describe("probe(): generic byte-identical fallback, cached go package line", () 
     execFileSync("git", ["add", "-A"], { cwd: repo });
     execFileSync(
       "git",
-      ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "captured go output"],
+      [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "captured go output",
+      ],
       { cwd: repo },
     );
     // The default mutant (flips `flag` in fixture.js) is a genuine
@@ -1635,16 +1649,16 @@ describe("probe(): real pytest end-to-end, timing-digit stability", () => {
       expect(result.status).toBe("inconclusive");
       expect(result.reason).toBe("no_tests_executed");
       expect(result.mutation_probe?.result).toBe("not_run");
-    expect(
-      result.warnings.some((w) =>
-        /the mutant run's own output shows no test was actually executed \(pytest\)/.test(
-          w,
+      expect(
+        result.warnings.some((w) =>
+          /the mutant run's own output shows no test was actually executed \(pytest\)/.test(
+            w,
+          ),
         ),
-      ),
-    ).toBe(true);
-  },
-  60000,
-);
+      ).toBe(true);
+    },
+    60000,
+  );
 });
 
 // --- End-to-end pair over a REAL `go test ./...` (go 1.27.4 was used
