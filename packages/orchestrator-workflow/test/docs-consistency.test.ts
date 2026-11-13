@@ -1829,8 +1829,7 @@ const ANCHOR_CONTINUATION_CITATION_RE =
 }
 
 // agent-tasks 8c89aa12: same "last content line" semantics as okf-kit's
-// own opt-in `anchor-not-on-last-line` check
-// (packages/okf-kit/src/rules/citations-resolve.ts's
+// own opt-in `anchor-not-on-last-line` check (packages/okf-kit/src/rules/citations-resolve.ts's
 // CLOSING_BOILERPLATE_RE/isContentLine/lastContentLineInRange), mirrored
 // here rather than imported so this test's assertion is self-contained
 // and does not take a runtime dependency on okf-kit's own source tree
@@ -1840,7 +1839,8 @@ const ANCHOR_CONTINUATION_CITATION_RE =
 // on the next unrelated edit to citations-resolve.ts above this span.
 // The "mirror stays in sync" assertion right below this block is what
 // actually catches drift now, not this comment.
-const CLOSING_BOILERPLATE_RE = /^[\]\)\};,]*$/;
+const CLOSING_BOILERPLATE_RE =
+  /^(?:[\]\)\};,]*|(?:\/>|<\/>|\)\}|<\/[A-Za-z][\w.:-]*>)[;,]?)$/;
 
 function isContentLine(text: string): boolean {
   const trimmed = text.trim();

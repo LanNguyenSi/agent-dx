@@ -18,7 +18,7 @@ It validates frontmatter shape, link resolution, staleness against git history, 
 - `init` scaffolds a starter bundle: `index.md`, `log.md`, and one template doc per concept type.
 - `docs-for` reverse lookup: given one or more changed paths, which bundle docs claim them as `sources` or `applies_to` (a lookup-only field that `sources-fresh` ignores).
 - A citation can carry an anchor (`#heading` or `#"text"`) so a `path:N-M` citation survives content moving above it; see [Citation resolution](docs/citations.md).
-- Citation targets cover `.ts`, `.js`, `.mjs`, `.md`, `.yml`, `.yaml`, `.json`, `.prisma` and `.go`; a backticked `` `path.ext:N` ``/`` `path.ext:N-M` `` citation whose extension is outside that set reports an `extension-unrecognised` notice (advisory, never counted toward `--strict`) instead of being silently skipped.
+- Citation targets cover `.ts`, `.js`, `.mjs`, `.md`, `.yml`, `.yaml`, `.json`, `.prisma`, `.go` and `.tsx`; a backticked `` `path.ext:N` ``/`` `path.ext:N-M` `` citation whose extension is outside that set reports an `extension-unrecognised` notice (advisory, never counted toward `--strict`) instead of being silently skipped -- directory-qualified in any form, directory-less in the range or anchored form, with a malformed `#anchor` or without one.
 - `--dirty-as-now` makes a pre-commit `check` run report the same staleness verdict CI reports after the commit lands; see [Staleness](docs/staleness.md).
 - `--require-anchors` and `--prose-line-references` opt into stricter checks for a bundle whose citations are already anchored.
 

@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-11-13T12:07:30Z, okf-kit treats a lone JSX closer (`/>`, `</>`, `)}`, `</tag>`) as closing boilerplate, so the
+  mirrored closing-boilerplate pattern in `test/docs-consistency.test.ts` was updated to the same expression (two
+  comment lines above it merged, so no later line of that file moved). Re-verified: none of the four docs that list
+  `test/docs-consistency.test.ts` as a source describes the mirrored pattern, and no citation points into the edited
+  lines, so no claim changed. Re-stamped `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`.
 - 2026-11-10T14:03:09Z, release 0.51.0: the changes since 0.50.0 (per-role default routing, the Codex fallback, the
   model-selection aid for the install agent, the tier policy and the unavailable-model rule) are written under a new
   `0.51.0` heading in `CHANGELOG.md`, 100 lines inserted after `[Unreleased]`; every `CHANGELOG.md` line citation in

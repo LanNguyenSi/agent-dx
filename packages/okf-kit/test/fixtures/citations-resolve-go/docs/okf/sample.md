@@ -40,7 +40,7 @@ Anchored unrecognised `.rs` citation, quoted anchor, exactly one notice: `src/li
 
 Anchored unrecognised `.rs` citation, bare-word anchor, one notice: `src/lib.rs:2#main`.
 
-Anchored unrecognised `.tsx` citation, quoted anchor with punctuation, one notice: `src/app/page.tsx:31-33#"router.replace('/login')"`.
+Anchored `.tsx` citation, quoted anchor with punctuation, now a recognised target so only missing-file (there is no page.tsx here): `src/app/page.tsx:31-33#"router.replace('/login')"`.
 
 Anchored recognised `.go` citation, no notice: `internal/main.go:9-12#"needle in helper"`.
 

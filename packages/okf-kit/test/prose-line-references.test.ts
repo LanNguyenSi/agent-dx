@@ -24,6 +24,7 @@ const NEGATIVE_ROOT = path.join(FIXTURES_DIR, "prose-line-references-negative");
 const JSON_EXT_ROOT = path.join(FIXTURES_DIR, "prose-line-references-json-ext");
 const PRISMA_EXT_ROOT = path.join(FIXTURES_DIR, "prose-line-references-prisma");
 const GO_EXT_ROOT = path.join(FIXTURES_DIR, "prose-line-references-go");
+const TSX_EXT_ROOT = path.join(FIXTURES_DIR, "prose-line-references-tsx");
 const BINDER_ROOT = path.join(FIXTURES_DIR, "prose-line-references-binder");
 const RANGES_ROOT = path.join(FIXTURES_DIR, "prose-line-references-ranges");
 const RESERVED_ROOT = path.join(FIXTURES_DIR, "prose-line-references-reserved");
@@ -63,6 +64,10 @@ function loadPrismaExt() {
 
 function loadGoExt() {
   return loadFixture("prose-line-references-go/docs/okf", GO_EXT_ROOT);
+}
+
+function loadTsxExt() {
+  return loadFixture("prose-line-references-tsx/docs/okf", TSX_EXT_ROOT);
 }
 
 function loadBinder() {
@@ -261,6 +266,39 @@ describe("prose-line-references", () => {
     // `cmd/old.go` instead, producing an `out-of-bounds` warning that names
     // it; neither may exist for the `.gox` reference.
     expect(findings.some((f) => f.message.includes("cmd/old.go"))).toBe(false);
+    expect(findings).toHaveLength(2);
+  });
+
+  // The `.tsx` entry in FILE_MENTION_RE's extension alternation must stay in
+  // step with CITATION_RE (see the comment at its definition): a `foo.tsx`
+  // mention resolves like any other, and `foo.tsx2` -- an extension this
+  // rule knows nothing about -- must not be matched as a truncated `foo.tsx`
+  // (nor as `foo.ts`, since `ts` is a prefix of `tsx` either) and bound to
+  // the real `web/App.tsx` sitting next to it.
+  it("a `.tsx` file mention resolves and its drifted line reference is reported out-of-bounds", () => {
+    const ctx = loadTsxExt();
+    ctx.proseLineReferences = { strict: false };
+    const findings = proseLineReferencesRule.run(ctx);
+    const oob = findingsFor("out-of-bounds", findings);
+    expect(oob).toHaveLength(1);
+    expect(oob[0]?.message).toContain("bound to `web/App.tsx`");
+    expect(oob[0]?.severity).toBe("warning");
+  });
+
+  it("a `.tsx2` file mention is not matched as `.tsx` or truncated to `.ts`: its line reference stays unresolvable, never bound to the real web/App.tsx", () => {
+    const ctx = loadTsxExt();
+    ctx.proseLineReferences = { strict: false };
+    const findings = proseLineReferencesRule.run(ctx);
+    const unresolvable = findingsFor("unresolvable", findings);
+    expect(unresolvable).toHaveLength(1);
+    expect(unresolvable[0]?.message).toContain("line 999");
+    expect(unresolvable[0]?.message).toContain(
+      "no file mention could be bound",
+    );
+    expect(unresolvable[0]?.severity).toBe("notice");
+    // The unresolvable reference is the `.tsx2` sentence's own: the only
+    // mention-bound finding in the fixture is the `.tsx` sentence's
+    // out-of-bounds from the test above, so exactly these two exist.
     expect(findings).toHaveLength(2);
   });
 
