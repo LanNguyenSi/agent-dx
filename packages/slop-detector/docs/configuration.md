@@ -135,7 +135,7 @@ checkFiles(files, { packs, config, corpusEnabled: true });
 
 ### Opting individual rules in
 
-Because both rules are `enabledByDefault: false` you must also enable them via `ruleOverrides`:
+Because both rules are `enabledByDefault: false` you must also enable them via the `rules` key:
 
 ```yaml
 # slop.config.yml

@@ -101,6 +101,21 @@ jobs:
           # history and tags rather than Actions' default shallow clone.
           fetch-depth: 0
 
+      - name: Verify tagged commit is on master
+        # Runs before any repository code executes (npm ci, build, test), so
+        # a tag pushed on a side branch cannot reach the publish step or run
+        # its scripts with the id-token. HEAD is the commit the tag resolves
+        # to (checkout ref above), for the push and the workflow_dispatch
+        # path alike. Master is fetched explicitly rather than trusting what
+        # the checkout happened to bring.
+        run: |
+          git fetch --no-tags origin master:refs/remotes/origin/master
+          head_sha=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$head_sha" refs/remotes/origin/master; then
+            echo "::error::Tagged commit ${head_sha} is not an ancestor of origin/master; refusing to publish a tag that is not on master." >&2
+            exit 1
+          fi
+
       - uses: actions/setup-node@v5
         with:
           node-version: 22

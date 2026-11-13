@@ -38,6 +38,7 @@ jobs:
   okf-staleness:
     name: OKF bundle staleness (warn-only)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     env:
       # REPO-SPECIFIC (2 of 2): path of the knowledge bundle to check

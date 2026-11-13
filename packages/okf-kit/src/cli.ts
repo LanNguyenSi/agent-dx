@@ -265,7 +265,7 @@ program.exitOverride();
 
 program
   .name("okf-kit")
-  .description("Validate OKF v0.1 knowledge bundles")
+  .description("Validate OKF v0.1 and v0.2 knowledge bundles")
   .version(readVersion());
 
 program

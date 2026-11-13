@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The `templates/okf-staleness.yml` job now sets `timeout-minutes: 10`, so a
+  hung install or check cannot hold a runner for the six-hour default. A repo
+  that copied the template picks this up when it re-syncs from the release
+  that ships it.
+- The CLI description, the package description and both READMEs now say the
+  tool validates OKF v0.1 and v0.2 bundles; `--spec` already accepted both.
+
 ## [0.21.0] - 2026-11-12
 
 ### Added
