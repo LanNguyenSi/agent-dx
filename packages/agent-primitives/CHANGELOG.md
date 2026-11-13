@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `probe` recognizes `go test`'s package result line (`ok <pkg>
+  0.329s`, `ok <pkg> (cached)`, `FAIL <pkg> 0.435s`, and the `-cover`
+  tail after the timing), so a second run of the same plan reports a
+  green go mutant as `survived` instead of
+  `inconclusive`/`no_tests_executed` (`mutation_probe.result:
+  "not_run"`). A rerun's baseline and mutant package lines are go's
+  byte-identical `(cached)` form, and the generic byte-identical
+  fallback only steps aside for output `hasKnownTestSummary`
+  recognizes; it knew vitest, node's test runner, PHPUnit and pytest,
+  not go. The lone `ok` or `FAIL` word line `go test` itself prints,
+  and a `--- FAIL:` test line with no package line, are not package
+  lines and change nothing; the pattern is the one `GO_RUN_SHAPE` in
+  build-failure detection already used for its package-line
+  alternative, now shared as `GO_PACKAGE_RESULT_LINE`. A go package line
+  also counts as a test runner summary for the tsc build-failure rule
+  (a type error next to it is not a build failure), and a filter that
+  selects no tests (`[no tests to run]`) reads `survived` like any green
+  run, since go has no zero-tests detector.
+
 ## [0.22.0] - 2026-11-11
 
 ### Added

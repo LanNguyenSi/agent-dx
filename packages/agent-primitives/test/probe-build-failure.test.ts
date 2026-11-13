@@ -205,6 +205,12 @@ describe("detectBuildFailure(): captured real outputs", () => {
     expect(detectBuildFailure(jest, "")).toEqual({ detected: false });
   });
 
+  it("tsc: a type error next to a go package result line is NOT a build failure (the go line counts as a test runner summary)", () => {
+    const mixed =
+      "src/a.ts(2,9): error TS2322: bad\nok  \texample.com/m\t0.1s\n";
+    expect(detectBuildFailure(mixed, "")).toEqual({ detected: false });
+  });
+
   it("vitest: a file that fails to transform and no test run is a build failure", () => {
     expect(detectBuildFailure(captured("vitest-transform-failed"), "")).toEqual(
       { detected: true, via: "vitest" },

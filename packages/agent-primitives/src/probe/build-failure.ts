@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { combinedOutput } from "../exec.js";
-import { hasKnownTestSummary } from "./zero-tests.js";
+import { GO_PACKAGE_RESULT_LINE, hasKnownTestSummary } from "./zero-tests.js";
 
 /**
  * Detects when a mutant run's test command failed because the BUILD
@@ -89,9 +89,16 @@ const GO_TEST_FAILED =
   /^\s*--- FAIL:|^FAIL\s+\S+\s+(?:[\d.]+s|\(cached\))\s*$/m;
 
 /** A package line `go test` printed for a test binary that ran, or a
- * test line of `-v` output: the shapes that say the toolchain is go. */
-const GO_RUN_SHAPE =
-  /^(?:ok|FAIL)\s+\S+\s+(?:[\d.]+s|\(cached\)|\[)|^\s*--- (?:FAIL|PASS|SKIP):/m;
+ * test line of `-v` output: the shapes that say the toolchain is go.
+ * The package-line alternative IS `zero-tests.ts`'s
+ * `GO_PACKAGE_RESULT_LINE` (shared by construction, not restated), so
+ * `hasKnownTestSummary` and this module can never disagree about what
+ * a go package line looks like; only the `--- ` test-line alternative
+ * belongs to this module alone. */
+const GO_RUN_SHAPE = new RegExp(
+  `${GO_PACKAGE_RESULT_LINE.source}|^\\s*--- (?:FAIL|PASS|SKIP):`,
+  "m",
+);
 
 /** tsc's own diagnostic lines, anchored at the start of the line with a
  * path that carries no colon, so a test runner printing `AssertionError:

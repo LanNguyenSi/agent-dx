@@ -16,7 +16,13 @@ import { combinedOutput } from "../exec.js";
  * summary shape and is exercised by real captured fixtures), and node's
  * built-in test runner's zero-count summary line. `hasKnownTestSummary`
  * backs the generic byte-identical fallback (`step.ts`'s classify step)
- * for a suite neither detector recognizes at all.
+ * for a suite neither detector recognizes at all, and also knows go's
+ * package result lines (see `GO_PACKAGE_RESULT_LINE` below): go needs
+ * no zero-tests detector of its own, but without recognizing its
+ * summary a second run of the same probe plan reads the package's own
+ * `ok <pkg> (cached)` line -- byte-identical on the baseline and the
+ * mutant run -- as a quiet unknown runner and reports
+ * `not_run(no_tests_executed)` for a genuine survivor.
  *
  * Consumed by `setup.ts` (the baseline-stage check, before a mutant is
  * even applied) and `step.ts` (the mutant-stage check, and the generic
@@ -335,12 +341,36 @@ function hasNodeTestSummaryLine(combined: string): boolean {
 }
 
 /**
+ * `go test`'s own package result line, as captured from real runs (see
+ * `test/fixtures/captured/go-test-*.txt`): the status word padded to
+ * `FAIL`'s width (`ok  `, `FAIL`), then the package path, then the
+ * elapsed time (`0.329s`), go's own `(cached)` marker for a rerun of
+ * unchanged sources, or go's own `[build failed]`/`[setup failed]`
+ * marker, and with `-cover` go appends `\tcoverage: 100.0% of
+ * statements` after the time (the pattern is open-ended after the
+ * status field precisely so that tail stays part of the recognized
+ * shape). go separates the fields with tabs; the separator class is
+ * `[ \t]` and never `\s`, so the shape stays inside one line: the lone
+ * `ok` or `FAIL` word go itself prints at the end of a failing run
+ * must never absorb the next line's first token and read as a package
+ * line. `--- FAIL: TestName (0.00s)` (a test line, not a package line,
+ * anchored away by the `^` here) is recognized only by
+ * `probe/build-failure.ts`'s `GO_RUN_SHAPE`, which ORs this exact
+ * source with its own test-line alternative, so that package-line
+ * alternative cannot drift between the two. (GO_BUILD_FAILED_LINE and
+ * GO_TEST_FAILED in build-failure.ts still restate go lines on their own.)
+ */
+export const GO_PACKAGE_RESULT_LINE =
+  /^(?:ok|FAIL)[ \t]+\S+[ \t]+(?:[\d.]+s|\(cached\)|\[)/m;
+
+/**
  * Whether `stdoutTail`/`stderrTail` carries ANY summary line one of the
  * detectors above recognizes, zero-count or not (a normal `Tests  5
- * passed (5)` included): used by the generic byte-identical fallback
- * (`step.ts`) to stay out of the way of output these detectors already
- * understand, so the fallback only ever fires for a genuinely unknown
- * test runner.
+ * passed (5)` included), or a `go test` package result line (go has no
+ * zero-tests detector; only this function recognizes it): used by the
+ * generic byte-identical fallback (`step.ts`) to stay out of the way of
+ * output these detectors already understand, so the fallback only ever
+ * fires for a genuinely unknown test runner.
  */
 export function hasKnownTestSummary(
   stdoutTail: string,
@@ -360,6 +390,7 @@ export function hasKnownTestSummary(
   return (
     hasNodeTestSummaryLine(combined) ||
     PYTEST_NO_TESTS_LINE.test(combined) ||
-    pytestSummaryLine(combined) !== undefined
+    pytestSummaryLine(combined) !== undefined ||
+    GO_PACKAGE_RESULT_LINE.test(combined)
   );
 }
