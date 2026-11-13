@@ -1,0 +1,1 @@
+ok  	example.com/m	0.558s	coverage: 100.0% of statements

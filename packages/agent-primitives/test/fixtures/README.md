@@ -158,6 +158,32 @@ wall-clock times (`Start at`, `Duration`) and Go's package timings
 The vitest missing-module case reuses `vitest-collection-error.txt`
 above.
 
+### Summary-recognition go captures (`go-test-pass*`, `go-test-cover`, `go-test-fail`)
+
+Raw `go test ./...` output captured against a one-package throwaway
+module (`example.com/m`, one test asserting `Add(2, 3) == 5`), go
+1.27.4, with the module's build cache under this repository's
+`.ap-logs` directory. `go test` prints no absolute paths at this
+invocation (the package line names the module path, the failure
+locator the project-relative `calc_test.go:7`), so nothing needed
+trimming; the tab field separators and the wall-clock timings are kept
+verbatim, the same convention the pytest captures below use: the point
+of recognizing these lines (`probe`'s `hasKnownTestSummary`) is that
+the timing digits differ run to run while the `(cached)` rerun is
+byte-identical to itself. Consumed by `probe-zero-tests.test.ts`.
+
+- `go-test-pass.txt`: the first run of the suite (exit `0`, the real
+  timing, not a cache hit).
+- `go-test-pass-cached.txt`: the same command run again on unchanged
+  sources (exit `0`, go's own `(cached)` marker) -- the text the
+  baseline and the mutant of a rerun plan each print byte-identically.
+- `go-test-fail.txt`: the same module with `Add` returning `a - b`
+  (exit `1`) -- `--- FAIL: TestAdd`, its locator line, the test
+  binary's bare `FAIL`, go's `FAIL <pkg> <time>s` package line and
+  go's own trailing bare `FAIL`.
+- `go-test-cover.txt`: `go test -cover ./...` (exit `0`) -- the
+  package line's `\tcoverage: 100.0% of statements` tail.
+
 ### PHP captures (`phpunit-*`, `phpstan-*`, `phpcs-*`)
 
 No PHP toolchain lives on the dev machine these were captured on: each

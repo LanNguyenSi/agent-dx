@@ -786,6 +786,81 @@ describe("hasKnownTestSummary()", () => {
   });
 });
 
+// --- go (captured real `go test ./...` runs against a one-package
+// throwaway module, the fixtures keeping go's own tabs and timing
+// digits, see the go captures section of test/fixtures/README.md):
+// `hasKnownTestSummary` recognizes the package result line, which is
+// what keeps the generic byte-identical fallback off a cached rerun
+// (go's `(cached)` line is byte-identical on the baseline and the
+// mutant run of a rerun plan -- the pair that used to read as
+// `not_run(no_tests_executed)`). go has no zero-tests detector, so
+// none of these captures is ever `detected` either. ---------------
+
+describe("hasKnownTestSummary(): go (captured real go test)", () => {
+  it("go: a passing run's `ok <pkg> <time>s` package line is recognized and NOT a zero-tests reading", () => {
+    const output = readCaptured("go-test-pass");
+    expect(output).toContain("ok  \texample.com/m\t0.329s");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(true);
+  });
+
+  it("go: a cached rerun's `ok <pkg> (cached)` package line is recognized and NOT a zero-tests reading: this is the exact byte-identical rerun text a second run of the same plan prints", () => {
+    const output = readCaptured("go-test-pass-cached");
+    expect(output).toContain("ok  \texample.com/m\t(cached)");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(true);
+  });
+
+  it("go: a failing run's `FAIL <pkg> <time>s` package line is recognized (a real test ran and failed) and NOT a zero-tests reading", () => {
+    const output = readCaptured("go-test-fail");
+    expect(output).toContain("FAIL\texample.com/m\t0.435s");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(true);
+  });
+
+  it("go: the `-cover` tail (`ok <pkg> <time>s` followed by a tab and `coverage: 100.0% of statements`) stays part of the recognized package line (captured real `go test -cover ./...`)", () => {
+    const output = readCaptured("go-test-cover");
+    expect(output).toContain("\tcoverage: 100.0% of statements");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(true);
+  });
+
+  it("go: `--- FAIL: TestX (0.00s)` WITHOUT a package line is NOT recognized: the `--- ` test line is not a package line, and go's own trailing bare `FAIL` word line is neither", () => {
+    const output =
+      "--- FAIL: TestX (0.00s)\n    calc_test.go:7: Add(2, 3) = -1, want 5\nFAIL\n";
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(false);
+  });
+
+  it("go: a lone `ok` or `FAIL` word does not count, not even at a line start followed by a package-shaped next line: the separator class stays inside one line, so the bare word cannot absorb the following line's first token (a `\\s`-class separator would match this exact pair)", () => {
+    expect(hasKnownTestSummary("ok\n", "")).toBe(false);
+    expect(hasKnownTestSummary("FAIL\n", "")).toBe(false);
+    expect(
+      hasKnownTestSummary("ok\nexample.com/m 0.329s\n", ""),
+    ).toBe(false);
+    expect(hasKnownTestSummary("FAIL\nsee output above\n", "")).toBe(false);
+  });
+
+  it("go: an indented or log-prefixed package line is NOT recognized: the `^` anchor is load-bearing, the same as for every other runner here", () => {
+    expect(hasKnownTestSummary("  ok  \texample.com/m\t0.329s\n", "")).toBe(
+      false,
+    );
+    expect(
+      hasKnownTestSummary("pkg1: ok  \texample.com/m\t0.329s\n", ""),
+    ).toBe(false);
+  });
+});
+
 // --- probe() through the shared baseline-stage check (setup.ts): a
 // synthetic testCommand stands in for a real test runner's output, the
 // same idiom test/probe-refusal-contract.test.ts's own provocations
@@ -1233,6 +1308,47 @@ describe("probe(): generic byte-identical fallback, truncated-tail guard", () =>
   });
 });
 
+// --- The same fallback driven by the REAL captured go rerun text: the
+// pair of byte-identical `ok <pkg> (cached)` tails a second run of the
+// same plan prints on both sides is a genuine survivor's evidence once
+// `hasKnownTestSummary` recognizes the package line, not the
+// `not_run(no_tests_executed)` this shape used to produce. ---------
+
+describe("probe(): generic byte-identical fallback, cached go package line", () => {
+  it("byte-identical captured go `(cached)` output on both runs, exit 0, is survived, not inconclusive/no_tests_executed", async () => {
+    const repo = initGitRepo();
+    fs.writeFileSync(
+      path.join(repo, "go-test.out"),
+      readCaptured("go-test-pass-cached"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "captured go output"],
+      { cwd: repo },
+    );
+    // The default mutant (flips `flag` in fixture.js) is a genuine
+    // survivor here: the `cat` below never reads fixture.js, so it
+    // cannot observe the mutation either way, and both runs print the
+    // captured go rerun byte-identically, exit 0. Before go's package
+    // line was recognized that pair entered the fallback and flipped
+    // this to inconclusive/no_tests_executed; now the recognized
+    // package line keeps the fallback out and the real verdict stands.
+    const result = await probe(
+      baseOptions(repo, { testCommand: "cat go-test.out" }),
+    );
+    expect(result.status).toBe("survived");
+    expect(result.reason).toBeUndefined();
+    expect(
+      result.warnings.some((w) =>
+        /the mutant run's own output shows no test was actually executed/.test(
+          w,
+        ),
+      ),
+    ).toBe(false);
+  });
+});
+
 // --- The mutant-side detector and the generic fallback also apply to a
 // `killed` verdict whose "killed"-ness rests on nothing but a PASSING
 // exit code (`--expect pass`): the exact silent exit-0 evidence this
@@ -1519,13 +1635,147 @@ describe("probe(): real pytest end-to-end, timing-digit stability", () => {
       expect(result.status).toBe("inconclusive");
       expect(result.reason).toBe("no_tests_executed");
       expect(result.mutation_probe?.result).toBe("not_run");
-      expect(
-        result.warnings.some((w) =>
-          /the mutant run's own output shows no test was actually executed \(pytest\)/.test(
-            w,
-          ),
+    expect(
+      result.warnings.some((w) =>
+        /the mutant run's own output shows no test was actually executed \(pytest\)/.test(
+          w,
         ),
-      ).toBe(true);
+      ),
+    ).toBe(true);
+  },
+  60000,
+);
+});
+
+// --- End-to-end pair over a REAL `go test ./...` (go 1.27.4 was used
+// for the captures above; CI may not ship go at all and go additionally
+// needs a writable build cache, so the seam below runs a real smoke
+// test rather than only probing for the binary, and both tests skip
+// rather than silently weakening the suite, the same idiom the pytest
+// pair above uses). The point of running the SAME probe plan twice:
+// the second run's baseline and mutant package lines are both go's
+// byte-identical `(cached)` form (the sources go sees are exactly what
+// the first run's two sides compiled), which is the real-world shape
+// that read a surviving mutant as `not_run(no_tests_executed)`. -----
+
+/** Whether a real `go test ./...` run succeeds in a throwaway module
+ * (go present AND a writable build cache), not merely whether a `go`
+ * binary exists. */
+const HAS_GO = (() => {
+  let dir: string | undefined;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-go-smoke-"));
+    fs.writeFileSync(
+      path.join(dir, "calc.go"),
+      "package m\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n",
+    );
+    fs.writeFileSync(
+      path.join(dir, "calc_test.go"),
+      [
+        "package m",
+        "",
+        'import "testing"',
+        "",
+        "func TestAdd(t *testing.T) {",
+        "\tif Add(2, 3) != 5 {",
+        '\t\tt.Errorf("Add(2, 3) = %d, want 5", Add(2, 3))',
+        "\t}",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    execFileSync("go", ["mod", "init", "example.com/smoke"], {
+      cwd: dir,
+      stdio: "ignore",
+    });
+    execFileSync("go", ["test", "./..."], { cwd: dir, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (dir !== undefined) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+})();
+
+const CALC_GO = [
+  "package m",
+  "",
+  "func Add(a, b int) int {",
+  "\treturn a + b",
+  "}",
+  "",
+  "func Unused() int {",
+  "\treturn 1",
+  "}",
+  "",
+].join("\n");
+
+const CALC_TEST_GO = [
+  "package m",
+  "",
+  'import "testing"',
+  "",
+  "func TestAdd(t *testing.T) {",
+  "\tif Add(2, 3) != 5 {",
+  '\t\tt.Errorf("Add(2, 3) = %d, want 5", Add(2, 3))',
+  "\t}",
+  "}",
+  "",
+].join("\n");
+
+function initGoRepo(): string {
+  const repo = makeTmpDir();
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["config", "user.email", "test@example.com"], {
+    cwd: repo,
+  });
+  execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "calc.go"), CALC_GO);
+  fs.writeFileSync(path.join(repo, "calc_test.go"), CALC_TEST_GO);
+  execFileSync("go", ["mod", "init", "example.com/m"], {
+    cwd: repo,
+    stdio: "ignore",
+  });
+  execFileSync("git", ["add", "-A"], { cwd: repo });
+  execFileSync(
+    "git",
+    ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+    { cwd: repo },
+  );
+  return repo;
+}
+
+describe("probe(): real go test end-to-end, cached-rerun stability", () => {
+  it.skipIf(!HAS_GO)(
+    "the same green mutant over a genuinely passing go suite is `survived` on two back-to-back runs of the same plan, the second of which prints go's byte-identical `(cached)` package lines on both sides (needs go with a writable build cache; skipped without it), not a `not_run(no_tests_executed)` on the cached rerun",
+    async () => {
+      // Mutates only the never-called `Unused` (same shape): the suite
+      // genuinely compiles, runs and passes on both sides -- a real
+      // survivor. The first run's two sides each compile (timing
+      // digits differ, so byte identity never held there anyway); the
+      // SECOND run's baseline and mutant each hit go's result cache
+      // again, printing byte-identical `ok example.com/m (cached)`
+      // lines -- before the package line was recognized, exactly that
+      // pair entered the generic fallback on the second run.
+      const repo = initGoRepo();
+      const options = (): ProbeOptions => ({
+        file: "calc.go",
+        line: 8,
+        form: "replace",
+        replaceText: "\treturn 2",
+        testCommand: "go test ./...",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+      });
+      for (const run of [1, 2]) {
+        const result = await probe(options());
+        expect(result.status, `run ${String(run)}`).toBe("survived");
+        expect(result.reason, `run ${String(run)}`).toBeUndefined();
+      }
     },
     60000,
   );

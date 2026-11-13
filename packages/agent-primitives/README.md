@@ -105,7 +105,9 @@ for teams shipping with AI agents.
   PHP_CodeSniffer) output is recognized by `verify` and `probe` alongside
   vitest, tsc, and eslint; `probe`'s zero-tests guard additionally
   recognizes pytest's final summary line (`3 passed in 0.01s` and its
-  `no tests ran in 0.00s` zero-tests form).
+  `no tests ran in 0.00s` zero-tests form), and its byte-identical
+  fallback additionally recognizes `go test`'s package result lines
+  (`ok <pkg> 0.329s`, `ok <pkg> (cached)`, `FAIL <pkg> 0.435s`).
 - Every command accepts the same global flags (`-f/--format`, `-C/--cwd`,
   `-m/--max-chars`, `-l/--log-dir`, and `--json` as an alias for
   `-f json`); see
