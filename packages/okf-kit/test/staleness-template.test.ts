@@ -59,6 +59,15 @@ describe("templates/okf-staleness.yml", () => {
     expect(template.trimEnd().endsWith("exit 0")).toBe(true);
   });
 
+  it("bounds the job with timeout-minutes", () => {
+    const job = (
+      parse(template) as {
+        jobs: { "okf-staleness": { "timeout-minutes"?: number } };
+      }
+    ).jobs["okf-staleness"];
+    expect(job["timeout-minutes"]).toBeGreaterThan(0);
+  });
+
   it("uses a full checkout so sources-fresh sees real history", () => {
     expect(template).toMatch(/fetch-depth: 0/);
   });

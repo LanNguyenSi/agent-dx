@@ -16,8 +16,9 @@ against one pack and config:
   it blocks run-local review references from landing in reusable content.
 - `workflow-guard` checks the repository's workflow files and composite
   action metadata with the `workflow-slop` pack: it blocks `run:` expression injection, workflow
-  files that do not parse, reintroduced Node-20 action majors, and a
-  missing or unrecognized npm-audit gate. It is a security control rather
+  files that do not parse, YAML constructs the pack cannot resolve,
+  reintroduced Node-20 action majors, and a missing or unrecognized
+  npm-audit gate. It is a security control rather
   than a doc-hygiene lint, so it reports under its own status check. See
   [workflow-slop](../packages/slop-detector/docs/workflow-slop.md).
 - `OKF bundle prose guard` checks

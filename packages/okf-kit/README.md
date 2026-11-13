@@ -1,6 +1,6 @@
 # okf-kit
 
-CLI that validates OKF v0.1 knowledge bundles for structural correctness, staleness, and citation drift.
+CLI that validates OKF v0.1 and v0.2 knowledge bundles for structural correctness, staleness, and citation drift.
 
 Part of [agent-dx](https://github.com/LanNguyenSi/agent-dx), playbooks and tooling for teams shipping with AI agents.
 

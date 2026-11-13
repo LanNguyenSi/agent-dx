@@ -1,7 +1,7 @@
 {
   "name": "okf-kit",
   "version": "0.21.0",
-  "description": "CLI that validates OKF v0.1 knowledge bundles for structural correctness",
+  "description": "CLI that validates OKF v0.1 and v0.2 knowledge bundles for structural correctness",
   "type": "module",
   "bin": {
     "okf-kit": "./dist/cli.js"
