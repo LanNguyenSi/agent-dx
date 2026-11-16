@@ -126,7 +126,9 @@ see the entry for this rule in the orchestrator-workflow CHANGELOG.
 ## Narrow rounds
 
 A narrow round is a fix round or a re-review after a task's first round
-whose assignment is limited to named findings of the last review. A
+whose assignment is limited to named findings of the last review. Narrow
+limits what the round may change and which findings it answers; the
+re-review still covers the round's whole delta. A
 redesign round, a split round, any round that follows a halt signal of this
 file (the Round-2 halt rule, the Review-round escalation budget, the
 Fix-regression decision point) before its decision is recorded, and the
@@ -144,12 +146,20 @@ field; the input contract gains no field for them:
   behaviour branch the round adds or changes.
 - The replay scope: the implementer replays an earlier round's probe only
   when the round's delta touches the probe's mutant file, the test file that
-  killed it, a file that imports or is imported by either, or a fixture,
-  configuration, or build step they share. A probe whose killing test file
+  killed it, a file that imports or is imported by either, a file either one
+  reads at run time, or a fixture, configuration, or build step they share.
+  When in doubt, the probe is replayed. A probe whose killing test file
   is not recorded is replayed.
 - The checks the round may leave out, and for each one who runs it before
   acceptance: the full test suite where targeted tests cover the delta, and
   checks that need a real environment. No other check may be left out.
+
+The killing test file of a probe is the file of the failing test that the
+runner's verdict, the return's `tests.executed` entry, or the probe's plan
+or result reference names for it: the orchestrator carries it into the
+probe's row in `04-implementation-summary.md`, and the briefing of a narrow
+round names it beside each earlier probe's definition, so a probe named
+without one is replayed.
 
 The briefing still names every earlier probe by its definition, as step 6
 of the [detailed workflow](evidence-and-probes.md) says. The implementer
@@ -167,8 +177,9 @@ that is running finishes, and a mutation probe is never aborted before its
 restore. The implementer then returns `status: partial` and lists what is
 open. The reviewer keeps `status: reviewed`, lists the open items under
 `residual_risks` and `missing_tests`, and, while a duty of the briefing's
-`review_method` is open, recommends at most `accept_with_notes` or
-`fix_required`, never `accept`. A checkpoint return is held to its output
+`review_method` or the probe replay in run mode `single` is open,
+recommends at most `accept_with_notes` or `fix_required`, never `accept`.
+A checkpoint return is held to its output
 contract like any other return. The stop by itself is neither a misfire
 nor a negative round for the Review-round escalation budget: the
 orchestrator spawns a follow-up round with the open items. Findings that

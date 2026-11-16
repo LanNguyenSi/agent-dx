@@ -59,6 +59,8 @@ Rules:
   `constraints` name the round `narrow`, replay only the earlier probes their
   replay scope covers and report every other one as `not_applicable` with
   `replayed: true` (reason: `outside the round's delta`), not a regression.
+  A narrow assignment without a replay-scope line means: replay every
+  earlier probe.
 - When the assignment's `constraints` set a time budget, it is a checkpoint
   for your report, not a licence to skip work: once it has passed, start no
   new check, let a running check finish (never abort a mutation probe before
@@ -74,8 +76,9 @@ Rules:
   rule.
 - A persisted probe-plan reference (a path plus an immutable revision or hash
   and the mutant's locator) may replace a repeated inline definition. Resolve
-  it first; an unresolvable or stale one is `not_applicable` evidence, not a
-  skipped probe. Never rewrite a prior plan for new code.
+  it first; an unresolvable or stale one is `not_applicable` evidence with
+  the proof still open, never a permitted skip: only a narrow round's replay
+  scope permits leaving a replay out. Never rewrite a prior plan for new code.
 - When a verify runner is available, run `agent-primitives verify -c <checks>`
   for the checks the acceptance criteria name, naming only checks the repo has
   (a repo without a `lint` or `typecheck` script is not run with the default

@@ -1,5 +1,25 @@
 # Bundle log
 
+- 2026-11-16T16:32:44Z, narrow rounds, review fixes: the `## Narrow rounds` section of `review-and-recovery.md` grows by 11 lines
+  (a clause that narrow limits what the round may change while the re-review covers the whole delta, the
+  replay scope gains files read at run time and the in-doubt default, a paragraph says where a probe's killing
+  test file comes from, and the reviewer's verdict cap names the run mode `single` replay), the implementer
+  prompt gains 3 lines (a narrow assignment without a replay-scope line replays every earlier probe; the
+  plan-reference bullet separates a stale reference from a replay left out under the scope),
+  `test/docs-consistency.test.ts` pins four more sentences of the section and the reviewer prompt's verdict
+  cap in the describe at the end of the file (the safety-core comment near the top keeps its four lines), and
+  the `[Unreleased]` entry in `CHANGELOG.md` is reworded on the same 28 lines. 60 citations in
+  `review-gate-and-waivers.md` and `subagent-contracts-superset.md` were re-pointed with `okf-kit repoint
+  --base` (content unchanged); six `implementer.md` citations of this log below the replay bullet moved by 3
+  lines and were re-pointed by exact-text replacement. Updated: `subagent-contracts-superset.md` (the replay
+  scope, the origin of the killing test file, the missing replay-scope line) and `review-gate-and-waivers.md`
+  (the whole-delta clause, the run mode `single` replay in the verdict cap, the five pinned sentences in place
+  of "the section's other sentences carry no pin" for those four). Re-verified: `model-preselection.md` cites
+  `test/docs-consistency.test.ts` only above the changed describe and its routing claims are untouched;
+  `run-state-lifecycle-and-markers.md` cites no line of `review-and-recovery.md`, its `CHANGELOG.md`
+  citations sit on unmoved lines, and none of its claims describes the replay or a time budget. Re-stamped
+  `model-preselection.md`, `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`.
 - 2026-11-16T16:03:08Z, narrow rounds: `review-and-recovery.md` gains a `## Narrow rounds` section after the escalation budget
   (62 lines), `evidence-and-probes.md` points to it from step 6 and step 7 (one sentence appended to an existing
   line each, so no line of that file moved), the implementer prompt's replay bullet gains the narrow-round scope
@@ -3155,7 +3175,7 @@
   violated | not_applicable` now, not just `met | violated`, since a
   `not_applicable` probe (the mutant could not be applied, so no `result`
   was measured) has nothing for `met`/`violated` to report
-  (`implementer.md:161#"expectation: met | violated | not_applicable"`,
+  (`implementer.md:164#"expectation: met | violated | not_applicable"`,
   `packages/orchestrator-workflow/assets/skill/references/contracts.md:150#"expectation: met | violated | not_applicable"`).
   The two `not_applicable` verdicts that used to share one bare label
   (a probe with no reapplicable definition, not a regression, versus a
@@ -3171,8 +3191,8 @@
   agent-primitives flag name); both copies now say "matched what the
   probe was expected to do", tool-agnostic like the rest of the prompt
   (the flag pointer stays only in `CHANGELOG.md`'s own prose)
-  (`implementer.md:207#"needs a measured"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:207#"needs a measured"`). The verify/mutation-
+  (`implementer.md:210#"needs a measured"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:210#"needs a measured"`). The verify/mutation-
   probe-runner bullet (`implementer.md` only, no SKILL.md mirror) now
   says where the definition fields come from when a runner reports a
   probe's mutant record separately from its result fields
@@ -3304,8 +3324,8 @@
   implementer.md): a replayed probe whose `expectation` is now `violated`,
   or which can no longer be applied, is the regression signal; `result`
   alone is not
-  (`implementer.md:207#"needs a measured"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:200#"are the exact text swapped there"`). The
+  (`implementer.md:210#"needs a measured"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:203#"are the exact text swapped there"`). The
   `04-implementation-summary.md` template's Mutation Probes table gained
   matching columns
   (`assets/templates/04-implementation-summary.md:53#"| Round | Mutant | File | Anchor | Before | After | Verified Applied Via | Result | Expectation | Reason | Restored Verified | Replayed |"`).
@@ -3329,7 +3349,7 @@
   file (`CHANGELOG.md`'s own 17-line `[Unreleased]` insertion, the one
   live anchored citation into it above); a small number of citations
   landing on a line whose own text changed were re-anchored by hand
-  rather than only re-numbered (`packages/orchestrator-workflow/assets/agents/implementer.md:212#"When the assignment names no mutation probes, return"`,
+  rather than only re-numbered (`packages/orchestrator-workflow/assets/agents/implementer.md:215#"When the assignment names no mutation probes, return"`,
   `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:86#"A replayed probe whose"`,
   `implementer.md:56#"replayed probe whose"`). Two pre-existing
   numeric-only (no string anchor) citations into `implementer.md` in an
