@@ -1038,8 +1038,7 @@ describe("generated: overlapping candidate lists, catalogs and leaves", () => {
     const leafClass = classOf(intended.model, lists);
     const floor = FLOORED.includes(role) ? 1 : 0;
     let best:
-      | { model: string; effort: Tier; reason: string; key: number }
-      | undefined;
+      { model: string; effort: Tier; reason: string; key: number } | undefined;
     for (const [id, levels] of offered) {
       const own = classOf(id, lists);
       if (own === -1 || own > leafClass || own < floor) continue;

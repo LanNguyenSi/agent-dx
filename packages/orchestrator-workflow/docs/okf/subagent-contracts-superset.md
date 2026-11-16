@@ -37,7 +37,7 @@ All `path:line` pointers below are repo-root-relative from the agent-dx root.
 ## Five roles, two postures
 
 The canonical role list is code, not just prose: `ROLES` at
-`packages/orchestrator-workflow/src/models.ts:8#"export const ROLES: Role[] = ["` (`Role` type at `packages/orchestrator-workflow/src/models.ts:1#"export type Role ="`)
+`packages/orchestrator-workflow/src/models.ts:4#"export const ROLES: Role[] = ["` (`Role` type at `packages/orchestrator-workflow/src/models.ts:1#"export type Role ="`)
 = `explorer, task-slicer, implementer, reviewer, advisor` (five since
 0.21.0, four before it), narratively mirrored at
 `packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:63#"the [agentic-coding-playbook"` (`## Roles`).
@@ -45,14 +45,14 @@ The advisor role is qualitatively different from the other four: it is
 escalation-only, spawned only at defined triggers rather than at a fixed
 point in every run, and installed only under the `full` profile, never
 `minimal` (see [install-fence-mechanics.md](install-fence-mechanics.md) for
-the profile-scoping mechanics: `MINIMAL_PROFILE_ROLES`, `src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`,
+the profile-scoping mechanics: `MINIMAL_PROFILE_ROLES`, `src/models.ts:38#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`,
 simply does not name it, the same way it never named explorer/task-slicer).
 
 Read-only vs. writable is also a code-level set:
 `READ_ONLY_ROLES = new Set(["explorer", "reviewer", "advisor"])` at
-`packages/orchestrator-workflow/src/models.ts:22#"export const READ_ONLY_ROLES: ReadonlySet<Role> = new"` (advisor added
+`packages/orchestrator-workflow/src/models.ts:18#"export const READ_ONLY_ROLES: ReadonlySet<Role> = new"` (advisor added
 0.21.0, for the same reason as explorer/reviewer: it reads and recommends
-but never edits, per the comment at `packages/orchestrator-workflow/src/models.ts:16-20#"* it reads and recommends but never edits."`). There is no matching
+but never edits, per the comment at `packages/orchestrator-workflow/src/models.ts:12-16#"* it reads and recommends but never edits."`). There is no matching
 `WRITABLE_ROLES` constant; the writable set is derived as the complement,
 exactly as `packages/orchestrator-workflow/test/docs-consistency.test.ts:289#"const writableRoles = ROLES.filter((role) =>"`
 computes it: `ROLES.filter((role) => !READ_ONLY_ROLES.has(role))` →
@@ -74,7 +74,7 @@ orchestrator to spawn the installed prompts under
 instead of improvising role text
 (`packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:63#"the [agentic-coding-playbook"`). Per-role
 default models (`DEFAULT_MODELS`,
-`packages/orchestrator-workflow/src/models.ts:289-294#"as Record<Role, string>;"`) are out of this doc's
+`packages/orchestrator-workflow/src/models.ts:285-290#"as Record<Role, string>;"`) are out of this doc's
 lane; see [model-preselection.md](model-preselection.md).
 
 ## Repository-bound verification sets
@@ -858,7 +858,7 @@ unnamed-method default in `reviewer.md` carries no sentence pin. The class
 list and the rules under it, including the
 never-`adversarial`-on-`-medium` constraint, are pinned as whole sentences at
 their one site in the delegation and tiers reference
-(`test/docs-consistency.test.ts:10038#"safety core: the review method and tier class list stays pinned"`),
+(`test/docs-consistency.test.ts:10034#"safety core: the review method and tier class list stays pinned"`),
 and `test/charter.test.ts` pins that the class mapping appears at that site only
 (`test/charter.test.ts:215#"the review method and tier class mapping is normative once"`).
 

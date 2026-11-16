@@ -264,7 +264,7 @@ line outside a test case keeps the round there too
 `review-and-recovery.md:264#"when any round of the task was given the"`;
 `review-and-recovery.md:269#"such a task goes through a reviewer round. On such a task the test class is"`).
 The clauses are pinned as whole sentences
-in `test/docs-consistency.test.ts:9892#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
+in `test/docs-consistency.test.ts:9888#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
 their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.
 
 ## The Decision legend in 05-review-findings.md

@@ -8852,11 +8852,7 @@ describe("review-report validator schema matches the reviewer output contract ex
    * distinguish.
    */
   type FenceShape =
-    | "enum"
-    | "array"
-    | "mapping-list"
-    | "mapping"
-    | "inline-scalar";
+    "enum" | "array" | "mapping-list" | "mapping" | "inline-scalar";
 
   function fenceShapes(block: string): Record<string, FenceShape> {
     const enumKeys = new Set(Object.keys(enumSpellings(block)));

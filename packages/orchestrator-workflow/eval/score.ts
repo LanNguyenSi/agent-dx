@@ -165,10 +165,7 @@ export function mediumPlusCount(check: ReturnCheck): number {
 /* ------------------------------------------------------------------ */
 
 export type RunStatus =
-  | "completed"
-  | "timeout"
-  | "session_failed"
-  | "setup_failed";
+  "completed" | "timeout" | "session_failed" | "setup_failed";
 
 /** What a guarded command left behind, as the run record keeps it. */
 export interface ProcessRecord {

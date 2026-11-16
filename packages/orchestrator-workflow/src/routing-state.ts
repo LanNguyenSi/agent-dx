@@ -115,8 +115,7 @@ export function legacyOpencodeFallbacks(
     );
     const keys = field === "opencodeModels" ? ROLES : MODEL_CLASSES;
     const map = parsed[field] as
-      | Partial<Record<Role | ModelClass, string | undefined>>
-      | undefined;
+      Partial<Record<Role | ModelClass, string | undefined>> | undefined;
     // Complete qualified maps are represented entirely by routing. Otherwise
     // presence (including {}) records inheritance for missing map keys.
     if (map !== undefined && !keys.every((key) => map[key]?.includes("/")))

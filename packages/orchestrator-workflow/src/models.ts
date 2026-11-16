@@ -1,9 +1,5 @@
 export type Role =
-  | "explorer"
-  | "task-slicer"
-  | "implementer"
-  | "reviewer"
-  | "advisor";
+  "explorer" | "task-slicer" | "implementer" | "reviewer" | "advisor";
 
 export const ROLES: Role[] = [
   "explorer",
