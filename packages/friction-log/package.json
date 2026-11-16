@@ -48,17 +48,17 @@
     "directory": "packages/friction-log"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.0",
-    "commander": "^12.0.0",
-    "yaml": "^2.8.3"
+    "better-sqlite3": "^13.0.3",
+    "commander": "^12.1.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.11",
-    "@types/node": "^20.11.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.19.43",
     "prettier": "^3.9.10",
-    "tsx": "^4.22.4",
-    "typescript": "^5.3.3",
-    "vitest": "^4.1.6"
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
   },
   "engines": {
     "node": ">=22"
