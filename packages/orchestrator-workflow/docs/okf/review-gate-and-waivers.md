@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-11-16T06:55:31Z
+timestamp: 2026-11-16T16:03:08Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -105,7 +105,7 @@ rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
 resupply it instead of inferring one from the findings list"
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:259-261#"instead of inferring one from the findings list."`; the installed `reviewer.md:251#"leave it blank or omit it."` prompt carries the mirrored
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:259-261#"instead of inferring one from the findings list."`; the installed `reviewer.md:257#"leave it blank or omit it."` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.
@@ -148,14 +148,14 @@ explanatory documentation, comments, or citations. It excludes source- and
 test-file edits and semantic changes to executable commands, configuration,
 policy, instructions, or behavior; it applies only to low/medium
 documentation or maintainability findings and never to high/critical or any
-other ineligible finding (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:197#"ineligible finding, and records the concrete verification in a"`). This is a closing
+other ineligible finding (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:259#"ineligible finding, and records the concrete verification in a"`). This is a closing
 option after review, not an exception to the review requirement or the waiver
 rules above.
 
 For an eligible closure, record the concrete verification in a
 `05-review-findings.md` row without changing its Severity or Decision headers,
 and set the row's Decision to `accepted`
-(`review-and-recovery.md:199#"and Decision"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
+(`review-and-recovery.md:261#"and Decision"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The rule moved
 out of the always-loaded charter into the review and recovery reference, which
@@ -166,13 +166,13 @@ pinned as sentences at that site only, in
 `test/docs-consistency.test.ts:3198#"safety core: the docs-only closing delta stays narrowly bounded at the review and recovery reference"`.
 
 A second closing option sits in the same section, with its own conditions
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:203#"A second closing option covers a medium finding in the category"`).
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:265#"A second closing option covers a medium finding in the category"`).
 After independent review, the orchestrator may close a *medium* finding in the
 category the reviewer reported (`docs` or `tests`) without another reviewer
 round when the task's entire unreviewed delta consists of fixes of two classes:
 only explanatory text, or tests added or existing tests tightened with no
 assertion removed or loosened and no test deleted or skipped
-(`review-and-recovery.md:215#"The second class adds tests or"`).
+(`review-and-recovery.md:277#"The second class adds tests or"`).
 Text that a tool consumes as data or configuration counts as configuration,
 not explanatory text: comment directives (lint, type-check, coverage,
 formatter, or test-environment directives, shebangs, build tags), document
@@ -180,16 +180,16 @@ frontmatter such as a bundle's `sources:` list, and any part of a
 documentation or instruction file that a test or tool reads as data (markers,
 pinned sentences), so a documentation file that a test reads as data is
 configuration and closes under neither option
-(`review-and-recovery.md:209#"semantics. Text that a tool consumes as data or configuration counts as"`).
+(`review-and-recovery.md:271#"semantics. Text that a tool consumes as data or configuration counts as"`).
 Citations, anchored ones included, stay explanatory text, so a citation fix
 stays closable under either option on a task outside the `adversarial` class;
 on an `adversarial`-class task only test-only fixes close, and a citation fix,
 being documentation, keeps the reviewer round
-(`review-and-recovery.md:214#"pinned sentences). Citations, anchored ones included, stay explanatory text."`;
-`review-and-recovery.md:258#"the classes listed in the"`).
+(`review-and-recovery.md:276#"pinned sentences). Citations, anchored ones included, stay explanatory text."`;
+`review-and-recovery.md:320#"the classes listed in the"`).
 The definition governs the first option too: what counts as explanatory text
 there is limited by it
-(`review-and-recovery.md:199#"What counts as explanatory text for this option is"`).
+(`review-and-recovery.md:261#"What counts as explanatory text for this option is"`).
 The test class is bounded line by line, not by who reads a change: it closes a
 fix only when the fix changes existing test files exclusively and every line
 it adds, changes, or removes is part of an assertion added inside an existing
@@ -197,15 +197,15 @@ test case or part of a new test case added to an existing test file, the new
 test case being the call or declaration that defines it and its body, so a new
 `it(...)` in an existing file, or a new Go `func TestX` in an existing
 `_test.go` file, can close a finding
-(`review-and-recovery.md:217#"This test class closes a fix only when the fix changes existing test files"`).
+(`review-and-recovery.md:279#"This test class closes a fix only when the fix changes existing test files"`).
 An added assertion leaves every existing assertion in place, and rewriting an
 existing test's expected value counts as loosening, so a changed expected
 value keeps the round
-(`review-and-recovery.md:222#"An added assertion leaves every existing assertion in place: none is removed,"`).
+(`review-and-recovery.md:284#"An added assertion leaves every existing assertion in place: none is removed,"`).
 One fix may combine several new test cases and added assertions, and a new
 `describe` block whose body holds nothing but new test cases counts as part of
 them, as do the blank lines that separate a new test case from its neighbours
-(`review-and-recovery.md:225#"One fix may add several new test cases and add assertions next to them; a"`).
+(`review-and-recovery.md:287#"One fix may add several new test cases and add assertions next to them; a"`).
 Everything else keeps the reviewer round: a new file of any kind (test file,
 helper, fixture, snapshot, golden file), a helper, fixture, snapshot, golden
 file, or allowlist or exemption entry added or changed anywhere but inside a
@@ -213,7 +213,7 @@ new test case, an import, a module mock such as `vi.mock` wherever it is
 written (the runner hoists it to module level), any other line outside a test
 case (a hook such as `beforeEach` or a Go `TestMain`, module-level or
 init-time code such as a Go `func init()`), and a configuration change
-(`review-and-recovery.md:229#"Anything else keeps the reviewer round: a new file of any kind (a test file,"`).
+(`review-and-recovery.md:291#"Anything else keeps the reviewer round: a new file of any kind (a test file,"`).
 An orchestrator decides eligibility from the diff alone, with no search for
 readers: a new fixture file, a new helper, a new allowlist entry, or a new
 import keeps the round whatever reads it. The boundary is lexical, so state
@@ -225,34 +225,34 @@ This rule replaces an earlier dependent-test exception, so neither
 dependent-test evidence nor a search for readers is asked for.
 Adding `.only` or a condition that narrows a test counts as loosening
 without exception
-(`review-and-recovery.md:238#"a condition that narrows a test counts as loosening without"`).
+(`review-and-recovery.md:300#"a condition that narrows a test counts as loosening without"`).
 Unlike the first option it may touch test files, which is why the bound and
 the probe requirement below exist: a test change can hide a behaviour change.
 A fix that changes code, configuration, or instruction semantics keeps the
 reviewer round
-(`review-and-recovery.md:239#"exception. A fix that changes code, configuration, or instruction semantics"`).
+(`review-and-recovery.md:301#"exception. A fix that changes code, configuration, or instruction semantics"`).
 The halt exclusion reads the reviewer's markers, not the orchestrator's
 judgement: a finding marked `recurrence: repeated` with `introduced_by_delta`
 `yes` or `unknown`, and any fix on a task whose Review-round escalation budget
 has fired, are not eligible, so those rules govern
-(`review-and-recovery.md:243#"fired, is not eligible for this option: those rules govern and the next"`),
+(`review-and-recovery.md:305#"fired, is not eligible for this option: those rules govern and the next"`),
 and high and critical findings stay blocking under both options
-(`review-and-recovery.md:245#"High and critical findings stay blocking: neither closing option closes one,"`).
+(`review-and-recovery.md:307#"High and critical findings stay blocking: neither closing option closes one,"`).
 The closure is recorded in the same `05-review-findings.md` row, Decision
 `accepted`, with the finding, the fix commit, the test run as the package's
 full test command (plus the type-check when a test or source file was touched)
 with its exit code, a killed mutation probe for each added assertion and each
 new test case, and the bundle check result where the repository has a
 knowledge bundle
-(`review-and-recovery.md:250#"was touched) with its exit code, a killed mutation probe for each added"`;
-`review-and-recovery.md:251#"bundle check result where the"`). It is
+(`review-and-recovery.md:312#"was touched) with its exit code, a killed mutation probe for each added"`;
+`review-and-recovery.md:313#"bundle check result where the"`). It is
 not a review round, so it counts toward neither the test-adequacy cap, the
 Round-2 halt rule, the Review-round escalation budget nor the Fix-regression
 decision point
-(`review-and-recovery.md:252#"closure is not a review round: it"`).
+(`review-and-recovery.md:314#"closure is not a review round: it"`).
 On a task of the `adversarial` class the first option is not available and the
 second closes a finding only when the fix changes test files exclusively
-(`review-and-recovery.md:258#"the classes listed in the"`).
+(`review-and-recovery.md:320#"the classes listed in the"`).
 A task is of that class when its delta falls in a class the `adversarial` row
 lists or when any round of the task was given the `adversarial` class, so a
 docs-only fix on such a task does not qualify, and any fix other than one
@@ -260,9 +260,9 @@ confined to test files goes through a reviewer round; on such a task the test
 class is the same line-level rule as under the second option, so a new or
 changed helper, fixture, snapshot, or golden file, an import, or any other
 line outside a test case keeps the round there too
-(`review-and-recovery.md:263#"when its delta falls in a class that row lists or"`;
-`review-and-recovery.md:264#"when any round of the task was given the"`;
-`review-and-recovery.md:269#"such a task goes through a reviewer round. On such a task the test class is"`).
+(`review-and-recovery.md:325#"when its delta falls in a class that row lists or"`;
+`review-and-recovery.md:326#"when any round of the task was given the"`;
+`review-and-recovery.md:331#"such a task goes through a reviewer round. On such a task the test class is"`).
 The clauses are pinned as whole sentences
 in `test/docs-consistency.test.ts:9888#"safety core: the docs-or-test medium closing option stays bounded at the review and recovery reference"`, and
 their single site in `test/charter.test.ts:188#"sits only in review-and-recovery.md"`.
@@ -371,7 +371,7 @@ implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
 same rule (`reviewer.md:163#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:251#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:224#"residual_risks:"`); `matches_implementer_claim`
+field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:251#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:230#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -395,7 +395,7 @@ all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
 `packages/orchestrator-workflow/assets/skill/references/contracts.md:259-261#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing: ask the reviewer to resupply it, rather than infer one from the
-findings, and the installed `reviewer.md:251#"leave it blank or omit it."` prompt carries the mirrored
+findings, and the installed `reviewer.md:257#"leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part
@@ -478,11 +478,11 @@ here, see
 The halt rule and the budget both need something to repeat (a defect
 class, or negative rounds). A third, earlier rule covers a fix round whose
 review shows that the fix itself broke something, without any repetition
-yet (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:126#"## Fix-regression decision point"`):
+yet (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:188#"## Fix-regression decision point"`):
 the trigger, in the review of a fix round, is at least one `high` or
 `critical` finding that the previous round's review did not report, with
 `introduced_by_delta: yes`
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:129#"reports at least one"`);
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:191#"reports at least one"`);
 the qualifier is read off the findings of the two reviews, not off
 `recurrence`, so a `recurrence: repeated` finding the previous round did
 not report still triggers it. `unknown` and `no` do not trigger it;
@@ -492,9 +492,9 @@ orchestrator names in one sentence why the fix could introduce the defect
 (the structural cause, or the statement that there is none) and records one of
 four outcomes in `03-decisions.md`: continue with the stated reason,
 redesign, split, or hold
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:143#"record one of four outcomes as a decision in"`);
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:205#"record one of four outcomes as a decision in"`);
 an advisor spawn is optional. It is a decision point and not a halt
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:147#"This is a decision point, not a halt"`):
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:209#"This is a decision point, not a halt"`):
 continuing is a valid outcome, it is no round-2 halt signal, it adds
 nothing to the budget's count, and it never replaces a review round; when
 the same review also fires the Round-2 halt signal, the halt rule governs.
@@ -505,6 +505,49 @@ not carry it, so it needs no AGENTS.md re-install and reaches an existing
 install with the next kit re-install. No test pins the section's clauses;
 `test/probe-plans-recovery.test.ts` only checks that every packaged reference
 is routed from the entrypoint.
+
+## Narrow rounds and the time-budget checkpoint
+
+A fix round or re-review after a task's first round whose assignment is
+limited to named findings of the last review is a narrow round
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:126#"## Narrow rounds"`).
+A redesign round, a split round, a round after a halt signal whose decision
+is not yet recorded, and the re-entry after a misfire are not narrow, and a
+doubt counts as not narrow
+(`review-and-recovery.md:133#"When in doubt, the round is not"`).
+The briefing carries the round kind with its findings, a time budget, the
+mandatory probes, the replay scope, and the checks the round may leave out
+in the existing `constraints` field, so the input contract is unchanged
+(`review-and-recovery.md:137#"The briefing of a narrow round carries these lines in its"`).
+The replay scope itself is described in
+[subagent-contracts-superset.md](subagent-contracts-superset.md#fix-round-mutation-probe-replay).
+
+The budget is a checkpoint for the report and decides nothing at the gate.
+Once it has passed, a role starts no new check and lets a running one
+finish. The implementer returns `status: partial`; the reviewer keeps
+`status: reviewed` and, while a `review_method` duty is open, recommends at
+most `accept_with_notes` or `fix_required`. The stop is neither a misfire
+nor a negative round for the escalation budget, the orchestrator spawns a
+follow-up round with the open items, and findings the review reports count
+as they would without the checkpoint
+(`review-and-recovery.md:172#"The stop by itself is neither a misfire"`).
+Under any budget the round keeps the probe per fixed finding,
+`class_closure`, the touched tests, the bundle check, the hygiene checks,
+the reviewer's `review_method` duties, and its probe replay in run mode
+`single`; a check that was not run is missing evidence, and the full suite
+runs before acceptance against the accepted head
+(`review-and-recovery.md:177#"Never droppable under a time budget, in a narrow round or any other: the"`).
+
+One sentence of the section is pinned whole at that one site, as part of
+the safety core's review-gate rule: "A time budget neither replaces a review
+round nor lifts a duty this section names as never droppable."
+(`test/docs-consistency.test.ts:10246#"safety core: a time budget replaces no review round and lifts no never-droppable duty"`).
+The section's other sentences carry no pin. The reviewer prompt states the
+checkpoint as its own bullet
+(`packages/orchestrator-workflow/assets/agents/reviewer.md:206#"set a time budget, it is a checkpoint"`).
+The rule lives in the skill reference and the implementer and reviewer
+prompts; `agents-md-section.md` does not carry it, so it needs no AGENTS.md
+re-install.
 
 ## Ceremony rules: review method by risk class, pinned prose
 
@@ -532,7 +575,7 @@ trust boundary, outward-action, review-gate, and reviewer read-only rules includ
 The charter states none of this; it sits in `delegation-and-tiers.md`, and step 7
 of the detailed workflow points there.
 
-Pinned-prose changes (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:155#"## Pinned-prose changes"`)
+Pinned-prose changes (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:217#"## Pinned-prose changes"`)
 cover a change to documentation wording that a test pins or could pin. The
 section is installed into every consumer repository, so it states the pin
 model generically: tests pin the machine contract (return field names, enums
@@ -544,14 +587,14 @@ are listed in the header comment above the safety-core tests of
 `test/docs-consistency.test.ts` and in the CHANGELOG. The reason given for the
 bound is that
 "A prose mutant survives exactly when its bytes sit in no assertion"
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:159#"when its bytes sit in no assertion, so for prose outside the pinned set a"`),
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:221#"when its bytes sit in no assertion, so for prose outside the pinned set a"`),
 so rounds that hunt for the next unpinned sentence do not converge. The
 briefing's claim list is the contract plus the declared safety core, and it
 bounds the reviewer's prose mutant space; a survivor outside the list is a
 scope note in `residual_risks`, not a finding, unless the reviewer shows the
 sentence is load-bearing. The cap stays: "Cap test-adequacy review rounds on
 the change at two."
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:174#"Cap test-adequacy review rounds on the change at two."`),
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:236#"Cap test-adequacy review rounds on the change at two."`),
 where a test-adequacy round returns only `tests` findings of severity `low`
 or `medium` about pin gaps, and a round returning any other finding is an
 ordinary round outside the cap. Semantic findings are exempt from the bound

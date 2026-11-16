@@ -123,6 +123,68 @@ through the reviewer subagent in full; this budget forces a change in
 approach, not a shortcut past the review gate. Anchored by a measurement;
 see the entry for this rule in the orchestrator-workflow CHANGELOG.
 
+## Narrow rounds
+
+A narrow round is a fix round or a re-review after a task's first round
+whose assignment is limited to named findings of the last review. A
+redesign round, a split round, any round that follows a halt signal of this
+file (the Round-2 halt rule, the Review-round escalation budget, the
+Fix-regression decision point) before its decision is recorded, and the
+re-entry after a misfire are not narrow. When in doubt, the round is not
+narrow. A round that is not narrow keeps every duty of the detailed
+workflow, the replay of every earlier probe included.
+
+The briefing of a narrow round carries these lines in its `constraints`
+field; the input contract gains no field for them:
+
+- The round kind, `narrow`, and the findings the round is limited to.
+- A time budget. It is a soft checkpoint, and the orchestrator chooses its
+  value for the round.
+- The mandatory probes: one mutation probe per fixed finding and one per
+  behaviour branch the round adds or changes.
+- The replay scope: the implementer replays an earlier round's probe only
+  when the round's delta touches the probe's mutant file, the test file that
+  killed it, a file that imports or is imported by either, or a fixture,
+  configuration, or build step they share. A probe whose killing test file
+  is not recorded is replayed.
+- The checks the round may leave out, and for each one who runs it before
+  acceptance: the full test suite where targeted tests cover the delta, and
+  checks that need a real environment. No other check may be left out.
+
+The briefing still names every earlier probe by its definition, as step 6
+of the [detailed workflow](evidence-and-probes.md) says. The implementer
+reports each one it did not replay under the replay scope in
+`mutation_probes` as `not_applicable` with `replayed: true` and the reason
+`outside the round's delta`; that is a skipped replay, not a regression.
+The orchestrator compares the skipped probes with the returned diff: a
+skipped probe that the delta does reach is replayed before the reviewer
+spawn. It records the skipped replays in `03-decisions.md` and names them
+as skipped in the reviewer briefing, so the reviewer can hold each skip
+against the diff.
+
+At the checkpoint of a time budget the role starts no new check. A check
+that is running finishes, and a mutation probe is never aborted before its
+restore. The implementer then returns `status: partial` and lists what is
+open. The reviewer keeps `status: reviewed`, lists the open items under
+`residual_risks` and `missing_tests`, and, while a duty of the briefing's
+`review_method` is open, recommends at most `accept_with_notes` or
+`fix_required`, never `accept`. A checkpoint return is held to its output
+contract like any other return. The stop by itself is neither a misfire
+nor a negative round for the Review-round escalation budget: the
+orchestrator spawns a follow-up round with the open items. Findings that
+the review reports count as they would without the checkpoint.
+
+Never droppable under a time budget, in a narrow round or any other: the
+mutation probe per fixed finding, `class_closure`, the tests the round
+touched, the bundle check, the hygiene checks this kit requires before a
+commit and before handback, the reviewer's `review_method` duties, and the
+reviewer's probe replay in run mode `single`. A time budget neither
+replaces a review round nor lifts a duty this section names as never
+droppable. A check that was not run is missing evidence, not a pass, and
+the full test suite runs at least once before acceptance, against the head
+that is accepted. Anchored by an observed run; see the entry for this rule
+in the orchestrator-workflow CHANGELOG.
+
 ## Fix-regression decision point
 
 The signal: the review of a fix round (any implementation round after the

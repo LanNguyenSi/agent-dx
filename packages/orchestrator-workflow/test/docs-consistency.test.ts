@@ -175,10 +175,10 @@ function phraseBoundedSlice(
  *      review method class mapping, delegation-and-tiers.md.
  *   4. The reviewer's read-only rule. Site: assets/agents/reviewer.md.
  *
- * The unavailable-model rule of review-and-recovery.md decides who reviews
- * when a routed model is not offered, so it is part of rule 3. Its three
- * sentences are pinned at that one site (see the describe on the unavailable
- * model rule).
+ * Part of rule 3, each pinned at review-and-recovery.md alone: the
+ * unavailable-model rule (who reviews when a routed model is not offered; see
+ * its describe) and the narrow-round budget sentence (a time budget replaces
+ * no review round and lifts no never-droppable duty; see the describe on it).
  *
  * Rule 1 also lives in runbook-selection.test.ts. charter.test.ts rejects a
  * second copy of a pinned sentence in the charter, SKILL.md, or a reference.
@@ -10232,5 +10232,48 @@ describe("INSTALL-AGENT.md Choosing models subsection matches the shipped defaul
         return [entry.alias, leaf.model, leaf.effort];
       }),
     );
+  });
+});
+
+/**
+ * Safety core, rule 3 (continued): a time budget on a round is a checkpoint
+ * for the report, never a way around the review gate. The sentence is pinned
+ * whole at one site, the Narrow rounds section of the review and recovery
+ * reference; the role prompts and the detailed workflow only point there or
+ * state their own duty in their own words. The list of other sites is read
+ * from the files, so a copy added to any of them fails here.
+ */
+describe("safety core: a time budget replaces no review round and lifts no never-droppable duty", () => {
+  const recovery = unwrap(
+    readRawAsset("skill/references/review-and-recovery.md"),
+  );
+  const otherSites = [
+    "skill/SKILL.md",
+    "agents-md-section.md",
+    ...readdirSync(`${PACKAGE_DIR}/assets/skill/references`)
+      .filter((name) => name !== "review-and-recovery.md")
+      .map((name) => `skill/references/${name}`),
+    ...readdirSync(`${PACKAGE_DIR}/assets/agents`).map(
+      (name) => `agents/${name}`,
+    ),
+  ];
+  const others = otherSites.map((site) => unwrap(readRawAsset(site)));
+  const sentence =
+    "A time budget neither replaces a review round nor lifts a duty this section names as never droppable.";
+
+  it("states the sentence whole, once, inside the Narrow rounds section", () => {
+    expect(recovery.split(sentence).length - 1).toBe(1);
+    const sectionStart = recovery.indexOf("## Narrow rounds");
+    const sectionEnd = recovery.indexOf("## Fix-regression decision point");
+    expect(sectionStart, "Narrow rounds section missing").toBeGreaterThan(-1);
+    expect(sectionEnd).toBeGreaterThan(sectionStart);
+    expect(recovery.slice(sectionStart, sectionEnd)).toContain(sentence);
+  });
+
+  it("states the sentence at no other site", () => {
+    expect(otherSites.length).toBeGreaterThan(10);
+    others.forEach((other, i) => {
+      expect(other, otherSites[i]).not.toContain(sentence);
+    });
   });
 });

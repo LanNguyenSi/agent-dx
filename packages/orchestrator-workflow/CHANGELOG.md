@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Narrow rounds, defined in a new section of
+  `references/review-and-recovery.md`: a fix round or re-review after a task's
+  first round whose assignment is limited to named findings of the last
+  review. Redesign and split rounds, a round after a halt signal whose
+  decision is not yet recorded, and the re-entry after a misfire are not
+  narrow, and a doubt counts as not narrow. The briefing carries the round
+  kind with its findings, a time budget as a soft checkpoint whose value the
+  orchestrator chooses, the mandatory probes, the replay scope, and the checks
+  the round may leave out with who runs each before acceptance, all in the
+  existing `constraints` field. In a narrow round the implementer replays an
+  earlier probe only when the delta reaches it (mutant file, killing test
+  file, a file importing or imported by either, shared fixtures,
+  configuration, or build steps; always when the killing test file is not
+  recorded) and reports the others as `not_applicable` with the reason
+  `outside the round's delta`; the orchestrator records them in
+  `03-decisions.md`. Rounds that are not narrow keep the full replay, and the
+  reviewer's replay in run mode `single` is unchanged. At the checkpoint a
+  role starts no new check and lets a running one finish: the implementer
+  returns `status: partial`, the reviewer keeps `status: reviewed` and
+  recommends no `accept` while a `review_method` duty is open, and the stop
+  is neither a misfire nor a negative round for the escalation budget. No
+  budget drops the probe per fixed finding, `class_closure`, touched tests,
+  the bundle check, the hygiene checks, or a reviewer duty, and the full
+  suite runs before acceptance. The implementer and reviewer prompts
+  each gain a checkpoint bullet, and steps 6 and 7 of the detailed workflow
+  point to the section. Anchored by an observed run, in which replaying every
+  earlier probe made each fix round cost more than the one before. Installed
+  skill and agent files report as outdated until refreshed.
+
 ## [0.51.0] - 2026-11-10
 
 ### Added

@@ -55,7 +55,17 @@ Rules:
   `not_applicable` (reason: `no definition recorded`), not a regression. A
   replayed probe whose `expectation` is now `violated`, or which can no longer
   be applied (reason: `target text no longer present`), is a regression:
-  report it as such and resolve it before you return.
+  report it as such and resolve it before you return. When the assignment's
+  `constraints` name the round `narrow`, replay only the earlier probes their
+  replay scope covers and report every other one as `not_applicable` with
+  `replayed: true` (reason: `outside the round's delta`), not a regression.
+- When the assignment's `constraints` set a time budget, it is a checkpoint
+  for your report, not a licence to skip work: once it has passed, start no
+  new check, let a running check finish (never abort a mutation probe before
+  its restore), and return `status: partial` with what is open in
+  `open_questions`. No budget drops the probe per fixed finding,
+  `class_closure`, the tests you touched, the bundle check, or the hygiene
+  checks below; a check you did not run is missing evidence, not a pass.
 - On any round after the task's first that fixes a review finding, enumerate
   the defect's class: search for the pattern the fix addresses and list every
   hit, or state a source-level closure (the fix removes the pattern at its one

@@ -83,7 +83,7 @@ directory and the subagents.
    `not_applicable` (reason: `no definition recorded`), not a regression.
    The implementer replays each one, not only the round's new probes,
    before the next reviewer spawn, and reports each in `mutation_probes`
-   with the evidence fields plus `replayed: true`. A replayed probe whose
+   with the evidence fields plus `replayed: true`. A narrow round is briefed as the Narrow rounds section of [review and recovery](review-and-recovery.md) says: its implementer replays only the earlier probes that section's replay scope reaches and reports the others as skipped. A replayed probe whose
    `expectation` is now `violated`, or which can no longer be applied
    (reason: `target text no longer present`), is the regression signal;
    `result` alone is not: reported as such (`result` `survived` or
@@ -285,7 +285,7 @@ directory and the subagents.
    (`file`, `anchor`, `before`, `after`) and `verified_applied_via` value,
    not merely their id; a probe recorded with only an id and no definition
    cannot be skipped this way and is `not_applicable`. The reviewer may
-   then skip re-running the ones named by definition.
+   then skip re-running the ones named by definition. The re-review of a narrow round is briefed as the Narrow rounds section of [review and recovery](review-and-recovery.md) says: this list then holds only the probes replayed under that round's replay scope, and the briefing names the skipped ones as skipped.
    The reviewer output contract itself is unchanged. In run mode `single`
    that skip permission does not apply: nobody but the orchestrator has
    seen its probe evidence. A probe counts as named when the briefing

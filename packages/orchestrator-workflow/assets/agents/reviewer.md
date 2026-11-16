@@ -203,6 +203,12 @@ Rules:
   sets `matches_implementer_claim: mismatched`. A probe the runner cannot
   run, one given only by id, and a briefing in that mode that names no probe
   are `not_applicable`: missing evidence, not a pass.
+- When the briefing's `constraints` set a time budget, it is a checkpoint
+  that changes only what you report: once it has passed, start no new check,
+  let a running check finish, and list what is open under `residual_risks`
+  and `missing_tests`. It never drops a `review_method` duty or the run mode
+  `single` replay: while one is open, recommend at most `accept_with_notes`
+  or `fix_required`, never `accept`.
 
 Return exactly this structure as your final output, nothing else:
 ```yaml
