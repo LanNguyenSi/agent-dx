@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-11-16T16:32:44Z
+timestamp: 2026-11-16T17:03:31Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -542,20 +542,32 @@ the reviewer's `review_method` duties, and its probe replay in run mode
 runs before acceptance against the accepted head
 (`review-and-recovery.md:188#"Never droppable under a time budget, in a narrow round or any other: the"`).
 
-One sentence of the section is pinned whole at that one site, as part of
-the safety core's review-gate rule: "A time budget neither replaces a review
-round nor lifts a duty this section names as never droppable."
-(`test/docs-consistency.test.ts:10248#"safety core: a time budget replaces no review round and lifts no never-droppable duty"`).
-The same describe pins four more sentences of the section whole and once:
-the never-droppable list, the reviewer's verdict cap, and the two replay
-defaults of the replay scope (in doubt, and without a recorded killing test
-file, the probe is replayed)
-(`test/docs-consistency.test.ts:10288#"const sectionSentences = ["`).
-The section's other sentences carry no pin. The reviewer prompt states the
-checkpoint as its own bullet
+The section's pinned sentences are a closed claim list that the test file
+declares once, in the constant `NARROW_ROUNDS_CLAIMS` above the describe,
+under the Pinned-prose rule below and as part of the safety core's
+review-gate rule
+(`test/docs-consistency.test.ts:10300#"it.each(NARROW_ROUNDS_CLAIMS)("`).
+It holds ten sentences, each pinned whole and once inside the section: the
+whole-delta clause of the re-review, the two replay defaults of the replay
+scope (in doubt, and without a recorded killing test file, the probe is
+replayed), "No other check may be left out.", the sentence that a mutation
+probe is never aborted before its restore, the reviewer's verdict cap, the
+sentence that reported findings count as they would without the checkpoint,
+the never-droppable list, "A time budget neither replaces a review round nor
+lifts a duty this section names as never droppable.", and the sentence on a
+check that was not run and the full suite
+(`test/docs-consistency.test.ts:10284#"safety core: a time budget replaces no review round and lifts no never-droppable duty"`).
+Every other sentence of the section carries no pin, and neither does a copy
+of a listed sentence in the prompts, this bundle, or the CHANGELOG: the
+definition of a narrow round with its in-doubt default, the briefing lines,
+the origin of the killing test file, and the skipped-replay report are
+outside the list, so a surviving mutant there is a scope note. The reviewer
+prompt states the checkpoint as its own bullet
 (`packages/orchestrator-workflow/assets/agents/reviewer.md:206#"set a time budget, it is a checkpoint"`),
-and the verdict-cap sentence of that bullet is pinned at the prompt
-(`test/docs-consistency.test.ts:10310#"states the reviewer prompt's verdict cap whole, once"`).
+and the verdict-cap sentence of that bullet is the one sentence with a
+second pinned site, the prompt, because the reviewer acts on the prompt's
+own wording
+(`test/docs-consistency.test.ts:10322#"states the reviewer prompt's verdict cap whole, once"`).
 The rule lives in the skill reference and the implementer and reviewer
 prompts; `agents-md-section.md` does not carry it, so it needs no AGENTS.md
 re-install.

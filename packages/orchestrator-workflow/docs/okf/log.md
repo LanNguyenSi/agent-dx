@@ -1,5 +1,27 @@
 # Bundle log
 
+- 2026-11-16T17:03:31Z, narrow rounds, declared claim list: `test/docs-consistency.test.ts` now declares the pinned sentences of the
+  `## Narrow rounds` section of `review-and-recovery.md` once, as the closed claim list `NARROW_ROUNDS_CLAIMS` with a
+  header comment (ten sentences, each pinned whole and once inside the section; every other sentence of the section
+  and every copy in the prompts, this bundle, and the CHANGELOG is unpinned prose). Five sentences are new on the
+  list: the whole-delta clause of the re-review, "No other check may be left out.", the sentence that a mutation
+  probe is never aborted before its restore, the sentence that reported findings count as they would without the
+  checkpoint, and the sentence on a check that was not run and the full suite. The reviewer prompt's verdict cap stays
+  pinned at the prompt as the one sentence with a second site, and the comment says why. The safety-core comment near
+  the top of the test file was rewritten on the same four lines; the describe at the end of the file grew, which moved
+  only lines below the last citation of any other describe. In `review-and-recovery.md` the paragraph on the killing
+  test file was rewritten on the same six lines (file or files of the failing tests; the orchestrator records the
+  artifact naming them as the probe's result reference in the Optional Probe Plan and Result Index of the
+  implementation summary, since the Mutation Probes table has no cell for it), so no line of that file moved.
+  Updated: `review-gate-and-waivers.md` (the claim list in place of "one sentence plus four more", the three
+  `test/docs-consistency.test.ts` citations of that passage re-pointed by hand to the test over the new constant, the
+  describe, and the verdict-cap test) and `subagent-contracts-superset.md` (the killing test file passage and its
+  `review-and-recovery.md:157` anchor text). Re-verified: `model-preselection.md` cites
+  `test/docs-consistency.test.ts` only above the changed describe and on no line of the rewritten comment, and its
+  routing claims are untouched; `run-state-lifecycle-and-markers.md` cites no line of `review-and-recovery.md`, its
+  `test/docs-consistency.test.ts` citations sit above the changed describe and off the rewritten comment, and none of
+  its claims describes the replay, a time budget, or the probe index. Re-stamped `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`.
 - 2026-11-16T16:32:44Z, narrow rounds, review fixes: the `## Narrow rounds` section of `review-and-recovery.md` grows by 11 lines
   (a clause that narrow limits what the round may change while the re-review covers the whole delta, the
   replay scope gains files read at run time and the in-doubt default, a paragraph says where a probe's killing

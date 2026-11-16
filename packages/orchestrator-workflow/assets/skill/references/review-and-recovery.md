@@ -154,12 +154,12 @@ field; the input contract gains no field for them:
   acceptance: the full test suite where targeted tests cover the delta, and
   checks that need a real environment. No other check may be left out.
 
-The killing test file of a probe is the file of the failing test that the
-runner's verdict, the return's `tests.executed` entry, or the probe's plan
-or result reference names for it: the orchestrator carries it into the
-probe's row in `04-implementation-summary.md`, and the briefing of a narrow
-round names it beside each earlier probe's definition, so a probe named
-without one is replayed.
+The killing test file of a probe is the file or files of the failing tests the
+runner's verdict, the return's `tests.executed` entry, or the probe's plan or
+result reference names for it. The orchestrator records the artifact naming
+them as the probe's result reference in the Optional Probe Plan and Result
+Index of `04-implementation-summary.md`, and a narrow briefing names them
+beside each earlier probe's definition; a probe named without one is replayed.
 
 The briefing still names every earlier probe by its definition, as step 6
 of the [detailed workflow](evidence-and-probes.md) says. The implementer

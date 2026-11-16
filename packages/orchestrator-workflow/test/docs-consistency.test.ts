@@ -175,10 +175,10 @@ function phraseBoundedSlice(
  *      review method class mapping, delegation-and-tiers.md.
  *   4. The reviewer's read-only rule. Site: assets/agents/reviewer.md.
  *
- * Part of rule 3, each pinned at review-and-recovery.md alone: the
- * unavailable-model rule (who reviews when a routed model is not offered; see
- * its describe) and the narrow-round budget sentences (no budget replaces a
- * review round or lifts a never-droppable duty; see the describe on them).
+ * Part of rule 3, pinned at review-and-recovery.md: the unavailable-model
+ * rule (who reviews when a routed model is not offered; see its describe) and
+ * the Narrow rounds claim list (NARROW_ROUNDS_CLAIMS, whose comment also names
+ * the one sentence pinned at a second site, the reviewer prompt's verdict cap).
  *
  * Rule 1 also lives in runbook-selection.test.ts. charter.test.ts rejects a
  * second copy of a pinned sentence in the charter, SKILL.md, or a reference.
@@ -10236,15 +10236,51 @@ describe("INSTALL-AGENT.md Choosing models subsection matches the shipped defaul
 });
 
 /**
- * Safety core, rule 3 (continued): a time budget on a round is a checkpoint
- * for the report, never a way around the review gate. The sentence is pinned
- * whole at one site, the Narrow rounds section of the review and recovery
- * reference; the role prompts and the detailed workflow only point there or
- * state their own duty in their own words. The list of other sites is read
- * from the files, so a copy added to any of them fails here. The same section
- * holds four more pinned sentences (see `sectionSentences`), and the reviewer
- * prompt's own verdict-cap sentence is pinned at that prompt.
+ * Safety core, rule 3 (continued): the closed claim list of the Narrow rounds
+ * section of the review and recovery reference, declared under that
+ * reference's Pinned-prose rule. These are the sentences of the section that
+ * bound the review gate and test adequacy: what a narrow scope or a time
+ * budget can never take away. Each is pinned whole, once, inside the section
+ * (the describe below). Every other sentence of the section, and every copy of
+ * a listed sentence in the role prompts, the knowledge bundle and the
+ * CHANGELOG, is unpinned prose; a surviving mutant outside this list is a
+ * scope note, not a finding.
+ *
+ * Left off on purpose: the definition of a narrow round and its in-doubt
+ * default only decide which rounds get the narrower replay scope, and every
+ * sentence listed here holds in a narrow round as well; the briefing lines,
+ * the origin of the killing test file, the report of a skipped replay and the
+ * orchestrator's check of it are procedure.
+ *
+ * One sentence has a second pinned site. The reviewer acts on its prompt, and
+ * the prompt words the verdict cap as its own duty in its own terms, so the
+ * cap is pinned here at the section and, as REVIEWER_PROMPT_VERDICT_CAP, at
+ * assets/agents/reviewer.md. Every rendered reviewer variant is generated
+ * from that one file, so the pin sits on the source.
  */
+const NARROW_ROUNDS_BUDGET_CLAIM =
+  "A time budget neither replaces a review round nor lifts a duty this section names as never droppable.";
+const NARROW_ROUNDS_CLAIMS = [
+  // The review gate under a narrow scope: the re-review is not narrowed.
+  "Narrow limits what the round may change and which findings it answers; the re-review still covers the round's whole delta.",
+  // Test adequacy under a narrow scope: both replay defaults fail closed, and
+  // the list of checks a round may leave out is closed.
+  "When in doubt, the probe is replayed.",
+  "A probe whose killing test file is not recorded is replayed.",
+  "No other check may be left out.",
+  // The checkpoint of a time budget: it leaves no mutant in the tree, caps the
+  // verdict while a reviewer duty is open, and discounts no finding.
+  "A check that is running finishes, and a mutation probe is never aborted before its restore.",
+  "The reviewer keeps `status: reviewed`, lists the open items under `residual_risks` and `missing_tests`, and, while a duty of the briefing's `review_method` or the probe replay in run mode `single` is open, recommends at most `accept_with_notes` or `fix_required`, never `accept`.",
+  "Findings that the review reports count as they would without the checkpoint.",
+  // What no budget drops, and what a check that did not run counts as.
+  "Never droppable under a time budget, in a narrow round or any other: the mutation probe per fixed finding, `class_closure`, the tests the round touched, the bundle check, the hygiene checks this kit requires before a commit and before handback, the reviewer's `review_method` duties, and the reviewer's probe replay in run mode `single`.",
+  NARROW_ROUNDS_BUDGET_CLAIM,
+  "A check that was not run is missing evidence, not a pass, and the full test suite runs at least once before acceptance, against the head that is accepted.",
+];
+const REVIEWER_PROMPT_VERDICT_CAP =
+  "It never drops a `review_method` duty or the run mode `single` replay: while one is open, recommend at most `accept_with_notes` or `fix_required`, never `accept`.";
+
 describe("safety core: a time budget replaces no review round and lifts no never-droppable duty", () => {
   const recovery = unwrap(
     readRawAsset("skill/references/review-and-recovery.md"),
@@ -10260,39 +10296,8 @@ describe("safety core: a time budget replaces no review round and lifts no never
     ),
   ];
   const others = otherSites.map((site) => unwrap(readRawAsset(site)));
-  const sentence =
-    "A time budget neither replaces a review round nor lifts a duty this section names as never droppable.";
 
-  it("states the sentence whole, once, inside the Narrow rounds section", () => {
-    expect(recovery.split(sentence).length - 1).toBe(1);
-    const sectionStart = recovery.indexOf("## Narrow rounds");
-    const sectionEnd = recovery.indexOf("## Fix-regression decision point");
-    expect(sectionStart, "Narrow rounds section missing").toBeGreaterThan(-1);
-    expect(sectionEnd).toBeGreaterThan(sectionStart);
-    expect(recovery.slice(sectionStart, sectionEnd)).toContain(sentence);
-  });
-
-  it("states the sentence at no other site", () => {
-    expect(otherSites.length).toBeGreaterThan(10);
-    others.forEach((other, i) => {
-      expect(other, otherSites[i]).not.toContain(sentence);
-    });
-  });
-
-  // The sentences around the pinned one that carry the rule's fail-closed
-  // side: which duties no budget drops, the reviewer's verdict cap while a
-  // duty is open, and the two replay defaults of the replay scope. Each is
-  // pinned whole, once, inside the section; a list item deleted from the
-  // never-droppable list, a cap loosened to allow `accept`, or a default
-  // inverted to skip the probe fails here.
-  const sectionSentences = [
-    "Never droppable under a time budget, in a narrow round or any other: the mutation probe per fixed finding, `class_closure`, the tests the round touched, the bundle check, the hygiene checks this kit requires before a commit and before handback, the reviewer's `review_method` duties, and the reviewer's probe replay in run mode `single`.",
-    "The reviewer keeps `status: reviewed`, lists the open items under `residual_risks` and `missing_tests`, and, while a duty of the briefing's `review_method` or the probe replay in run mode `single` is open, recommends at most `accept_with_notes` or `fix_required`, never `accept`.",
-    "When in doubt, the probe is replayed.",
-    "A probe whose killing test file is not recorded is replayed.",
-  ];
-
-  it.each(sectionSentences)(
+  it.each(NARROW_ROUNDS_CLAIMS)(
     "states this sentence whole, once, inside the Narrow rounds section: %s",
     (pinned) => {
       const sectionStart = recovery.indexOf("## Narrow rounds");
@@ -10304,13 +10309,20 @@ describe("safety core: a time budget replaces no review round and lifts no never
     },
   );
 
-  // The reviewer prompt states the verdict cap as its own duty, in its own
-  // words. Every rendered reviewer variant is generated from this one file,
-  // so the pin sits on the source.
+  // The budget sentence is the one the role prompts and the detailed workflow
+  // point to, so a verbatim second copy at any of them fails here. The list of
+  // those sites is read from the files.
+  it("states the sentence at no other site", () => {
+    expect(otherSites.length).toBeGreaterThan(10);
+    others.forEach((other, i) => {
+      expect(other, otherSites[i]).not.toContain(NARROW_ROUNDS_BUDGET_CLAIM);
+    });
+  });
+
   it("states the reviewer prompt's verdict cap whole, once", () => {
     const reviewerPrompt = unwrap(readRawAsset("agents/reviewer.md"));
-    const cap =
-      "It never drops a `review_method` duty or the run mode `single` replay: while one is open, recommend at most `accept_with_notes` or `fix_required`, never `accept`.";
-    expect(reviewerPrompt.split(cap).length - 1).toBe(1);
+    expect(reviewerPrompt.split(REVIEWER_PROMPT_VERDICT_CAP).length - 1).toBe(
+      1,
+    );
   });
 });
