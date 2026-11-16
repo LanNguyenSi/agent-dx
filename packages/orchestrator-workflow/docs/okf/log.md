@@ -1,5 +1,13 @@
 # Bundle log
 
+- 2026-11-16T06:55:31Z, prettier 3.9.10 reformat: single-line union types in `src/models.ts`, `src/cli.ts`, `src/routing-state.ts`,
+  `test/docs-consistency.test.ts`, `test/codex-fallback.test.ts` and `eval/score.ts` moved the lines below them;
+  24 citations were re-pointed with `okf-kit repoint --base` plus two by hand (`src/models.ts:1-4` and
+  `routing-state.ts:104-122`, whose cited ranges lost lines inside them). Re-verified: the code behind each cited
+  line is unchanged (whitespace and line breaks only), `okf-kit check --require-anchors` reports the same finding
+  counts as before the reformat, so no claim changed. Re-stamped `install-fence-mechanics.md`,
+  `model-preselection.md`, `operator-install-and-registry.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`.
 - 2026-11-13T12:07:30Z, okf-kit treats a lone JSX closer (`/>`, `</>`, `)}`, `</tag>`) as closing boilerplate, so the
   mirrored closing-boilerplate pattern in `test/docs-consistency.test.ts` was updated to the same expression (two
   comment lines above it merged, so no later line of that file moved). Re-verified: none of the four docs that list
