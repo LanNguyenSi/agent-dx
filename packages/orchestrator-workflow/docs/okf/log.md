@@ -1,5 +1,33 @@
 # Bundle log
 
+- 2026-11-16T17:30:30Z, narrow rounds, section pin: `test/docs-consistency.test.ts` now pins the `## Narrow rounds` section of
+  `review-and-recovery.md` as a whole. The constant `NARROW_ROUNDS_SECTION` records the section's text, one entry per
+  heading, paragraph, or list item, and one test compares the section with it, from the heading to the next
+  second-level heading, with line wraps and runs of whitespace collapsed: a sentence that is changed, added, removed,
+  or moved inside the section fails, a rewrap does not. `NARROW_ROUNDS_CLAIMS` stays as a readable list of ten
+  sentences with its once-in-the-file test and is no longer the boundary of the pin. The header comment names the
+  section as the one normative site, every statement of its rules outside it as an unpinned copy, and the reviewer
+  prompt's verdict cap as the one sentence with a second pinned site. The safety-core comment near the top of the test
+  file was rewritten on the same two lines; the block at the end of the file grew by 84 lines, which moved only lines
+  below the last citation of any other describe. The section gained the originals of statements that stood only in
+  copies: a narrow briefing without the replay-scope line means a replay of every earlier probe (one line more in
+  the replay-scope bullet); only the replay scope permits leaving a replay out, and a plan reference that cannot be
+  resolved or is stale stays open evidence; the reviewer briefing lists as replayed only the probes the round
+  replayed; the replay scope narrows the implementer's replay alone (five lines more in the skipped-replay
+  paragraph); and the implementer lists what is open in `open_questions` (same line). The definition now reads "a
+  signal of this file" where it read "a halt signal of this file", because the Fix-regression decision point it
+  names is not a halt, and the `[Unreleased]` entry in `CHANGELOG.md` follows on the same two lines. 37 citations in
+  `review-gate-and-waivers.md` and `subagent-contracts-superset.md` were re-pointed with `okf-kit repoint --base`
+  (content unchanged); the five `test/docs-consistency.test.ts` citations of the pin passage were set by hand.
+  Updated: `review-gate-and-waivers.md` (the section pin in place of the closed claim list, and the signal wording
+  of the definition) and `subagent-contracts-superset.md` (the missing replay-scope line has its original in the
+  section; the anchor `is not recorded is replayed.` was re-read on its edited line 152). Re-verified:
+  `model-preselection.md` cites `test/docs-consistency.test.ts` only above the changed block and on no line of the
+  rewritten comment, and its routing claims are untouched; `run-state-lifecycle-and-markers.md` cites no line of
+  `review-and-recovery.md`, its `test/docs-consistency.test.ts` citations sit above the changed block and off the
+  rewritten comment, its `CHANGELOG.md` citations sit on unmoved lines, and none of its claims describes the replay,
+  a time budget, or a pin of this section. Re-stamped `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`.
 - 2026-11-16T17:03:31Z, narrow rounds, declared claim list: `test/docs-consistency.test.ts` now declares the pinned sentences of the
   `## Narrow rounds` section of `review-and-recovery.md` once, as the closed claim list `NARROW_ROUNDS_CLAIMS` with a
   header comment (ten sentences, each pinned whole and once inside the section; every other sentence of the section

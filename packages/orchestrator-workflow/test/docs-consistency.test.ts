@@ -177,8 +177,8 @@ function phraseBoundedSlice(
  *
  * Part of rule 3, pinned at review-and-recovery.md: the unavailable-model
  * rule (who reviews when a routed model is not offered; see its describe) and
- * the Narrow rounds claim list (NARROW_ROUNDS_CLAIMS, whose comment also names
- * the one sentence pinned at a second site, the reviewer prompt's verdict cap).
+ * the Narrow rounds section as a whole (NARROW_ROUNDS_SECTION, whose comment
+ * names the one sentence pinned at a second site, the reviewer's verdict cap).
  *
  * Rule 1 also lives in runbook-selection.test.ts. charter.test.ts rejects a
  * second copy of a pinned sentence in the charter, SKILL.md, or a reference.
@@ -10236,28 +10236,87 @@ describe("INSTALL-AGENT.md Choosing models subsection matches the shipped defaul
 });
 
 /**
- * Safety core, rule 3 (continued): the closed claim list of the Narrow rounds
- * section of the review and recovery reference, declared under that
- * reference's Pinned-prose rule. These are the sentences of the section that
- * bound the review gate and test adequacy: what a narrow scope or a time
- * budget can never take away. Each is pinned whole, once, inside the section
- * (the describe below). Every other sentence of the section, and every copy of
- * a listed sentence in the role prompts, the knowledge bundle and the
- * CHANGELOG, is unpinned prose; a surviving mutant outside this list is a
- * scope note, not a finding.
+ * Safety core, rule 3 (continued): the Narrow rounds section of the review and
+ * recovery reference is the normative site as a whole (that reference's
+ * Pinned-prose rule: one normative site, every other statement is a copy).
+ * NARROW_ROUNDS_SECTION records the section's text, line wraps aside, and the
+ * section pin in the describe below is what closes the section: a sentence
+ * that is changed, added, removed or moved inside it fails that one test, so
+ * the section has no unpinned sentence.
  *
- * Left off on purpose: the definition of a narrow round and its in-doubt
- * default only decide which rounds get the narrower replay scope, and every
- * sentence listed here holds in a narrow round as well; the briefing lines,
- * the origin of the killing test file, the report of a skipped replay and the
- * orchestrator's check of it are procedure.
- *
- * One sentence has a second pinned site. The reviewer acts on its prompt, and
- * the prompt words the verdict cap as its own duty in its own terms, so the
- * cap is pinned here at the section and, as REVIEWER_PROMPT_VERDICT_CAP, at
+ * Every statement of these rules outside the section (the role prompts, the
+ * detailed workflow, the knowledge bundle, the CHANGELOG) is a copy and is not
+ * pinned, with one exception. The reviewer acts on its prompt, and the prompt
+ * words the verdict cap as its own duty in its own terms, so the cap is pinned
+ * in the section and, as REVIEWER_PROMPT_VERDICT_CAP, at
  * assets/agents/reviewer.md. Every rendered reviewer variant is generated
  * from that one file, so the pin sits on the source.
+ *
+ * NARROW_ROUNDS_CLAIMS is kept as a readable list of the section's sentences
+ * that bound the review gate and test adequacy: what a narrow scope or a time
+ * budget can never take away. Its test adds that each of them stands exactly
+ * once in the whole file. The list documents those claims; it is not the
+ * boundary of the pin.
+ *
+ * The recorded text is one entry per paragraph, heading or list item, written
+ * one sentence per line so that the diff of a later edit shows the sentence
+ * that changed.
  */
+const NARROW_ROUNDS_SECTION = [
+  "## Narrow rounds",
+  [
+    "A narrow round is a fix round or a re-review after a task's first round whose assignment is limited to named findings of the last review.",
+    "Narrow limits what the round may change and which findings it answers; the re-review still covers the round's whole delta.",
+    "A redesign round, a split round, any round that follows a signal of this file (the Round-2 halt rule, the Review-round escalation budget, the Fix-regression decision point) before its decision is recorded, and the re-entry after a misfire are not narrow.",
+    "When in doubt, the round is not narrow.",
+    "A round that is not narrow keeps every duty of the detailed workflow, the replay of every earlier probe included.",
+  ].join(" "),
+  "The briefing of a narrow round carries these lines in its `constraints` field; the input contract gains no field for them:",
+  "- The round kind, `narrow`, and the findings the round is limited to.",
+  [
+    "- A time budget.",
+    "It is a soft checkpoint, and the orchestrator chooses its value for the round.",
+  ].join(" "),
+  "- The mandatory probes: one mutation probe per fixed finding and one per behaviour branch the round adds or changes.",
+  [
+    "- The replay scope: the implementer replays an earlier round's probe only when the round's delta touches the probe's mutant file, the test file that killed it, a file that imports or is imported by either, a file either one reads at run time, or a fixture, configuration, or build step they share.",
+    "When in doubt, the probe is replayed.",
+    "A probe whose killing test file is not recorded is replayed.",
+    "A narrow briefing without this line means: the implementer replays every earlier probe.",
+  ].join(" "),
+  [
+    "- The checks the round may leave out, and for each one who runs it before acceptance: the full test suite where targeted tests cover the delta, and checks that need a real environment.",
+    "No other check may be left out.",
+  ].join(" "),
+  [
+    "The killing test file of a probe is the file or files of the failing tests the runner's verdict, the return's `tests.executed` entry, or the probe's plan or result reference names for it.",
+    "The orchestrator records the artifact naming them as the probe's result reference in the Optional Probe Plan and Result Index of `04-implementation-summary.md`, and a narrow briefing names them beside each earlier probe's definition; a probe named without one is replayed.",
+  ].join(" "),
+  [
+    "The briefing still names every earlier probe by its definition, as step 6 of the [detailed workflow](evidence-and-probes.md) says.",
+    "The implementer reports each one it did not replay under the replay scope in `mutation_probes` as `not_applicable` with `replayed: true` and the reason `outside the round's delta`; that is a skipped replay, not a regression.",
+    "Only the replay scope permits leaving a replay out: a probe-plan reference that cannot be resolved or is stale is `not_applicable` evidence with the proof still open, not a skipped replay.",
+    "The orchestrator compares the skipped probes with the returned diff: a skipped probe that the delta does reach is replayed before the reviewer spawn.",
+    "It records the skipped replays in `03-decisions.md`.",
+    "The reviewer briefing lists as replayed only the probes the round replayed and names the skipped ones as skipped, so the reviewer can hold each skip against the diff.",
+    "The replay scope narrows the implementer's replay alone: the reviewer's probe replay in run mode `single` is unchanged.",
+  ].join(" "),
+  [
+    "At the checkpoint of a time budget the role starts no new check.",
+    "A check that is running finishes, and a mutation probe is never aborted before its restore.",
+    "The implementer then returns `status: partial` and lists what is open in `open_questions`.",
+    "The reviewer keeps `status: reviewed`, lists the open items under `residual_risks` and `missing_tests`, and, while a duty of the briefing's `review_method` or the probe replay in run mode `single` is open, recommends at most `accept_with_notes` or `fix_required`, never `accept`.",
+    "A checkpoint return is held to its output contract like any other return.",
+    "The stop by itself is neither a misfire nor a negative round for the Review-round escalation budget: the orchestrator spawns a follow-up round with the open items.",
+    "Findings that the review reports count as they would without the checkpoint.",
+  ].join(" "),
+  [
+    "Never droppable under a time budget, in a narrow round or any other: the mutation probe per fixed finding, `class_closure`, the tests the round touched, the bundle check, the hygiene checks this kit requires before a commit and before handback, the reviewer's `review_method` duties, and the reviewer's probe replay in run mode `single`.",
+    "A time budget neither replaces a review round nor lifts a duty this section names as never droppable.",
+    "A check that was not run is missing evidence, not a pass, and the full test suite runs at least once before acceptance, against the head that is accepted.",
+    "Anchored by an observed run; see the entry for this rule in the orchestrator-workflow CHANGELOG.",
+  ].join(" "),
+];
 const NARROW_ROUNDS_BUDGET_CLAIM =
   "A time budget neither replaces a review round nor lifts a duty this section names as never droppable.";
 const NARROW_ROUNDS_CLAIMS = [
@@ -10281,10 +10340,28 @@ const NARROW_ROUNDS_CLAIMS = [
 const REVIEWER_PROMPT_VERDICT_CAP =
   "It never drops a `review_method` duty or the run mode `single` replay: while one is open, recommend at most `accept_with_notes` or `fix_required`, never `accept`.";
 
+/**
+ * The Narrow rounds section as the entries NARROW_ROUNDS_SECTION records: the
+ * text from the section's heading up to the next second-level heading, split
+ * at blank lines and at list items, each entry with its line wraps and runs of
+ * whitespace collapsed. A rewrap changes no entry; any other edit does.
+ */
+function narrowRoundsSectionEntries(raw: string): string[] {
+  const start = raw.search(/^## Narrow rounds$/m);
+  if (start === -1) return [];
+  const afterHeading = raw.slice(start + 1);
+  const next = afterHeading.search(/^## /m);
+  const section =
+    next === -1 ? raw.slice(start) : raw.slice(start, start + 1 + next);
+  return section
+    .split(/\n(?:[ \t]*\n)+|\n(?=- )/)
+    .map((entry) => unwrap(entry).trim())
+    .filter((entry) => entry !== "");
+}
+
 describe("safety core: a time budget replaces no review round and lifts no never-droppable duty", () => {
-  const recovery = unwrap(
-    readRawAsset("skill/references/review-and-recovery.md"),
-  );
+  const rawRecovery = readRawAsset("skill/references/review-and-recovery.md");
+  const recovery = unwrap(rawRecovery);
   const otherSites = [
     "skill/SKILL.md",
     "agents-md-section.md",
@@ -10296,6 +10373,13 @@ describe("safety core: a time budget replaces no review round and lifts no never
     ),
   ];
   const others = otherSites.map((site) => unwrap(readRawAsset(site)));
+
+  it("pins the Narrow rounds section as a whole", () => {
+    expect(
+      narrowRoundsSectionEntries(rawRecovery),
+      "The Narrow rounds section of review-and-recovery.md no longer reads as NARROW_ROUNDS_SECTION records it. The section is pinned as a whole. If the change to the section is intended, update the recorded text in this test deliberately, in the same change, and have that change reviewed as a change to the rules of the review gate. Never update the recorded text only to turn a failing run green.",
+    ).toEqual(NARROW_ROUNDS_SECTION);
+  });
 
   it.each(NARROW_ROUNDS_CLAIMS)(
     "states this sentence whole, once, inside the Narrow rounds section: %s",

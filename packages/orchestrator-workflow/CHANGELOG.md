@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Narrow rounds, defined in a new section of
   `references/review-and-recovery.md`: a fix round or re-review after a task's
   first round whose assignment is limited to named findings of the last review.
-  Redesign and split rounds, a round after a halt signal whose decision is not
-  yet recorded, and the re-entry after a misfire are not narrow, and a doubt
+  Redesign and split rounds, a round after a signal of that file whose decision
+  is still open, and the re-entry after a misfire are not narrow, and a doubt
   counts as not narrow. The briefing carries the round kind with its findings,
   a time budget as a soft checkpoint whose value the orchestrator chooses, the
   mandatory probes, the replay scope, and the checks the round may leave out

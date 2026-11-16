@@ -129,7 +129,7 @@ A narrow round is a fix round or a re-review after a task's first round
 whose assignment is limited to named findings of the last review. Narrow
 limits what the round may change and which findings it answers; the
 re-review still covers the round's whole delta. A
-redesign round, a split round, any round that follows a halt signal of this
+redesign round, a split round, any round that follows a signal of this
 file (the Round-2 halt rule, the Review-round escalation budget, the
 Fix-regression decision point) before its decision is recorded, and the
 re-entry after a misfire are not narrow. When in doubt, the round is not
@@ -149,7 +149,8 @@ field; the input contract gains no field for them:
   killed it, a file that imports or is imported by either, a file either one
   reads at run time, or a fixture, configuration, or build step they share.
   When in doubt, the probe is replayed. A probe whose killing test file
-  is not recorded is replayed.
+  is not recorded is replayed. A narrow briefing without this line means:
+  the implementer replays every earlier probe.
 - The checks the round may leave out, and for each one who runs it before
   acceptance: the full test suite where targeted tests cover the delta, and
   checks that need a real environment. No other check may be left out.
@@ -166,16 +167,21 @@ of the [detailed workflow](evidence-and-probes.md) says. The implementer
 reports each one it did not replay under the replay scope in
 `mutation_probes` as `not_applicable` with `replayed: true` and the reason
 `outside the round's delta`; that is a skipped replay, not a regression.
-The orchestrator compares the skipped probes with the returned diff: a
-skipped probe that the delta does reach is replayed before the reviewer
-spawn. It records the skipped replays in `03-decisions.md` and names them
-as skipped in the reviewer briefing, so the reviewer can hold each skip
-against the diff.
+Only the replay scope permits leaving a replay out: a probe-plan reference
+that cannot be resolved or is stale is `not_applicable` evidence with the
+proof still open, not a skipped replay. The orchestrator compares the
+skipped probes with the returned diff: a skipped probe that the delta does
+reach is replayed before the reviewer spawn. It records the skipped replays
+in `03-decisions.md`. The reviewer briefing lists as replayed only the
+probes the round replayed and names the skipped ones as skipped, so the
+reviewer can hold each skip against the diff. The replay scope narrows the
+implementer's replay alone: the reviewer's probe replay in run mode
+`single` is unchanged.
 
 At the checkpoint of a time budget the role starts no new check. A check
 that is running finishes, and a mutation probe is never aborted before its
 restore. The implementer then returns `status: partial` and lists what is
-open. The reviewer keeps `status: reviewed`, lists the open items under
+open in `open_questions`. The reviewer keeps `status: reviewed`, lists the open items under
 `residual_risks` and `missing_tests`, and, while a duty of the briefing's
 `review_method` or the probe replay in run mode `single` is open,
 recommends at most `accept_with_notes` or `fix_required`, never `accept`.

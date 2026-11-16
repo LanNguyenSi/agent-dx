@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-11-16T17:03:31Z
+timestamp: 2026-11-16T17:30:30Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -542,21 +542,21 @@ records the artifact naming them as the probe's result reference in the
 Optional Probe Plan and Result Index of `04-implementation-summary.md` (the
 Mutation Probes table has no cell for it and gains none), and the narrow
 briefing names them beside each earlier probe's definition
-(`review-and-recovery.md:157#"The killing test file of a probe is the file or files of the failing tests the"`).
+(`review-and-recovery.md:158#"The killing test file of a probe is the file or files of the failing tests the"`).
 A probe left out this way is reported as `not_applicable` with `replayed:
 true` and the reason `outside the round's delta`, which is a skipped replay
 and not a regression; the orchestrator compares the skipped probes with the
 returned diff, records them in `03-decisions.md`, and names them as skipped
 in the reviewer briefing
-(`review-and-recovery.md:168#"that is a skipped replay, not a regression."`).
+(`review-and-recovery.md:169#"that is a skipped replay, not a regression."`).
 The output contract gained no field for this: a skipped replay reuses
 `result: not_applicable`, `reason`, and `replayed`. Step 6 and step 7 point
 to that section instead of restating it
 (`evidence-and-probes.md:86#"A narrow round is briefed as the Narrow rounds section of"`),
 and the installed prompt carries the scope at the end of its replay bullet
 (`packages/orchestrator-workflow/assets/agents/implementer.md:59#"replay only the earlier probes their"`),
-where a narrow assignment without a replay-scope line means a replay of
-every earlier probe
+where, as in the section, a narrow assignment without a replay-scope line
+means a replay of every earlier probe
 (`implementer.md:62#"A narrow assignment without a replay-scope line means: replay every"`).
 A round that is not narrow keeps the full replay, and the reviewer's replay
 in run mode `single` is unchanged. A time budget in a briefing's
