@@ -1,11 +1,7 @@
 import type { Sink } from "../types.js";
 
 export type SinkName =
-  | "markdown-file"
-  | "stdout-json"
-  | "github-issues"
-  | "agent-tasks"
-  | "linear";
+  "markdown-file" | "stdout-json" | "github-issues" | "agent-tasks" | "linear";
 
 export const availableSinks: readonly SinkName[] = [
   "markdown-file",

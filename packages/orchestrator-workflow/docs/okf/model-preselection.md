@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-11-13T12:07:30Z
+timestamp: 2026-11-16T06:55:31Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -33,18 +33,18 @@ sources:
 Five roles get a per-role model since 0.21.0 (four before it): `explorer`,
 `task-slicer`, `implementer`, `reviewer`, `advisor`
 (`Role` type and `ROLES`,
-`packages/orchestrator-workflow/src/models.ts:1-8#"export const ROLES: Role[] = ["`). The orchestrator
+`packages/orchestrator-workflow/src/models.ts:1-4#"export const ROLES: Role[] = ["`). The orchestrator
 itself is deliberately excluded from this map; it always runs on the
-session's main model (`src/models.ts:285-287#"not configured here."`, policy restated below). Since
+session's main model (`src/models.ts:281-283#"not configured here."`, policy restated below). Since
 0.15.0 every role in `ROLES` still gets a preselected model regardless of
 `--profile` (models are resolved before roles are filtered down to what the
 profile installs); see [install-fence-mechanics.md](install-fence-mechanics.md)
 for how `--profile` scopes which roles get an actual subagent file: since
 0.21.0 `advisor` is scoped out of `minimal` the same way `explorer` and
 `task-slicer` already were, via the same `MINIMAL_PROFILE_ROLES` set
-(`src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
+(`src/models.ts:38#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
 
-Defaults (`src/models.ts:289-294#"as Record<Role, string>;"`, derived from the class of each role's default tier in `ROLE_TIER_DEFS`, documented in
+Defaults (`src/models.ts:285-290#"as Record<Role, string>;"`, derived from the class of each role's default tier in `ROLE_TIER_DEFS`, documented in
 `packages/orchestrator-workflow/docs/model-routing-reference.md:24#"a second opinion at escalation, only useful when at least as strong"`):
 
 | Role | Default | Rationale (docs/model-routing-reference.md) |
@@ -55,7 +55,7 @@ Defaults (`src/models.ts:289-294#"as Record<Role, string>;"`, derived from the c
 | reviewer | `opus` | skeptical judgment, and the last check before acceptance |
 | advisor | `fable` | a second opinion at escalation, only useful when at least as strong as the model the orchestrator session runs on |
 
-`ModelAlias` is `"sonnet" | "opus" | "haiku" | "fable"` (`src/models.ts:72-74#"export const MODEL_ALIASES: ModelAlias[] = ["`); a
+`ModelAlias` is `"sonnet" | "opus" | "haiku" | "fable"` (`src/models.ts:68-70#"export const MODEL_ALIASES: ModelAlias[] = ["`); a
 role's value may also be a full model id or, for opencode, a fully-qualified
 `provider/model-id` string (see below). Since 0.19.0, each role's
 preselected model coexists with an independent, opt-in axis: effort-tier
@@ -71,11 +71,11 @@ below.
 
 1. **CLI input.** `orchestrator-workflow init` accepts `--models
    "role=model,role=model"`, parsed by `parseModelsSpec` on top of a base
-   map (`src/models.ts:110-138#"return result;"`). Unknown roles and malformed pairs throw;
+   map (`src/models.ts:106-134#"return result;"`). Unknown roles and malformed pairs throw;
    each value is validated by `assertValidModelId`, which rejects empty
    strings, leading/trailing whitespace, and any of `:"'#\n\\` since the
    value is interpolated as a plain YAML scalar into subagent frontmatter
-   (`src/models.ts:95-105#"or a plain id like anthropic/claude-opus-4-8"`).
+   (`src/models.ts:91-101#"or a plain id like anthropic/claude-opus-4-8"`).
 2. **Base resolution + interactive fallback.** The CLI builds the base map
    as `DEFAULT_MODELS` overlaid with the *previous* manifest's models (if
    any), then applies `--models` on top; when running interactively with no
@@ -123,14 +123,14 @@ below.
 
 - **Claude Code.** `composeClaudeAgent` always emits a `model:` line;
   `claudeModelValue` is the identity function, so aliases and full ids pass
-  through unchanged (`src/models.ts:296-297#"return (MODEL_ALIASES as string[]).includes(value);"`, `src/init.ts:586-597#"disallowedTools: Edit, Write, NotebookEdit"`). Since
+  through unchanged (`src/models.ts:292-293#"return (MODEL_ALIASES as string[]).includes(value);"`, `src/init.ts:586-597#"disallowedTools: Edit, Write, NotebookEdit"`). Since
   0.22.0 it also always emits a pinned `effort:` line right after `model:`
   (`tierDef(role, DEFAULT_TIER[role]).effort`, `src/init.ts:590-593#"selection?.effort ?? tierDef(role, DEFAULT_TIER[role]).effort"`; medium for
   explorer/task-slicer/implementer, high for reviewer/advisor), covered in
   its own "Pinned default effort (0.22.0)" section below. The read-only
   roles (`explorer`, `reviewer`, and since 0.21.0 `advisor`, per
   `READ_ONLY_ROLES` at
-  `src/models.ts:22#"export const READ_ONLY_ROLES: ReadonlySet<Role> = new"`) additionally get
+  `src/models.ts:18#"export const READ_ONLY_ROLES: ReadonlySet<Role> = new"`) additionally get
   `disallowedTools: Edit, Write, NotebookEdit` right after `effort:`
   (`src/init.ts:596-597#"disallowedTools: Edit, Write, NotebookEdit"`). Test coverage:
   `test/init.test.ts:113#"expect(slicer).toMatch(/^model: opus$/m);"` (the task-slicer carries `model: opus`) and
@@ -141,7 +141,7 @@ below.
 - **opencode.** opencode needs a fully-qualified `provider/model-id`.
   `opencodeModelValue` (the pure fallback used when the CLI has not already
   resolved a catalog) passes through any value containing `/` and returns
-  `undefined` otherwise (`src/models.ts:91-92#"return model.includes("`). The real CLI path is
+  `undefined` otherwise (`src/models.ts:87-88#"return model.includes("`). The real CLI path is
   richer: when the `opencode` harness is selected, `resolveInitInputs`
   (`cli-inputs.ts`) shells out to
   `opencode models`, parses the catalog (`loadOpencodeCatalog`,
@@ -203,8 +203,8 @@ legacy `opencodeModels` and `opencodeClassModels` fallback maps instead.
 A present map, including an empty map, records session inheritance for missing
 slots unless an explicit routing leaf supplies that selection. An absent map
 means legacy resolution is unknown; updates and doctor retain this distinction
-(`routing-state.ts:104-123#"result[field] = bare;"`,
-`routing-state.ts:129-135#"delete result.opencode?.[role]?.[tier];"`). A manifest that records no `routing` (installed before routing existed) is materialized once, when `readInstalledManifest` reads it (and `readOperatorManifest` for the operator defaults), by `materializePreRoutingRouting` with the tier-uniform table it was installed under (`PRE_ROLE_TIER_DEFS`) and, whichever harnesses the manifest lists, the Codex aliases and efforts of that time (`PRE_ROUTING_CODEX_ALIASES`), so a re-install keeps that routing and `doctor`/`apply --sync` compare it instead of adopting the per-role defaults for its non-default tiers.
+(`routing-state.ts:104-122#"result[field] = bare;"`,
+`routing-state.ts:128-134#"delete result.opencode?.[role]?.[tier];"`). A manifest that records no `routing` (installed before routing existed) is materialized once, when `readInstalledManifest` reads it (and `readOperatorManifest` for the operator defaults), by `materializePreRoutingRouting` with the tier-uniform table it was installed under (`PRE_ROLE_TIER_DEFS`) and, whichever harnesses the manifest lists, the Codex aliases and efforts of that time (`PRE_ROUTING_CODEX_ALIASES`), so a re-install keeps that routing and `doctor`/`apply --sync` compare it instead of adopting the per-role defaults for its non-default tiers.
 
 Codex begins with a complete deterministic default map: Luna at low for
 explorer and implementer, run at high effort; balanced Sol at task-slicer low, explorer,
@@ -243,23 +243,23 @@ counterpart, `--no-tiers`, so a re-run can explicitly turn a previously
 installed `tiers: true` back off; before the fix `--tiers` was one-way and
 the only route back to `tiers: false` was hand-editing the manifest.
 
-**Tier data (`src/models.ts:141-202#"large:"`).** `Tier` is
-`"low" | "medium" | "high" | "xhigh"` (`src/models.ts:146#"export type Tier ="`). `ROLE_TIERS` (`src/models.ts:153-158#"advisor: ["`) is
+**Tier data (`src/models.ts:137-198#"large:"`).** `Tier` is
+`"low" | "medium" | "high" | "xhigh"` (`src/models.ts:142#"export type Tier ="`). `ROLE_TIERS` (`src/models.ts:149-154#"advisor: ["`) is
 which tiers each role gets a variant for: explorer and task-slicer
 `low, medium, high`; implementer all four; reviewer `medium, high, xhigh`;
 since 0.21.0, advisor `high, xhigh` (the smallest tier list of any role:
 its default already sits at `high`, one step below the reviewer's default
 `--tiers` ceiling, so it only ever gets one variant, `-xhigh`).
-`DEFAULT_TIER` (`src/models.ts:166-171#"advisor:"`) is the tier each role's plain file already
+`DEFAULT_TIER` (`src/models.ts:162-167#"advisor:"`) is the tier each role's plain file already
 corresponds to (`medium` for explorer/task-slicer/implementer, `high` for
 reviewer and, since 0.21.0, advisor), the tier a variant is never rendered
 for since that would both collide with and duplicate the default file
 (`init.ts:1139-1142#"composeClaudeAgentVariant("` Claude Code,
 `init.ts:1221-1223#"const modelClass = def.modelClass;"` opencode, both a `continue` guarded by
 `tier === DEFAULT_TIER[role]`, role-generic code unchanged by the role
-addition). `ROLE_TIER_DEFS` (`src/models.ts:211-233#"advisor: {"`) maps each role and tier to a
-`ModelClass` (`"small" | "medium" | "large" | "xlarge"`, `src/models.ts:179#"export type ModelClass ="`) and its requested
-`effort` value (not always the tier's name: the implementer and reviewer `xhigh` variants run at `high`). `CLASS_MODELS` (`src/models.ts:199-203#"xlarge:"`) maps each
+addition). `ROLE_TIER_DEFS` (`src/models.ts:207-229#"advisor: {"`) maps each role and tier to a
+`ModelClass` (`"small" | "medium" | "large" | "xlarge"`, `src/models.ts:175#"export type ModelClass ="`) and its requested
+`effort` value (not always the tier's name: the implementer and reviewer `xhigh` variants run at `high`). `CLASS_MODELS` (`src/models.ts:195-199#"xlarge:"`) maps each
 class to a `ModelAlias`: `small`->`haiku`, `medium`->`sonnet`,
 `large`->`opus`, `xlarge`->`fable`. `Tier`, `ModelClass`, and all four maps are re-exported
 from `src/index.ts` since fix-round-1 (review finding L2), the same
@@ -598,7 +598,7 @@ carries none of this.
 ## Docs-consistency pins (model-specific)
 
 `test/docs-consistency.test.ts` guards enumeration sites so a role
-added to `ROLES` (`src/models.ts:1-8#"export const ROLES: Role[] = ["`) cannot silently go undocumented in
+added to `ROLES` (`src/models.ts:1-4#"export const ROLES: Role[] = ["`) cannot silently go undocumented in
 model-facing docs, each targeting the specific list rather than the whole
 file; the guard proved itself for real at 0.21.0: every site below failed
 red on the advisor addition until each listed doc was updated to name the

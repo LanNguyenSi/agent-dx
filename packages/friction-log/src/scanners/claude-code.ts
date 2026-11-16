@@ -44,9 +44,7 @@ interface PermissionEntry {
 }
 
 type TranscriptEntry =
-  | MessageEntry
-  | PermissionEntry
-  | { type: string; [k: string]: unknown };
+  MessageEntry | PermissionEntry | { type: string; [k: string]: unknown };
 
 const FRICTION_PHRASE_PATTERNS: RegExp[] = [
   /\bdidn['']?t work\b/i,

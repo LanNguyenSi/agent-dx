@@ -427,8 +427,7 @@ export class FrictionDb {
          LIMIT 1`,
       )
       .get({ title, toolSurface: toolSurface ?? null }) as
-      | { id: number }
-      | undefined;
+      { id: number } | undefined;
     return row?.id ?? null;
   }
 
@@ -580,8 +579,7 @@ export class FrictionDb {
 
   getTask(id: number): Task | null {
     const row = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id) as
-      | TaskRow
-      | undefined;
+      TaskRow | undefined;
     return row ? rowToTask(row) : null;
   }
 

@@ -1153,10 +1153,10 @@ program
       // uncaught exception crash the CLI with a raw stack trace.
       const isLockTimeout = error instanceof OperatorManifestLockTimeoutError;
       const doctorError:
-        | "operator-manifest-locked"
-        | "operator-manifest-write-failed" = isLockTimeout
-        ? "operator-manifest-locked"
-        : "operator-manifest-write-failed";
+        "operator-manifest-locked" | "operator-manifest-write-failed" =
+        isLockTimeout
+          ? "operator-manifest-locked"
+          : "operator-manifest-write-failed";
       const message = error instanceof Error ? error.message : String(error);
 
       if (opts.json) {
