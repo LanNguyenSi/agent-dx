@@ -50,19 +50,19 @@
     "directory": "packages/slop-detector"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
-    "@typescript-eslint/parser": "^8.59.1",
-    "@typescript-eslint/types": "^8.59.1",
-    "commander": "^12.0.0",
-    "yaml": "^2.8.3",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@typescript-eslint/parser": "^8.72.1",
+    "@typescript-eslint/types": "^8.72.1",
+    "commander": "^12.1.0",
+    "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^20.19.43",
     "prettier": "^3.9.10",
-    "tsx": "^4.22.4",
-    "typescript": "^5.3.3",
-    "vitest": "^4.1.6"
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
   },
   "overrides": {
     "@eslint/config-array": {
