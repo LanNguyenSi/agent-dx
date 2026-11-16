@@ -21,7 +21,8 @@
   (content unchanged); the five `test/docs-consistency.test.ts` citations of the pin passage were set by hand.
   Updated: `review-gate-and-waivers.md` (the section pin in place of the closed claim list, and the signal wording
   of the definition) and `subagent-contracts-superset.md` (the missing replay-scope line has its original in the
-  section; the anchor `is not recorded is replayed.` was re-read on its edited line 152). Re-verified:
+  section; the anchor `is not recorded is replayed.` was re-read on its edited line 152). One unanchored citation of
+  this log, in the entry below, moved by one line and was re-pointed by exact-text replacement. Re-verified:
   `model-preselection.md` cites `test/docs-consistency.test.ts` only above the changed block and on no line of the
   rewritten comment, and its routing claims are untouched; `run-state-lifecycle-and-markers.md` cites no line of
   `review-and-recovery.md`, its `test/docs-consistency.test.ts` citations sit above the changed block and off the
@@ -44,7 +45,7 @@
   Updated: `review-gate-and-waivers.md` (the claim list in place of "one sentence plus four more", the three
   `test/docs-consistency.test.ts` citations of that passage re-pointed by hand to the test over the new constant, the
   describe, and the verdict-cap test) and `subagent-contracts-superset.md` (the killing test file passage and its
-  `review-and-recovery.md:157` anchor text). Re-verified: `model-preselection.md` cites
+  `review-and-recovery.md:158` anchor text). Re-verified: `model-preselection.md` cites
   `test/docs-consistency.test.ts` only above the changed describe and on no line of the rewritten comment, and its
   routing claims are untouched; `run-state-lifecycle-and-markers.md` cites no line of `review-and-recovery.md`, its
   `test/docs-consistency.test.ts` citations sit above the changed describe and off the rewritten comment, and none of
