@@ -1,5 +1,7 @@
 # Bundle log
 
+- 2026-11-17T13:24:13Z, release 0.52.0: the `[Unreleased]` narrow-rounds entry of `CHANGELOG.md` moved under a new `## [0.52.0] - 2026-11-17` heading, which added two lines (the heading and a blank line) above every released entry. This log's `CHANGELOG.md` line citations moved by those two lines and were re-pointed by exact-text replacement (`CHANGELOG.md:1438#"The implementer"` from 1436, `CHANGELOG.md:1815#"Citation scanning is paragraph-joined"` from 1813). Re-verified: `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md` cite `CHANGELOG.md` only by released-version heading anchors (`#[0.7.3]`, `#[0.9.0]`, `#[0.24.0]` and the like), every one of which still resolves, and none of their claims describes a narrow round or the cut. Re-stamped those three docs.
+
 - 2026-11-16T17:30:30Z, narrow rounds, section pin: `test/docs-consistency.test.ts` now pins the `## Narrow rounds` section of
   `review-and-recovery.md` as a whole. The constant `NARROW_ROUNDS_SECTION` records the section's text, one entry per
   heading, paragraph, or list item, and one test compares the section with it, from the heading to the next
