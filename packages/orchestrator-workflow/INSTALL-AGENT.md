@@ -110,7 +110,10 @@ prompt equivalent in the manual fallback below (nor does its negation,
 `--no-tiers`): the automated installer is the only path that renders
 tier-variant files; a manual scaffold (step 4) does not cover them.
 The manifest records the complete effective routing map, including exact
-Codex model and effort selections. Nothing else in the repository is modified. Locally edited files are
+Codex model and effort selections. Nothing else in the repository is modified.
+A symbolic link on any of these paths, or in a directory above one, is never
+followed: the run stops before changing anything and names the link; replace
+it with a regular file or directory and run again. Locally edited files are
 reported as conflicts and left alone, never overwritten silently; the
 exceptions are the kit-owned surfaces: `.ai/workflow/manifest.json` (the
 kit's state file, rewritten whenever the applied state changes) and the

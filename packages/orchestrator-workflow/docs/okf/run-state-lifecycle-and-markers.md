@@ -29,7 +29,7 @@ One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:76#"  05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:81-82#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:119#"one directory per unit of work, newest = active";
-packages/orchestrator-workflow/INSTALL-AGENT.md:67-68#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:188-193#"instead: it sources its defaults from the operator"). The newest run
+packages/orchestrator-workflow/INSTALL-AGENT.md:67-68#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:191-196#"instead: it sources its defaults from the operator"). The newest run
 directory is the active one unless a `.ai/run` pointer names one
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:82-83#"pointer names one (see below);", see the pointer section below); older
 directories are the auditable history and
@@ -164,7 +164,7 @@ tracked run file, not gitignored: the README and the manual-install doc both
 note the pointer is machine-local and add it to `.gitignore`
 (packages/orchestrator-workflow/README.md:125#"it to the repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:68-71#"repository's";
-packages/orchestrator-workflow/INSTALL-AGENT.md:218-220#"repository's").
+packages/orchestrator-workflow/INSTALL-AGENT.md:221-223#"repository's").
 
 The template-markers.test.ts property test that checks the shipped keyed
 line against the consumer's shape no longer mirrors a tightened subset of

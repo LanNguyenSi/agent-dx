@@ -99,6 +99,23 @@ manifest on every run. The rules:
   (`opencodeModels`, `opencodeClassModels`) when present, file hashes, and the
   first install time, and is rewritten whenever that state changes. Apart from
   the `knowledge` field described above, do not edit it by hand.
+- Symbolic links in the target repository are refused, never followed. A git
+  checkout can contain links, for example `AGENTS.md` pointing at a file
+  outside the repository, and following one would edit or create a file
+  somewhere else. `init`, `apply`, and `uninstall` therefore check, with
+  `lstat`, every path they would read, write, or remove and each directory
+  above it, and refuse the whole run before the first change when any of them
+  is a symlink: a linked file, a dangling link, or a linked directory such as
+  `.ai/`, `.claude/`, `.codex/`, `.agents/`, `.opencode/`, or one of their
+  subdirectories. The message names the link; replace it with a regular file
+  or directory and run the command again. The same holds for the manifest:
+  a linked `.ai/workflow/manifest.json` is refused by `init`, `apply`,
+  `uninstall`, and `adopt` (which reports `symlinked-repo-manifest`) instead
+  of being read as the install record. A `CLAUDE.md` that links to
+  `AGENTS.md` is refused too. The target directory itself may be a symlink,
+  and links the installer never touches are ignored. `uninstall` also leaves
+  a linked directory out of its empty-directory pruning, with a note. The
+  operator manifest lives outside the repository and is not affected.
 
 ## Exit codes
 
@@ -111,8 +128,9 @@ empty or contains whitespace. When Codex is a selected harness, a
 model or effort, exits `2` for `setup` and `1` for `init` and `apply` (a missing model does not end the run when `--codex-fallback degrade` finds a substitute for every affected leaf); without
 Codex the catalog is parsed but not checked. Any other failure exits
 `1`, for example a missing target directory, an unknown harness or profile,
-a missing or unreadable operator manifest for `apply`, or `uninstall` without
-`--yes` in a non-interactive session. Every other run exits `0`, including an
+a missing or unreadable operator manifest for `apply`, a symbolic link on a
+path the installer would touch (see "Ownership and re-runs"), or `uninstall`
+without `--yes` in a non-interactive session. Every other run exits `0`, including an
 `apply` skipped by a pin and an install that reported conflicts. `doctor`,
 `adopt`, and `validate-review-report` have their own exit codes, listed in
 [Operator-level install](operator-install.md) and the

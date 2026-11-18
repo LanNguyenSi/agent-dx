@@ -160,23 +160,23 @@ below).
 ## `setup`: operator-level defaults
 
 `setup` writes or refreshes only `<home>/manifest.json`'s `defaults`; it
-touches no repository (cli.ts:335-337#"touches no repository",
-cli.ts:489#"const result = updateOperatorManifest(home, (current, state) => {",
+touches no repository (cli.ts:336-338#"touches no repository",
+cli.ts:490#"const result = updateOperatorManifest(home, (current, state) => {",
 the action's only write call, targeting the operator manifest rather than
 any repository). A plain re-run that resolves to the same
 `harnesses`/`profile`/`tiers`/`models`/`routing`
 values as already stored is a no-op write, decided by an
 order/completeness-insensitive comparison, `defaultsEqual`
-(cli.ts:148-161#"return normalize(a) === normalize(b);"); the newly-resolved
+(cli.ts:149-162#"return normalize(a) === normalize(b);"); the newly-resolved
 values are otherwise assembled into `defaults` verbatim
-(cli.ts:463#"const newDefaults: OperatorManifestDefaults = {") and passed
+(cli.ts:464#"const newDefaults: OperatorManifestDefaults = {") and passed
 through `updateOperatorManifest`.
 
 ## `apply`: project the operator's install onto one target
 
 `apply --target <repo>` installs the kit into `<repo>` and registers it
-(cli.ts:732-734#"registers the target in the operator manifest",
-cli.ts:1071#"const upserted = upsertOperatorTarget("). Its
+(cli.ts:733-735#"registers the target in the operator manifest",
+cli.ts:1072#"const upserted = upsertOperatorTarget("). Its
 harnesses/profile/tiers/models/routing precedence is layered:
 
 1. An explicit CLI flag always wins, the same override-vs-persist rule
@@ -186,13 +186,13 @@ harnesses/profile/tiers/models/routing precedence is layered:
    (cli-inputs.ts:390#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
 2. Absent an explicit `--harness`, harnesses fall back to the target's own
    recorded harnesses, else the operator defaults, else detection, else `claude`
-   (cli.ts:742-744#"else the operator defaults, else detected",
-   cli.ts:655-667#"return detected.length > 0 ? detected :").
+   (cli.ts:743-745#"else the operator defaults, else detected",
+   cli.ts:656-668#"return detected.length > 0 ? detected :").
 3. Absent an explicit flag, `profile`/`tiers`/`models`/`routing` fall back to the
    target's own recorded manifest, UNLESS `--sync` is passed, in which case
    the operator defaults override the target's recording instead
-   (cli.ts:773-775#"override the target's own recorded values",
-   cli.ts:687-705#": (repoManifest?.tiers ?? operatorDefaults.tiers);").
+   (cli.ts:774-776#"override the target's own recorded values",
+   cli.ts:688-706#": (repoManifest?.tiers ?? operatorDefaults.tiers);").
    `--sync` only affects profile/tiers/models/routing; harnesses are never widened by
    the operator defaults once the target has its own recorded set.
 4. An explicit `--routing <json-file>` is parsed before target writes and is
@@ -211,46 +211,46 @@ producing a false mismatch.
 
 A repo manifest can carry a kit-version pin. A plain `apply` is skipped with
 no changes when the repo's recorded pin differs from the running operator
-install's version (cli.ts:914-920#"Repository is pinned at"), unless the
+install's version (cli.ts:915-921#"Repository is pinned at"), unless the
 operator explicitly overrides the gate: `--force-pin` advances an *existing*
 pin to the current kit version, with no effect on a target that has no pin
-recorded at all (cli.ts:777-779#"has no effect on a target with no pin recorded",
-cli.ts:1004-1009#"? PACKAGE_VERSION"); `--pin <version>` sets or replaces the
+recorded at all (cli.ts:778-780#"has no effect on a target with no pin recorded",
+cli.ts:1005-1010#"? PACKAGE_VERSION"); `--pin <version>` sets or replaces the
 pin regardless of any existing one
-(cli.ts:781-783#"regardless of any existing pin"); `--unpin` clears it
-(cli.ts:785-787#"clear the target's recorded kit-version pin",
-cli.ts:1004-1005#"? null"). `--pin` and `--unpin` are mutually exclusive at the
+(cli.ts:782-784#"regardless of any existing pin"); `--unpin` clears it
+(cli.ts:786-788#"clear the target's recorded kit-version pin",
+cli.ts:1005-1006#"? null"). `--pin` and `--unpin` are mutually exclusive at the
 CLI layer, a usage error rather than an implicit precedence rule
-(cli.ts:829#"if (opts.pin !== undefined && opts.unpin) {"). `runInit` itself
+(cli.ts:830#"if (opts.pin !== undefined && opts.unpin) {"). `runInit` itself
 resolves the final stored pin the same way for both `init` and `apply`: a
 `string` sets it, `null` clears it, `undefined` (the default, no flag passed)
 carries the previous manifest's pin forward unchanged
-(init.ts:840-847#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
+(init.ts:858-865#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
 
 Registration happens even when local edits left some files `conflicted` (the
 apply itself still ran). The pin gate returns before the install is ever
 attempted: it sits above `runInit`'s own call site
-(cli.ts:914-920#"Repository is pinned at", cli.ts:1012#"const report = runInit({"),
+(cli.ts:915-921#"Repository is pinned at", cli.ts:1013#"const report = runInit({"),
 so nothing runs when it fires. The same is true of every other early return:
-`--pin` and `--unpin` together (cli.ts:829-830#"cannot be used together") or
+`--pin` and `--unpin` together (cli.ts:830-831#"cannot be used together") or
 a malformed `--pin` value
-(cli.ts:835-839#"must be non-empty with no internal whitespace") are usage
+(cli.ts:836-840#"must be non-empty with no internal whitespace") are usage
 errors at exit code 2; an unreadable
-(cli.ts:857#"back it up and repair it, or remove it and run") or absent
-(cli.ts:864#"No operator setup found") operator manifest, and a target
-that is not a directory (cli.ts:86-89#"Target is not a directory"), are
+(cli.ts:858#"back it up and repair it, or remove it and run") or absent
+(cli.ts:865#"No operator setup found") operator manifest, and a target
+that is not a directory (cli.ts:87-90#"Target is not a directory"), are
 precondition failures at exit code 1; none of these install anything either.
 
 Once the install has actually run, registration can still fail without a
 second install attempt. If the operator-manifest lock cannot be acquired,
 the kit is installed in the target but not registered, and the operator is
 told to re-run `apply` to register it
-(cli.ts:1081-1085#"the kit was installed but the target was not registered").
+(cli.ts:1082-1086#"the kit was installed but the target was not registered").
 The same outcome follows if the operator manifest turns unreadable or absent
 between this command's own top-of-run read and this later locked write:
 `applyRegistrationFailureMessage` reports it and the command exits 1 with
 the kit already installed but the target unregistered
-(cli.ts:1096#"applyRegistrationFailureMessage(").
+(cli.ts:1097#"applyRegistrationFailureMessage(").
 
 ## `doctor`: report every registered target's status
 
@@ -258,7 +258,7 @@ the kit already installed but the target unregistered
 each target's status against the operator's defaults; the citation below is
 the plain path, and under `--prune` the same per-target walk runs inside
 the locked read-modify-write described further down
-(cli.ts:1115-1116#"Report each operator-registered target's status",
+(cli.ts:1116-1117#"Report each operator-registered target's status",
 doctor.ts:1062-1064#"state.manifest,").
 The vocabulary is a seven-member union, `TargetStatus`
 (doctor.ts:48#"export type TargetStatus ="): `clean`, `divergent`,
@@ -277,7 +277,7 @@ subset of `TargetReport`'s fields is part of the `--json` contract,
 doctor.ts:167-179#"reason: report.reason,"); the fields outside that
 contract exist only for the human-output printer in `cli.ts`, to render
 detail lines without recomputing values `inspectTarget` already worked out
-(doctor.ts:65-70#"render detail lines without recomputing values"). The contract's optional `knowledgeWarnings` key carries the knowledge-bundle warnings (a configured `path` or `repoRoot` that is not a directory, a malformed manifest `knowledge` entry ignored on read, a non-empty list omitting an existing `docs/okf/`) and is omitted when there is none (doctor.ts:173#"? { knowledgeWarnings: report.knowledgeWarnings }"); the human output prints each one as a `knowledge:` detail line under any status (cli.ts:1308#"knowledge: ${warning}"), and they never change the status or the exit code. The contract's optional `codexWarnings` key (doctor.ts:176#"? { codexWarnings: report.codexWarnings }") likewise carries at most one Codex instruction-budget warning per codex-selecting target, decided without fall-through by the highest config layer that sets `project_doc_max_bytes` (the project config, the user config, or the 32768 default). Each layer's file is parsed whole with `@iarna/toml` (doctor.ts:439#"function readCodexProjectDocMaxBytes"), never line-scanned, and that parser implements TOML 0.5 while Codex reads TOML 1.1, so doctor never claims Codex rejects a file the parser refuses: such a file is reported as a layer whose budget is unknown, with the parser's first message line quoted back (doctor.ts:458#"function parseTomlFirstLine"), Codex noted as possibly loading it, and the AGENTS.md size and the default budget given for context. Only the top-level key counts, a key inside a `[table]` header is a different key. A parsed value is used only when it is an integer from 0 up to 9223372036854775807 (doctor.ts:479#"function decideCodexBudgetValue"): the deciding budget below the file's size (`AGENTS.override.md` when it is a regular file, else `AGENTS.md`) warns that Codex silently truncates it to the budget; the deciding value `0` warns that Codex loads no project instruction file at all; a value Codex cannot use (a string, a boolean, an array, a table, a negative or fractional number) warns that Codex refuses to load the file, naming the reason; and an unknown layer (an unreadable file, or a `BigInt` the parser returns for any integer literal outside the safe JS range, narrowed to 64 bits with the high bits dropped, doctor.ts:488#"outside the range doctor can read exactly") warns that the budget is unknown -- every one of these with no size comparison, and the check assumes Codex trusts the project. Two known mismatches are not detected: an integer-valued float like `65536.0` is indistinguishable from that integer in JavaScript and reads as the budget although Codex rejects it (a test pins it), and a file the TOML 0.5 parser accepts but Codex rejects whole (stricter TOML 1.x rules, a wrong-typed other key) still yields its budget. With profiles, the system layer, managed layers and `-c` session flags not considered, it prints as a `codex:` detail line (cli.ts:1313#"codex: ${warning}") and never changes the status or the exit code either.
+(doctor.ts:65-70#"render detail lines without recomputing values"). The contract's optional `knowledgeWarnings` key carries the knowledge-bundle warnings (a configured `path` or `repoRoot` that is not a directory, a malformed manifest `knowledge` entry ignored on read, a non-empty list omitting an existing `docs/okf/`) and is omitted when there is none (doctor.ts:173#"? { knowledgeWarnings: report.knowledgeWarnings }"); the human output prints each one as a `knowledge:` detail line under any status (cli.ts:1309#"knowledge: ${warning}"), and they never change the status or the exit code. The contract's optional `codexWarnings` key (doctor.ts:176#"? { codexWarnings: report.codexWarnings }") likewise carries at most one Codex instruction-budget warning per codex-selecting target, decided without fall-through by the highest config layer that sets `project_doc_max_bytes` (the project config, the user config, or the 32768 default). Each layer's file is parsed whole with `@iarna/toml` (doctor.ts:439#"function readCodexProjectDocMaxBytes"), never line-scanned, and that parser implements TOML 0.5 while Codex reads TOML 1.1, so doctor never claims Codex rejects a file the parser refuses: such a file is reported as a layer whose budget is unknown, with the parser's first message line quoted back (doctor.ts:458#"function parseTomlFirstLine"), Codex noted as possibly loading it, and the AGENTS.md size and the default budget given for context. Only the top-level key counts, a key inside a `[table]` header is a different key. A parsed value is used only when it is an integer from 0 up to 9223372036854775807 (doctor.ts:479#"function decideCodexBudgetValue"): the deciding budget below the file's size (`AGENTS.override.md` when it is a regular file, else `AGENTS.md`) warns that Codex silently truncates it to the budget; the deciding value `0` warns that Codex loads no project instruction file at all; a value Codex cannot use (a string, a boolean, an array, a table, a negative or fractional number) warns that Codex refuses to load the file, naming the reason; and an unknown layer (an unreadable file, or a `BigInt` the parser returns for any integer literal outside the safe JS range, narrowed to 64 bits with the high bits dropped, doctor.ts:488#"outside the range doctor can read exactly") warns that the budget is unknown -- every one of these with no size comparison, and the check assumes Codex trusts the project. Two known mismatches are not detected: an integer-valued float like `65536.0` is indistinguishable from that integer in JavaScript and reads as the budget although Codex rejects it (a test pins it), and a file the TOML 0.5 parser accepts but Codex rejects whole (stricter TOML 1.x rules, a wrong-typed other key) still yields its budget. With profiles, the system layer, managed layers and `-c` session flags not considered, it prints as a `codex:` detail line (cli.ts:1314#"codex: ${warning}") and never changes the status or the exit code either.
 
 Exit codes: `2` when no operator manifest exists at all (nothing else is
 evaluated), whether the file is simply absent or present-but-unreadable
@@ -289,17 +289,17 @@ acquiring or writing the lock, e.g. `EACCES` in a read-only operator home):
 the manifest is left untouched and `cli.ts`'s own `catch` block prints a
 differently-shaped JSON object with `error: "operator-manifest-locked"` or
 `"operator-manifest-write-failed"` plus a `message` string, carrying no
-`unvalidatedDropped` field at all (cli.ts:1142-1170#"error: doctorError,").
+`unvalidatedDropped` field at all (cli.ts:1143-1171#"error: doctorError,").
 Otherwise: `1` if any remaining target (after an optional prune) is
 `drift`, `missing`, `no-manifest`, or `unverifiable`; else `0`
 (doctor.ts:1071-1079#": 0;"). Outside that thrown-lock-error path, `--json`
 prints the `DoctorReport` as one JSON object with each target projected to
 its `TargetReportJson` subset
-(cli.ts:1190#"targets: report.targets.map(targetReportToJson),"), including the
+(cli.ts:1191#"targets: report.targets.map(targetReportToJson),"), including the
 report-level `unvalidatedDropped`
 (doctor.ts:245#"unvalidatedDropped: number;") and `pruned`
 (doctor.ts:231#"pruned: string[];")
-(cli.ts:1185-1194#"report.error ? { error: report.error }"); within that
+(cli.ts:1186-1195#"report.error ? { error: report.error }"); within that
 object, `error` is set only when no manifest was evaluated, distinguishing
 "never ran `setup`" from "manifest exists but does not parse or validate"
 (doctor.ts:246-251#"(corrupt JSON, or an envelope that does not match this kit)."). That
@@ -312,7 +312,7 @@ registry before reporting, rewriting the whole manifest file in normalized
 form; `unverifiable` targets are never removed by it, since an unreadable
 target might still be perfectly fine and dropping its row on that basis would
 be an unrecoverable guess
-(cli.ts:1122-1124#"remove missing and no-manifest targets from the operator registry",
+(cli.ts:1123-1125#"remove missing and no-manifest targets from the operator registry",
 doctor.ts:877#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>([").
 The prune's own re-read, recompute, and write run inside
 `updateOperatorManifest`'s single locked section, the same as every other
@@ -322,16 +322,16 @@ registry write.
 
 `adopt [dir]` registers a repository that already has the kit installed,
 touching nothing in the repository itself
-(cli.ts:1393-1394#"touching nothing in the repository",
-cli.ts:1543-1554#"bootstrapped = !current;", the action's only write call,
+(cli.ts:1394-1395#"touching nothing in the repository",
+cli.ts:1551-1562#"bootstrapped = !current;", the action's only write call,
 targeting the operator manifest and never the target repository). When no
 operator manifest exists yet at all, it bootstraps one from the target's own
 recorded
 settings (harnesses/profile/tiers/models/routing) instead of falling back to the
 shipped defaults `setup` would use
-(cli.ts:1393-1394#"bootstraps the operator manifest from the repository's own recorded settings",
-cli.ts:1349-1356#"models: { ...repoManifest.models },",
-cli.ts:1543-1554#"bootstrapped = !current;"). It then prints the one
+(cli.ts:1394-1395#"bootstraps the operator manifest from the repository's own recorded settings",
+cli.ts:1350-1357#"models: { ...repoManifest.models },",
+cli.ts:1551-1562#"bootstrapped = !current;"). It then prints the one
 target's doctor report and exits with `adoptExitCodeForStatus`'s own
 single-target mapping, a function scoped to `adopt`'s contract
 (doctor.ts:183-184#"single-target exit-code") and not something `doctor`'s
@@ -349,7 +349,7 @@ drives whether the success line is suppressed
 whether the `--json` output carries an `unexpected-target-status` error key
 (doctor.ts:1105-1108#"return adoptExitCodeForStatus(status) === 2"), both
 wired into `adopt`'s own action
-(cli.ts:1625-1626#"const unexpectedStatus = suppressSuccessLine(targetReport.status);").
+(cli.ts:1633-1634#"const unexpectedStatus = suppressSuccessLine(targetReport.status);").
 Every failure `adopt` can report before it has a target report to return
 (not a directory, no repo manifest, a foreign or unreadable repo manifest, a
 lock failure) is a usage/precondition error at exit code 2, unlike `apply`
@@ -361,13 +361,13 @@ not-a-directory check land on exit code 1, while `apply`'s own
 ## The pin rule
 
 A repo manifest's optional `pin` field
-(init.ts:175-202#"pin?: string;") records a kit-version an operator wants that
+(init.ts:176-203#"pin?: string;") records a kit-version an operator wants that
 repo to stay at, independent of `version` (the actually-installed kit
 version); `InitOptions.pin` is how a caller sets it: a `string` to set, `null`
 to clear, `undefined` to carry the previous value forward unchanged
-(init.ts:132-140#"pin?: string | null;"). A stored pin that is empty or
+(init.ts:133-141#"pin?: string | null;"). A stored pin that is empty or
 whitespace-only is treated as no pin at all, both on write and on read back
-(init.ts:539-543#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
+(init.ts:546-550#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
 computation applies the pin rule precisely: a recorded pin suppresses
 `version-lag` only when the pin equals the repo's own *installed* version;
 that is the expected, deliberate-stay state. When the pin and the installed
@@ -382,7 +382,7 @@ installed version against the running kit version instead
 `runUninstall` takes only a target directory and a force flag; it has no
 operator-home parameter, takes no lock, and never reads or writes the
 operator manifest at all
-(uninstall.ts:122-125#"}): UninstallReport {"). A target that is uninstalled
+(uninstall.ts:123-126#"}): UninstallReport {"). A target that is uninstalled
 therefore stays registered until a `doctor` run reclassifies it: once its
 `.ai/workflow/manifest.json` is gone, `inspectTarget` reports it
 `no-manifest`, and only `doctor --prune` actually removes that row from the

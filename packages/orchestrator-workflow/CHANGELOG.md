@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `init`, `apply`, `uninstall`, and `adopt` no longer follow symbolic links
+  in the target repository. A cloned repository can ship `AGENTS.md`,
+  `CLAUDE.md`, a kit file, or a directory such as `.claude/` as a link (git
+  keeps symlinks), and the installer would append to, overwrite, delete
+  from, or create a file at whatever the link pointed to, outside the
+  repository. Every path the installer reads, writes, or removes, and each
+  directory above it, is now checked with `lstat` first; a link anywhere on
+  the path, a dangling one included, makes the command refuse the whole run
+  before it changes anything, name the link, and exit non-zero. Replacing the
+  link with a regular file or directory lets the run proceed. A `CLAUDE.md`
+  that links to `AGENTS.md` is refused too; the target directory itself may
+  still be a symlink.
+
 ## [0.52.0] - 2026-11-17
 
 ### Added
