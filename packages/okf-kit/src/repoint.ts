@@ -19,6 +19,12 @@ export interface RepointOptions {
   repoRoot?: string;
   /** Rewrite the docs. Without it nothing is written and the plan is only reported. */
   write?: boolean;
+  /**
+   * Also re-point the citations of `log.md` docs: those the drift analysis
+   * judges like any other doc's, except a citation written as one side of an
+   * `old -> new` pair (see `narratedCitations`), which is left as written. Off by default, since a log narrates past states.
+   */
+  includeLog?: boolean;
 }
 
 export interface PlannedRewrite {
@@ -62,7 +68,8 @@ export interface RepointResult {
  * moved since `<ref>` and can be located by shifting through the hunks of
  * `git diff -U0 <ref>` (see `src/citation-drift.ts`). A citation an edit
  * touched is refused and listed. Only the digits of the line numbers are
- * rewritten: no timestamp, no frontmatter, no log entry.
+ * rewritten: no timestamp, no frontmatter, no log entry. `log.md` is left
+ * alone unless `includeLog` is set (see `RepointOptions`).
  *
  * Exit code: 0 when nothing is refused, 1 when at least one citation needs
  * manual handling (rewrites are still written under `--write`).
@@ -88,6 +95,7 @@ export function runRepoint(
   const verdicts = analyzeCitationDrift(
     { root: repoRoot, bundleDir: resolvedBundleDir, docs: ctx.docs },
     base,
+    { includeLog: options.includeLog },
   );
 
   const rewrites: PlannedRewrite[] = [];

@@ -9,6 +9,9 @@ okf-kit repoint path/to/bundle --base origin/main
 # rewrite the docs
 okf-kit repoint path/to/bundle --base origin/main --write
 
+# also re-point the live citations of log.md (opt-in, see below)
+okf-kit repoint path/to/bundle --base origin/main --write --include-log
+
 # the plan as JSON
 okf-kit repoint path/to/bundle --base origin/main --json
 ```
@@ -24,9 +27,19 @@ MANUAL doc.md: `src/a.ts:12`: lines inside the cited range were edited, removed 
 
 ## What it rewrites
 
-Primary citations (`path:N`, `path:N-M`, anchored or not), continuations (`` `:N` ``, `` `:N-M` ``, `` (`N`) ``), extensions (`` `path:N`-`M` ``, only the `M`) and bound short forms (`:N-M`). Only the digits of the line numbers change: an `#anchor`, the surrounding prose, the frontmatter and its `timestamp` or `generated` stamp stay as they are. `repoint` never re-stamps a doc and never writes a `log.md` entry; do both yourself once you have verified the result.
+Primary citations (`path:N`, `path:N-M`, anchored or not), continuations (`` `:N` ``, `` `:N-M` ``, `` (`N`) ``), extensions (`` `path:N`-`M` ``, only the `M`) and bound short forms (`:N-M`). Only the digits of the line numbers change: an `#anchor`, the surrounding prose, the frontmatter and its `timestamp` or `generated` stamp stay as they are. `repoint` never re-stamps a doc and never writes a `log.md` entry; once you have verified the result, `okf-kit restamp` does both (see [Re-stamping docs](restamp.md)).
 
-A citation is rewritten only when no hunk of `git diff -U0 <ref>` touches the cited range, so the whole range shifted by the net line change above it, and the text at the new lines equals the text at the old lines at the ref. Anything else is listed as `MANUAL` and left alone: a line inside the range was edited or removed, lines were inserted between the first and last cited line, or the shifted text does not match. What is not judged at all (new file, citation written since the ref, reserved docs, ...) is counted in the summary line and, by reason, under `skipped` in the `--json` output.
+A citation is rewritten only when no hunk of `git diff -U0 <ref>` touches the cited range, so the whole range shifted by the net line change above it, and the text at the new lines equals the text at the old lines at the ref. Anything else is listed as `MANUAL` and left alone: a line inside the range was edited or removed, lines were inserted between the first and last cited line, or the shifted text does not match. What is not judged at all (new file, citation written since the ref, reserved docs unless `--include-log` names `log.md`, ...) is counted in the summary line and, by reason, under `skipped` in the `--json` output.
+
+## `log.md` (`--include-log`)
+
+By default `repoint` leaves the reserved docs alone: the line numbers in `index.md` and `log.md` narrate past states, so most of them are not live citations. A bundle whose own tests check the citations of its `log.md` can opt that file in with `--include-log` (every `log.md` of the bundle, at any depth; `index.md` stays out). Its citations are then judged by exactly the same analysis as any other doc's, so only a citation that `citations-resolve` collects (the cited file resolves) and that the drift verdicts call moved is rewritten. A citation written as one side of an `old -> new` pair is narration and is never rewritten, because rewriting either side would turn the sentence into a different claim. Both sides of a pair are skipped together. Arrows are `->`, `-->`, `=>`, `==>` and the characters `→`, `⇒` and `⟶`, and only an arrow outside backticks counts. The `-->` that ends an HTML comment therefore counts as an arrow too, so citations next to it are left alone. The forms that are detected:
+
+- an arrow directly before or after a citation on its line, with at most a one-word label such as `new` between the arrow and a citation after it (`` `src/a.ts:93` -> new `src/a.ts:150` ``);
+- an arrow anywhere between a citation and the next citation, on one line or across a line break inside the same log entry (`` `src/a.ts:93` (was) -> `src/a.ts:150` ``, or the arrow ending one line and the second citation starting the next); a blank line, a new bullet or a heading between them ends the entry, so an arrow in the next entry never reaches back;
+- `from <citation> to <citation>`, on one line or across a line break in the same entry.
+
+Nothing else is detected: a pair written with other words (`was` ... `now`) and no arrow is judged like any live citation, as is a citation with an arrow only inside backticks. Such citations are counted under `skipped` with a reason naming the pair. Prose that merely says where something moved ("moved from line 93 to line 150") has no citation grammar and is never touched.
 
 ## Options
 
@@ -34,6 +47,7 @@ A citation is rewritten only when no hunk of `git diff -U0 <ref>` touches the ci
 |--------|---------|
 | `--base <ref>` | Required. The git ref (branch, tag or commit) the docs' line numbers were written against. A ref that names no commit is a usage error (exit 2). |
 | `-w, --write` | Rewrite the docs. Without it nothing is written. |
+| `--include-log` | Also re-point the live citations of `log.md` (see above). Off by default. |
 | `-r, --repo-root <path>` | Repo root the citations resolve against (auto-detected from the bundle dir when omitted). |
 | `-j, --json` | Output `{ bundleDir, base, written, rewrites, refused, skipped, unchanged }`. |
 

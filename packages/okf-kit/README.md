@@ -85,9 +85,16 @@ okf-kit docs-for path/to/bundle src/foo.ts
 # cited lines were themselves edited is listed for manual handling and never rewritten.
 okf-kit repoint path/to/bundle --base origin/main
 okf-kit repoint path/to/bundle --base origin/main --write
+# --include-log also re-points the live citations of log.md (a detected `old -> new` pair is left as written, see docs/repoint.md)
+okf-kit repoint path/to/bundle --base origin/main --write --include-log
+
+# source changes are committed and the stale docs re-verified: set their stamp to now, and add one
+# log.md entry. Dry run by default; refuses while a source of such a doc has uncommitted changes.
+okf-kit restamp path/to/bundle
+okf-kit restamp path/to/bundle --write --log-entry "re-verified after the retry change"
 ```
 
-See [Scaffold a bundle](docs/init.md), [Reverse lookup](docs/docs-for.md) and [Re-pointing citations](docs/repoint.md) for the full command reference, including flags and output formats.
+See [Scaffold a bundle](docs/init.md), [Reverse lookup](docs/docs-for.md), [Re-pointing citations](docs/repoint.md) and [Re-stamping docs](docs/restamp.md) for the full command reference, including flags and output formats.
 
 ### Use in CI
 
@@ -109,6 +116,7 @@ Pin the exact version and use a full (non-shallow) checkout; [CI usage](docs/ci.
 - [Staleness (`sources-fresh`)](docs/staleness.md): the re-stamp rule, comment-only source edits, designator-less timestamps, squash-merge interaction, `--dirty-as-now`, `sources-fresh-future`.
 - [Citation resolution (`citations-resolve`)](docs/citations.md): every finding id, anchor forms, continuation and short-form citations, `--require-anchors`, and the opt-in `--base` drift check (`citation-drift`).
 - [Re-pointing citations (`repoint`)](docs/repoint.md): rewrite the line numbers of citations that moved since a git ref, with a dry run, and what is refused.
+- [Re-stamping docs (`restamp`)](docs/restamp.md): set the stamp of the docs `check` reports stale, after the source commit, with an optional `log.md` entry, and when it refuses.
 - [Prose line references](docs/prose-line-references.md): the opt-in `--prose-line-references` check for line numbers written outside `citations-resolve`'s own grammar.
 - [CI usage](docs/ci.md): shallow-clone caveats, the pinned-version rationale, the template's pin, and the `templates/okf-staleness.yml` warn-only workflow template.
 
@@ -126,7 +134,7 @@ See [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) for issue and PR convention
 
 Modules under `src/`:
 
-- `cli.ts`: the `check`, `docs-for`, `repoint` and `init` commands, `runCheck`, and the mapping of results and errors to exit codes.
+- `cli.ts`: the `check`, `docs-for`, `repoint`, `restamp` and `init` commands, `runCheck`, and the mapping of results and errors to exit codes.
 - `bundle.ts`: `loadBundle` walks the bundle's `*.md` files and parses their frontmatter (`parseFrontmatter`).
 - `rules/`: one file per rule (`sources-fresh.ts` holds both `sources-fresh` and `sources-fresh-future`); `rules/index.ts` registers them in `allRules`.
 - `report.ts`: `summarize`, and the text (`renderText`) and JSON (`renderJson`) output of `check`.
@@ -136,7 +144,7 @@ Modules under `src/`:
 - `links.ts`: `extractMarkdownLinks`, shared by `links-resolve` and `no-absolute-links`.
 - `companions.ts`: `--companion` parsing (`parseCompanions`).
 - `docs-for.ts`: `runDocsFor` and its text and JSON output.
-- `citation-drift.ts`: the diff-hunk line mapping and the per-citation verdicts behind `check --base` (rule `rules/citation-drift.ts`) and `repoint`; `repoint.ts`: `runRepoint` and its text and JSON output.
+- `citation-drift.ts`: the diff-hunk line mapping and the per-citation verdicts behind `check --base` (rule `rules/citation-drift.ts`) and `repoint`; `repoint.ts`: `runRepoint` and its text and JSON output; `restamp.ts`: `runRestamp` (the stale set is `sources-fresh`'s own verdict) and its text and JSON output; `log-entry.ts`: `addLogEntry`, the `log.md` entry placement.
 - `init.ts` and `templates.ts`: `runInit` and the scaffolded file bodies.
 - `types.ts`: the shared types (`Finding`, `Rule`, `BundleContext`, `RunGit`); `errors.ts`: `UsageError`.
 

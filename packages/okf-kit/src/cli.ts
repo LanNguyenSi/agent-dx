@@ -16,6 +16,7 @@ import { resolveBaseCommit } from "./citation-drift.js";
 import { detectRepoRoot } from "./git.js";
 import { formatInitSummary, runInit } from "./init.js";
 import { renderRepointJson, renderRepointText, runRepoint } from "./repoint.js";
+import { renderRestampJson, renderRestampText, runRestamp } from "./restamp.js";
 import { allRules } from "./rules/index.js";
 import { renderJson, renderText, summarize } from "./report.js";
 import type {
@@ -253,6 +254,22 @@ export function runCheck(
   return { bundleDir: resolvedBundleDir, findings, exitCode };
 }
 
+/** `--future-skew-minutes <n>` as a number of minutes; undefined when the option is absent. */
+function parseFutureSkewMinutes(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  // `Number("")` and `Number("  ")` both resolve to 0, which would
+  // otherwise silently accept an empty/whitespace-only value as
+  // "0 minutes" instead of rejecting it as the usage error it is.
+  const n = trimmed === "" ? Number.NaN : Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new UsageError(
+      `--future-skew-minutes must be a non-negative number, got \`${value}\``,
+    );
+  }
+  return n;
+}
+
 const program = new Command();
 
 // Route commander's own usage errors (unknown option, missing argument, no
@@ -372,20 +389,9 @@ program
       },
     ) => {
       try {
-        let futureSkewMinutes: number | undefined;
-        if (opts.futureSkewMinutes !== undefined) {
-          const trimmed = opts.futureSkewMinutes.trim();
-          // `Number("")` and `Number("  ")` both resolve to 0, which would
-          // otherwise silently accept an empty/whitespace-only value as
-          // "0 minutes" instead of rejecting it as the usage error it is.
-          const n = trimmed === "" ? Number.NaN : Number(trimmed);
-          if (!Number.isFinite(n) || n < 0) {
-            throw new UsageError(
-              `--future-skew-minutes must be a non-negative number, got \`${opts.futureSkewMinutes}\``,
-            );
-          }
-          futureSkewMinutes = n;
-        }
+        const futureSkewMinutes = parseFutureSkewMinutes(
+          opts.futureSkewMinutes,
+        );
         if (opts.rule !== undefined && opts.rule.length === 0) {
           throw new UsageError(
             "--rule needs at least one rule id (an empty value is not 'every rule'; omit --rule for that)",
@@ -449,6 +455,11 @@ program
     "-w, --write",
     "Rewrite the line numbers in the docs (default: print the planned rewrites and change nothing)",
   )
+  .option(
+    "--include-log",
+    "Also re-point the citations of log.md that the same analysis judges moved; a citation written as one side of an " +
+      "`old -> new` pair is narration and left as written, the detected forms are listed in docs/repoint.md (default: log.md is left alone)",
+  )
   .option("-j, --json", "Output the result as JSON")
   .exitOverride()
   .action(
@@ -458,6 +469,7 @@ program
         base: string;
         repoRoot?: string;
         write?: boolean;
+        includeLog?: boolean;
         json?: boolean;
       },
     ) => {
@@ -466,10 +478,77 @@ program
           base: opts.base,
           repoRoot: opts.repoRoot,
           write: opts.write,
+          includeLog: opts.includeLog,
         });
         const output = opts.json
           ? renderRepointJson(result)
           : renderRepointText(result);
+        process.stdout.write(output);
+        process.exitCode = result.exitCode;
+        return;
+      } catch (err) {
+        if (err instanceof UsageError) {
+          process.stderr.write(`okf-kit: ${err.message}\n`);
+          process.exit(2);
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`okf-kit: ${msg}\n`);
+        process.exit(2);
+      }
+    },
+  );
+
+program
+  .command("restamp <bundleDir>")
+  .description(
+    "Set the stamp of every doc `check` reports STALE to the current UTC time (dry run unless --write); run it after the source changes are committed, then commit the docs. Refuses when a source of such a doc has uncommitted changes",
+  )
+  .option(
+    "-r, --repo-root <path>",
+    "Repo root the docs' `sources` resolve against (auto-detected via `git rev-parse --show-toplevel` from the bundle dir when omitted)",
+  )
+  .option(
+    "-w, --write",
+    "Rewrite the stamps in the docs (default: print the planned stamps and change nothing)",
+  )
+  .option(
+    "--log-entry <text>",
+    "Also add one entry to the bundle-root log.md (newest first, under today's `## YYYY-MM-DD` heading, as `- <stamp>, <text>`) when a doc is re-stamped",
+  )
+  .option(
+    "--future-skew-minutes <n>",
+    "Clock-skew allowance in minutes for the new stamp, as for `check` (default 10): a stamp " +
+      "later than the clock by more than this would be flagged future-dated, so such a doc is listed for manual handling",
+  )
+  .option("-j, --json", "Output the result as JSON")
+  .exitOverride()
+  .action(
+    (
+      bundleDir: string,
+      opts: {
+        repoRoot?: string;
+        write?: boolean;
+        logEntry?: string;
+        futureSkewMinutes?: string;
+        json?: boolean;
+      },
+    ) => {
+      try {
+        const futureSkewMinutes = parseFutureSkewMinutes(
+          opts.futureSkewMinutes,
+        );
+        const result = runRestamp(bundleDir, {
+          repoRoot: opts.repoRoot,
+          write: opts.write,
+          logEntry: opts.logEntry,
+          futureSkewSeconds:
+            futureSkewMinutes === undefined
+              ? undefined
+              : Math.round(futureSkewMinutes * 60),
+        });
+        const output = opts.json
+          ? renderRestampJson(result)
+          : renderRestampText(result);
         process.stdout.write(output);
         process.exitCode = result.exitCode;
         return;
