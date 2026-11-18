@@ -24,11 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the docs. `--log-entry <text>` adds one `- <stamp>, <text>` entry to the
   bundle-root `log.md`, first under today's `## YYYY-MM-DD` heading
   (created above the newest one when that is older), above the first bullet
-  of a flat log, or appended to a log with neither.
+  of a flat log, or appended to a log with neither. The stamp is never
+  earlier than the latest commit of the doc's sources (a source commit dated
+  after the clock sets it; one past the allowance lists the doc as manual),
+  `--future-skew-minutes <n>` sets the allowance as for `check`, and a
+  directory source that contains the bundle does not count the bundle's own
+  docs and log as uncommitted.
 - `okf-kit repoint --include-log`: also re-points the citations of
   `log.md` (any depth) that the drift analysis judges moved. A citation
-  written as one side of an `old -> new` pair is narration and is never
-  rewritten. Without the flag `log.md` stays untouched, as before.
+  written as one side of an `old -> new` pair is narration and is left as
+  written, both sides together. The detected forms: an arrow (`->`, `-->`,
+  `=>`, `==>`, `→`, `⇒`, `⟶`) outside backticks directly before or after a
+  citation; an arrow between a citation and the next one in the same entry
+  (one line, or across a line break with no blank line, bullet or heading
+  between); and `from <citation> to <citation>`. Other wordings are judged
+  like any citation. Without the flag `log.md` stays untouched, as before.
 
 ## [0.22.0] - 2026-11-17
 

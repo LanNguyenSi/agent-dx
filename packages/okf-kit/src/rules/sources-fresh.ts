@@ -432,19 +432,47 @@ export function isStaleFinding(finding: Finding): boolean {
  * `source` (modified, staged, deleted or untracked; a directory entry counts
  * when anything below it is dirty). Null when git could not report the
  * state: a caller that must not guess treats that as "unknown", not "clean".
+ *
+ * `ignore` names repo-relative paths (a file each) that do not count, even
+ * when dirty: the caller's own output that a directory `source` happens to
+ * contain, for instance the docs of the bundle that lives inside it.
  */
 export function isSourceDirty(
   ctx: BundleContext,
   repoRoot: string,
   source: string,
+  ignore: readonly string[] = [],
 ): boolean | null {
   const git = ctx.runGit ?? defaultRunGit;
-  if (getDirtyStateShared(ctx, git, repoRoot) === null) return null;
+  const state = getDirtyStateShared(ctx, git, repoRoot);
+  if (state === null) return null;
+  const ignored = new Set(
+    ignore.map((p) => normalizeRelPath(toTopLevelPath(state.prefix, p))),
+  );
   return isDirtyForShared(
     ctx,
     git,
     repoRoot,
     repoRelativeSource(repoRoot, source),
+    ignored,
+  );
+}
+
+/**
+ * The last-commit epoch (seconds, committer time) of the `sources` entry
+ * `source`, or null when it has no git history or git could not say. The
+ * same lookup `sources-fresh` makes for its STALE verdict.
+ */
+export function getSourceCommitEpoch(
+  ctx: BundleContext,
+  repoRoot: string,
+  source: string,
+): number | null {
+  const git = ctx.runGit ?? defaultRunGit;
+  return getLastCommitEpoch(
+    git,
+    repoRoot,
+    literalPathspec(repoRelativeSource(repoRoot, source)),
   );
 }
 
@@ -694,21 +722,25 @@ function getDirtyStateShared(
  * ordinary commit-epoch verdict, and the rule reports the failure once at
  * bundle level (see `readDirtyState`).
  */
+const NO_PATHS: ReadonlySet<string> = new Set();
+
 function isDirtyForShared(
   ctx: BundleContext,
   git: RunGit,
   repoRoot: string,
   relPath: string,
+  ignored: ReadonlySet<string> = NO_PATHS,
 ): boolean {
   const state = getDirtyStateShared(ctx, git, repoRoot);
   if (state === null) return false;
   const { paths } = state;
   const normalized = normalizeRelPath(toTopLevelPath(state.prefix, relPath));
-  if (normalized === ".") return paths.size > 0;
-  if (paths.has(normalized)) return true;
+  const counted = (p: string): boolean => !ignored.has(p);
+  if (normalized === ".") return [...paths].some(counted);
+  if (paths.has(normalized) && counted(normalized)) return true;
   const prefix = `${normalized}/`;
   for (const p of paths) {
-    if (p.startsWith(prefix)) return true;
+    if (p.startsWith(prefix) && counted(p)) return true;
   }
   return false;
 }

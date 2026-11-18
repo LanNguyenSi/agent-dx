@@ -7,6 +7,7 @@ import { detectRepoRoot } from "./git.js";
 import { addLogEntry } from "./log-entry.js";
 import {
   DEFAULT_FUTURE_SKEW_SECONDS,
+  getSourceCommitEpoch,
   isSourceDirty,
   isStaleFinding,
   sourcesFreshRule,
@@ -17,6 +18,7 @@ import {
   getStampDivergence,
   getTimestampEpochMs,
   getValidSources,
+  resolveRepoPath,
 } from "./util.js";
 
 export interface RestampOptions {
@@ -25,6 +27,12 @@ export interface RestampOptions {
   write?: boolean;
   /** Text of one `log.md` entry to add when at least one doc is re-stamped. */
   logEntry?: string;
+  /**
+   * Clock-skew allowance in seconds: how far ahead of the clock a stamp may
+   * be before `sources-fresh-future` flags it (default
+   * `DEFAULT_FUTURE_SKEW_SECONDS`; CLI: `--future-skew-minutes`).
+   */
+  futureSkewSeconds?: number;
   /** Clock in milliseconds since the epoch (default `Date.now`); tests pin it. */
   now?: () => number;
   /** Test-only override for git access. */
@@ -88,9 +96,15 @@ const GENERATED_AT_PATH = ["generated", "at"];
  *
  * The new stamp is the clock reading to the second, but never equal to or
  * earlier than the stamp it replaces (one second later when that one is not
- * in the past); a previous stamp further in the future than the
- * `sources-fresh-future` allowance has no valid successor and is listed for
- * manual handling. The stamp is written where the doc keeps it: `generated.at`
+ * in the past) and never earlier than the latest commit of the doc's stale
+ * sources (a source commit dated after the clock sets the floor; a stamp
+ * equal to the commit time is fresh, `sources-fresh` calls a source stale
+ * only when its commit is strictly later). A stamp more than the future
+ * allowance (`sources-fresh-future`, `futureSkewSeconds`) ahead of the clock
+ * would be flagged future-dated, so a doc whose smallest valid stamp is past
+ * that line is listed for manual handling. The allowance is strict: a stamp
+ * exactly `futureSkewSeconds` ahead of the clock is accepted, one second
+ * more is not. The stamp is written where the doc keeps it: `generated.at`
  * when the doc has one (OKF v0.2), else `timestamp`, quoting kept.
  *
  * Exit code: 0 when nothing is refused or left for manual handling, 1
@@ -145,12 +159,27 @@ export function runRestamp(
   const docsByPath = new Map(ctx.docs.map((doc) => [doc.relPath, doc]));
 
   // The stamp must follow the source commit: a source with uncommitted
-  // changes is not a commit yet, so a stamp now would predate the commit that
-  // lands it. Every source of the doc counts, not only the one found stale.
+  // changes is not a commit yet, so the stamp would vouch for content that
+  // has not landed, and the commit that lands it could still carry a date the
+  // stamp does not clear. Every source of the doc counts, not only the one
+  // found stale. The bundle's own docs (and its log) do not count as dirty
+  // content of a directory source that contains the bundle: they are what
+  // this command writes.
+  const bundleFiles = ctx.docs.map((d) =>
+    path
+      .relative(repoRoot, path.join(resolvedBundleDir, d.relPath))
+      .split(path.sep)
+      .join("/"),
+  );
   for (const docPath of staleDocs) {
     const doc = docsByPath.get(docPath);
     for (const source of getValidSources(doc?.frontmatter.parsed) ?? []) {
-      const dirty = isSourceDirty(ctx, repoRoot, source);
+      const dirty = isSourceDirty(
+        ctx,
+        repoRoot,
+        source,
+        isDirectory(resolveRepoPath(repoRoot, source)) ? bundleFiles : [],
+      );
       if (dirty === true) {
         result.refused.push({
           doc: docPath,
@@ -172,6 +201,7 @@ export function runRestamp(
   }
 
   const nowSeconds = Math.floor((options.now ?? Date.now)() / 1000);
+  const skewSeconds = options.futureSkewSeconds ?? DEFAULT_FUTURE_SKEW_SECONDS;
   const edits = new Map<string, string>();
   for (const docPath of staleDocs) {
     const doc = docsByPath.get(docPath) as BundleDoc;
@@ -183,11 +213,29 @@ export function runRestamp(
       });
       continue;
     }
-    const nextSeconds = Math.max(nowSeconds, Math.floor(previousMs / 1000) + 1);
-    if (nextSeconds > nowSeconds + DEFAULT_FUTURE_SKEW_SECONDS) {
+    const previousSeconds = Math.floor(previousMs / 1000);
+    // The latest commit among the doc's sources: the stamp has to be at or
+    // after it for `sources-fresh` to call them fresh. A source that is not
+    // stale was committed before the stamp it already carries, so it never
+    // raises the floor.
+    let sourceSeconds = Number.NEGATIVE_INFINITY;
+    let latestSource = "";
+    for (const source of getValidSources(doc.frontmatter.parsed) ?? []) {
+      const epoch = getSourceCommitEpoch(ctx, repoRoot, source);
+      if (epoch !== null && epoch > sourceSeconds) {
+        sourceSeconds = epoch;
+        latestSource = source;
+      }
+    }
+    const afterPrevious = previousSeconds + 1;
+    const nextSeconds = Math.max(nowSeconds, afterPrevious, sourceSeconds);
+    if (nextSeconds > nowSeconds + skewSeconds) {
       result.manual.push({
         doc: docPath,
-        reason: `its stamp ${new Date(previousMs).toISOString()} is more than ${DEFAULT_FUTURE_SKEW_SECONDS} s in the future, so a stamp strictly later than it would be flagged future-dated; correct it by hand`,
+        reason:
+          afterPrevious <= nowSeconds + skewSeconds
+            ? `\`${latestSource}\` was committed ${isoSeconds(sourceSeconds)}, ${sourceSeconds - nowSeconds} s in the future of the clock (the allowance is ${skewSeconds} s), so no stamp that clears the commit would escape being flagged future-dated; re-stamp after the clock passes it, or correct the commit date`
+            : `its stamp ${new Date(previousMs).toISOString()} is in the future (${previousSeconds - nowSeconds} s ahead of the clock, the allowance is ${skewSeconds} s), so a stamp strictly later than it would be flagged future-dated; correct it by hand`,
       });
       continue;
     }
@@ -228,6 +276,14 @@ export function runRestamp(
   }
   result.exitCode = result.manual.length > 0 ? 1 : 0;
   return result;
+}
+
+function isDirectory(absPath: string): boolean {
+  try {
+    return fs.statSync(absPath).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /** `YYYY-MM-DDTHH:MM:SSZ`, the spelling bundles stamp with. */
@@ -340,9 +396,15 @@ export function renderRestampText(result: RestampResult): string {
   } else if (result.stale.length === 0) {
     lines.push("no doc is stale, nothing to re-stamp");
   }
-  lines.push(
-    `${result.stamped.length} ${result.written ? "re-stamped" : "to re-stamp (dry run, pass --write to rewrite)"}, ${result.refused.length} refused, ${result.manual.length} need manual handling`,
-  );
+  if (result.refused.length > 0) {
+    lines.push(
+      `0 re-stamped (refused, nothing written), ${result.refused.length} refused, ${result.manual.length} need manual handling`,
+    );
+  } else {
+    lines.push(
+      `${result.stamped.length} ${result.written ? "re-stamped" : "to re-stamp (dry run, pass --write to rewrite)"}, ${result.refused.length} refused, ${result.manual.length} need manual handling`,
+    );
+  }
   return lines.join("\n") + "\n";
 }
 

@@ -254,6 +254,22 @@ export function runCheck(
   return { bundleDir: resolvedBundleDir, findings, exitCode };
 }
 
+/** `--future-skew-minutes <n>` as a number of minutes; undefined when the option is absent. */
+function parseFutureSkewMinutes(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  // `Number("")` and `Number("  ")` both resolve to 0, which would
+  // otherwise silently accept an empty/whitespace-only value as
+  // "0 minutes" instead of rejecting it as the usage error it is.
+  const n = trimmed === "" ? Number.NaN : Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new UsageError(
+      `--future-skew-minutes must be a non-negative number, got \`${value}\``,
+    );
+  }
+  return n;
+}
+
 const program = new Command();
 
 // Route commander's own usage errors (unknown option, missing argument, no
@@ -373,20 +389,9 @@ program
       },
     ) => {
       try {
-        let futureSkewMinutes: number | undefined;
-        if (opts.futureSkewMinutes !== undefined) {
-          const trimmed = opts.futureSkewMinutes.trim();
-          // `Number("")` and `Number("  ")` both resolve to 0, which would
-          // otherwise silently accept an empty/whitespace-only value as
-          // "0 minutes" instead of rejecting it as the usage error it is.
-          const n = trimmed === "" ? Number.NaN : Number(trimmed);
-          if (!Number.isFinite(n) || n < 0) {
-            throw new UsageError(
-              `--future-skew-minutes must be a non-negative number, got \`${opts.futureSkewMinutes}\``,
-            );
-          }
-          futureSkewMinutes = n;
-        }
+        const futureSkewMinutes = parseFutureSkewMinutes(
+          opts.futureSkewMinutes,
+        );
         if (opts.rule !== undefined && opts.rule.length === 0) {
           throw new UsageError(
             "--rule needs at least one rule id (an empty value is not 'every rule'; omit --rule for that)",
@@ -453,7 +458,7 @@ program
   .option(
     "--include-log",
     "Also re-point the citations of log.md that the same analysis judges moved; a citation written as one side of an " +
-      "`old -> new` pair is narration and is never rewritten (default: log.md is left alone)",
+      "`old -> new` pair is narration and left as written, the detected forms are listed in docs/repoint.md (default: log.md is left alone)",
   )
   .option("-j, --json", "Output the result as JSON")
   .exitOverride()
@@ -510,6 +515,11 @@ program
     "--log-entry <text>",
     "Also add one entry to the bundle-root log.md (newest first, under today's `## YYYY-MM-DD` heading, as `- <stamp>, <text>`) when a doc is re-stamped",
   )
+  .option(
+    "--future-skew-minutes <n>",
+    "Clock-skew allowance in minutes for the new stamp, as for `check` (default 10): a stamp " +
+      "later than the clock by more than this would be flagged future-dated, so such a doc is listed for manual handling",
+  )
   .option("-j, --json", "Output the result as JSON")
   .exitOverride()
   .action(
@@ -519,14 +529,22 @@ program
         repoRoot?: string;
         write?: boolean;
         logEntry?: string;
+        futureSkewMinutes?: string;
         json?: boolean;
       },
     ) => {
       try {
+        const futureSkewMinutes = parseFutureSkewMinutes(
+          opts.futureSkewMinutes,
+        );
         const result = runRestamp(bundleDir, {
           repoRoot: opts.repoRoot,
           write: opts.write,
           logEntry: opts.logEntry,
+          futureSkewSeconds:
+            futureSkewMinutes === undefined
+              ? undefined
+              : Math.round(futureSkewMinutes * 60),
         });
         const output = opts.json
           ? renderRestampJson(result)

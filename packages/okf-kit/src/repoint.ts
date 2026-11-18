@@ -21,8 +21,8 @@ export interface RepointOptions {
   write?: boolean;
   /**
    * Also re-point the citations of `log.md` docs: those the drift analysis
-   * judges like any other doc's, never a citation written as one side of an
-   * `old -> new` pair. Off by default, since a log narrates past states.
+   * judges like any other doc's, except a citation written as one side of an
+   * `old -> new` pair (see `narratedCitations`), which is left as written. Off by default, since a log narrates past states.
    */
   includeLog?: boolean;
 }

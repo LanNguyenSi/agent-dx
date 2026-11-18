@@ -193,3 +193,126 @@ describe("repoint --include-log", () => {
     );
   });
 });
+
+describe("repoint --include-log: narrated pairs", () => {
+  /** Every cited line of src/a.ts from 3 on moves down by three. */
+  const moved = (text: string): string =>
+    text.replace(
+      /src\/a\.ts:(\d+)/g,
+      (_m, n: string) => `src/a.ts:${Number(n) + 3}`,
+    );
+  const entry = (text: string): string => `${LOG_BULLET} ${text}`;
+
+  /** A repo whose log (at the base and now) is `log`, with src/a.ts drifted. */
+  function repoWithLog(log: string): TmpGitRepo {
+    const r = createTmpGitRepo();
+    repo = r;
+    r.commitFiles(
+      [
+        { relPath: "docs/okf/doc.md", content: DOC },
+        { relPath: "docs/okf/log.md", content: log },
+        { relPath: "src/a.ts", content: sourceLines(12).join("\n") + "\n" },
+      ],
+      T0,
+    );
+    const lines = sourceLines(12);
+    lines.splice(2, 0, "export const ins1 = 0;", "export const ins2 = 0;");
+    lines.splice(4, 0, "export const ins3 = 0;");
+    fs.writeFileSync(path.join(r.dir, "src/a.ts"), lines.join("\n") + "\n");
+    return r;
+  }
+  function logAfterRepoint(log: string): string {
+    const r = repoWithLog(log);
+    runRepoint(bundle(r), {
+      base: "HEAD",
+      repoRoot: r.dir,
+      includeLog: true,
+      write: true,
+    });
+    return read(r, "docs/okf/log.md");
+  }
+  const logOf = (texts: string[]): string =>
+    ["# Log", "", "## 2026-01-01", "", ...texts.map((t) => entry(t) + "\n")]
+      .join("\n")
+      .replace(/\n$/, "");
+
+  // Both citations of each of these are one narrated pair: neither moves.
+  const NARRATED: Array<[string, string]> = [
+    [
+      "a word between the citation and the arrow",
+      "`src/a.ts:6` (was) -> `src/a.ts:7`",
+    ],
+    ["a long arrow", "`src/a.ts:6` --> `src/a.ts:7`"],
+    ["a double-line arrow", "`src/a.ts:6` ==> `src/a.ts:7`"],
+    ["the arrow character U+21D2", "`src/a.ts:6` ⇒ `src/a.ts:7`"],
+    ["the arrow character U+27F6", "`src/a.ts:6` ⟶ `src/a.ts:7`"],
+    ["a word after the arrow", "`src/a.ts:6` -> new `src/a.ts:7`"],
+    [
+      "the arrow ends the line before the right citation",
+      "`src/a.ts:6` ->\n  `src/a.ts:7`",
+    ],
+    [
+      "the arrow starts the line of the right citation",
+      "`src/a.ts:6`\n  -> `src/a.ts:7`",
+    ],
+    [
+      "words around the arrow on one line",
+      "`src/a.ts:6` was wrong, so it became -> `src/a.ts:7`",
+    ],
+    ["from ... to ...", "from `src/a.ts:6` to `src/a.ts:7`"],
+    [
+      "from ... to ... over a line break",
+      "from `src/a.ts:6`\n  to `src/a.ts:7`",
+    ],
+    ["an arrow after a lone citation", "`src/a.ts:6` -> dropped"],
+    ["an arrow before a lone citation", "dropped -> `src/a.ts:6`"],
+    ["a range and a continuation", "`src/a.ts:6-8` (was) -> `:9-11`"],
+  ];
+  for (const [name, text] of NARRATED) {
+    it(`narrated, neither side moves: ${name}`, () => {
+      const after = logAfterRepoint(logOf([text]));
+      expect(after).toContain(text);
+    });
+  }
+
+  // Live citations: no arrow joins them, so each one moves.
+  const LIVE: Array<[string, string]> = [
+    ["no arrow", "`src/a.ts:6` and `src/a.ts:7`"],
+    [
+      "an arrow inside another code span",
+      "`src/a.ts:6` and `x -> y` and `src/a.ts:7`",
+    ],
+    ["from a citation to a line number", "from `src/a.ts:6` to line 9"],
+    [
+      "an arrow in prose between a citation and a file without one",
+      "`src/a.ts:6` and `src/gone.ts:2` -> removed",
+    ],
+  ];
+  for (const [name, text] of LIVE) {
+    it(`live, moves: ${name}`, () => {
+      // the last case: the arrow follows `src/gone.ts:2` (not a citation
+      // of a file that exists), so only that side is narration
+      const after = logAfterRepoint(logOf([text]));
+      expect(after).toContain(moved(text));
+    });
+  }
+
+  it("an arrow in the next entry (a new bullet, a blank line) does not reach back", () => {
+    const packed = [
+      "# Log",
+      "",
+      "## 2026-01-01",
+      "",
+      entry("fixed `src/a.ts:6`."),
+      entry("then -> `src/a.ts:7`."),
+      "",
+    ].join("\n");
+    const after = logAfterRepoint(packed);
+    expect(after).toContain("fixed `src/a.ts:9`.");
+    expect(after).toContain("then -> `src/a.ts:7`.");
+    const loose = logOf(["fixed `src/a.ts:6`.", "-> `src/a.ts:7`."]);
+    const afterLoose = logAfterRepoint(loose);
+    expect(afterLoose).toContain("fixed `src/a.ts:9`.");
+    expect(afterLoose).toContain("-> `src/a.ts:7`.");
+  });
+});

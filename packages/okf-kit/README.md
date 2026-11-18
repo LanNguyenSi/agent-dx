@@ -85,7 +85,7 @@ okf-kit docs-for path/to/bundle src/foo.ts
 # cited lines were themselves edited is listed for manual handling and never rewritten.
 okf-kit repoint path/to/bundle --base origin/main
 okf-kit repoint path/to/bundle --base origin/main --write
-# --include-log also re-points the live citations of log.md (never an `old -> new` pair)
+# --include-log also re-points the live citations of log.md (a detected `old -> new` pair is left as written, see docs/repoint.md)
 okf-kit repoint path/to/bundle --base origin/main --write --include-log
 
 # source changes are committed and the stale docs re-verified: set their stamp to now, and add one

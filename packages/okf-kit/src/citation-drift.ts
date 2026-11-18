@@ -54,7 +54,7 @@ import type { BundleDoc } from "./types.js";
  * --include-log`) opts `log.md` in for the bundles whose tests check its
  * citations: a `log.md` citation is then judged like any other, except that
  * a citation written as one side of an `old -> new` pair is narration and is
- * skipped (see `isNarratedPair`). `index.md` stays out.
+ * skipped (see `narratedCitations`). `index.md` stays out.
  */
 
 export type DriftStatus = "ok" | "moved" | "changed" | "skipped";
@@ -493,6 +493,9 @@ export function analyzeCitationDrift(
       carried = carriedAtRef(now, atRef);
     }
 
+    const narrated = logIncluded
+      ? narratedCitations(doc.raw, citations)
+      : new Set<ResolvedCitation>();
     for (const entry of now) {
       const { citation, file } = entry;
       const skipped = (reason: string): CitationVerdict => ({
@@ -505,7 +508,7 @@ export function analyzeCitationDrift(
         verdicts.push(skipped(`the doc did not exist at ${base.ref}`));
         continue;
       }
-      if (logIncluded && isNarratedPair(doc.raw, citation)) {
+      if (narrated.has(citation)) {
         verdicts.push(
           skipped(
             "narrated as one side of an `old -> new` pair, left as written",
@@ -551,42 +554,144 @@ export function analyzeCitationDrift(
   return verdicts;
 }
 
-const ARROW_AT_END_RE = /(?:->|=>|\u2192)\s*(?:[A-Za-z]+\s+)?$/;
-const ARROW_AT_START_RE = /^\s*(?:->|=>|\u2192)/;
+// An arrow token: `->`, `-->`, `=>`, `==>`, and the arrow characters
+// `U+2192`, `U+21D2` and `U+27F6`.
+const ARROW = "(?:-+>|=+>|[\\u2192\\u21D2\\u27F6])";
+const ARROW_RE = new RegExp(ARROW);
+const ARROW_AT_END_RE = new RegExp(`${ARROW}\\s*(?:[A-Za-z]+\\s+)?$`);
+const ARROW_AT_START_RE = new RegExp(`^\\s*${ARROW}`);
+const FROM_BEFORE_RE = /\bfrom(?:\s+\S*)?$/i;
+const TO_BETWEEN_RE = /^\s*to(?:\s+\S*)?\s*$/i;
+/** A line that opens a new log entry or heading: it ends the entry before it. */
+const ENTRY_START_RE = /^\s*(?:[-*+]\s|\d+[.)]\s|#{1,6}\s)/;
 
 /**
- * Whether `citation` is written as one side of an `old -> new` pair (`->`,
- * `=>` or the arrow character directly before or after it, on its line, a
- * one-word label such as `new` allowed between the arrow and a citation
- * after it): a log entry that says where a citation WAS and where it went. Re-pointing
- * either side would turn the narration into a different claim, so neither is
- * a live citation.
+ * `raw` with every inline code span (a backtick run up to the next run of the
+ * same length in the same paragraph) blanked to spaces, newlines and offsets
+ * kept: what is left is the prose outside backticks.
  */
-export function isNarratedPair(
+function outsideInlineCode(raw: string): string {
+  const out = raw.split("");
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] !== "`") {
+      i += 1;
+      continue;
+    }
+    let runEnd = i;
+    while (raw[runEnd] === "`") runEnd += 1;
+    const run = raw.slice(i, runEnd);
+    const paragraphEnd = raw.slice(runEnd).search(/\n[ \t]*\r?\n/);
+    const limit = paragraphEnd === -1 ? raw.length : runEnd + paragraphEnd;
+    let close = -1;
+    for (let j = runEnd; j < limit;) {
+      if (raw[j] !== "`") {
+        j += 1;
+        continue;
+      }
+      let k = j;
+      while (raw[k] === "`") k += 1;
+      if (k - j === run.length) {
+        close = j;
+        break;
+      }
+      j = k;
+    }
+    if (close === -1) {
+      i = runEnd;
+      continue;
+    }
+    for (let p = i; p < close + run.length; p += 1) {
+      if (raw[p] !== "\n" && raw[p] !== "\r") out[p] = " ";
+    }
+    i = close + run.length;
+  }
+  return out.join("");
+}
+
+/**
+ * Whether `gap` (the text between two citations) stays inside one log entry:
+ * no blank line and no line that opens a bullet or a heading after its first
+ * line. The last line of the gap ends where the next citation starts, so it
+ * may be all blank (the citation's own backticks are blanked out) and is
+ * only checked for an opening bullet or heading.
+ */
+function withinOneEntry(gap: string): boolean {
+  const lines = gap.split("\n");
+  for (let i = 1; i < lines.length; i += 1) {
+    const partial = i === lines.length - 1;
+    if (!partial && /^\s*$/.test(lines[i])) return false;
+    if (ENTRY_START_RE.test(lines[i])) return false;
+  }
+  return true;
+}
+
+/**
+ * The citations of a `log.md` that are narration: written as a side of an
+ * `old -> new` pair, so re-pointing either side would turn the sentence into
+ * a different claim. Detected forms (arrows are `->`, `-->`, `=>`, `==>`,
+ * `U+2192`, `U+21D2`, `U+27F6`, outside backticks):
+ *   1. an arrow directly before or after the citation on its line (a
+ *      one-word label such as `new` may sit between the arrow and a citation
+ *      after it)
+ *   2. an arrow anywhere between the citation and its NEIGHBOUR citation,
+ *      on one line or across line breaks inside one entry (no blank line,
+ *      bullet or heading between them): both citations of that pair
+ *   3. `from <citation> to <citation>`: both
+ * A pair is symmetric: whichever side an arrow marks, the other side of the
+ * same pair is skipped too.
+ */
+export function narratedCitations(
   raw: string,
-  citation: ResolvedCitation,
-): boolean {
-  const first = citation.startSpan ?? citation.endSpan;
-  if (!first) return false;
-  const last = citation.endSpan ?? first;
-  const spanEnd = last.offset + last.length;
-  const lineStart = raw.lastIndexOf("\n", first.offset - 1) + 1;
-  const nextBreak = raw.indexOf("\n", spanEnd);
-  const lineEnd = nextBreak === -1 ? raw.length : nextBreak;
-  const before = raw.slice(lineStart, first.offset);
-  const after = raw.slice(spanEnd, lineEnd);
-  // Citations sit in backticks: the arrow belongs to the citation when it is
-  // next to the backtick pair.
-  const insideBackticks = (before.match(/`/g) ?? []).length % 2 === 1;
-  const outerBefore = insideBackticks
-    ? before.slice(0, before.lastIndexOf("`"))
-    : before;
-  const outerAfter = insideBackticks
-    ? after.slice(after.indexOf("`") + 1)
-    : after;
-  return (
-    ARROW_AT_END_RE.test(outerBefore) || ARROW_AT_START_RE.test(outerAfter)
-  );
+  citations: ResolvedCitation[],
+): Set<ResolvedCitation> {
+  const narrated = new Set<ResolvedCitation>();
+  const located = citations
+    .flatMap((citation) => {
+      const first = citation.startSpan ?? citation.endSpan;
+      if (!first) return [];
+      const last = citation.endSpan ?? first;
+      return [
+        { citation, start: first.offset, end: last.offset + last.length },
+      ];
+    })
+    .sort((a, b) => a.start - b.start);
+  if (located.length === 0) return narrated;
+  const outside = outsideInlineCode(raw);
+
+  /** The pair of `located[i - 1]` and `located[i]`: an arrow or `from .. to ..` joins them. */
+  const joined = (i: number): boolean => {
+    if (i < 1 || i >= located.length) return false;
+    const gap = outside.slice(located[i - 1].end, located[i].start);
+    if (!withinOneEntry(gap)) return false;
+    if (ARROW_RE.test(gap)) return true;
+    const lineStart = outside.lastIndexOf("\n", located[i - 1].start - 1) + 1;
+    return (
+      TO_BETWEEN_RE.test(gap) &&
+      FROM_BEFORE_RE.test(
+        outside.slice(lineStart, located[i - 1].start).trimEnd(),
+      )
+    );
+  };
+  const asRightSide = (i: number): boolean => {
+    const lineStart = outside.lastIndexOf("\n", located[i].start - 1) + 1;
+    return (
+      ARROW_AT_END_RE.test(outside.slice(lineStart, located[i].start)) ||
+      joined(i)
+    );
+  };
+  const asLeftSide = (i: number): boolean => {
+    const nextBreak = outside.indexOf("\n", located[i].end);
+    const lineEnd = nextBreak === -1 ? outside.length : nextBreak;
+    return (
+      ARROW_AT_START_RE.test(outside.slice(located[i].end, lineEnd)) ||
+      joined(i + 1)
+    );
+  };
+  located.forEach(({ citation }, i) => {
+    if (asRightSide(i) || asLeftSide(i)) narrated.add(citation);
+  });
+  return narrated;
 }
 
 /** `line 14` or `lines 14-16`. */

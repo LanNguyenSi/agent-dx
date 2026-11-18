@@ -26,6 +26,8 @@ would add to log.md under ## 2026-01-03: re-verified after the retry change in s
 1 to re-stamp (dry run, pass --write to rewrite), 0 refused, 0 need manual handling
 ```
 
+A refused run ends with `0 re-stamped (refused, nothing written), <n> refused, 0 need manual handling` instead, with or without `--write`.
+
 ## The order of steps
 
 [`sources-fresh`](staleness.md) accepts a doc as fresh when the doc's own last commit lands at or after the source's last commit and that commit moved the stamp strictly later. So the stamp has to be written after the source change is committed, and the re-stamped docs are committed next:
@@ -35,7 +37,11 @@ would add to log.md under ## 2026-01-03: re-verified after the retry change in s
 3. `okf-kit restamp <bundleDir> --write [--log-entry <text>]`.
 4. Commit the docs (and `log.md`).
 
-A stamp written while a source still has uncommitted changes would predate the commit that lands them, which is the future-dated stamp `--dirty-as-now` and `sources-fresh-future` exist to catch. `restamp` therefore refuses: if any `sources` entry of a doc it would stamp has uncommitted changes (modified, staged, deleted or untracked; a directory entry counts when anything below it is dirty), or git cannot report the work tree state, it prints a `REFUSED` line per doc and source, writes nothing (not even the other docs or the log) and exits `1`. Every source of the doc counts, not only the one found stale. A dirty source of a doc that is not stale does not block.
+A stamp is a claim about the sources as they are, so it must not be written while a source still has uncommitted changes: it would vouch for content that is not committed yet, and the commit that lands it can carry a date the stamp does not clear. `restamp` therefore refuses: if any `sources` entry of a doc it would stamp has uncommitted changes (modified, staged, deleted or untracked; a directory entry counts when anything below it is dirty), or git cannot report the work tree state, it prints a `REFUSED` line per doc and source, writes nothing (not even the other docs or the log), prints a summary that says nothing was written (never the dry-run summary) and exits `1`. Every source of the doc counts, not only the one found stale. A dirty source of a doc that is not stale does not block.
+
+When a doc lists a directory that contains the bundle itself (`sources: [docs]` for a bundle in `docs/okf`), the bundle's own docs and its `log.md` do not count as dirty content of that directory: they are what `restamp` writes. Any other dirty file below the directory still refuses, a non-doc file inside the bundle directory included. A dirty file source is never excluded, even when it is a bundle doc.
+
+This differs from [the same-commit advice](staleness.md): committing the source change and a hand-written stamp together lets the re-stamp rule treat the doc as fresh, but `restamp` has no committed source time to measure its stamp against until the source is committed, so it waits for that commit.
 
 ## Which docs
 
@@ -45,7 +51,8 @@ The stale set is the verdict of the `sources-fresh` rule itself, the same code `
 
 - The clock reading to the second, in the `YYYY-MM-DDTHH:MM:SSZ` spelling bundles stamp with.
 - Never equal to or earlier than the stamp it replaces: when the previous stamp is not in the past, the new one is one second after it. A stamp that stayed the same or moved back would not count as a re-stamp for `sources-fresh`.
-- A previous stamp further in the future than the `sources-fresh-future` allowance (10 minutes) has no valid successor: a stamp strictly later than it would be flagged future-dated. The doc is listed as `MANUAL` and left alone; the other docs are still stamped, and the exit code is `1`.
+- Never earlier than the last commit of the doc's sources (committer time, as `sources-fresh` reads it): a source commit dated after the clock sets the stamp to that commit's time. A stamp equal to the commit time is fresh, `sources-fresh` calls a source stale only when its commit is strictly later.
+- At most the future allowance ahead of the clock: 10 minutes by default, `--future-skew-minutes <n>` as for `check`. The comparison is strict like `sources-fresh-future`'s: a stamp exactly the allowance ahead is accepted, one second more would be flagged future-dated. A doc whose smallest valid stamp is further ahead (a previous stamp that is already that far in the future, or a source commit dated that far ahead) is listed as `MANUAL` with the reason and left alone; the other docs are still stamped, and the exit code is `1`. With the default allowance, a previous stamp 599 s ahead of the clock is stamped 600 s ahead; one 600 s ahead is `MANUAL`.
 - It is written where the doc keeps its effective stamp: `generated.at` when the doc has one (OKF v0.2), else `timestamp`. A `timestamp` beside a `generated.at` that names the same instant is kept in step; one that names another instant is left alone (`generated-shape` reports the divergence). Quoting, a trailing comment, the rest of the frontmatter and the line endings stay byte for byte.
 
 ## The log entry
@@ -65,6 +72,7 @@ The entry reads `- <stamp>, <text>`. Entries are separated by a blank line when 
 | `-w, --write` | Rewrite the docs (and the log). Without it nothing is written. |
 | `--log-entry <text>` | Add one entry to the bundle-root `log.md` when a doc is re-stamped. |
 | `-r, --repo-root <path>` | Repo root the `sources` resolve against (auto-detected from the bundle dir when omitted). |
+| `--future-skew-minutes <n>` | How far ahead of the clock the new stamp may be, in minutes (default 10), as for `check`. A non-negative number; anything else is a usage error. |
 | `-j, --json` | Output `{ bundleDir, written, stale, stamped, refused, manual, logEntry }`. |
 
 ## Exit codes
