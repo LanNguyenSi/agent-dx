@@ -860,15 +860,15 @@ describe("the mutation_probes contract fixes its sub-field names, enums, and rea
    * unchanged, otherwise empty), through the route and installed prompt.
    */
   it("the installed prompt states the `reason` sub-field is required when result is not_applicable, and on a killed item carries the build-detection reason unchanged, otherwise empty", () => {
-    const reasonRule =
-      "`reason` is free text, required when `result` is `not_applicable`.";
-    const killedReason =
-      "`build detection ambiguous: ...` or `build detection skipped: ...`";
-    const unchangedOrEmpty =
-      "pasted unchanged when the runner printed one; otherwise it is empty.";
+    // The whole rule sentence, including the `killed` qualifier and the closing clause.
+    const reasonRule = [
+      "`reason` is free text, required when `result` is `not_applicable`.",
+      "On a `killed` item it carries the probe runner's build-detection reason",
+      "(`build detection ambiguous: ...` or `build detection skipped: ...`)",
+      "pasted unchanged when the runner printed one.",
+      "In every other case `reason` is empty.",
+    ].join(" ");
     expect(implementerMd).toContain(reasonRule);
-    expect(implementerMd).toContain(killedReason);
-    expect(implementerMd).toContain(unchangedOrEmpty);
   });
 });
 
@@ -10306,8 +10306,8 @@ const NARROW_ROUNDS_SECTION = [
     "The orchestrator compares the skipped probes with the returned diff: a skipped probe that the delta does reach is replayed before the reviewer spawn.",
     "It records the skipped replays in `03-decisions.md`.",
     "The reviewer briefing lists as replayed only the probes the round replayed and names the skipped ones as skipped, so the reviewer can hold each skip against the diff.",
-    "The replay scope narrows the implementer's replay alone.",
-    "In run mode `single` it narrows the orchestrator's own replay; the reviewer briefing still names every probe the orchestrator ran by its definition, skipped ones included, and the reviewer replays each of them, so the reviewer's probe replay is unchanged.",
+    "The replay scope narrows the implementer's replay alone, except in run mode `single`, where the orchestrator implements and it narrows the orchestrator's own replay;",
+    "the reviewer briefing still names every probe the orchestrator ran by its definition, skipped ones included, and the reviewer replays each of them, so the reviewer's probe replay is unchanged.",
   ].join(" "),
   [
     "At the checkpoint of a time budget the role starts no new check.",
@@ -10416,5 +10416,16 @@ describe("safety core: a time budget replaces no review round and lifts no never
     expect(reviewerPrompt.split(REVIEWER_PROMPT_VERDICT_CAP).length - 1).toBe(
       1,
     );
+  });
+});
+
+describe("the detailed workflow's single-mode sentence names the reviewer's skip permission as the thing that does not apply", () => {
+  it("pins the whole sentence of step 7", () => {
+    const evidence = unwrap(
+      readRawAsset("skill/references/evidence-and-probes.md"),
+    );
+    const sentence =
+      "In run mode `single` the reviewer's permission to skip re-running does not apply: nobody but the orchestrator has seen its probe evidence.";
+    expect(evidence.split(sentence).length - 1).toBe(1);
   });
 });

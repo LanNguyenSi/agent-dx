@@ -622,7 +622,7 @@ met`, which is not a regression.
 Review round 3 added the eleventh sub-field, `reason`: free text,
 required when `result` is `not_applicable`; on a `killed` item it carries the
 probe runner's build-detection reason pasted unchanged when the runner printed
-one, otherwise it is empty
+one, and in every other case it is empty
 (`implementer.md:212#"text, required when"`).
 Before this round the two `not_applicable` verdicts were distinguished
 only by prose parenthetical, with no field a misfire check could look

@@ -176,8 +176,8 @@ reach is replayed before the reviewer spawn. It records the skipped replays
 in `03-decisions.md`. The reviewer briefing lists as replayed only the
 probes the round replayed and names the skipped ones as skipped, so the
 reviewer can hold each skip against the diff. The replay scope narrows the
-implementer's replay alone. In run mode `single` it narrows the
-orchestrator's own replay; the reviewer briefing still names every probe the
+implementer's replay alone, except in run mode `single`, where the
+orchestrator implements and it narrows the orchestrator's own replay; the reviewer briefing still names every probe the
 orchestrator ran by its definition, skipped ones included, and the reviewer
 replays each of them, so the reviewer's probe replay is unchanged.
 

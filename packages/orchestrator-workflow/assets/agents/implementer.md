@@ -212,7 +212,7 @@ its fields hold.
   - `reason` is free text, required when `result` is `not_applicable`. On a
     `killed` item it carries the probe runner's build-detection reason
     (`build detection ambiguous: ...` or `build detection skipped: ...`)
-    pasted unchanged when the runner printed one; otherwise it is empty.
+    pasted unchanged when the runner printed one. In every other case `reason` is empty.
   - `replayed` is `false` for a probe new this round.
   - When the assignment names no mutation probes, return `mutation_probes: []`
     rather than omitting the field.
