@@ -21,8 +21,8 @@ okf-kit restamp path/to/bundle --json
 Example output of a dry run:
 
 ```text
-would re-stamp doc.md: timestamp 2026-01-01T00:00:00Z -> 2026-01-03T00:00:00Z
-would add to log.md under ## 2026-01-03: re-verified after the retry change in src/client.ts
+would re-stamp doc.md: timestamp <previous stamp> -> <new stamp>
+would add to log.md under ## <today>: re-verified after the retry change in src/client.ts
 1 to re-stamp (dry run, pass --write to rewrite), 0 refused, 0 need manual handling
 ```
 
