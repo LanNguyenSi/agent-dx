@@ -287,7 +287,7 @@ directory and the subagents.
    cannot be skipped this way and is `not_applicable`. The reviewer may
    then skip re-running the ones named by definition. The re-review of a narrow round is briefed as the Narrow rounds section of [review and recovery](review-and-recovery.md) says: this list then holds only the probes replayed under that round's replay scope, and the briefing names the skipped ones as skipped.
    The reviewer output contract itself is unchanged. In run mode `single`
-   that skip permission does not apply: nobody but the orchestrator has
+   the reviewer's permission to skip re-running does not apply: nobody but the orchestrator has
    seen its probe evidence. A probe counts as named when the briefing
    gives its full definition or a resolved immutable plan-and-result
    reference; an id alone does not name a probe. The orchestrator records

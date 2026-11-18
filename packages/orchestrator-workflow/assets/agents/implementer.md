@@ -209,8 +209,10 @@ its fields hold.
     result was measured.
   - `expectation` needs a measured `result`: when none was measured, for
     example because the mutant could not be applied, it is `not_applicable`.
-  - `reason` is free text, required when `result` is `not_applicable`, empty
-    otherwise.
+  - `reason` is free text, required when `result` is `not_applicable`. On a
+    `killed` item it carries the probe runner's build-detection reason
+    (`build detection ambiguous: ...` or `build detection skipped: ...`)
+    pasted unchanged when the runner printed one; otherwise it is empty.
   - `replayed` is `false` for a probe new this round.
   - When the assignment names no mutation probes, return `mutation_probes: []`
     rather than omitting the field.
