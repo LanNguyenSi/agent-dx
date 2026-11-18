@@ -23,6 +23,9 @@ import type {
 const RULE_ID = "sources-fresh";
 const FUTURE_RULE_ID = "sources-fresh-future";
 
+/** Start of the message of every STALE finding `sources-fresh` reports; `isStaleFinding` reads it back. */
+const STALE_MESSAGE_PREFIX = "STALE:";
+
 /**
  * Default clock-skew allowance (seconds) for `sources-fresh-future`: a doc
  * timestamp up to this far after the doc's own last commit is still treated
@@ -289,7 +292,7 @@ export const sourcesFreshRule: Rule = {
             ruleId: RULE_ID,
             severity: "warning",
             file: doc.relPath,
-            message: `STALE: \`${source}\` changed ${epochToIso(commitEpoch)} after doc timestamp ${epochToIso(timestampEpoch)}`,
+            message: `${STALE_MESSAGE_PREFIX} \`${source}\` changed ${epochToIso(commitEpoch)} after doc timestamp ${epochToIso(timestampEpoch)}`,
           });
         }
       }
@@ -410,6 +413,40 @@ export const sourcesFreshFutureRule: Rule = {
     return findings;
   },
 };
+
+/**
+ * Whether `finding` is a STALE finding of `sources-fresh`: a doc whose
+ * `sources` changed after its timestamp and that no commit re-stamped.
+ * `okf-kit restamp` takes its stale set from exactly the findings this
+ * accepts, so it and `check` can never disagree about which docs are stale.
+ */
+export function isStaleFinding(finding: Finding): boolean {
+  return (
+    finding.ruleId === RULE_ID &&
+    finding.message.startsWith(STALE_MESSAGE_PREFIX)
+  );
+}
+
+/**
+ * Whether the uncommitted state of the work tree touches the `sources` entry
+ * `source` (modified, staged, deleted or untracked; a directory entry counts
+ * when anything below it is dirty). Null when git could not report the
+ * state: a caller that must not guess treats that as "unknown", not "clean".
+ */
+export function isSourceDirty(
+  ctx: BundleContext,
+  repoRoot: string,
+  source: string,
+): boolean | null {
+  const git = ctx.runGit ?? defaultRunGit;
+  if (getDirtyStateShared(ctx, git, repoRoot) === null) return null;
+  return isDirtyForShared(
+    ctx,
+    git,
+    repoRoot,
+    repoRelativeSource(repoRoot, source),
+  );
+}
 
 /**
  * Docs carrying a validly-shaped frontmatter `sources` list (see

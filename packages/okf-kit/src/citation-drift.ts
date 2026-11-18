@@ -50,7 +50,11 @@ import type { BundleDoc } from "./types.js";
  * Anchored (`#"..."`) citations self-locate and are not special-cased: the
  * line numbers are checked and rewritten like any other, the anchor stays.
  * Reserved docs (`index.md`, `log.md`) are skipped: their line numbers
- * narrate past states and are not live citations.
+ * narrate past states and are not live citations. `includeLog` (`repoint
+ * --include-log`) opts `log.md` in for the bundles whose tests check its
+ * citations: a `log.md` citation is then judged like any other, except that
+ * a citation written as one side of an `old -> new` pair is narration and is
+ * skipped (see `isNarratedPair`). `index.md` stays out.
  */
 
 export type DriftStatus = "ok" | "moved" | "changed" | "skipped";
@@ -423,6 +427,11 @@ function carriedAtRef(
   return verdict;
 }
 
+export interface DriftOptions {
+  /** Also judge the citations of `log.md` docs (see the header comment). */
+  includeLog?: boolean;
+}
+
 export interface DriftInput {
   /** Real path of the repo root. */
   root: string;
@@ -437,6 +446,7 @@ export interface DriftInput {
 export function analyzeCitationDrift(
   input: DriftInput,
   base: DriftBase,
+  options: DriftOptions = {},
 ): CitationVerdict[] {
   // `input.root` goes to the citation scan unchanged (path resolution climbs
   // from the doc up to it, so both must be spelled the same way as in
@@ -450,7 +460,9 @@ export function analyzeCitationDrift(
   const verdicts: CitationVerdict[] = [];
 
   for (const doc of input.docs) {
-    if (doc.isReserved) continue;
+    const logIncluded =
+      Boolean(options.includeLog) && doc.basename === "log.md";
+    if (doc.isReserved && !logIncluded) continue;
     const citations = collectResolvedCitations(
       input.root,
       input.bundleDir,
@@ -493,6 +505,14 @@ export function analyzeCitationDrift(
         verdicts.push(skipped(`the doc did not exist at ${base.ref}`));
         continue;
       }
+      if (logIncluded && isNarratedPair(doc.raw, citation)) {
+        verdicts.push(
+          skipped(
+            "narrated as one side of an `old -> new` pair, left as written",
+          ),
+        );
+        continue;
+      }
       const carry = carried.get(entry);
       if (carry?.kind === "skip") {
         verdicts.push(
@@ -529,6 +549,44 @@ export function analyzeCitationDrift(
     }
   }
   return verdicts;
+}
+
+const ARROW_AT_END_RE = /(?:->|=>|\u2192)\s*(?:[A-Za-z]+\s+)?$/;
+const ARROW_AT_START_RE = /^\s*(?:->|=>|\u2192)/;
+
+/**
+ * Whether `citation` is written as one side of an `old -> new` pair (`->`,
+ * `=>` or the arrow character directly before or after it, on its line, a
+ * one-word label such as `new` allowed between the arrow and a citation
+ * after it): a log entry that says where a citation WAS and where it went. Re-pointing
+ * either side would turn the narration into a different claim, so neither is
+ * a live citation.
+ */
+export function isNarratedPair(
+  raw: string,
+  citation: ResolvedCitation,
+): boolean {
+  const first = citation.startSpan ?? citation.endSpan;
+  if (!first) return false;
+  const last = citation.endSpan ?? first;
+  const spanEnd = last.offset + last.length;
+  const lineStart = raw.lastIndexOf("\n", first.offset - 1) + 1;
+  const nextBreak = raw.indexOf("\n", spanEnd);
+  const lineEnd = nextBreak === -1 ? raw.length : nextBreak;
+  const before = raw.slice(lineStart, first.offset);
+  const after = raw.slice(spanEnd, lineEnd);
+  // Citations sit in backticks: the arrow belongs to the citation when it is
+  // next to the backtick pair.
+  const insideBackticks = (before.match(/`/g) ?? []).length % 2 === 1;
+  const outerBefore = insideBackticks
+    ? before.slice(0, before.lastIndexOf("`"))
+    : before;
+  const outerAfter = insideBackticks
+    ? after.slice(after.indexOf("`") + 1)
+    : after;
+  return (
+    ARROW_AT_END_RE.test(outerBefore) || ARROW_AT_START_RE.test(outerAfter)
+  );
 }
 
 /** `line 14` or `lines 14-16`. */

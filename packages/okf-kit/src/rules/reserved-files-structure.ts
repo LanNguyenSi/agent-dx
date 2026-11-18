@@ -45,9 +45,9 @@ const LINK_AT_START_RE = /^\[[^\]]*\]\([^)]*\)/;
 // masking mirrors `prose-line-references`).
 const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
 
-type Heading = { level: number; text: string };
+export type Heading = { level: number; text: string };
 
-function parseHeading(line: string): Heading | null {
+export function parseHeading(line: string): Heading | null {
   const m = HEADING_RE.exec(line);
   if (!m) return null;
   const text = (m[2] ?? "").replace(/[ \t]+#+[ \t]*$/, "").trim();
@@ -83,7 +83,7 @@ const FENCE_RUN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
  * open/close direction for its anchor-heading search and boundary checks and
  * so returns per-line state. A fence line is neither a heading nor prose here.
  */
-function scanFences(lines: string[]): boolean[] {
+export function scanFences(lines: string[]): boolean[] {
   const fences: boolean[] = [];
   let openRun: string | undefined;
   for (let i = 0; i < lines.length; i++) {
@@ -113,7 +113,7 @@ function scanFences(lines: string[]): boolean[] {
 }
 
 /** The epoch (ms) of `text` when it is a real calendar ISO date, else null. */
-function isoDateEpoch(text: string): number | null {
+export function isoDateEpoch(text: string): number | null {
   const m = ISO_DATE_SHAPE_RE.exec(text);
   if (!m) return null;
   const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
@@ -139,7 +139,7 @@ function isListItem(line: string): { content: string } | null {
 /** Replaces every HTML comment span with same-length blank space (newlines
  * kept), so a comment's text is invisible to the prose scan while the line
  * count and every other line's columns stay put. */
-function maskHtmlComments(text: string): string {
+export function maskHtmlComments(text: string): string {
   return text.replace(HTML_COMMENT_RE, (span) => span.replace(/[^\n]/g, " "));
 }
 

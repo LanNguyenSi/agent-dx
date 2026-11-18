@@ -16,6 +16,7 @@ import { resolveBaseCommit } from "./citation-drift.js";
 import { detectRepoRoot } from "./git.js";
 import { formatInitSummary, runInit } from "./init.js";
 import { renderRepointJson, renderRepointText, runRepoint } from "./repoint.js";
+import { renderRestampJson, renderRestampText, runRestamp } from "./restamp.js";
 import { allRules } from "./rules/index.js";
 import { renderJson, renderText, summarize } from "./report.js";
 import type {
@@ -449,6 +450,11 @@ program
     "-w, --write",
     "Rewrite the line numbers in the docs (default: print the planned rewrites and change nothing)",
   )
+  .option(
+    "--include-log",
+    "Also re-point the citations of log.md that the same analysis judges moved; a citation written as one side of an " +
+      "`old -> new` pair is narration and is never rewritten (default: log.md is left alone)",
+  )
   .option("-j, --json", "Output the result as JSON")
   .exitOverride()
   .action(
@@ -458,6 +464,7 @@ program
         base: string;
         repoRoot?: string;
         write?: boolean;
+        includeLog?: boolean;
         json?: boolean;
       },
     ) => {
@@ -466,10 +473,64 @@ program
           base: opts.base,
           repoRoot: opts.repoRoot,
           write: opts.write,
+          includeLog: opts.includeLog,
         });
         const output = opts.json
           ? renderRepointJson(result)
           : renderRepointText(result);
+        process.stdout.write(output);
+        process.exitCode = result.exitCode;
+        return;
+      } catch (err) {
+        if (err instanceof UsageError) {
+          process.stderr.write(`okf-kit: ${err.message}\n`);
+          process.exit(2);
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`okf-kit: ${msg}\n`);
+        process.exit(2);
+      }
+    },
+  );
+
+program
+  .command("restamp <bundleDir>")
+  .description(
+    "Set the stamp of every doc `check` reports STALE to the current UTC time (dry run unless --write); run it after the source changes are committed, then commit the docs. Refuses when a source of such a doc has uncommitted changes",
+  )
+  .option(
+    "-r, --repo-root <path>",
+    "Repo root the docs' `sources` resolve against (auto-detected via `git rev-parse --show-toplevel` from the bundle dir when omitted)",
+  )
+  .option(
+    "-w, --write",
+    "Rewrite the stamps in the docs (default: print the planned stamps and change nothing)",
+  )
+  .option(
+    "--log-entry <text>",
+    "Also add one entry to the bundle-root log.md (newest first, under today's `## YYYY-MM-DD` heading, as `- <stamp>, <text>`) when a doc is re-stamped",
+  )
+  .option("-j, --json", "Output the result as JSON")
+  .exitOverride()
+  .action(
+    (
+      bundleDir: string,
+      opts: {
+        repoRoot?: string;
+        write?: boolean;
+        logEntry?: string;
+        json?: boolean;
+      },
+    ) => {
+      try {
+        const result = runRestamp(bundleDir, {
+          repoRoot: opts.repoRoot,
+          write: opts.write,
+          logEntry: opts.logEntry,
+        });
+        const output = opts.json
+          ? renderRestampJson(result)
+          : renderRestampText(result);
         process.stdout.write(output);
         process.exitCode = result.exitCode;
         return;

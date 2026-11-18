@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `okf-kit restamp <bundleDir>`: sets the stamp of every doc `check`
+  reports `STALE` to the current UTC time, replacing the hand-written loop
+  over `check --json`. The stale set is the `sources-fresh` rule's own
+  verdict. It is a dry run unless `--write` is given, writes
+  `generated.at` for a doc that has one and `timestamp` otherwise (quoting,
+  comments and line endings kept), and never writes a stamp equal to or
+  earlier than the one it replaces (a previous stamp further in the future
+  than the `sources-fresh-future` allowance is listed for manual
+  handling). It refuses, writing nothing and exiting `1`, while any
+  `sources` entry of a doc it would stamp has uncommitted changes or git
+  cannot report the work tree state, because a stamp has to follow the
+  source commit; run it after committing the source changes, then commit
+  the docs. `--log-entry <text>` adds one `- <stamp>, <text>` entry to the
+  bundle-root `log.md`, first under today's `## YYYY-MM-DD` heading
+  (created above the newest one when that is older), above the first bullet
+  of a flat log, or appended to a log with neither.
+- `okf-kit repoint --include-log`: also re-points the citations of
+  `log.md` (any depth) that the drift analysis judges moved. A citation
+  written as one side of an `old -> new` pair is narration and is never
+  rewritten. Without the flag `log.md` stays untouched, as before.
+
 ## [0.22.0] - 2026-11-17
 
 ### Added
