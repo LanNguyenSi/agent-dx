@@ -313,6 +313,40 @@ describe("restamp: the future allowance edge", () => {
     expect(result.exitCode).toBe(1);
   });
 
+  it("previous stamp at the edge (599 s ahead) and a source 700 s ahead: the manual reason names the source commit", () => {
+    repo = createTmpGitRepo();
+    repo.commitFiles(
+      [
+        { relPath: "docs/okf/doc.md", content: doc(plus(NOW, 599)) },
+        { relPath: "src/a.ts", content: "export const a = 1;\n" },
+      ],
+      T0,
+    );
+    repo.commitFile("src/a.ts", "export const a = 2;\n", plus(NOW, 700));
+    const result = run(repo);
+    expect(result.stamped).toEqual([]);
+    expect(result.manual).toHaveLength(1);
+    expect(result.manual[0].reason).toContain("`src/a.ts` was committed");
+    expect(result.manual[0].reason).not.toContain("its stamp");
+  });
+
+  it("previous stamp past the edge (600 s ahead) and a source 700 s ahead: the manual reason names the stamp", () => {
+    repo = createTmpGitRepo();
+    repo.commitFiles(
+      [
+        { relPath: "docs/okf/doc.md", content: doc(plus(NOW, 600)) },
+        { relPath: "src/a.ts", content: "export const a = 1;\n" },
+      ],
+      T0,
+    );
+    repo.commitFile("src/a.ts", "export const a = 2;\n", plus(NOW, 700));
+    const result = run(repo);
+    expect(result.stamped).toEqual([]);
+    expect(result.manual).toHaveLength(1);
+    expect(result.manual[0].reason).toContain("its stamp");
+    expect(result.manual[0].reason).not.toContain("was committed");
+  });
+
   it("the accepted edge is the one `check` accepts: a stamp 600 s past the doc's commit is not future-dated, 601 s is", () => {
     const r = staleAhead(599);
     runRestamp(bundle(r), {
