@@ -855,12 +855,19 @@ describe("the mutation_probes contract fixes its sub-field names, enums, and rea
    * (no-definition vs no-longer-applied) were distinguished only by
    * prose, with no field a misfire check could look for. This pins the
    * new eleventh `mutation_probes` sub-field, `reason`, and its
-   * requiredness rule (free text, required exactly when `result` is
-   * `not_applicable`, empty otherwise), through the route and installed prompt.
+   * requiredness rule (free text, required when `result` is
+   * `not_applicable`; on a killed item the build-detection reason pasted
+   * unchanged, otherwise empty), through the route and installed prompt.
    */
-  it("the installed prompt states the `reason` sub-field is required exactly when result is not_applicable, empty otherwise", () => {
-    const reasonRule =
-      "required when `result` is `not_applicable`, empty otherwise";
+  it("the installed prompt states the `reason` sub-field is required when result is not_applicable, and on a killed item carries the build-detection reason unchanged, otherwise empty", () => {
+    // The whole rule sentence, including the `killed` qualifier and the closing clause.
+    const reasonRule = [
+      "`reason` is free text, required when `result` is `not_applicable`.",
+      "On a `killed` item it carries the probe runner's build-detection reason",
+      "(`build detection ambiguous: ...` or `build detection skipped: ...`)",
+      "pasted unchanged when the runner printed one.",
+      "In every other case `reason` is empty.",
+    ].join(" ");
     expect(implementerMd).toContain(reasonRule);
   });
 });
@@ -10286,7 +10293,7 @@ const NARROW_ROUNDS_SECTION = [
   ].join(" "),
   [
     "- The checks the round may leave out, and for each one who runs it before acceptance: the full test suite where targeted tests cover the delta, and checks that need a real environment.",
-    "No other check may be left out.",
+    "No other non-replay check may be left out; replays follow the replay scope.",
   ].join(" "),
   [
     "The killing test file of a probe is the file or files of the failing tests the runner's verdict, the return's `tests.executed` entry, or the probe's plan or result reference names for it.",
@@ -10299,7 +10306,8 @@ const NARROW_ROUNDS_SECTION = [
     "The orchestrator compares the skipped probes with the returned diff: a skipped probe that the delta does reach is replayed before the reviewer spawn.",
     "It records the skipped replays in `03-decisions.md`.",
     "The reviewer briefing lists as replayed only the probes the round replayed and names the skipped ones as skipped, so the reviewer can hold each skip against the diff.",
-    "The replay scope narrows the implementer's replay alone: the reviewer's probe replay in run mode `single` is unchanged.",
+    "The replay scope narrows the implementer's replay alone, except in run mode `single`, where the orchestrator implements and it narrows the orchestrator's own replay;",
+    "the reviewer briefing still names every probe the orchestrator ran by its definition, skipped ones included, and the reviewer replays each of them, so the reviewer's probe replay is unchanged.",
   ].join(" "),
   [
     "At the checkpoint of a time budget the role starts no new check.",
@@ -10326,7 +10334,7 @@ const NARROW_ROUNDS_CLAIMS = [
   // the list of checks a round may leave out is closed.
   "When in doubt, the probe is replayed.",
   "A probe whose killing test file is not recorded is replayed.",
-  "No other check may be left out.",
+  "No other non-replay check may be left out; replays follow the replay scope.",
   // The checkpoint of a time budget: it leaves no mutant in the tree, caps the
   // verdict while a reviewer duty is open, and discounts no finding.
   "A check that is running finishes, and a mutation probe is never aborted before its restore.",
@@ -10408,5 +10416,16 @@ describe("safety core: a time budget replaces no review round and lifts no never
     expect(reviewerPrompt.split(REVIEWER_PROMPT_VERDICT_CAP).length - 1).toBe(
       1,
     );
+  });
+});
+
+describe("the detailed workflow's single-mode sentence names the reviewer's skip permission as the thing that does not apply", () => {
+  it("pins the whole sentence of step 7", () => {
+    const evidence = unwrap(
+      readRawAsset("skill/references/evidence-and-probes.md"),
+    );
+    const sentence =
+      "In run mode `single` the reviewer's permission to skip re-running does not apply: nobody but the orchestrator has seen its probe evidence.";
+    expect(evidence.split(sentence).length - 1).toBe(1);
   });
 });

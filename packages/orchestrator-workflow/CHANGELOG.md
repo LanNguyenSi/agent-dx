@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Narrow rounds wording: in run mode `single` the replay scope narrows the
+  orchestrator's own replay, while the reviewer briefing still names every
+  probe the orchestrator ran by its definition, skipped ones included, and the
+  reviewer replays each; the single-mode sentence in the detailed workflow now
+  names the reviewer's permission to skip re-running as the thing that does
+  not apply; the leave-out list covers non-replay checks only, and replays
+  follow the replay scope. No rule changes. Installed skill and agent files
+  report as outdated until refreshed.
+- The implementer output contract allows a non-empty `reason` on a `killed`
+  `mutation_probes` item when it carries the probe runner's build-detection
+  reason (`build detection ambiguous: ...` or `build detection skipped: ...`)
+  pasted unchanged; otherwise `reason` is empty unless the result is
+  `not_applicable`.
+
 ### Security
 
 - `init`, `apply`, `uninstall`, and `adopt` no longer follow symbolic links
