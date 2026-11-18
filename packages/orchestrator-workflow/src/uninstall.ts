@@ -1,12 +1,4 @@
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  readFileSync,
-  rmdirSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
 import { join } from "node:path";
 
 import { isContainedRelativePath, readInstalledManifest } from "./init.js";
@@ -17,6 +9,7 @@ import {
   SECTION_BEGIN,
   SECTION_END,
 } from "./writers.js";
+import { SymlinkRefusedError, TargetFs } from "./target-fs.js";
 
 export interface UninstallReport {
   /** Kit files removed (hash matched the install record, or --force). */
@@ -33,9 +26,13 @@ function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-function removeAgentsSection(report: UninstallReport, path: string): void {
-  if (!existsSync(path)) return;
-  const existing = readFileSync(path, "utf8");
+function removeAgentsSection(
+  fs: TargetFs,
+  report: UninstallReport,
+  path: string,
+): void {
+  if (!fs.exists(path)) return;
+  const existing = fs.readText(path);
   const lines = existing.split("\n");
   const beginLines: number[] = [];
   const endLines: number[] = [];
@@ -63,19 +60,23 @@ function removeAgentsSection(report: UninstallReport, path: string): void {
     .trim();
   if (remaining === "" || remaining === AGENTS_MD_HEADING) {
     // Nothing but what init itself created remains; remove the file.
-    unlinkSync(path);
+    fs.removeFile(path);
     report.removed.push(path);
     return;
   }
-  writeFileSync(path, `${remaining}\n`, "utf8");
+  fs.writeText(path, `${remaining}\n`);
   report.removed.push(`${path} (workflow section)`);
 }
 
-function removeClaudeImport(report: UninstallReport, path: string): void {
-  if (!existsSync(path)) return;
-  const existing = readFileSync(path, "utf8");
+function removeClaudeImport(
+  fs: TargetFs,
+  report: UninstallReport,
+  path: string,
+): void {
+  if (!fs.exists(path)) return;
+  const existing = fs.readText(path);
   if (existing === CLAUDE_MD_BOILERPLATE) {
-    unlinkSync(path);
+    fs.removeFile(path);
     report.removed.push(path);
     return;
   }
@@ -84,11 +85,11 @@ function removeClaudeImport(report: UninstallReport, path: string): void {
   if (without.length === lines.length) return;
   const remaining = without.join("\n").trimEnd();
   if (remaining === "") {
-    unlinkSync(path);
+    fs.removeFile(path);
     report.removed.push(path);
     return;
   }
-  writeFileSync(path, `${remaining}\n`, "utf8");
+  fs.writeText(path, `${remaining}\n`);
   report.removed.push(`${path} (@AGENTS.md import line)`);
 }
 
@@ -137,6 +138,20 @@ export function runUninstall(options: {
     missing: [],
     notes: [],
   };
+  const fs = new TargetFs(targetDir);
+  const manifestPath = join(targetDir, ".ai", "workflow", "manifest.json");
+
+  // Refuse the whole run before the first removal when any path it would
+  // touch is, or lies below, a symbolic link; a half-removed install is
+  // worse than a refused one. The manifest's own path was checked by
+  // `readInstalledManifest` above, and every operation below checks again.
+  for (const relativePath of Object.keys(manifest.files)) {
+    if (isContainedRelativePath(relativePath)) {
+      fs.assertSafe(join(targetDir, relativePath));
+    }
+  }
+  fs.assertSafe(join(targetDir, "AGENTS.md"));
+  fs.assertSafe(join(targetDir, "CLAUDE.md"));
 
   for (const [relativePath, recordedHash] of Object.entries(manifest.files)) {
     // Defense in depth: readInstalledManifest already drops escaping keys,
@@ -150,18 +165,19 @@ export function runUninstall(options: {
       continue;
     }
     const path = join(targetDir, relativePath);
-    if (!existsSync(path)) {
+    const kind = fs.kind(path);
+    if (kind === undefined) {
       report.missing.push(path);
       continue;
     }
-    if (!statSync(path).isFile()) {
+    if (kind !== "file") {
       report.kept.push(path);
       report.notes.push(`${path}: not a regular file; ignored.`);
       continue;
     }
-    const content = readFileSync(path, "utf8");
+    const content = fs.readText(path);
     if (force || sha256(content) === recordedHash) {
-      unlinkSync(path);
+      fs.removeFile(path);
       report.removed.push(path);
     } else {
       report.kept.push(path);
@@ -171,26 +187,39 @@ export function runUninstall(options: {
     }
   }
 
-  removeAgentsSection(report, join(targetDir, "AGENTS.md"));
-  removeClaudeImport(report, join(targetDir, "CLAUDE.md"));
+  removeAgentsSection(fs, report, join(targetDir, "AGENTS.md"));
+  removeClaudeImport(fs, report, join(targetDir, "CLAUDE.md"));
 
-  const manifestPath = join(targetDir, ".ai", "workflow", "manifest.json");
-  if (existsSync(manifestPath)) {
-    unlinkSync(manifestPath);
+  if (fs.exists(manifestPath)) {
+    fs.removeFile(manifestPath);
     report.removed.push(manifestPath);
   }
 
   for (const candidate of PRUNE_CANDIDATES) {
     const path = join(targetDir, candidate);
     try {
-      rmdirSync(path);
-    } catch {
-      // Not empty or not present; either way it stays.
+      fs.removeDir(path);
+    } catch (error) {
+      if (error instanceof SymlinkRefusedError) {
+        // The kit never creates a link, so there is nothing of ours to prune
+        // there; leave it alone and say so.
+        report.notes.push(
+          `${path}: is or lies below a symbolic link; not pruned.`,
+        );
+      }
+      // Otherwise not empty or not present; either way it stays.
     }
   }
 
   const runsDir = join(targetDir, ".ai", "runs");
-  if (existsSync(runsDir)) {
+  let runsDirExists = false;
+  try {
+    runsDirExists = fs.exists(runsDir);
+  } catch (error) {
+    // A linked runs directory was left alone above; nothing more to note.
+    if (!(error instanceof SymlinkRefusedError)) throw error;
+  }
+  if (runsDirExists) {
     report.notes.push(
       `${runsDir}: run history kept; remove manually if no longer needed.`,
     );

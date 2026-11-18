@@ -50,6 +50,7 @@ import type {
 } from "./operator-manifest.js";
 import type { UninstallReport } from "./uninstall.js";
 import { runUninstall } from "./uninstall.js";
+import { SymlinkRefusedError } from "./target-fs.js";
 import {
   adoptExitCodeForStatus,
   adoptJsonExtras,
@@ -1446,7 +1447,14 @@ program
       return;
     }
 
-    const repoManifest = readInstalledManifest(targetDir);
+    let repoManifest: ReturnType<typeof readInstalledManifest>;
+    try {
+      repoManifest = readInstalledManifest(targetDir);
+    } catch (error) {
+      if (!(error instanceof SymlinkRefusedError)) throw error;
+      reportUsageError("symlinked-repo-manifest", error.message);
+      return;
+    }
     if (!repoManifest) {
       const repoManifestPath = join(targetDir, MANIFEST_PATH);
       // `statOrClassify` distinguishes "no such file" from every other

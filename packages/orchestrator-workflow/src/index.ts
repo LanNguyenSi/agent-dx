@@ -2,6 +2,7 @@ export { runInit } from "./init.js";
 export type { InitOptions } from "./init.js";
 export { runUninstall } from "./uninstall.js";
 export type { UninstallReport } from "./uninstall.js";
+export { SymlinkRefusedError } from "./target-fs.js";
 export {
   detectHarnesses,
   parseHarnessList,

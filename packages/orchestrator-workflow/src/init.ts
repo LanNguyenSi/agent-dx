@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { isAbsolute, join, normalize, posix, sep, win32 } from "node:path";
 
 import {
@@ -47,6 +47,7 @@ import {
   opencodeClassLeafModel,
 } from "./routing-state.js";
 import type { OpencodeModelMaps } from "./routing-state.js";
+import { TargetFs } from "./target-fs.js";
 import type { Report } from "./writers.js";
 import {
   emptyReport,
@@ -423,14 +424,20 @@ function parseKnowledgeBundles(
  * Reads the manifest of a previous install, if any. Manifests can be written
  * by hand (manual agent installs) or damaged, so every field is sanitized;
  * anything invalid degrades to "no record" instead of crashing or leaking
- * unvalidated values into generated frontmatter.
+ * unvalidated values into generated frontmatter. The one exception is a
+ * symbolic link on the manifest's path, which throws `SymlinkRefusedError`.
  */
 export function readInstalledManifest(targetDir: string): Manifest | undefined {
   const path = join(targetDir, MANIFEST_PATH);
-  if (!existsSync(path)) return undefined;
+  const fs = new TargetFs(targetDir);
+  // `exists` throws SymlinkRefusedError for a link on the manifest's path
+  // rather than degrading to "no record": what the installer decides to
+  // write or remove is derived from this file, so it is never read through
+  // a link.
+  if (!fs.exists(path)) return undefined;
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
+    raw = JSON.parse(fs.readText(path));
   } catch {
     return undefined;
   }
@@ -762,6 +769,17 @@ export function runInit(options: InitOptions): Report {
   if (!statSync(targetDir).isDirectory()) {
     throw new Error(`Target is not a directory: ${targetDir}`);
   }
+  // Two passes over the same code: the first checks every path the run would
+  // read, write, or create for a symbolic link and writes nothing, so a
+  // refusal leaves the target untouched instead of half installed; the second
+  // does the work, with each access checked again.
+  const fs = new TargetFs(targetDir);
+  runInitPass(options, fs.withDryRun(true));
+  return runInitPass(options, fs);
+}
+
+function runInitPass(options: InitOptions, fs: TargetFs): Report {
+  const { targetDir } = options;
   const force = options.force ?? false;
   const profile: Profile = options.profile ?? DEFAULT_PROFILE;
   const tiers = options.tiers ?? false;
@@ -1007,7 +1025,7 @@ export function runInit(options: InitOptions): Report {
     );
     if (hadTrackedHarnessFiles && options.harnesses.length === 0) {
       for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-        if (existsSync(join(targetDir, name))) {
+        if (fs.exists(join(targetDir, name))) {
           report.notes.push(
             `${name}: now untracked after --harness dropped to none; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
           );
@@ -1024,11 +1042,11 @@ export function runInit(options: InitOptions): Report {
   const installKitFile = (relativePath: string, content: string): void => {
     const path = join(targetDir, relativePath);
     const recorded = previous?.files?.[relativePath];
-    if (existsSync(path)) {
-      const existing = readFileSync(path, "utf8");
+    if (fs.exists(path)) {
+      const existing = fs.readText(path);
       const unedited = recorded !== undefined && sha256(existing) === recorded;
-      installFile(report, path, content, { force: force || unedited });
-      if (readFileSync(path, "utf8") === content) {
+      installFile(fs, report, path, content, { force: force || unedited });
+      if (fs.readText(path) === content) {
         installedFiles[relativePath] = sha256(content);
       } else if (recorded !== undefined) {
         // Conflicted: the user's edit stays, and so does the original record.
@@ -1036,7 +1054,7 @@ export function runInit(options: InitOptions): Report {
       }
       return;
     }
-    installFile(report, path, content, { force });
+    installFile(fs, report, path, content, { force });
     installedFiles[relativePath] = sha256(content);
   };
 
@@ -1057,6 +1075,7 @@ export function runInit(options: InitOptions): Report {
   // written, so AGENTS.md is left untouched (and never created) too.
   if (options.harnesses.length > 0) {
     upsertMarkerSection(
+      fs,
       report,
       join(targetDir, "AGENTS.md"),
       readAsset("agents-md-section.md"),
@@ -1078,9 +1097,9 @@ export function runInit(options: InitOptions): Report {
     ];
     const conflicts = files.filter(({ relativePath, content }) => {
       const path = join(targetDir, relativePath);
-      if (!existsSync(path) || force) return false;
+      if (!fs.exists(path) || force) return false;
       const recorded = previous?.files[relativePath];
-      const existing = readFileSync(path, "utf8");
+      const existing = fs.readText(path);
       return (
         existing !== content &&
         (recorded === undefined || sha256(existing) !== recorded)
@@ -1148,7 +1167,7 @@ export function runInit(options: InitOptions): Report {
         }
       }
     }
-    ensureClaudeImport(report, join(targetDir, "CLAUDE.md"));
+    ensureClaudeImport(fs, report, join(targetDir, "CLAUDE.md"));
   }
 
   if (options.harnesses.includes("codex")) {
@@ -1316,6 +1335,7 @@ export function runInit(options: InitOptions): Report {
       installedAt: previous?.installedAt || new Date().toISOString(),
     };
     installFile(
+      fs,
       report,
       manifestPath,
       `${JSON.stringify(manifest, null, 2)}\n`,

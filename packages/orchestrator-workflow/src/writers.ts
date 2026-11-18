@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import type { TargetFs } from "./target-fs.js";
 
 export interface Report {
   /** Created from scratch. */
@@ -18,33 +17,30 @@ export function emptyReport(): Report {
   return { written: [], updated: [], skipped: [], conflicted: [], notes: [] };
 }
 
-function write(path: string, content: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, "utf8");
-}
-
 /**
  * Installs a kit-owned file. Kit-owned files are only ever overwritten with
- * --force; local edits otherwise win and are reported as conflicts.
+ * --force; local edits otherwise win and are reported as conflicts. Every
+ * access goes through `fs`, which refuses symbolic links in the target.
  */
 export function installFile(
+  fs: TargetFs,
   report: Report,
   path: string,
   content: string,
   options: { force: boolean },
 ): void {
-  if (!existsSync(path)) {
-    write(path, content);
+  if (!fs.exists(path)) {
+    fs.writeText(path, content);
     report.written.push(path);
     return;
   }
-  const existing = readFileSync(path, "utf8");
+  const existing = fs.readText(path);
   if (existing === content) {
     report.skipped.push(path);
     return;
   }
   if (options.force) {
-    write(path, content);
+    fs.writeText(path, content);
     report.updated.push(path);
     return;
   }
@@ -64,17 +60,18 @@ export const AGENTS_MD_HEADING = "# Agent instructions";
  * fence; anything other than exactly one well-ordered pair is a conflict.
  */
 export function upsertMarkerSection(
+  fs: TargetFs,
   report: Report,
   path: string,
   section: string,
 ): void {
   const block = section.trimEnd();
-  if (!existsSync(path)) {
-    write(path, `${AGENTS_MD_HEADING}\n\n${block}\n`);
+  if (!fs.exists(path)) {
+    fs.writeText(path, `${AGENTS_MD_HEADING}\n\n${block}\n`);
     report.written.push(path);
     return;
   }
-  const existing = readFileSync(path, "utf8");
+  const existing = fs.readText(path);
   const lines = existing.split("\n");
   const beginLines: number[] = [];
   const endLines: number[] = [];
@@ -84,7 +81,7 @@ export function upsertMarkerSection(
   });
   if (beginLines.length === 0 && endLines.length === 0) {
     const base = existing.trimEnd();
-    write(path, base === "" ? `${block}\n` : `${base}\n\n${block}\n`);
+    fs.writeText(path, base === "" ? `${block}\n` : `${base}\n\n${block}\n`);
     report.updated.push(path);
     return;
   }
@@ -106,7 +103,7 @@ export function upsertMarkerSection(
     report.skipped.push(path);
     return;
   }
-  write(path, replaced);
+  fs.writeText(path, replaced);
   report.updated.push(path);
 }
 
@@ -120,13 +117,17 @@ export const CLAUDE_MD_BOILERPLATE = `# CLAUDE.md\n\nProject agent instructions 
  * Claude Code reads CLAUDE.md, not AGENTS.md. Ensure CLAUDE.md exists and
  * imports AGENTS.md so the policy section is loaded there too.
  */
-export function ensureClaudeImport(report: Report, path: string): void {
-  if (!existsSync(path)) {
-    write(path, CLAUDE_MD_BOILERPLATE);
+export function ensureClaudeImport(
+  fs: TargetFs,
+  report: Report,
+  path: string,
+): void {
+  if (!fs.exists(path)) {
+    fs.writeText(path, CLAUDE_MD_BOILERPLATE);
     report.written.push(path);
     return;
   }
-  const existing = readFileSync(path, "utf8");
+  const existing = fs.readText(path);
   // Claude Code resolves @-imports anywhere in the file, so an inline
   // mention like "see @AGENTS.md" already imports it.
   const hasImport = existing
@@ -137,7 +138,7 @@ export function ensureClaudeImport(report: Report, path: string): void {
     return;
   }
   const base = existing.trimEnd();
-  write(
+  fs.writeText(
     path,
     base === ""
       ? `${CLAUDE_IMPORT_LINE}\n`
