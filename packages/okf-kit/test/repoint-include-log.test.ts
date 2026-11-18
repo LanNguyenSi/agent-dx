@@ -265,6 +265,7 @@ describe("repoint --include-log: narrated pairs", () => {
       "from `src/a.ts:6`\n  to `src/a.ts:7`",
     ],
     ["an arrow after a lone citation", "`src/a.ts:6` -> dropped"],
+    ["a long arrow after a lone citation", "`src/a.ts:6` --> dropped"],
     ["an arrow before a lone citation", "dropped -> `src/a.ts:6`"],
     ["a range and a continuation", "`src/a.ts:6-8` (was) -> `:9-11`"],
   ];
