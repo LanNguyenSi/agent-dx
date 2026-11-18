@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-11-18
+
 ### Changed
 
 - Narrow rounds wording: in run mode `single` the replay scope narrows the
