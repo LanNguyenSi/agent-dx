@@ -134,6 +134,7 @@ describe("TargetFs", () => {
   it("assertSafe refuses a path outside the target", () => {
     const fs = new TargetFs(repo);
     expect(() => fs.assertSafe(victim)).toThrow(/outside the target/);
+    expect(() => fs.assertSafe(join(repo, ".."))).toThrow(/outside the target/);
     expect(() =>
       fs.assertSafe(join(repo, "..", "outside", "victim.txt")),
     ).toThrow(/outside the target/);

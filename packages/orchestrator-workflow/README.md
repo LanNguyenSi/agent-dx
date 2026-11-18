@@ -269,8 +269,8 @@ unedited kit files are deleted, locally edited ones are kept and reported
 import line are taken out; either file is deleted only when nothing but
 init's own boilerplate remains. Kit directories are pruned only when empty,
 and run history under `.ai/runs/` is always kept. Interactive runs ask for
-confirmation; non-interactive runs require `--yes`. A symlink on any path it
-would remove or edit stops it before anything is removed (see
+confirmation; non-interactive runs require `--yes`. A symlink on any file it would remove or edit stops it before anything is removed; a linked kit
+directory is left out of pruning with a note (see
 [Ownership and re-runs](#ownership-and-re-runs)).
 
 ## Reviewer-report validation
