@@ -3,7 +3,7 @@ type: module
 title: Install fence mechanics
 description: How orchestrator-workflow's installer writes, fences, updates, and removes its surface in a target repo.
 tags: [installer, marker-fence, manifest, agents-md, harness-adapters, uninstall]
-timestamp: 2026-11-16T06:55:31Z
+timestamp: 2026-11-18T06:17:38Z
 sources:
   - packages/orchestrator-workflow/src/init.ts
   - packages/orchestrator-workflow/src/codex.ts
@@ -11,6 +11,7 @@ sources:
   - packages/orchestrator-workflow/src/routing-state.ts
   - packages/orchestrator-workflow/src/uninstall.ts
   - packages/orchestrator-workflow/src/writers.ts
+  - packages/orchestrator-workflow/src/target-fs.ts
   - packages/orchestrator-workflow/src/assets.ts
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/detect.ts
@@ -20,6 +21,7 @@ sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/test/init.test.ts
   - packages/orchestrator-workflow/test/uninstall.test.ts
+  - packages/orchestrator-workflow/test/symlink-refusal.test.ts
   - packages/orchestrator-workflow/test/opencode.test.ts
   - packages/orchestrator-workflow/test/codex.test.ts
   - packages/orchestrator-workflow/test/routing.test.ts

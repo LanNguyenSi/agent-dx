@@ -3,7 +3,7 @@ type: module
 title: Operator install and target registry
 description: The operator-level home, manifest schema, locked write API, target registry, and the setup/apply/doctor/adopt commands built on top of it.
 tags: [operator, manifest, registry, lock, doctor, adopt, pin, cli]
-timestamp: 2026-11-16T06:55:31Z
+timestamp: 2026-11-18T06:17:38Z
 sources:
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -352,7 +352,7 @@ wired into `adopt`'s own action
 (cli.ts:1633-1634#"const unexpectedStatus = suppressSuccessLine(targetReport.status);").
 Every failure `adopt` can report before it has a target report to return
 (not a directory, no repo manifest, a foreign or unreadable repo manifest, a
-lock failure) is a usage/precondition error at exit code 2, unlike `apply`
+repo manifest path that is or lies below a symbolic link, a lock failure) is a usage/precondition error at exit code 2, unlike `apply`
 above: only `apply`'s unreadable/absent operator manifest and its own
 not-a-directory check land on exit code 1, while `apply`'s own
 `--pin`/`--unpin` usage errors exit at 2, the same code as every one of
