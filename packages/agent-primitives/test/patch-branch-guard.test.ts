@@ -2,11 +2,13 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { patch, PatchUsageError, type RepoGuard } from "../src/patch/index.js";
 import {
   branchGuardEnv,
+  chargeableMs,
   combineGuards,
+  GuardBudget,
   protectedNameProblem,
 } from "../src/patch/branch-guard.js";
 import { CLI_PATH, spawnCli } from "./helpers/spawn-cli.js";
@@ -2620,6 +2622,43 @@ describe("patch branch guard: the overall time budget of a plan", () => {
     expect(d[0]).toContain("did not finish within");
     expect(d[1]).toContain("was not run");
     expect(d[2]).toContain("was not run");
+  }, 30_000);
+
+  it("a call stopped at its bound is charged the whole bound even when the clock read a hair less", () => {
+    // The timer that stops a call and the clock that times it can differ
+    // by a millisecond; the call that was stopped at 400 ms must leave
+    // nothing of a 400 ms budget, not a sliver that starts another call.
+    const budget = new GuardBudget(400);
+    budget.charge(chargeableMs(399.4, 400, true));
+    expect(budget.remainingMs()).toBe(0);
+    // A call that finished is charged what it took, even close to its bound.
+    const other = new GuardBudget(400);
+    other.charge(chargeableMs(399.4, 400, false));
+    expect(other.remainingMs()).toBeCloseTo(0.6, 5);
+    // A stopped call that overran is charged what it took.
+    expect(chargeableMs(412.5, 400, true)).toBe(412.5);
+  });
+
+  it("a per-call bound equal to the budget, with the clock reading under the bound: the other repositories are still not run", () => {
+    // Every timed git call reads 399.4 ms although it was stopped at 400.
+    let ticks = 0;
+    const spy = vi
+      .spyOn(performance, "now")
+      .mockImplementation(() => 399.4 * ticks++);
+    try {
+      const { base, edits } = many(3);
+      const hang = hangingShim("*");
+      const r = withGitShim(hang.body, () =>
+        patch({ cwd: base, edits, gitTimeoutMs: 400, gitBudgetMs: 400 }),
+      );
+      expect(hang.calls()).toBe(1);
+      const d = details(r);
+      expect(d[0]).toContain("did not finish within");
+      expect(d[1]).toContain("was not run");
+      expect(d[2]).toContain("was not run");
+    } finally {
+      spy.mockRestore();
+    }
   }, 30_000);
 
   it("the budget defaults to twice the per-call bound", () => {

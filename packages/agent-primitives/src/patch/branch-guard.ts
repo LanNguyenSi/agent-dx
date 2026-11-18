@@ -290,6 +290,19 @@ export class GuardBudget {
   }
 }
 
+/** What a git call is charged to the budget. A call that hit its time
+ * limit was stopped by the limit, so it is charged at least that limit: the
+ * clock that enforced the stop and the clock that measured it can disagree
+ * by a millisecond or so, and the sliver of budget that disagreement would
+ * leave must not start another call that is stopped at once. */
+export function chargeableMs(
+  elapsedMs: number,
+  timeoutMs: number,
+  timedOut: boolean,
+): number {
+  return timedOut ? Math.max(elapsedMs, timeoutMs) : elapsedMs;
+}
+
 /** The state of a repository's classification calls: set by the first one
  * that times out, after which no further git call is run for it. */
 interface HangState {
@@ -352,9 +365,10 @@ function runGit(
   const run = boundedCommand("git", [...args]);
   const startedAt = performance.now();
   const res = spawnSync(run.command, run.args, options);
-  limit.budget?.charge(performance.now() - startedAt);
+  const elapsedMs = performance.now() - startedAt;
   endGroupIfAbnormal(res);
   const e = res.error as NodeJS.ErrnoException | undefined;
+  limit.budget?.charge(chargeableMs(elapsedMs, timeoutMs, isTimeoutError(e)));
   if (isTimeoutError(e)) {
     const why = budgetBound
       ? `${name} did not finish within the ${String(timeoutMs)} ms left of the branch guard's overall time budget of ${String(limit.budget?.totalMs)} ms for the whole plan and was stopped`
