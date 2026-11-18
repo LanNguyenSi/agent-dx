@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `patch`'s branch guard charges a git call that was stopped at its time
+  bound the whole bound against the plan's overall budget, even when the
+  measuring clock read a fraction of a millisecond less. Before, a plan
+  whose per-call bound equalled the budget could leave a sliver of budget
+  after the first hanging call, start the next repository's call with it,
+  and report that repository as unresolved instead of "was not run".
+
 ## [0.22.1] - 2026-11-17
 
 ### Fixed
