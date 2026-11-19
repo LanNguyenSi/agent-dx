@@ -1983,7 +1983,17 @@ NEVER fires when the run's own captured tail was truncated
 above): a real `go test ./...` that printed one `ok <pkg> <time>` line
 followed by more than 60 no-test lines has lost exactly the line that
 vetoed the reading, and keeps its verdict instead of being refused as
-`no_tests_executed` (or, on a mutant run, overridden). A go
+`no_tests_executed` (or, on a mutant run, overridden). The gate cuts
+both ways: a go run that genuinely executed nothing but whose tail was
+truncated for the same reason -- a `go test -run XNoMatch ./...` over
+more than 60 packages, every package line carrying `[no tests to run]`
+yet the tail cut past 60 lines -- is NOT detected either and keeps its
+verdict, because a truncated tail of only-no-test lines is
+indistinguishable from one that also dropped a line that ran. That
+unreadable-on-a-truncated-tail case is what `--require-baseline-evidence`
+covers: give it a pattern the run must print before any verdict, so an
+empty or unreadable baseline is refused even when the go reading stays
+silent on a truncated tail. A go
 package line also counts as a test runner summary for the tsc
 build-failure rule, so a type error printed next to it is not reported as
 a build failure.

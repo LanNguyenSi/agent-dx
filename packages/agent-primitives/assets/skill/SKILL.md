@@ -168,7 +168,7 @@ none while the run still exits `0`. Escape the metacharacters, or name
 the whole test file in the command instead of filtering by name. A
 filter that selects nothing is refused at the baseline as
 `no_tests_executed` for the runners the zero-tests detectors recognize
-(vitest, node's `--test`, PHPUnit, pytest); `--require-baseline-evidence` is the
+(vitest, node's `--test`, PHPUnit, pytest, go); `--require-baseline-evidence` is the
 opt-in safety net for any runner, including jest and every other one the
 detectors do not recognize. Nothing detects a filter that selects the
 wrong tests on its own: pin what you expect in

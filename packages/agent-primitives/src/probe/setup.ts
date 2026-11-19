@@ -1196,9 +1196,9 @@ export async function runBaselineGate(
       // reading is the one reading that rests on a line being ABSENT
       // (any package line without go's marker vetoes it), so a
       // truncated tail -- whose missing lines may include exactly the
-      // package line that ran -- must never fire it (zero-tests.ts,
-      // round-1 review finding). The other detectors read a PRESENT
-      // summary line and are unaffected by the flag.
+      // package line that ran -- must never fire it (see the
+      // `tailsTruncated` gate in zero-tests.ts). The other detectors
+      // read a PRESENT summary line and are unaffected by the flag.
       baselineTest.stdoutTruncated || baselineTest.stderrTruncated,
     );
     if (zeroTestsEvidence.detected) {

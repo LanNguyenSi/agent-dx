@@ -892,9 +892,9 @@ export async function runMutantAttempt(
       // (any package line without go's marker vetoes it), so a
       // truncated tail -- whose missing lines may include exactly the
       // package line that ran -- must never fire it and override this
-      // run's real verdict (zero-tests.ts, round-1 review finding).
-      // The other detectors read a PRESENT summary line and are
-      // unaffected by the flag.
+      // run's real verdict (see the `tailsTruncated` gate in
+      // zero-tests.ts). The other detectors read a PRESENT summary
+      // line and are unaffected by the flag.
       testResult.stdoutTruncated || testResult.stderrTruncated,
     );
     // The generic byte-identical fallback: scoped to a verdict whose own

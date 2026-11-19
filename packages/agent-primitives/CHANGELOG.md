@@ -29,7 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was truncated (`stdoutTruncated`/`stderrTruncated`): a real run that
   printed more than 60 no-test lines after the package line that ran
   has that line outside the tail the detector sees, and keeps its
-  verdict instead of reading as zero-tests.
+  verdict instead of reading as zero-tests. The same gate cuts the
+  other way: a go run that executed nothing but whose tail was
+  truncated for that reason (a `go test -run XNoMatch ./...` over more
+  than 60 packages) is not detected either and keeps its verdict,
+  since a truncated tail of only-no-test lines is indistinguishable
+  from one that dropped a line that ran; `--require-baseline-evidence`
+  is the opt-in net for that case.
 
 ### Fixed
 
