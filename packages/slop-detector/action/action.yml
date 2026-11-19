@@ -18,13 +18,13 @@ inputs:
     required: false
     default: block
   changed-files-only:
-    description: On pull_request events, scan only files changed in the PR (needs enough fetch depth for the base commit).
+    description: On pull_request and pull_request_target events, scan only files changed in the PR (needs enough fetch depth for the base commit).
     required: false
     default: "false"
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v5
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
       with:
         node-version: 22
     - name: Install slop-detector
