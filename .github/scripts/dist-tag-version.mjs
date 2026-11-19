@@ -19,31 +19,16 @@
 //   <tag>          read stdin, print the version (or nothing), exit 0;
 //                  on unparsable input print a ::warning:: and exit 1
 //   --self-test    exercise the resolver against fixtures, no stdin needed
+//
+// The resolver itself lives in lib/resolve-version.mjs, which check-latest.mjs
+// imports too; this file always runs its CLI.
 
-const argv = process.argv.slice(2);
-
-if (argv.includes("--self-test")) {
-  selfTest();
-  process.exit(0);
-}
-
-const tag = argv[0];
-if (!tag) {
-  console.error("usage: dist-tag-version.mjs <dist-tag> | --self-test");
-  process.exit(2);
-}
-
-// Pure resolver, kept separate so the self-test needs no stdin. Throws on
-// input that is not JSON; a JSON body that carries no object to index into
-// (empty array, null, a bare string) resolves to "tag absent", which the
-// caller must be able to tell apart from a throw.
-export function resolveVersion(text, tag) {
-  const data = JSON.parse(text);
-  const obj = Array.isArray(data) ? data[0] : data;
-  if (obj === null || obj === undefined || typeof obj !== "object") return "";
-  const version = obj[tag];
-  return typeof version === "string" ? version : "";
-}
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolveVersion } from "./lib/resolve-version.mjs";
 
 function selfTest() {
   const cases = [
@@ -54,9 +39,12 @@ function selfTest() {
     ["missing tag returns empty (array shape)", '[{"next":"0.20.0"}]', "latest", { version: "" }],
     ["unparsable input is reported as a parse error", 'not json {{{', "latest", { parseError: true }],
     ["empty array returns empty", "[]", "latest", { version: "" }],
+    ["null body returns empty (tag absent, not a parse error)", "null", "latest", { version: "" }],
   ];
   let failed = 0;
+  let total = 0;
   for (const [name, input, tag, wanted] of cases) {
+    total++;
     let got;
     try {
       got = { version: resolveVersion(input, tag) };
@@ -69,21 +57,76 @@ function selfTest() {
     const wantLabel = wanted.parseError ? "parse-error" : `'${wanted.version}'`;
     console.log(`  ${pass ? "PASS" : "FAIL"}  ${name} (wanted ${wantLabel}, got ${gotLabel})`);
   }
+  // The CLI wrapper itself: spawn this file so the entry-point guard, the
+  // stdin read, the stdout output and the exit codes are pinned too.
+  const self = fileURLToPath(import.meta.url);
+  const cliCases = [
+    // [name, args, stdin, wanted stdout, wanted exit status]
+    ["cli prints the version for the object shape", ["latest"], '{"latest":"0.19.1"}', "0.19.1", 0],
+    ["cli prints the version for the array shape", ["latest"], '[{"latest":"0.19.1"}]', "0.19.1", 0],
+    ["cli prints nothing for an absent tag", ["latest"], '{"next":"0.20.0"}', "", 0],
+    ["cli treats a null body as an absent tag", ["latest"], "null", "", 0],
+    ["cli exits 1 on unparsable input", ["latest"], "not json {{{", "", 1],
+    ["cli exits 2 without a tag argument", [], "", "", 2],
+  ];
+  for (const [name, args, input, wantedOut, wantedStatus] of cliCases) {
+    total++;
+    const run = spawnSync(process.execPath, [self, ...args], { input, encoding: "utf8", timeout: 20000 });
+    const pass = run.status === wantedStatus && run.stdout === wantedOut;
+    if (!pass) failed++;
+    console.log(
+      `  ${pass ? "PASS" : "FAIL"}  ${name} (wanted exit ${wantedStatus} '${wantedOut}', got exit ${run.status} '${run.stdout}')`,
+    );
+  }
+  // The CLI reached through a symlinked directory still runs and prints.
+  const dir = mkdtempSync(join(tmpdir(), "dist-tag-version-"));
+  try {
+    const linked = join(dir, "linked");
+    symlinkSync(dirname(self), linked, "dir");
+    total++;
+    const run = spawnSync(process.execPath, [join(linked, "dist-tag-version.mjs"), "latest"], {
+      input: '{"latest":"0.19.1"}',
+      encoding: "utf8",
+      timeout: 20000,
+    });
+    const pass = run.status === 0 && run.stdout === "0.19.1";
+    if (!pass) failed++;
+    console.log(`  ${pass ? "PASS" : "FAIL"}  cli run through a symlinked directory still prints (got exit ${run.status} '${run.stdout}')`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
   if (failed > 0) {
     console.error(`::error::${failed} self-test case(s) failed; refusing to trust the resolver`);
     process.exit(1);
   }
-  console.log("self-test: all cases pass");
+  console.log(`dist-tag-version self-test: ${total} cases pass`);
 }
 
-const chunks = [];
-for await (const chunk of process.stdin) chunks.push(chunk);
+async function main() {
+  const argv = process.argv.slice(2);
 
-let version;
-try {
-  version = resolveVersion(chunks.join(""), tag);
-} catch (err) {
-  console.error(`::warning::could not parse npm view output: ${err.message}`);
-  process.exit(1);
+  if (argv.includes("--self-test")) {
+    selfTest();
+    process.exit(0);
+  }
+
+  const tag = argv[0];
+  if (!tag) {
+    console.error("usage: dist-tag-version.mjs <dist-tag> | --self-test");
+    process.exit(2);
+  }
+
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+
+  let version;
+  try {
+    version = resolveVersion(chunks.join(""), tag);
+  } catch (err) {
+    console.error(`::warning::could not parse npm view output: ${err.message}`);
+    process.exit(1);
+  }
+  process.stdout.write(version);
 }
-process.stdout.write(version);
+
+await main();

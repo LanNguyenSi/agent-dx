@@ -84,6 +84,18 @@ jobs:
     needs: parse
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Publishes of one package run one at a time, in arrival order, so two
+    # tags pushed back-to-back cannot finish out of order and leave `latest`
+    # on the older version. Different packages do not block each other. A run
+    # is never cancelled mid-publish. GitHub keeps at most one run waiting per
+    # group, so a third tag for the same package pushed while one publish runs
+    # and another waits replaces the waiting run, and that tag is not
+    # published. It cannot simply be re-dispatched after a higher version is
+    # on latest: npm refuses to apply latest implicitly to a lower version. Push
+    # tags for one package one at a time and wait for each run to finish.
+    concurrency:
+      group: publish-npm-${{ needs.parse.outputs.pkg }}
+      cancel-in-progress: false
     permissions:
       contents: read
       # id-token is required for `npm publish --provenance` to mint signed
@@ -156,12 +168,69 @@ jobs:
         # needs its own separate Trusted Publisher entry pointing at this file.
         run: npm install -g npm@^11.5.1 --no-audit --no-fund
 
+      - name: Fetch the workflow's own helper scripts
+        # The tagged checkout above may predate .github/scripts/check-latest.mjs
+        # (a workflow_dispatch of an old tag), so the latest check runs the
+        # scripts from the revision this workflow runs from. Sparse, outside
+        # every package directory, no credentials, and no repository code is
+        # executed by this step. It sits right before Publish so the package's
+        # own npm ci, build and test never see the nested tree.
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          path: _publish-scripts
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       - name: Publish
         env:
           VERSION: ${{ needs.parse.outputs.version }}
         run: |
           set -euo pipefail
           pkg=$(node -p "require('./package.json').name")
+
+          # Fail the run when `latest` is not on the highest published stable
+          # version. Reads retry (up to 5 times, exponential backoff) because
+          # the registry and its CDN can lag a fresh publish; a final mismatch
+          # or unreadable response fails the job and names the repair
+          # workflow. The comparison lives in check-latest.mjs.
+          assert_latest() {
+            local scripts="${GITHUB_WORKSPACE}/_publish-scripts/.github/scripts"
+            local max=5
+            local attempt=1
+            local tmp
+            local out
+            tmp=$(mktemp -d)
+            while true; do
+              if npm view "${pkg}" dist-tags --json > "${tmp}/dist-tags.json" \
+                && npm view "${pkg}" versions --json > "${tmp}/versions.json"; then
+                if out=$(node "${scripts}/check-latest.mjs" --package "${pkg}" \
+                  --dist-tags "${tmp}/dist-tags.json" --versions "${tmp}/versions.json"); then
+                  echo "${out}"
+                  rm -rf "${tmp}"
+                  return 0
+                fi
+              else
+                out="::warning::could not read dist-tags and versions for ${pkg} from the registry"
+              fi
+              if [ "${attempt}" -ge "${max}" ]; then
+                echo "${out}"
+                rm -rf "${tmp}"
+                case "${out}" in
+                  "::error::"*)
+                    echo "::error::dist-tags.latest of ${pkg} is not on its highest published stable version after ${max} reads (see the line above). Repair with the Move an npm dist-tag workflow (.github/workflows/npm-dist-tag.yml)." >&2
+                    ;;
+                  *)
+                    echo "::error::could not verify dist-tags.latest of ${pkg} after ${max} reads (registry or check failure, see the line above); the tag may be fine. Check npm view ${pkg} dist-tags by hand and use the Move an npm dist-tag workflow (.github/workflows/npm-dist-tag.yml) only if latest is wrong." >&2
+                    ;;
+                esac
+                return 1
+              fi
+              echo "latest check attempt ${attempt}/${max} did not pass yet (registry lag?); retrying"
+              sleep $((2 ** attempt * 2))
+              attempt=$((attempt + 1))
+            done
+          }
 
           # Idempotency: a re-run (workflow_dispatch, or "Re-run failed jobs")
           # can land on a version a prior attempt already published.
@@ -178,6 +247,7 @@ jobs:
               exit 1
             fi
             echo "::notice::${pkg}@${VERSION} is already on the registry; nothing to publish."
+            assert_latest || exit 1
             exit 0
           fi
 
@@ -193,6 +263,7 @@ jobs:
             echo "npm publish attempt ${attempt}/${max}"
             if npm publish --access public --provenance; then
               echo "::notice::Published ${pkg}@${VERSION} on attempt ${attempt}."
+              assert_latest || exit 1
               exit 0
             fi
             # A failed --provenance publish can still have landed the tarball;
@@ -213,6 +284,7 @@ jobs:
                 exit 1
               fi
               echo "::notice::${pkg}@${VERSION} reached the registry despite a non-zero publish exit; treating as success."
+              assert_latest || exit 1
               exit 0
             fi
             if [ "${attempt}" -ge "${max}" ]; then

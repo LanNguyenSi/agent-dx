@@ -100,10 +100,17 @@ Every package that `publish-npm.yml` publishes is released the same way:
    master fails the publish job before `npm ci`. GitHub
    turns a multi-tag push into one push event, and `publish-npm.yml` then
    publishes only one of the tags.
-6. If `latest` ends up on an older version because two publish runs finished
-   out of order, run the "Move an npm dist-tag" workflow
-   (`.github/workflows/npm-dist-tag.yml`); re-running the publish workflow
-   does not repair it.
+6. Publishes of one package are serialised, and the publish run fails (with an
+   `::error::` naming the package, `latest` and the expected version) when
+   `latest` is not on the highest published stable version after the run,
+   also on a re-run of an already published version. If it does, run the
+   "Move an npm dist-tag" workflow (`.github/workflows/npm-dist-tag.yml`);
+   re-running the publish workflow does not repair it. A deprecated highest
+   version also trips the check: move the tag with the same workflow, or
+   un-deprecate the version. Push tags for one package one at a time and wait
+   for each run: GitHub keeps only one waiting run per package, so a third tag
+   pushed while one publish runs and another waits is dropped, and the dropped
+   tag cannot be re-dispatched once a higher version is on `latest`.
 
 okf-kit and agent-primitives add the package-specific steps below;
 orchestrator-workflow and friction-log need nothing beyond these steps.

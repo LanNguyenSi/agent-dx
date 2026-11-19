@@ -768,8 +768,18 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
+      # Each step asserts its script's own sentinel line as well as the exit
+      # code, so a self-test that exits 0 without running any case fails.
       - name: Self-test .github/scripts/dist-tag-version.mjs (npm 11 object and npm 12 array shapes)
-        run: node .github/scripts/dist-tag-version.mjs --self-test
+        run: |
+          out=$(node .github/scripts/dist-tag-version.mjs --self-test)
+          echo "$out"
+          echo "$out" | grep -Eq '^dist-tag-version self-test: [1-9][0-9]* cases pass$'
+      - name: Self-test .github/scripts/check-latest.mjs (latest-on-highest-stable decision, both npm shapes)
+        run: |
+          out=$(node .github/scripts/check-latest.mjs --self-test)
+          echo "$out"
+          echo "$out" | grep -Eq '^check-latest self-test: [1-9][0-9]* cases pass$'
 
   ci:
     runs-on: ubuntu-latest
