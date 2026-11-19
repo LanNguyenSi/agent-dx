@@ -949,29 +949,50 @@ const TEST_FILE_RE = /(\.(test|spec)\.(ts|js|mjs|tsx)|_test\.go)$/i;
 const TEST_HEAD_LINE_RE = /^\s*(?:describe|it)\s*\(/;
 const TEST_CLOSING_LINE_RE = /^\s*\}\)\s*;\s*$/;
 // The Go half of the same check: `_test.go` is Go's test-file naming
-// convention, its blocks are top-level `func TestXxx(t *testing.T)`-style
-// functions, so the head is `func` at column 0 followed by one of Go's
-// four test-function prefixes and an optional name suffix (`func Example()`
-// with no suffix is a valid Go test head, hence `\w*`, not `\w+`), and the
-// closing line is a line that is exactly `}` once trimmed -- a func's
-// closing brace, nested or not: like the JS grammar's `});`, which likewise
-// matches a nested block's close, this is a lexical approximation of "the
-// range is a whole block", not an AST check. A method-form head is
-// deliberately not recognised: Go test entry points are functions.
+// convention. Its test blocks are, top-down: a top-level `func
+// TestXxx(t *testing.T)`-style function (`func` at column 0 followed by one
+// of Go's four test-function prefixes and an optional name suffix, `func
+// Example()` with no suffix being valid, hence `\w*` not `\w+`); a testify
+// suite method `func (r *T) TestXxx(...)`, the same four prefixes reached
+// through an optional `(receiver)` between `func` and the name; and, one
+// scope in, a subtest `t.Run("name", func(t *testing.T) {...})` opened by a
+// method call on any receiver identifier. The first two are function-shaped
+// and close on a line that is exactly `}` once trimmed (a func's closing
+// brace, nested or not); a subtest is call-shaped and closes on a line that
+// is exactly `})` once trimmed (the `)` closes the callback's argument
+// list, the `}` its body). Like the JS grammar's `});`, which likewise
+// matches a nested block's close, these are lexical approximations of "the
+// range is a whole block", not AST checks; the closing line is paired to the
+// head kind, so a subtest ended on a plain `}`, or a function ended on
+// `})`, is still the drift signal it was.
 const GO_TEST_FILE_RE = /_test\.go$/i;
-const GO_TEST_HEAD_LINE_RE = /^func\s+(?:Test|Benchmark|Fuzz|Example)\w*\(/;
+const GO_TEST_HEAD_LINE_RE =
+  /^func\s+(?:\(\w+\s+\*?\w+\)\s+)?(?:Test|Benchmark|Fuzz|Example)\w*\(/;
 const GO_TEST_CLOSING_LINE_RE = /^\}$/;
+// A Go subtest head (`^\s*\w+\.Run\(`, any receiver at any indent; the `(`
+// is required immediately after `Run`, so a `x.Runner(` call or a `t.Run`
+// sitting inside a string or comment is not a head) and its closing `})`.
+const GO_SUBTEST_HEAD_LINE_RE = /^\s*\w+\.Run\(/;
+const GO_SUBTEST_CLOSING_LINE_RE = /^\}\)$/;
 // Block-head detection for test-range-straddles-block (see the doc block
 // above and checkTestRangeStraddle below): a wider set of head shapes than
 // TEST_HEAD_LINE_RE (which stays short-form-only, unchanged, via
 // checkRangeBoundary/checkShortFormTarget) -- describe/it/test, each with
 // an optional .only/.skip/.each modifier. A leading `export `/`async ` is
 // deliberately not handled: not needed for any bundle this rule has been
-// measured against. A `_test.go` target gets GO_TEST_HEAD_LINE_RE instead
+// measured against. A `_test.go` target gets GO_TEST_BLOCK_HEAD_RE instead
 // (a Go file has no describe/it/test heads; the Go straddle grammar is the
-// Go head grammar, the same func heads the boundary check already knows).
+// Go head grammar -- both the func/suite-method heads and the `t.Run(`
+// subtest heads the boundary check knows).
 const TEST_BLOCK_HEAD_RE =
   /^\s*(?:describe|it|test)(?:\.(?:only|skip|each))?\s*\(/;
+// The Go straddle head set: the union of the two Go head shapes above, each
+// accepted at any indent (a `t.Run(` lives one scope in, so it is indented),
+// used by checkFullTarget's straddle call for a `_test.go` target. Sibling
+// `t.Run(` blocks at the same indent straddle; one nested deeper than the
+// range's start is skipped by checkTestRangeStraddle's indent rule.
+const GO_TEST_BLOCK_HEAD_RE =
+  /^\s*(?:func\s+(?:\(\w+\s+\*?\w+\)\s+)?(?:Test|Benchmark|Fuzz|Example)\w*\(|\w+\.Run\()/;
 // Markdown block-boundary check (see checkRangeBoundary): a range boundary
 // line that is nothing but a bracket (open or close), optionally with a
 // trailing `,`/`;`, is always a drift signal. A code-fence delimiter is
@@ -1489,7 +1510,7 @@ function checkFullTarget(
   // (opt-in)" above and checkTestRangeStraddle): a full citation's own
   // range into a .test./.spec. target (.ts, .js, .mjs) or a Go _test.go
   // target must not cross into another block's head after its own first
-  // line, against the grammar the file kind selects (GO_TEST_HEAD_LINE_RE
+  // line, against the grammar the file kind selects (GO_TEST_BLOCK_HEAD_RE
   // for Go, TEST_BLOCK_HEAD_RE otherwise). Deliberately
   // scoped to test-file targets only (isTestFile), not also a markdown
   // branch: a
@@ -1505,7 +1526,7 @@ function checkFullTarget(
       startLine,
       endLine,
       lines,
-      isGoTestFile(citedPath) ? GO_TEST_HEAD_LINE_RE : TEST_BLOCK_HEAD_RE,
+      isGoTestFile(citedPath) ? GO_TEST_BLOCK_HEAD_RE : TEST_BLOCK_HEAD_RE,
     );
     if (straddle) problems.push(straddle);
   }
@@ -1859,9 +1880,12 @@ function isMatchingFenceClosingLine(
  * Test-file targets (`.test.ts`/`.spec.ts`, and their `.js`/`.mjs`
  * equivalents): the range must start on a `describe(`/`it(` head line and
  * end on a matching closing `});` line; a Go `_test.go` target gets Go's
- * own grammar instead: a `func TestXxx(`-style head line and a closing
- * line that is exactly `}` once trimmed (see GO_TEST_HEAD_LINE_RE /
- * GO_TEST_CLOSING_LINE_RE). Severity split, by evidence
+ * own grammar instead: a `func TestXxx(`-style head (a plain test function
+ * or a testify suite method `func (r *T) TestXxx(`), or a `t.Run(` subtest
+ * at any indent -- and a closing line paired to that head kind: exactly
+ * `}` once trimmed for a function head, exactly `})` once trimmed for a
+ * subtest (see GO_TEST_HEAD_LINE_RE / GO_SUBTEST_HEAD_LINE_RE and
+ * GO_TEST_CLOSING_LINE_RE / GO_SUBTEST_CLOSING_LINE_RE). Severity split, by evidence
  * strength: a wrong START line is a
  * *warning* (`test-range-start-not-head`) -- the range beginning somewhere
  * other than a block head is strong drift evidence. A range whose start IS
@@ -1897,31 +1921,41 @@ function checkRangeBoundary(
 ): Problem | null {
   if (isTestFile(citedPath)) {
     // The file kind picks the grammar: Go's `_test.go` targets are held to
-    // the Go func head/closing grammar, everything else (the
-    // describe/it-shaped targets TEST_FILE_RE also matches) to the JS/TS
-    // one -- unchanged from before the Go grammar existed.
+    // the Go func/suite-method head and `t.Run(` subtest grammar, everything
+    // else (the describe/it-shaped targets TEST_FILE_RE also matches) to the
+    // JS/TS one -- unchanged from before the Go grammar existed.
     const goTarget = isGoTestFile(citedPath);
     const startText = lines[startLine - 1] ?? "";
+    // Which Go head kind matched decides the closing line the range must end
+    // on: a function (plain test function or suite method) closes on `}`, a
+    // `t.Run(` subtest on `})`. Pairing the closer to the head kind is what
+    // keeps a subtest ended on a plain `}` (or a function ended on `})`) a
+    // drift signal rather than silently accepted.
+    const startIsGoSubtest =
+      goTarget && GO_SUBTEST_HEAD_LINE_RE.test(startText);
     const startIsHead = goTarget
-      ? GO_TEST_HEAD_LINE_RE.test(startText)
+      ? startIsGoSubtest || GO_TEST_HEAD_LINE_RE.test(startText)
       : TEST_HEAD_LINE_RE.test(startText);
     if (!startIsHead) {
       return {
         rule: "test-range-start-not-head",
         message: goTarget
-          ? `range start is not a "func TestXxx(" head line ("${startText.trim()}")`
+          ? `range start is not a "func TestXxx(", suite-method or "t.Run(" head line ("${startText.trim()}")`
           : `range start is not a "describe(" or "it(" head line ("${startText.trim()}")`,
       };
     }
     const endText = lines[endLine - 1] ?? "";
+    const goEndTrim = endText.trim();
     const endIsClosing = goTarget
-      ? GO_TEST_CLOSING_LINE_RE.test(endText.trim())
+      ? startIsGoSubtest
+        ? GO_SUBTEST_CLOSING_LINE_RE.test(goEndTrim)
+        : GO_TEST_CLOSING_LINE_RE.test(goEndTrim)
       : TEST_CLOSING_LINE_RE.test(endText);
     if (!endIsClosing) {
       return {
         rule: "test-range-end-not-closing",
         message: goTarget
-          ? `range end is not a closing "}" line ("${endText.trim()}")`
+          ? `range end is not a closing "${startIsGoSubtest ? "})" : "}"}" line ("${goEndTrim}")`
           : `range end is not a matching closing "});" line ("${endText.trim()}")`,
         severity: "notice",
       };
@@ -1985,7 +2019,7 @@ function leadingWhitespaceWidth(text: string): number {
  * EXCEPT the range's own
  * first line (`startLine`
  * itself is never checked -- see that doc block for why) against
- * `headRe` (TEST_BLOCK_HEAD_RE for JS/TS test targets, GO_TEST_HEAD_LINE_RE
+ * `headRe` (TEST_BLOCK_HEAD_RE for JS/TS test targets, GO_TEST_BLOCK_HEAD_RE
  * for `_test.go` ones, selected by the caller via isGoTestFile); the first
  * hit (in document order) is reported,
  * matching this file's "one problem per citation" pattern. A block-head

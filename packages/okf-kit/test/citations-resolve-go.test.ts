@@ -1,7 +1,7 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { citationsResolveRule } from "../src/rules/citations-resolve.js";
-import type { Finding } from "../src/types.js";
+import type { BundleContext, Finding } from "../src/types.js";
 import { FIXTURES_DIR, loadFixture } from "./helpers.js";
 
 /**
@@ -16,13 +16,18 @@ import { FIXTURES_DIR, loadFixture } from "./helpers.js";
  * bare and the recommended anchored form (and a `.tsx` one, kept to show
  * the recognised extension set now absorbs it), the anchored recognised
  * forms the notice must refuse, and the look-alike shapes the notice must
- * refuse.
+ * refuse. The last suite pins the Go test-block grammar over
+ * `internal/sample_test.go`: a testify suite-method head, a `t.Run(` subtest
+ * head (closing on `})`), the head-kind pairing of the closing line, the
+ * non-head look-alikes (`x.Runner(`, `t.Run` in a comment or string) and the
+ * `t.Run` straddle under `--require-anchors`.
  */
 
 const GO_ROOT = path.join(FIXTURES_DIR, "citations-resolve-go");
 
-function loadGo() {
-  return loadFixture("citations-resolve-go/docs/okf", GO_ROOT);
+function loadGo(requireAnchors = false): BundleContext {
+  const ctx = loadFixture("citations-resolve-go/docs/okf", GO_ROOT);
+  return requireAnchors ? { ...ctx, requireAnchors: { allow: [] } } : ctx;
 }
 
 /** A finding's message always starts with `` `<citation>`: `` (see pushDrift). */
@@ -234,5 +239,82 @@ describe("citations-resolve extension-unrecognised notice", () => {
     expect(all).toHaveLength(1);
     expect(all[0]?.message).toContain("[extension-unrecognised]");
     expect(all[0]?.message).toContain('".golden"');
+  });
+});
+
+describe("citations-resolve Go subtest and suite-method test heads", () => {
+  it("a short-form range starting on a testify suite-method head and ending on } is clean", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    expect(
+      findingFor(findings, "internal/sample_test.go:7-11 (short-form)"),
+    ).toBeUndefined();
+  });
+
+  it("a short-form range starting on a t.Run subtest head and ending on }) is clean", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    expect(
+      findingFor(findings, "internal/sample_test.go:16-20 (short-form)"),
+    ).toBeUndefined();
+  });
+
+  it('a t.Run subtest range ended on a plain "}" (closer kind mismatch) keeps the end-not-closing notice', () => {
+    const findings = citationsResolveRule.run(loadGo());
+    const f = findingFor(
+      findings,
+      "internal/sample_test.go:16-19 (short-form)",
+    );
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[test-range-end-not-closing]");
+    expect(f?.severity).toBe("notice");
+  });
+
+  it('a func-head range ended on "})" (closer kind mismatch) keeps the end-not-closing notice', () => {
+    const findings = citationsResolveRule.run(loadGo());
+    const f = findingFor(
+      findings,
+      "internal/sample_test.go:13-20 (short-form)",
+    );
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[test-range-end-not-closing]");
+    expect(f?.severity).toBe("notice");
+  });
+
+  it("an x.Runner( call, a t.Run in a comment and a t.Run in a string are all start-not-head, not heads", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    for (const citation of [
+      "internal/sample_test.go:42-46 (short-form)",
+      "internal/sample_test.go:43-45 (short-form)",
+      "internal/sample_test.go:44-46 (short-form)",
+    ]) {
+      const f = findingFor(findings, citation);
+      expect(f, `expected start-not-head for ${citation}`).toBeDefined();
+      expect(f?.message).toContain("[test-range-start-not-head]");
+      expect(f?.severity).toBe("warning");
+    }
+  });
+
+  it("under --require-anchors a Go full range crossing into a sibling t.Run straddles", () => {
+    const findings = citationsResolveRule.run(loadGo(true));
+    const straddles = findingsFor(
+      findings,
+      "internal/sample_test.go:25-28",
+    ).filter((f) => f.message.includes("[test-range-straddles-block]"));
+    expect(straddles).toHaveLength(1);
+    expect(straddles[0]?.severity).toBe("warning");
+  });
+
+  it("under --require-anchors a nested t.Run deeper than the start is not a straddle, nor is a clean whole subtest", () => {
+    const findings = citationsResolveRule.run(loadGo(true));
+    for (const citation of [
+      "internal/sample_test.go:34-38",
+      "internal/sample_test.go:16-20",
+    ]) {
+      expect(
+        findingsFor(findings, citation).filter((f) =>
+          f.message.includes("[test-range-straddles-block]"),
+        ),
+        `expected no straddle for ${citation}`,
+      ).toHaveLength(0);
+    }
   });
 });
