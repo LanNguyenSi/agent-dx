@@ -181,7 +181,9 @@ esac
   });
 
   it("the landed-despite-error path checks latest too", () => {
-    expect(runStep({ STUB_PUBLISH_FAIL: "1", STUB_LATEST: "0.2.0" }).status).toBe(0);
+    expect(
+      runStep({ STUB_PUBLISH_FAIL: "1", STUB_LATEST: "0.2.0" }).status,
+    ).toBe(0);
     const bad = runStep({ STUB_PUBLISH_FAIL: "1", STUB_LATEST: "0.1.0" });
     expect(bad.status).toBe(1);
     expect(bad.stdout).toContain("expected 0.2.0");
@@ -193,15 +195,23 @@ esac
   });
 
   it("an unreadable registry fails as 'could not verify', without the repair hint", () => {
-    const r = runStep({ STUB_PRESENT: "1", STUB_VIEW_FAIL: "1", STUB_LATEST: "0.2.0" });
+    const r = runStep({
+      STUB_PRESENT: "1",
+      STUB_VIEW_FAIL: "1",
+      STUB_LATEST: "0.2.0",
+    });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("could not verify");
-    expect(r.stderr).not.toContain("is not on its highest published stable version");
+    expect(r.stderr).not.toContain(
+      "is not on its highest published stable version",
+    );
   });
 
   it("a real mismatch fails with the repair hint, not 'could not verify'", () => {
     const r = runStep({ STUB_PRESENT: "1", STUB_LATEST: "0.1.0" });
-    expect(r.stderr).toContain("is not on its highest published stable version");
+    expect(r.stderr).toContain(
+      "is not on its highest published stable version",
+    );
     expect(r.stderr).not.toContain("could not verify");
   });
 });
