@@ -770,6 +770,8 @@ jobs:
           node-version: 22
       - name: Self-test .github/scripts/dist-tag-version.mjs (npm 11 object and npm 12 array shapes)
         run: node .github/scripts/dist-tag-version.mjs --self-test
+      - name: Self-test .github/scripts/check-latest.mjs (latest-on-highest-stable decision, both npm shapes)
+        run: node .github/scripts/check-latest.mjs --self-test
 
   ci:
     runs-on: ubuntu-latest

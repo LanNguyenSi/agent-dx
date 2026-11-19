@@ -19,19 +19,13 @@
 //   <tag>          read stdin, print the version (or nothing), exit 0;
 //                  on unparsable input print a ::warning:: and exit 1
 //   --self-test    exercise the resolver against fixtures, no stdin needed
+//
+// The CLI only runs when this file is the entry point, so other scripts (for
+// example check-latest.mjs) can import resolveVersion without this file
+// reading stdin or running its self-test.
 
-const argv = process.argv.slice(2);
-
-if (argv.includes("--self-test")) {
-  selfTest();
-  process.exit(0);
-}
-
-const tag = argv[0];
-if (!tag) {
-  console.error("usage: dist-tag-version.mjs <dist-tag> | --self-test");
-  process.exit(2);
-}
+import { spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Pure resolver, kept separate so the self-test needs no stdin. Throws on
 // input that is not JSON; a JSON body that carries no object to index into
@@ -69,6 +63,25 @@ function selfTest() {
     const wantLabel = wanted.parseError ? "parse-error" : `'${wanted.version}'`;
     console.log(`  ${pass ? "PASS" : "FAIL"}  ${name} (wanted ${wantLabel}, got ${gotLabel})`);
   }
+  // The CLI wrapper itself: spawn this file so the entry-point guard, the
+  // stdin read, the stdout output and the exit codes are pinned too.
+  const self = fileURLToPath(import.meta.url);
+  const cliCases = [
+    // [name, args, stdin, wanted stdout, wanted exit status]
+    ["cli prints the version for the object shape", ["latest"], '{"latest":"0.19.1"}', "0.19.1", 0],
+    ["cli prints the version for the array shape", ["latest"], '[{"latest":"0.19.1"}]', "0.19.1", 0],
+    ["cli prints nothing for an absent tag", ["latest"], '{"next":"0.20.0"}', "", 0],
+    ["cli exits 1 on unparsable input", ["latest"], "not json {{{", "", 1],
+    ["cli exits 2 without a tag argument", [], "", "", 2],
+  ];
+  for (const [name, args, input, wantedOut, wantedStatus] of cliCases) {
+    const run = spawnSync(process.execPath, [self, ...args], { input, encoding: "utf8", timeout: 20000 });
+    const pass = run.status === wantedStatus && run.stdout === wantedOut;
+    if (!pass) failed++;
+    console.log(
+      `  ${pass ? "PASS" : "FAIL"}  ${name} (wanted exit ${wantedStatus} '${wantedOut}', got exit ${run.status} '${run.stdout}')`,
+    );
+  }
   if (failed > 0) {
     console.error(`::error::${failed} self-test case(s) failed; refusing to trust the resolver`);
     process.exit(1);
@@ -76,14 +89,33 @@ function selfTest() {
   console.log("self-test: all cases pass");
 }
 
-const chunks = [];
-for await (const chunk of process.stdin) chunks.push(chunk);
+async function main() {
+  const argv = process.argv.slice(2);
 
-let version;
-try {
-  version = resolveVersion(chunks.join(""), tag);
-} catch (err) {
-  console.error(`::warning::could not parse npm view output: ${err.message}`);
-  process.exit(1);
+  if (argv.includes("--self-test")) {
+    selfTest();
+    process.exit(0);
+  }
+
+  const tag = argv[0];
+  if (!tag) {
+    console.error("usage: dist-tag-version.mjs <dist-tag> | --self-test");
+    process.exit(2);
+  }
+
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+
+  let version;
+  try {
+    version = resolveVersion(chunks.join(""), tag);
+  } catch (err) {
+    console.error(`::warning::could not parse npm view output: ${err.message}`);
+    process.exit(1);
+  }
+  process.stdout.write(version);
 }
-process.stdout.write(version);
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
