@@ -20,24 +20,15 @@
 //                  on unparsable input print a ::warning:: and exit 1
 //   --self-test    exercise the resolver against fixtures, no stdin needed
 //
-// The CLI only runs when this file is the entry point, so other scripts (for
-// example check-latest.mjs) can import resolveVersion without this file
-// reading stdin or running its self-test.
+// The resolver itself lives in lib/resolve-version.mjs, which check-latest.mjs
+// imports too; this file always runs its CLI.
 
 import { spawnSync } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-// Pure resolver, kept separate so the self-test needs no stdin. Throws on
-// input that is not JSON; a JSON body that carries no object to index into
-// (empty array, null, a bare string) resolves to "tag absent", which the
-// caller must be able to tell apart from a throw.
-export function resolveVersion(text, tag) {
-  const data = JSON.parse(text);
-  const obj = Array.isArray(data) ? data[0] : data;
-  if (obj === null || obj === undefined || typeof obj !== "object") return "";
-  const version = obj[tag];
-  return typeof version === "string" ? version : "";
-}
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolveVersion } from "./lib/resolve-version.mjs";
 
 function selfTest() {
   const cases = [
@@ -50,7 +41,9 @@ function selfTest() {
     ["empty array returns empty", "[]", "latest", { version: "" }],
   ];
   let failed = 0;
+  let total = 0;
   for (const [name, input, tag, wanted] of cases) {
+    total++;
     let got;
     try {
       got = { version: resolveVersion(input, tag) };
@@ -75,6 +68,7 @@ function selfTest() {
     ["cli exits 2 without a tag argument", [], "", "", 2],
   ];
   for (const [name, args, input, wantedOut, wantedStatus] of cliCases) {
+    total++;
     const run = spawnSync(process.execPath, [self, ...args], { input, encoding: "utf8", timeout: 20000 });
     const pass = run.status === wantedStatus && run.stdout === wantedOut;
     if (!pass) failed++;
@@ -82,11 +76,28 @@ function selfTest() {
       `  ${pass ? "PASS" : "FAIL"}  ${name} (wanted exit ${wantedStatus} '${wantedOut}', got exit ${run.status} '${run.stdout}')`,
     );
   }
+  // The CLI reached through a symlinked directory still runs and prints.
+  const dir = mkdtempSync(join(tmpdir(), "dist-tag-version-"));
+  try {
+    const linked = join(dir, "linked");
+    symlinkSync(dirname(self), linked, "dir");
+    total++;
+    const run = spawnSync(process.execPath, [join(linked, "dist-tag-version.mjs"), "latest"], {
+      input: '{"latest":"0.19.1"}',
+      encoding: "utf8",
+      timeout: 20000,
+    });
+    const pass = run.status === 0 && run.stdout === "0.19.1";
+    if (!pass) failed++;
+    console.log(`  ${pass ? "PASS" : "FAIL"}  cli run through a symlinked directory still prints (got exit ${run.status} '${run.stdout}')`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
   if (failed > 0) {
     console.error(`::error::${failed} self-test case(s) failed; refusing to trust the resolver`);
     process.exit(1);
   }
-  console.log("self-test: all cases pass");
+  console.log(`dist-tag-version self-test: ${total} cases pass`);
 }
 
 async function main() {
@@ -116,6 +127,4 @@ async function main() {
   process.stdout.write(version);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await main();
-}
+await main();

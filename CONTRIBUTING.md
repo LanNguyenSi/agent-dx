@@ -107,7 +107,10 @@ Every package that `publish-npm.yml` publishes is released the same way:
    "Move an npm dist-tag" workflow (`.github/workflows/npm-dist-tag.yml`);
    re-running the publish workflow does not repair it. A deprecated highest
    version also trips the check: move the tag with the same workflow, or
-   un-deprecate the version.
+   un-deprecate the version. Push tags for one package one at a time and wait
+   for each run: GitHub keeps only one waiting run per package, so a third tag
+   pushed while one publish runs and another waits is dropped, and the dropped
+   tag cannot be re-dispatched once a higher version is on `latest`.
 
 okf-kit and agent-primitives add the package-specific steps below;
 orchestrator-workflow and friction-log need nothing beyond these steps.

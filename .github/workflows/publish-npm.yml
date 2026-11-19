@@ -89,7 +89,10 @@ jobs:
     # on the older version. Different packages do not block each other. A run
     # is never cancelled mid-publish. GitHub keeps at most one run waiting per
     # group, so a third tag for the same package pushed while one publish runs
-    # and another waits replaces the waiting run; re-dispatch the dropped tag.
+    # and another waits replaces the waiting run, and that tag is not
+    # published. It cannot simply be re-dispatched after a higher version is
+    # on latest: npm refuses to apply latest implicitly to a lower version. Push
+    # tags for one package one at a time and wait for each run to finish.
     concurrency:
       group: publish-npm-${{ needs.parse.outputs.pkg }}
       cancel-in-progress: false
@@ -127,6 +130,19 @@ jobs:
             echo "::error::Tagged commit ${head_sha} is not an ancestor of origin/master; refusing to publish a tag that is not on master." >&2
             exit 1
           fi
+
+      - name: Fetch the workflow's own helper scripts
+        # The tagged checkout above may predate .github/scripts/check-latest.mjs
+        # (a workflow_dispatch of an old tag), so the latest check runs the
+        # scripts from the revision this workflow runs from. Sparse, outside
+        # every package directory, no credentials, and no repository code is
+        # executed by this step.
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          path: _publish-scripts
+          sparse-checkout: .github/scripts
+          persist-credentials: false
 
       - uses: actions/setup-node@v5
         with:
@@ -178,7 +194,7 @@ jobs:
           # or unreadable response fails the job and names the repair
           # workflow. The comparison lives in check-latest.mjs.
           assert_latest() {
-            local scripts="${GITHUB_WORKSPACE}/.github/scripts"
+            local scripts="${GITHUB_WORKSPACE}/_publish-scripts/.github/scripts"
             local max=5
             local attempt=1
             local tmp
@@ -198,8 +214,15 @@ jobs:
               fi
               if [ "${attempt}" -ge "${max}" ]; then
                 echo "${out}"
-                echo "::error::dist-tags.latest of ${pkg} is not on its highest published stable version after ${max} reads (see the line above). Repair with the Move an npm dist-tag workflow (.github/workflows/npm-dist-tag.yml)." >&2
                 rm -rf "${tmp}"
+                case "${out}" in
+                  "::error::"*)
+                    echo "::error::dist-tags.latest of ${pkg} is not on its highest published stable version after ${max} reads (see the line above). Repair with the Move an npm dist-tag workflow (.github/workflows/npm-dist-tag.yml)." >&2
+                    ;;
+                  *)
+                    echo "::error::could not verify dist-tags.latest of ${pkg} after ${max} reads (registry or check failure, see the line above); the tag may be fine. Check npm view ${pkg} dist-tags by hand and use the Move an npm dist-tag workflow (.github/workflows/npm-dist-tag.yml) only if latest is wrong." >&2
+                    ;;
+                esac
                 return 1
               fi
               echo "latest check attempt ${attempt}/${max} did not pass yet (registry lag?); retrying"

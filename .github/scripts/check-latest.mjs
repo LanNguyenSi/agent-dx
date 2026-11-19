@@ -7,8 +7,9 @@
 //
 // Inputs are the bodies of `npm view <pkg> dist-tags --json` and
 // `npm view <pkg> versions --json`, passed as files. The dist-tags body is
-// resolved through resolveVersion from dist-tag-version.mjs, so both the
-// npm 11 object shape and the npm 12 array shape work. The versions body is a
+// resolved through resolveVersion from lib/resolve-version.mjs (shared with
+// dist-tag-version.mjs), so both the npm 11 object shape and the npm 12 array
+// shape work. The versions body is a
 // JSON array of version strings; a package with a single published version
 // prints a bare string instead, and an npm 12 body may wrap the list in one
 // more array, so all three are accepted.
@@ -38,11 +39,11 @@
 //   --self-test    exercise the decision against fixtures, no files needed
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolveVersion } from "./dist-tag-version.mjs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolveVersion } from "./lib/resolve-version.mjs";
 
 const REPAIR =
   'Repair it with the "Move an npm dist-tag" workflow (.github/workflows/npm-dist-tag.yml); re-running the publish workflow does not move a tag.';
@@ -184,9 +185,12 @@ function selfTest() {
     ["malformed dist-tags JSON", "not json {{{", '["1.0.0"]', "unparsable", "could not parse"],
     ["malformed versions JSON", tagsObj("1.0.0"), "not json {{{", "unparsable", "could not parse"],
     ["versions body is not a list of strings", tagsObj("1.0.0"), '{"1.0.0":{}}', "unparsable", "could not parse"],
+    ["versions list holds non-strings", tagsObj("1.0.0"), "[1,2]", "unparsable", "could not parse"],
   ];
   let failed = 0;
+  let total = 0;
   for (const [name, tags, versions, wantedStatus, fragment] of cases) {
+    total++;
     const got = decide(P, tags, versions);
     const pass = got.status === wantedStatus && got.message.includes(fragment);
     if (!pass) failed++;
@@ -197,6 +201,7 @@ function selfTest() {
   // and the repair workflow.
   const msg = decide(P, tagsObj("0.11.0"), '["0.11.0","0.12.0"]').message;
   for (const part of [P, "0.11.0", "0.12.0", "Move an npm dist-tag", "npm-dist-tag.yml"]) {
+    total++;
     const pass = msg.includes(part);
     if (!pass) failed++;
     console.log(`  ${pass ? "PASS" : "FAIL"}  mismatch message names '${part}'`);
@@ -240,23 +245,28 @@ function selfTest() {
       ],
     ];
     for (const [name, run, wantedStatus, fragment] of cliCases) {
+      total++;
       const pass = run.status === wantedStatus && run.stdout.includes(fragment);
       if (!pass) failed++;
       console.log(`  ${pass ? "PASS" : "FAIL"}  ${name} (wanted exit ${wantedStatus}, got exit ${run.status}: ${run.stdout.trim()})`);
     }
 
-    // Importing the resolver must not run its CLI (stdin read, self-test):
-    // import it in a child that is handed --self-test and expect a quiet import.
-    const resolverUrl = new URL("./dist-tag-version.mjs", import.meta.url).href;
-    const imported = spawnSync(
+    // Reached through a symlinked directory, the CLI must still run and
+    // decide (a script that silently does nothing there would pass vacuously).
+    const linked = join(dir, "linked");
+    symlinkSync(dirname(self), linked, "dir");
+    total++;
+    writeFileSync(tagsFile, tagsObj("0.9.0"));
+    writeFileSync(versionsFile, '["0.9.0","1.0.0"]');
+    const viaLink = spawnSync(
       process.execPath,
-      ["--input-type=module", "-e", `await import(${JSON.stringify(resolverUrl)}); console.log("imported");`, "--", "--self-test"],
-      { input: "", encoding: "utf8", timeout: 20000 },
+      [join(linked, "check-latest.mjs"), "--package", P, "--dist-tags", tagsFile, "--versions", versionsFile],
+      { encoding: "utf8", timeout: 20000 },
     );
-    const importPass = imported.status === 0 && imported.stdout === "imported\n";
-    if (!importPass) failed++;
+    const linkPass = viaLink.status === 1 && viaLink.stdout.includes("::error::");
+    if (!linkPass) failed++;
     console.log(
-      `  ${importPass ? "PASS" : "FAIL"}  importing dist-tag-version.mjs does not run its CLI (got exit ${imported.status}: ${imported.stdout.trim().slice(0, 80)})`,
+      `  ${linkPass ? "PASS" : "FAIL"}  cli run through a symlinked directory still decides (got exit ${viaLink.status}: ${viaLink.stdout.trim().slice(0, 80)})`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -266,14 +276,12 @@ function selfTest() {
     console.error(`::error::${failed} self-test case(s) failed; refusing to trust the latest check`);
     process.exit(1);
   }
-  console.log("self-test: all cases pass");
+  console.log(`check-latest self-test: ${total} cases pass`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const argv = process.argv.slice(2);
-  if (argv.includes("--self-test")) {
-    selfTest();
-    process.exit(0);
-  }
-  process.exit(runCli(argv));
+const argv = process.argv.slice(2);
+if (argv.includes("--self-test")) {
+  selfTest();
+  process.exit(0);
 }
+process.exit(runCli(argv));
