@@ -1623,7 +1623,12 @@ line whose remaining counts, once the neutral `warning`/`warnings`
 counts are ignored, are all `skipped` and/or `deselected` -- an
 all-skipped run exits `0` while having executed nothing, and a
 warnings-only `1 warning in X.XXs` (exit `5`) collected nothing behind
-a mere import-time warning). Any hit is
+a mere import-time warning), and go's zero-tests readings (every
+package result line carrying go's own `[no tests to run]` marker -- a
+`-run`/name filter that matched no test inside a package that has
+tests, exit `0` -- or a run whose only package lines are go's `[no
+test files]` headers, no `_test.go` anywhere, exit `0`; a package line
+without the marker, or a `--- ` test line, vetoes the reading). Any hit is
 `status: "inconclusive"`, `reason: "no_tests_executed"`, exit `2`,
 `mutation_probe.result: "not_run"` -- never `"killed"`/`"survived"`, a
 verdict that measured nothing. A baseline that reported no exit code of
@@ -1958,12 +1963,40 @@ unchanged.
 tail, at a line start and with both separators inside the line. A second
 run of the same plan prints the `(cached)` form on both sides, so the two
 tails are byte-identical; recognizing the line keeps the generic fallback
-away and a green go mutant reads `survived` on every run. Go has no
-zero-tests detector: a filter that selects no tests (`ok <pkg> 0.1s [no
-tests to run]`) is recognized as a package line as well and reads
-`survived`, not `not_run`. A go package line also counts as a test runner
-summary for the tsc build-failure rule, so a type error printed next to it
-is not reported as a build failure.
+away and a green go mutant reads `survived` on every run. Go also has a
+zero-tests detector: when EVERY package result line carries go's own
+`[no tests to run]` marker (`ok <pkg> 0.1s [no tests to run]`, a `-run`
+or name filter that matched no test inside a package that has tests,
+exit `0`), or when the only package lines at all are go's `[no test
+files]` headers (`? <pkg> [no test files]`, no `_test.go` anywhere, exit
+`0`), the run is read as `not_run`/`no_tests_executed` -- a baseline
+refused, a mutant run's verdict overridden -- like every other detector.
+A package line without the marker vetoes the reading, so a package that
+ran next to one that did not is a real mixed run and stays a verdict, and
+a `--- ` test line vetoes it too; a `[build failed]`/`[setup failed]`
+line belongs to the build-failure reading below, not to this one. This
+reading alone among the detectors here rests on a line being ABSENT (any
+vetoing package or test line), and a detector that only ever sees the
+captured tail cannot tell "absent" from "scrolled out", so the go reading
+NEVER fires when the run's own captured tail was truncated
+(`stdoutTruncated`/`stderrTruncated`, see the truncation paragraph
+above): a real `go test ./...` that printed one `ok <pkg> <time>` line
+followed by more than 60 no-test lines has lost exactly the line that
+vetoed the reading, and keeps its verdict instead of being refused as
+`no_tests_executed` (or, on a mutant run, overridden). The gate cuts
+both ways: a go run that genuinely executed nothing but whose tail was
+truncated for the same reason -- a `go test -run XNoMatch ./...` over
+more than 60 packages, every package line carrying `[no tests to run]`
+yet the tail cut past 60 lines -- is NOT detected either and keeps its
+verdict, because a truncated tail of only-no-test lines is
+indistinguishable from one that also dropped a line that ran. That
+unreadable-on-a-truncated-tail case is what `--require-baseline-evidence`
+covers: give it a pattern the run must print before any verdict, so an
+empty or unreadable baseline is refused even when the go reading stays
+silent on a truncated tail. A go
+package line also counts as a test runner summary for the tsc
+build-failure rule, so a type error printed next to it is not reported as
+a build failure.
 
 With no `--timeout` given and a test command that looks like a whole test
 suite rather than one targeted file -- `npm test`, `npm run test`/`npm
@@ -2169,7 +2202,7 @@ whether `--file` was given explicitly or is derived from the patch.
   test file in the command instead of filtering by name. A filter that
   selects NOTHING is already refused at the baseline as
   `no_tests_executed` for the runners the zero-tests detectors recognize
-  (vitest, node's `--test`, PHPUnit, pytest; see the paragraph on a baseline
+  (vitest, node's `--test`, PHPUnit, pytest, go; see the paragraph on a baseline
   that exits `0` but never actually ran a test, above), and
   `--require-baseline-evidence` is the opt-in safety net for any runner,
   including jest and every other one the detectors do not recognize.
@@ -2725,7 +2758,7 @@ above.
 | `pre_failed` | present | present | `--pre` exited non-zero during the baseline phase |
 | `baseline_failed` | present | present | the baseline test itself exited non-zero, or reported no exit code at all (it timed out, or a signal killed it), or `--pass-regex` was given and its pattern did not match the baseline's own output |
 | `target_changed_during_baseline` | present | present | the baseline run rewrote the target (a formatter, a codegen step) before any mutation |
-| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit, pytest) executed nothing, whatever its exit code -- for phpunit, this BASELINE-phase refusal fires only where the output itself STATES that (its own `No tests executed!` line, or a tally whose executed count derives to zero without depending on a version the output does not state); see the zero-tests paragraphs above. A phpunit MUTANT run whose own output is merely unreadable (the `"ambiguous"` shape, the row below) reports `zero_tests_ambiguous` instead, the same split the baseline phase already makes on the identical field: see the "An `exit()`/`die()` call mid-suite is read as an UNREADABLE result" paragraph above. |
+| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit, pytest, go) executed nothing, whatever its exit code -- for phpunit, this BASELINE-phase refusal fires only where the output itself STATES that (its own `No tests executed!` line, or a tally whose executed count derives to zero without depending on a version the output does not state); see the zero-tests paragraphs above. A phpunit MUTANT run whose own output is merely unreadable (the `"ambiguous"` shape, the row below) reports `zero_tests_ambiguous` instead, the same split the baseline phase already makes on the identical field: see the "An `exit()`/`die()` call mid-suite is read as an UNREADABLE result" paragraph above. |
 | `zero_tests_ambiguous` | present | present | phpunit only: the baseline's own output cannot be read for whether any test executed at all -- either its result report is missing altogether (a mid-suite `exit()`/`die()`, banner present but no `OK (`/marker/tally/progress counter/post-run `Time:` line), or it states no PHPUnit version banner and its tally carries a version-dependent count that decides the question with no version to read it against; see the zero-tests paragraphs above. This table covers the BASELINE-phase refusal only (`RefusalReason`, `REFUSAL_RESULT_SHAPE`); a MUTANT run whose own phpunit output reads the same way reports the identical `zero_tests_ambiguous` string as `mutation_probe.reason`, a plain string there rather than a `RefusalReason` (see the mutant-phase zero-tests paragraph below) |
 | `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |
 | `pycache_isolation_failed` | present | present | this run has at least one Python (`.py`) target and creating its isolated `PYTHONPYCACHEPREFIX` directory failed (an unwritable or full log directory); see [non-js-test-runners.md](non-js-test-runners.md)'s "Python bytecode cache" entry |

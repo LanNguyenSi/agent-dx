@@ -1,0 +1,2 @@
+ok  	example.com/m/m	0.329s
+ok  	example.com/m/n	0.329s [no tests to run]

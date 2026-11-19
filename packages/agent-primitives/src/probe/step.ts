@@ -887,6 +887,15 @@ export async function runMutantAttempt(
     const mutantZeroTests = detectKnownZeroTestsEvidence(
       testResult.stdoutTail,
       testResult.stderrTail,
+      // The mutant run's own truncation flags (`exec.ts`): the go
+      // reading is the one reading that rests on a line being ABSENT
+      // (any package line without go's marker vetoes it), so a
+      // truncated tail -- whose missing lines may include exactly the
+      // package line that ran -- must never fire it and override this
+      // run's real verdict (see the `tailsTruncated` gate in
+      // zero-tests.ts). The other detectors read a PRESENT summary
+      // line and are unaffected by the flag.
+      testResult.stdoutTruncated || testResult.stderrTruncated,
     );
     // The generic byte-identical fallback: scoped to a verdict whose own
     // predicate on THIS mutant's run reads as PASSING -- exit code `0`

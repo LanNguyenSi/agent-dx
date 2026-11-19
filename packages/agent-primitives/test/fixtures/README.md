@@ -158,7 +158,7 @@ wall-clock times (`Start at`, `Duration`) and Go's package timings
 The vitest missing-module case reuses `vitest-collection-error.txt`
 above.
 
-### Summary-recognition go captures (`go-test-pass*`, `go-test-cover`, `go-test-fail`)
+### Summary-recognition go captures (`go-test-pass*`, `go-test-cover`, `go-test-fail`, `go-test-no-*`)
 
 Raw `go test ./...` output captured against a one-package throwaway
 module (`example.com/m`, one test asserting `Add(2, 3) == 5`), go
@@ -183,6 +183,19 @@ byte-identical to itself. Consumed by `probe-zero-tests.test.ts`.
   go's own trailing bare `FAIL`.
 - `go-test-cover.txt`: `go test -cover ./...` (exit `0`) -- the
   package line's `\tcoverage: 100.0% of statements` tail.
+- `go-test-no-tests-to-run.txt`: `go test -run XNoMatch ./...` on the
+  same module (exit `0`) -- the package line's ` [no tests to run]`
+  marker tail, go's own statement that its test binary ran but the
+  name filter matched no test. The detector reads this as zero tests
+  (`probe`'s `via: "go"` zero-tests branch).
+- `go-test-no-test-files.txt`: `go test ./...` on the same module with
+  the `_test.go` file removed (exit `0`) -- go's `? <pkg> [no test
+  files]` package header, its statement that no `_test.go` exists. A
+  zero-tests reading too.
+- `go-test-no-tests-mixed.txt`: `go test -run TestAdd ./...` on a
+  two-package module (`m` with `TestAdd`, `n` with only `TestSize`;
+  exit `0`) -- the package that ran and the `[no tests to run]`
+  package beside it, the mixed run that is NOT a zero-tests reading.
 
 ### PHP captures (`phpunit-*`, `phpstan-*`, `phpcs-*`)
 

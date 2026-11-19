@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe` gained a `go test` zero-tests detector: when every package
+  result line carries go's own `[no tests to run]` marker (a
+  `-run`/name filter that matched no test inside a package that has
+  tests) or the only package lines are go's `[no test files]` headers
+  (no `_test.go` anywhere) -- both of which exit `0` -- the run reads
+  `not_run`/`no_tests_executed` at the baseline and on a mutant run
+  alike, like every other detector, instead of a real verdict. A
+  package line without the marker, or a `--- ` test line, vetoes the
+  reading, so a package that ran beside one that did not stays a real
+  run. The go build-failure patterns (`GO_BUILD_FAILED_LINE`,
+  `GO_TEST_FAILED`) now build their field separators from the same
+  exported `GO_FIELD_SEP` fragment as `GO_PACKAGE_RESULT_LINE`, so a
+  `FAIL <pkg> [build failed]` marker or a `FAIL <pkg> <time>` package
+  line whose pieces sit on separate lines never matches (the `--- FAIL:`
+  veto and every captured go fixture keep their verdicts). The go
+  reading alone among the zero-tests detectors rests on the ABSENCE of
+  a vetoing line, so it never fires on a run whose own captured tail
+  was truncated (`stdoutTruncated`/`stderrTruncated`): a real run that
+  printed more than 60 no-test lines after the package line that ran
+  has that line outside the tail the detector sees, and keeps its
+  verdict instead of reading as zero-tests. The same gate cuts the
+  other way: a go run that executed nothing but whose tail was
+  truncated for that reason (a `go test -run XNoMatch ./...` over more
+  than 60 packages) is not detected either and keeps its verdict,
+  since a truncated tail of only-no-test lines is indistinguishable
+  from one that dropped a line that ran; `--require-baseline-evidence`
+  is the opt-in net for that case.
+
 ### Fixed
 
 - `patch`'s branch guard charges a git call that was stopped at its time
