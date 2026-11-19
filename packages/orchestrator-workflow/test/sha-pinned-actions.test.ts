@@ -101,7 +101,7 @@ describe("every remote uses: in this repo is SHA-pinned with a version comment",
         readFileSync(`${repoRoot}/${rel}`, "utf8"),
       );
     }
-    expect(pinned).toBeGreaterThan(30);
+    expect(pinned).toBeGreaterThanOrEqual(38);
   });
 });
 
