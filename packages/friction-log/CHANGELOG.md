@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The README said "Four templates" and listed four; v1 ships seven (`tool-error`, `output-overflow`, `workflow-friction`, `tool-missing-capability`, `auth-expiry`, `schema-drift`, `doc-gap`). The README now names all seven, notes `workflow-friction` as the fallback when no category matches, and links to the `docs/commands.md` template table.
 - `file --sink stdout-json` now writes its two status lines to stderr, so stdout carries only the JSON record and `| jq .` parses. Other sinks still print the status lines to stdout.
 - The CLI exits 0 without a stack trace when the reader of its stdout closes the pipe early (`EPIPE`), for example `friction-log file 7 --sink stdout-json | head -c 1`.
 - The CLI also survives a closed stderr reader, for example `friction-log file 7 --sink stdout-json 2>&1 | head -c 1`: writes to a closed stderr are dropped instead of crashing the process, and the run ends with the exit code it would have had anyway (0 when it succeeded, the error code when it failed).
