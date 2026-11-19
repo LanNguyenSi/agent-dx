@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import { combinedOutput } from "../exec.js";
-import { GO_PACKAGE_RESULT_LINE, hasKnownTestSummary } from "./zero-tests.js";
+import {
+  GO_FIELD_SEP,
+  GO_PACKAGE_RESULT_LINE,
+  hasKnownTestSummary,
+} from "./zero-tests.js";
 
 /**
  * Detects when a mutant run's test command failed because the BUILD
@@ -79,14 +83,25 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-/** `FAIL <pkg> [build failed]` / `FAIL <pkg> [setup failed]`. */
-const GO_BUILD_FAILED_LINE = /^FAIL\s+\S+\s+\[(?:build|setup) failed\]\s*$/m;
+/** `FAIL <pkg> [build failed]` / `FAIL <pkg> [setup failed]`. The field
+ * separators are `GO_FIELD_SEP` (`zero-tests.ts`), the same one-line
+ * class `GO_PACKAGE_RESULT_LINE` is built from: a `FAIL` word, a package
+ * path or a marker sitting on a line of its own is never this marker. */
+const GO_BUILD_FAILED_LINE = new RegExp(
+  `^FAIL${GO_FIELD_SEP}\\S+${GO_FIELD_SEP}\\[(?:build|setup) failed\\][ \t]*$`,
+  "m",
+);
 
 /** A test that actually failed under `go test`: the `--- FAIL:` line
  * (also indented, for subtests) or a package's own `FAIL <pkg> <time>`
- * summary (a build failure never carries a duration). */
-const GO_TEST_FAILED =
-  /^\s*--- FAIL:|^FAIL\s+\S+\s+(?:[\d.]+s|\(cached\))\s*$/m;
+ * summary (a build failure never carries a duration). Same shared
+ * separators as the two package-line patterns above: a `FAIL <pkg>`
+ * with its timing on the next line is not a package result line, so it
+ * does not veto a build failure. */
+const GO_TEST_FAILED = new RegExp(
+  `^[ \t]*--- FAIL:|^FAIL${GO_FIELD_SEP}\\S+${GO_FIELD_SEP}(?:[\\d.]+s|\\(cached\\))[ \t]*$`,
+  "m",
+);
 
 /** A package line `go test` printed for a test binary that ran, or a
  * test line of `-v` output: the shapes that say the toolchain is go.

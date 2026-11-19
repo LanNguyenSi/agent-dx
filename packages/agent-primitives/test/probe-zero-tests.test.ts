@@ -793,8 +793,9 @@ describe("hasKnownTestSummary()", () => {
 // what keeps the generic byte-identical fallback off a cached rerun
 // (go's `(cached)` line is byte-identical on the baseline and the
 // mutant run of a rerun plan -- the pair that used to read as
-// `not_run(no_tests_executed)`). go has no zero-tests detector, so
-// none of these captures is ever `detected` either. ---------------
+// `not_run(no_tests_executed)`). None of these captures is a go
+// zero-tests reading either: each ran a test or failed one (see the
+// zero-tests describe below for the captures that are). ---------------
 
 describe("hasKnownTestSummary(): go (captured real go test)", () => {
   it("go: a passing run's `ok <pkg> <time>s` package line is recognized and NOT a zero-tests reading", () => {
@@ -865,6 +866,134 @@ describe("hasKnownTestSummary(): go (captured real go test)", () => {
     expect(hasKnownTestSummary("pkg1: ok  \texample.com/m\t0.329s\n", "")).toBe(
       false,
     );
+  });
+});
+
+// --- go zero-tests (captured real `go test -run XNoMatch ./...` and
+// `go test ./...` runs against one- and two-package throwaway modules,
+// go 1.27.4, see the summary-recognition section of
+// test/fixtures/README.md): both readings exit `0` with nothing
+// executed -- every package line carrying go's own `[no tests to run]`
+// marker, or only `[no test files]` headers -- and the detector takes
+// them, `via: "go"`, like the other detectors take their own silent
+// shapes. A package that ran vetoes the reading. --------------------
+
+describe("detectKnownZeroTestsEvidence(): go zero-tests (captured real go test)", () => {
+  it("go: every package line `[no tests to run]` (a `-run` filter matching no test inside a package that has tests, exit 0) IS a zero-tests detection", () => {
+    const output = readCaptured("go-test-no-tests-to-run");
+    expect(output).toContain("0.262s [no tests to run]");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: true,
+      via: "go",
+    });
+    // The line is still a recognized go package line for the generic
+    // fallback (which the detection outranks anyway).
+    expect(hasKnownTestSummary(output, "")).toBe(true);
+  });
+
+  it("go: a `[no tests to run]` package line arriving on stderr is detected the same way", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        "",
+        "ok  \texample.com/m\t0.262s [no tests to run]\n",
+      ),
+    ).toEqual({ detected: true, via: "go" });
+  });
+
+  it("go: only a `[no test files]` header (no `_test.go` anywhere, exit 0) IS a zero-tests detection; the header is go's statement that nothing ran, not a test summary, so `hasKnownTestSummary` stays false for a run that carries nothing but it", () => {
+    const output = readCaptured("go-test-no-test-files");
+    expect(output).toContain("[no test files]");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: true,
+      via: "go",
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(false);
+  });
+
+  it("go: one package that ran next to one that did not (`[no tests to run]` beside a plain `ok <pkg> <time>` package line) is NOT a zero-tests detection", () => {
+    const output = readCaptured("go-test-no-tests-mixed");
+    expect(output).toContain(
+      "ok  \texample.com/m/m\t0.329s\nok  \texample.com/m/n\t0.329s [no tests to run]",
+    );
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    expect(hasKnownTestSummary(output, "")).toBe(true);
+  });
+
+  it("go: a `[no test files]` header beside a package that ran is NOT a zero-tests detection either (the plain shape of a `go test ./...` over a repo where one of the packages has tests)", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        "ok  \texample.com/m\t0.329s\n?   \texample.com/n\t[no test files]\n",
+        "",
+      ),
+    ).toEqual({ detected: false });
+  });
+
+  it("go: a `--- ` test line vetoes the reading even when every package line carries `[no tests to run]` (an indented subtest line says a test ran); a bare `--- FAIL:` line with no package line stays no detection of anything, as before", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        "ok  \texample.com/m\t0.262s [no tests to run]\n--- PASS: TestAdd (0.00s)\n",
+        "",
+      ),
+    ).toEqual({ detected: false });
+    expect(
+      detectKnownZeroTestsEvidence(
+        "ok  \texample.com/m\t0.262s [no tests to run]\n    --- SKIP: TestAdd/sub (0.00s)\n",
+        "",
+      ),
+    ).toEqual({ detected: false });
+    expect(
+      detectKnownZeroTestsEvidence("--- FAIL: TestX (0.00s)\nFAIL\n", ""),
+    ).toEqual({ detected: false });
+  });
+
+  it("go: a `[build failed]`/`[setup failed]` package line beside a `[no tests to run]` one is NOT this reading (a package line without the marker vetoes; build-failure detection is that line's own detector)", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        "ok  \texample.com/m\t0.262s [no tests to run]\nFAIL\texample.com/n [build failed]\n",
+        "",
+      ),
+    ).toEqual({ detected: false });
+    expect(
+      detectKnownZeroTestsEvidence(
+        "ok  \texample.com/m\t0.262s [no tests to run]\nFAIL\texample.com/n [setup failed]\n",
+        "",
+      ),
+    ).toEqual({ detected: false });
+  });
+
+  it("go: the `(cached)` rerun and a bare duration do not read as `[no tests to run]` with the marker missing: the marker is what decides, not the mere presence of a package line (and the two captures of those rerun shapes stay detected: false)", () => {
+    expect(
+      detectKnownZeroTestsEvidence("ok  \texample.com/m\t(cached)\n", ""),
+    ).toEqual({ detected: false });
+    expect(
+      detectKnownZeroTestsEvidence("ok  \texample.com/m\t0.329s\n", ""),
+    ).toEqual({ detected: false });
+    // And the marker only counts INSIDE a package line: the lone
+    // trailing FAIL word, or an indented or prefixed lookalike, is no
+    // statement of anything.
+    expect(
+      detectKnownZeroTestsEvidence("FAIL [no tests to run]\n", ""),
+    ).toEqual({ detected: false });
+    expect(
+      detectKnownZeroTestsEvidence(
+        "  ok  \texample.com/m\t0.262s [no tests to run]\n",
+        "",
+      ),
+    ).toEqual({ detected: false });
+    expect(
+      detectKnownZeroTestsEvidence(
+        "  ?   \texample.com/m\t[no test files]\n",
+        "",
+      ),
+    ).toEqual({ detected: false });
+    expect(
+      detectKnownZeroTestsEvidence(
+        "pkg1: ?   \texample.com/m\t[no test files]\n",
+        "",
+      ),
+    ).toEqual({ detected: false });
   });
 });
 
@@ -1031,6 +1160,109 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
           w.includes("phpunit"),
       ),
     ).toBe(true);
+  });
+
+  // go zero-tests, baseline side, driven by the CAPTURED go outputs:
+  // both shapes exit `0`, so without the detector this baseline would
+  // go on to certify whatever mutant the run applies.
+  it("a baseline that exits 0 but whose own output is go's `[no tests to run]` package line is refused, never a verdict (go zero-tests detector)", async () => {
+    const repo = initGitRepo();
+    fs.writeFileSync(
+      path.join(repo, "go-test.out"),
+      readCaptured("go-test-no-tests-to-run"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "captured go output",
+      ],
+      { cwd: repo },
+    );
+    // The default mutant (flips `flag`) is invisible to the `cat`
+    // either way: what decides this run is the baseline's own output.
+    const result = await probe(
+      baseOptions(repo, { testCommand: "cat go-test.out" }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("no_tests_executed");
+    expect(
+      result.warnings.some((w) =>
+        /the baseline run's own output shows no test was actually executed \(go\)/.test(
+          w,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("a baseline that exits 0 but whose own output is only go's `[no test files]` header is refused the same way", async () => {
+    const repo = initGitRepo();
+    fs.writeFileSync(
+      path.join(repo, "go-test.out"),
+      readCaptured("go-test-no-test-files"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "captured go output",
+      ],
+      { cwd: repo },
+    );
+    const result = await probe(
+      baseOptions(repo, { testCommand: "cat go-test.out" }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(
+      result.warnings.some((w) =>
+        /the baseline run's own output shows no test was actually executed \(go\)/.test(
+          w,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("negative control: a baseline whose go output mixes a package that ran with one `[no tests to run]` proceeds to a real verdict", async () => {
+    const repo = initGitRepo();
+    fs.writeFileSync(
+      path.join(repo, "go-test.out"),
+      readCaptured("go-test-no-tests-mixed"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "captured go output",
+      ],
+      { cwd: repo },
+    );
+    // The default mutant is a genuine survivor here (the `cat` never
+    // reads fixture.js), and the mixed baseline output is a real run:
+    // the probe proceeds, it does not refuse.
+    const result = await probe(
+      baseOptions(repo, { testCommand: "cat go-test.out" }),
+    );
+    expect(result.status).toBe("survived");
+    expect(result.reason).toBeUndefined();
   });
 });
 
@@ -1240,6 +1472,75 @@ describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
         ),
       ),
     ).toBe(true);
+  });
+
+  it("a mutant that flips a genuinely-passing go-shaped baseline to only `[no tests to run]` package lines, still exit 0, is refused via the go branch, not the byte-identical fallback (the two runs' own text differ by construction here)", async () => {
+    const repo = makeTmpDir();
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: repo,
+    });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+    fs.writeFileSync(
+      path.join(repo, "runner.js"),
+      ["console.log('ok  \\texample.com/m\\t0.329s');", ""].join("\n"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+      { cwd: repo },
+    );
+    const result = await probe(
+      baseOptions(repo, {
+        file: "runner.js",
+        line: 1,
+        replaceText:
+          "console.log('ok  \\texample.com/m\\t0.262s [no tests to run]');",
+        testCommand: "node runner.js",
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("no_tests_executed");
+    expect(
+      result.warnings.some((w) =>
+        /the mutant run's own output shows no test was actually executed \(go\)/.test(
+          w,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("negative control: a mutant that ADDS a `[no test files]` header beside the package that ran stays a scored run (a real mixed reading is not zero-tests on the mutant side either)", async () => {
+    const repo = makeTmpDir();
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: repo,
+    });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+    fs.writeFileSync(
+      path.join(repo, "runner.js"),
+      ["console.log('ok  \\texample.com/m\\t0.329s');", ""].join("\n"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+      { cwd: repo },
+    );
+    const result = await probe(
+      baseOptions(repo, {
+        file: "runner.js",
+        line: 1,
+        replaceText:
+          "console.log('ok  \\texample.com/m\\t0.329s'); console.log('?   \\texample.com/n\\t[no test files]');",
+        testCommand: "node runner.js",
+      }),
+    );
+    expect(result.status).toBe("survived");
+    expect(result.reason).toBeUndefined();
   });
 });
 

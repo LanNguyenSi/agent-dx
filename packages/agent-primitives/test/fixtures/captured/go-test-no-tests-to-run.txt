@@ -1,0 +1,1 @@
+ok  	example.com/m	0.262s [no tests to run]

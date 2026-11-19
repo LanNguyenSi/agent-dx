@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe` gained a `go test` zero-tests detector: when every package
+  result line carries go's own `[no tests to run]` marker (a
+  `-run`/name filter that matched no test inside a package that has
+  tests) or the only package lines are go's `[no test files]` headers
+  (no `_test.go` anywhere) -- both of which exit `0` -- the run reads
+  `not_run`/`no_tests_executed` at the baseline and on a mutant run
+  alike, like every other detector, instead of a real verdict. A
+  package line without the marker, or a `--- ` test line, vetoes the
+  reading, so a package that ran beside one that did not stays a real
+  run. The go build-failure patterns (`GO_BUILD_FAILED_LINE`,
+  `GO_TEST_FAILED`) now build their field separators from the same
+  exported `GO_FIELD_SEP` fragment as `GO_PACKAGE_RESULT_LINE`, so a
+  `FAIL <pkg> [build failed]` marker or a `FAIL <pkg> <time>` package
+  line whose pieces sit on separate lines never matches (the `--- FAIL:`
+  veto and every captured go fixture keep their verdicts).
+
 ### Fixed
 
 - `patch`'s branch guard charges a git call that was stopped at its time

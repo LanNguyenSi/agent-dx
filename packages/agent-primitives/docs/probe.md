@@ -1623,7 +1623,12 @@ line whose remaining counts, once the neutral `warning`/`warnings`
 counts are ignored, are all `skipped` and/or `deselected` -- an
 all-skipped run exits `0` while having executed nothing, and a
 warnings-only `1 warning in X.XXs` (exit `5`) collected nothing behind
-a mere import-time warning). Any hit is
+a mere import-time warning), and go's zero-tests readings (every
+package result line carrying go's own `[no tests to run]` marker -- a
+`-run`/name filter that matched no test inside a package that has
+tests, exit `0` -- or a run whose only package lines are go's `[no
+test files]` headers, no `_test.go` anywhere, exit `0`; a package line
+without the marker, or a `--- ` test line, vetoes the reading). Any hit is
 `status: "inconclusive"`, `reason: "no_tests_executed"`, exit `2`,
 `mutation_probe.result: "not_run"` -- never `"killed"`/`"survived"`, a
 verdict that measured nothing. A baseline that reported no exit code of
@@ -1958,12 +1963,21 @@ unchanged.
 tail, at a line start and with both separators inside the line. A second
 run of the same plan prints the `(cached)` form on both sides, so the two
 tails are byte-identical; recognizing the line keeps the generic fallback
-away and a green go mutant reads `survived` on every run. Go has no
-zero-tests detector: a filter that selects no tests (`ok <pkg> 0.1s [no
-tests to run]`) is recognized as a package line as well and reads
-`survived`, not `not_run`. A go package line also counts as a test runner
-summary for the tsc build-failure rule, so a type error printed next to it
-is not reported as a build failure.
+away and a green go mutant reads `survived` on every run. Go also has a
+zero-tests detector: when EVERY package result line carries go's own
+`[no tests to run]` marker (`ok <pkg> 0.1s [no tests to run]`, a `-run`
+or name filter that matched no test inside a package that has tests,
+exit `0`), or when the only package lines at all are go's `[no test
+files]` headers (`? <pkg> [no test files]`, no `_test.go` anywhere, exit
+`0`), the run is read as `not_run`/`no_tests_executed` -- a baseline
+refused, a mutant run's verdict overridden -- like every other detector.
+A package line without the marker vetoes the reading, so a package that
+ran next to one that did not is a real mixed run and stays a verdict, and
+a `--- ` test line vetoes it too; a `[build failed]`/`[setup failed]`
+line belongs to the build-failure reading below, not to this one. A go
+package line also counts as a test runner summary for the tsc
+build-failure rule, so a type error printed next to it is not reported as
+a build failure.
 
 With no `--timeout` given and a test command that looks like a whole test
 suite rather than one targeted file -- `npm test`, `npm run test`/`npm
@@ -2169,7 +2183,7 @@ whether `--file` was given explicitly or is derived from the patch.
   test file in the command instead of filtering by name. A filter that
   selects NOTHING is already refused at the baseline as
   `no_tests_executed` for the runners the zero-tests detectors recognize
-  (vitest, node's `--test`, PHPUnit, pytest; see the paragraph on a baseline
+  (vitest, node's `--test`, PHPUnit, pytest, go; see the paragraph on a baseline
   that exits `0` but never actually ran a test, above), and
   `--require-baseline-evidence` is the opt-in safety net for any runner,
   including jest and every other one the detectors do not recognize.

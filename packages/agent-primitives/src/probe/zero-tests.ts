@@ -17,12 +17,19 @@ import { combinedOutput } from "../exec.js";
  * built-in test runner's zero-count summary line. `hasKnownTestSummary`
  * backs the generic byte-identical fallback (`step.ts`'s classify step)
  * for a suite neither detector recognizes at all, and also knows go's
- * package result lines (see `GO_PACKAGE_RESULT_LINE` below): go needs
- * no zero-tests detector of its own, but without recognizing its
- * summary a second run of the same probe plan reads the package's own
- * `ok <pkg> (cached)` line -- byte-identical on the baseline and the
- * mutant run -- as a quiet unknown runner and reports
+ * package result lines (see `GO_PACKAGE_RESULT_LINE` below): without
+ * recognizing its summary a second run of the same probe plan reads the
+ * package's own `ok <pkg> (cached)` line -- byte-identical on the
+ * baseline and the mutant run -- as a quiet unknown runner and reports
  * `not_run(no_tests_executed)` for a genuine survivor.
+ *
+ * A fifth shape, go's, is read here too (see `goZeroTestsReading`
+ * below): go itself states that nothing ran in two ways, every package
+ * result line carrying its own `[no tests to run]` marker (a `-run`
+ * filter that matched no test inside a package that has tests) or a
+ * run whose only package lines are `[no test files]` headers (no
+ * `_test.go` in sight) -- and both readings exit `0`, the silent-pass
+ * shape this module exists for.
  *
  * Consumed by `setup.ts` (the baseline-stage check, before a mutant is
  * even applied) and `step.ts` (the mutant-stage check, and the generic
@@ -108,7 +115,7 @@ import { combinedOutput } from "../exec.js";
  */
 
 export type ZeroTestsDetectorName =
-  "vitest" | "node_test" | "phpunit" | "pytest";
+  "vitest" | "node_test" | "phpunit" | "pytest" | "go";
 
 export interface ZeroTestsEvidence {
   detected: boolean;
@@ -121,8 +128,8 @@ export interface ZeroTestsEvidence {
    * `"zero_tests_ambiguous"` and `"no_tests_executed"` `RefusalReason`s
    * (see this module's own docblock above); `step.ts`'s mutant-phase
    * classify step reads it the same way for the mutant run's own
-   * `mutation_probe.reason`; absent for the vitest, node_test and pytest
-   * branches, which have no ambiguous reading to distinguish. */
+   * `mutation_probe.reason`; absent for the vitest, node_test, pytest
+   * and go branches, which have no ambiguous reading to distinguish. */
   ambiguous?: boolean;
 }
 
@@ -262,7 +269,9 @@ function findVitestJsonSummary(
  * whose count is zero: vitest's "No test files found" (no matching
  * file), an all-skipped or otherwise 0-passed/0-failed vitest `Tests`
  * summary (a `-t`/name filter that matched no test inside files vitest
- * still loaded), or node's built-in test runner reporting `tests 0`.
+ * still loaded), node's built-in test runner reporting `tests 0`, or
+ * go's own nothing-ran statements (every package line `[no tests to
+ * run]`, or only `[no test files]` headers).
  * `via` names which detector matched, for a caller's own warning text.
  */
 export function detectKnownZeroTestsEvidence(
@@ -326,6 +335,13 @@ export function detectKnownZeroTestsEvidence(
   if (pytestSummary !== undefined && pytestSummaryIsZeroTests(pytestSummary)) {
     return { detected: true, via: "pytest" };
   }
+  // go: every package result line carries go's own `[no tests to run]`
+  // marker, or the only package lines are `[no test files]` headers (see
+  // `goZeroTestsReading`); both readings exit `0`, which is what makes
+  // them read as a real pass without this branch.
+  if (goZeroTestsReading(combined)) {
+    return { detected: true, via: "go" };
+  }
   return { detected: false };
 }
 
@@ -341,36 +357,106 @@ function hasNodeTestSummaryLine(combined: string): boolean {
 }
 
 /**
+ * The field-separator class every `go test` line pattern is built from:
+ * go separates the fields of its package result lines with tabs (and
+ * pads the status word with spaces), and the `[no tests to run]` marker
+ * with a space. The class is `[ \t]+` and never `\s+`, so every shape
+ * stays inside one line: the lone `ok` or `FAIL` word go itself prints
+ * at the end of a failing run must never absorb the next line's first
+ * token and read as a package line. `GO_PACKAGE_RESULT_LINE` below and
+ * `GO_BUILD_FAILED_LINE` / `GO_TEST_FAILED` in `probe/build-failure.ts`
+ * all build their separators from this one fragment, so the one-line
+ * rule cannot drift between them.
+ */
+export const GO_FIELD_SEP = "[ \\t]+";
+
+/**
  * `go test`'s own package result line, as captured from real runs (see
  * `test/fixtures/captured/go-test-*.txt`): the status word padded to
  * `FAIL`'s width (`ok  `, `FAIL`), then the package path, then the
  * elapsed time (`0.329s`), go's own `(cached)` marker for a rerun of
- * unchanged sources, or go's own `[build failed]`/`[setup failed]`
- * marker, and with `-cover` go appends `\tcoverage: 100.0% of
- * statements` after the time (the pattern is open-ended after the
- * status field precisely so that tail stays part of the recognized
- * shape). go separates the fields with tabs; the separator class is
- * `[ \t]` and never `\s`, so the shape stays inside one line: the lone
- * `ok` or `FAIL` word go itself prints at the end of a failing run
- * must never absorb the next line's first token and read as a package
- * line. `--- FAIL: TestName (0.00s)` (a test line, not a package line,
- * anchored away by the `^` here) is recognized only by
- * `probe/build-failure.ts`'s `GO_RUN_SHAPE`, which ORs this exact
- * source with its own test-line alternative, so that package-line
- * alternative cannot drift between the two. (GO_BUILD_FAILED_LINE and
- * GO_TEST_FAILED in build-failure.ts still restate go lines on their own.)
+ * unchanged sources, or go's own `[build failed]`/`[setup failed]`/
+ * `[no tests to run]`-bearing marker, and with `-cover` go appends
+ * `\tcoverage: 100.0% of statements` after the time (the pattern is
+ * open-ended after the status field precisely so that tail stays part of
+ * the recognized shape). The separator class and the one-line rule are
+ * `GO_FIELD_SEP` above, shared with `probe/build-failure.ts`; the lone
+ * `ok` or `FAIL` word go itself prints at the end of a failing run is
+ * not a package line, and neither is a `--- FAIL: TestName (0.00s)`
+ * test line (recognized only by `probe/build-failure.ts`'s
+ * `GO_RUN_SHAPE`, which ORs this exact source with its own test-line
+ * alternative, so that package-line alternative cannot drift between the
+ * two).
  */
-export const GO_PACKAGE_RESULT_LINE =
-  /^(?:ok|FAIL)[ \t]+\S+[ \t]+(?:[\d.]+s|\(cached\)|\[)/m;
+export const GO_PACKAGE_RESULT_LINE = new RegExp(
+  `^(?:ok|FAIL)${GO_FIELD_SEP}\\S+${GO_FIELD_SEP}(?:[\\d.]+s|\\(cached\\)|\\[)`,
+  "m",
+);
+
+/** go's own marker saying "this package's test binary ran but the name
+ * filter matched no test in it": `ok  <pkg> 0.262s [no tests to run]`
+ * (captured real; go separates the timing from the marker with a space,
+ * not a tab). Tested INSIDE an already-matched package line, so it needs
+ * no anchors of its own; it never rescued a bare `ok`/`FAIL` word line,
+ * which never matches the package line to begin with. */
+const GO_NO_TESTS_TO_RUN_MARKER = /\[no tests to run\]/;
+
+/** go's own package header saying "this package has no `_test.go` file
+ * at all": `?   <pkg> [no test files]` (captured real, the `?` padded
+ * like the status word and the same tab-separated shape otherwise). */
+const GO_NO_TEST_FILES_LINE = new RegExp(
+  `^\\?${GO_FIELD_SEP}\\S+${GO_FIELD_SEP}\\[no test files\\]$`,
+  "m",
+);
+
+/** One `--- PASS:`/`--- FAIL:`/`--- SKIP:` test line of `go test` output
+ * (subtests are indented): where one exists a test did run, whatever the
+ * package lines say. Same one-line rule as `GO_FIELD_SEP`: a `--- ` test
+ * line needs its own line, not a status word from the previous one. */
+const GO_TEST_LINE = /^[ \t]*--- (?:PASS|FAIL|SKIP):/;
+
+/**
+ * Whether `go test`'s output states that nothing ran: EVERY package
+ * result line carries go's own `[no tests to run]` marker (a
+ * `-run`/name filter that matched no test inside a package that has
+ * tests; go exits `0` for that), or the only package lines at all are
+ * go's `[no test files]` headers (no `_test.go` anywhere; exit `0`).
+ * Both are the silent-pass shape: exit `0` with nothing executed. Any
+ * package line WITHOUT the marker vetoes the reading -- a timing, a
+ * `(cached)` rerun or a `[build failed]`/`[setup failed]` marker means
+ * that line is not this reading's (the test ran, or the build-failure
+ * detector has that line instead) -- and so does any `--- ` test line.
+ * A package that ran next to one that did not is a real mixed run and
+ * not zero-tests.
+ */
+function goZeroTestsReading(combined: string): boolean {
+  let sawStatementThatNothingRan = false;
+  for (const line of combined.split("\n")) {
+    if (GO_PACKAGE_RESULT_LINE.test(line)) {
+      if (GO_NO_TESTS_TO_RUN_MARKER.test(line)) {
+        sawStatementThatNothingRan = true;
+      } else {
+        return false;
+      }
+    } else if (GO_NO_TEST_FILES_LINE.test(line)) {
+      sawStatementThatNothingRan = true;
+    } else if (GO_TEST_LINE.test(line)) {
+      return false;
+    }
+  }
+  return sawStatementThatNothingRan;
+}
 
 /**
  * Whether `stdoutTail`/`stderrTail` carries ANY summary line one of the
  * detectors above recognizes, zero-count or not (a normal `Tests  5
- * passed (5)` included), or a `go test` package result line (go has no
- * zero-tests detector; only this function recognizes it): used by the
- * generic byte-identical fallback (`step.ts`) to stay out of the way of
- * output these detectors already understand, so the fallback only ever
- * fires for a genuinely unknown test runner.
+ * passed (5)` included), or a `go test` package result line (go's zero-
+ * tests reading additionally takes its `[no test files]` headers, which
+ * are a statement that nothing ran, not a test summary, and stay
+ * unrecognized here): used by the generic byte-identical fallback
+ * (`step.ts`) to stay out of the way of output these detectors already
+ * understand, so the fallback only ever fires for a genuinely unknown
+ * test runner.
  */
 export function hasKnownTestSummary(
   stdoutTail: string,

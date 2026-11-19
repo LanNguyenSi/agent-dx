@@ -174,6 +174,24 @@ describe("detectBuildFailure(): captured real outputs", () => {
     });
   });
 
+  it("go test: a `FAIL <pkg> [build failed]` whose pieces sit on separate lines is NOT the marker: the separators come from the shared `GO_FIELD_SEP` and stay inside one line (a `\\s`-class separator matches these exact splits)", () => {
+    for (const output of [
+      "FAIL\nexample.com/m [build failed]\n",
+      "FAIL\texample.com/m\n[build failed]\n",
+    ]) {
+      expect(detectBuildFailure(output, "")).toEqual({ detected: false });
+    }
+  });
+
+  it("go test: a `FAIL <pkg> <time>` package line whose timing sits on the next line does NOT veto the build failure (no test observed the mutant; a `\\s`-class `GO_TEST_FAILED` reads this split as a failing package line and drops the build failure)", () => {
+    expect(
+      detectBuildFailure(
+        "FAIL\texample.com/m [build failed]\nFAIL\texample.com/n\n0.435s\n",
+        "",
+      ),
+    ).toEqual({ detected: true, via: "go" });
+  });
+
   it("tsc: a pretest tsc error with no test-runner summary is a build failure", () => {
     expect(
       detectBuildFailure(captured("tsc-pretest-build-failed"), ""),
