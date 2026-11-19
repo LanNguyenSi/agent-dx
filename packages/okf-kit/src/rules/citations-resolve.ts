@@ -954,25 +954,31 @@ const TEST_CLOSING_LINE_RE = /^\s*\}\)\s*;\s*$/;
 // of Go's four test-function prefixes and an optional name suffix, `func
 // Example()` with no suffix being valid, hence `\w*` not `\w+`); a testify
 // suite method `func (r *T) TestXxx(...)`, the same four prefixes reached
-// through an optional `(receiver)` between `func` and the name; and, one
-// scope in, a subtest `t.Run("name", func(t *testing.T) {...})` opened by a
-// method call on any receiver identifier. The first two are function-shaped
-// and close on a line that is exactly `}` once trimmed (a func's closing
-// brace, nested or not); a subtest is call-shaped and closes on a line that
-// is exactly `})` once trimmed (the `)` closes the callback's argument
-// list, the `}` its body). Like the JS grammar's `});`, which likewise
-// matches a nested block's close, these are lexical approximations of "the
-// range is a whole block", not AST checks; the closing line is paired to the
-// head kind, so a subtest ended on a plain `}`, or a function ended on
-// `})`, is still the drift signal it was.
+// through an optional `(receiver)` between `func` and the name (the receiver
+// is the simple `name Type`/`name *Type` shape: a generic receiver
+// (`func (s *S[T]) TestX(`) or an unnamed one (`func (*S) TestX(`) is not
+// recognised); and, one scope in, a subtest
+// `t.Run("name", func(t *testing.T) {...})` opened by a method call on any
+// receiver identifier and carrying its `func` literal on the head line. The
+// first two are function-shaped and close on a line that is exactly `}`
+// once trimmed (a func's closing brace, nested or not); a subtest is
+// call-shaped and closes on a line that is exactly `})` once trimmed (the
+// `)` closes the callback's argument list, the `}` its body). Like the JS
+// grammar's `});`, which likewise matches a nested block's close, these are
+// lexical approximations of "the range is a whole block", not AST checks;
+// the closing line is paired to the head kind, so a subtest ended on a
+// plain `}`, or a function ended on `})`, is still the drift signal it was.
 const GO_TEST_FILE_RE = /_test\.go$/i;
 const GO_TEST_HEAD_LINE_RE =
   /^func\s+(?:\(\w+\s+\*?\w+\)\s+)?(?:Test|Benchmark|Fuzz|Example)\w*\(/;
 const GO_TEST_CLOSING_LINE_RE = /^\}$/;
-// A Go subtest head (`^\s*\w+\.Run\(`, any receiver at any indent; the `(`
-// is required immediately after `Run`, so a `x.Runner(` call or a `t.Run`
-// sitting inside a string or comment is not a head) and its closing `})`.
-const GO_SUBTEST_HEAD_LINE_RE = /^\s*\w+\.Run\(/;
+// A Go subtest head (`^\s*\w+\.Run\(.*\bfunc\s*\(`: any receiver at any
+// indent, the `(` required immediately after `Run`, and a `func` literal
+// required on the same line, so an `x.Runner(` call, a callback-less
+// `cmd.Run()` or `suite.Run(t, new(S))` call, and a look-alike the line
+// does not start with -- a `t.Run` inside a comment or a string -- are all
+// not heads) and its closing `})`.
+const GO_SUBTEST_HEAD_LINE_RE = /^\s*\w+\.Run\(.*\bfunc\s*\(/;
 const GO_SUBTEST_CLOSING_LINE_RE = /^\}\)$/;
 // Block-head detection for test-range-straddles-block (see the doc block
 // above and checkTestRangeStraddle below): a wider set of head shapes than
@@ -982,17 +988,20 @@ const GO_SUBTEST_CLOSING_LINE_RE = /^\}\)$/;
 // deliberately not handled: not needed for any bundle this rule has been
 // measured against. A `_test.go` target gets GO_TEST_BLOCK_HEAD_RE instead
 // (a Go file has no describe/it/test heads; the Go straddle grammar is the
-// Go head grammar -- both the func/suite-method heads and the `t.Run(`
-// subtest heads the boundary check knows).
+// Go head grammar -- both the func/suite-method heads and the
+// `<ident>.Run(..., func(` subtest heads the boundary check knows).
 const TEST_BLOCK_HEAD_RE =
   /^\s*(?:describe|it|test)(?:\.(?:only|skip|each))?\s*\(/;
-// The Go straddle head set: the union of the two Go head shapes above, each
-// accepted at any indent (a `t.Run(` lives one scope in, so it is indented),
-// used by checkFullTarget's straddle call for a `_test.go` target. Sibling
-// `t.Run(` blocks at the same indent straddle; one nested deeper than the
-// range's start is skipped by checkTestRangeStraddle's indent rule.
+// The Go straddle head set: the union of the two Go head shapes above, with
+// the same column rule as the boundary check -- the `func` alternative only
+// counts at column 0 exactly as GO_TEST_HEAD_LINE_RE requires, so an
+// indented `func TestX(` look-alike is not a straddle head; only the
+// `<ident>.Run(..., func(` alternative may be indented (a subtest lives one
+// scope in), used by checkFullTarget's straddle call for a `_test.go`
+// target. Sibling subtests at the same indent straddle; one nested deeper
+// than the range's start is skipped by checkTestRangeStraddle's indent rule.
 const GO_TEST_BLOCK_HEAD_RE =
-  /^\s*(?:func\s+(?:\(\w+\s+\*?\w+\)\s+)?(?:Test|Benchmark|Fuzz|Example)\w*\(|\w+\.Run\()/;
+  /^(?:func\s+(?:\(\w+\s+\*?\w+\)\s+)?(?:Test|Benchmark|Fuzz|Example)\w*\(|\s*\w+\.Run\(.*\bfunc\s*\()/;
 // Markdown block-boundary check (see checkRangeBoundary): a range boundary
 // line that is nothing but a bracket (open or close), optionally with a
 // trailing `,`/`;`, is always a drift signal. A code-fence delimiter is
@@ -1881,8 +1890,9 @@ function isMatchingFenceClosingLine(
  * equivalents): the range must start on a `describe(`/`it(` head line and
  * end on a matching closing `});` line; a Go `_test.go` target gets Go's
  * own grammar instead: a `func TestXxx(`-style head (a plain test function
- * or a testify suite method `func (r *T) TestXxx(`), or a `t.Run(` subtest
- * at any indent -- and a closing line paired to that head kind: exactly
+ * or a testify suite method `func (r *T) TestXxx(`), or an
+ * `<ident>.Run(..., func(` subtest at any indent -- and a closing line
+ * paired to that head kind: exactly
  * `}` once trimmed for a function head, exactly `})` once trimmed for a
  * subtest (see GO_TEST_HEAD_LINE_RE / GO_SUBTEST_HEAD_LINE_RE and
  * GO_TEST_CLOSING_LINE_RE / GO_SUBTEST_CLOSING_LINE_RE). Severity split, by evidence

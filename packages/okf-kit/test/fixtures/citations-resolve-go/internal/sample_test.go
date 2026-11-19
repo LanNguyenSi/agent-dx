@@ -44,3 +44,28 @@ func TestNotAHead(t *testing.T) {
 	name := "t.Run(literal)"
 	_ = name
 }
+
+func TestSuiteRun(t *testing.T) {
+	suite.Run(t, new(DeploySuite))
+}
+
+func (s DeploySuite) TestValueReceiver(t *testing.T) {
+	s.Log("value receiver")
+}
+
+func (s DeploySuite) TestValueTwo() {
+	s.Run("x", func() {
+		work()
+	})
+}
+
+func TestLookalikes(t *testing.T) {
+	t.Run("first", func(t *testing.T) {
+		work()
+	})
+	func TestX(t *testing.T) { // synthetic indented head look-alike
+		work()
+	}
+	cmd.Run()
+	x.Runner("nope", func() {})
+}

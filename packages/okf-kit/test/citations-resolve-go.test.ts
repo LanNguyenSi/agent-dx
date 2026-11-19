@@ -265,6 +265,7 @@ describe("citations-resolve Go subtest and suite-method test heads", () => {
     );
     expect(f).toBeDefined();
     expect(f?.message).toContain("[test-range-end-not-closing]");
+    expect(f?.message).toContain('closing "})"');
     expect(f?.severity).toBe("notice");
   });
 
@@ -316,5 +317,49 @@ describe("citations-resolve Go subtest and suite-method test heads", () => {
         `expected no straddle for ${citation}`,
       ).toHaveLength(0);
     }
+  });
+
+  it("a value-receiver suite-method head closes a clean short-form range on }", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    expect(
+      findingFor(findings, "internal/sample_test.go:52-54 (short-form)"),
+    ).toBeUndefined();
+  });
+
+  it('a testify s.Run("x", func() {) subtest head closes a clean short-form range on })', () => {
+    const findings = citationsResolveRule.run(loadGo());
+    expect(
+      findingFor(findings, "internal/sample_test.go:57-59 (short-form)"),
+    ).toBeUndefined();
+  });
+
+  it("a suite.Run(t, new(S)) call with no func literal is start-not-head, not a subtest head", () => {
+    const findings = citationsResolveRule.run(loadGo());
+    const f = findingFor(
+      findings,
+      "internal/sample_test.go:49-50 (short-form)",
+    );
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[test-range-start-not-head]");
+    expect(f?.severity).toBe("warning");
+  });
+
+  it("under --require-anchors a full range from one suite method into the next suite method straddles", () => {
+    const findings = citationsResolveRule.run(loadGo(true));
+    const straddles = findingsFor(
+      findings,
+      "internal/sample_test.go:52-56",
+    ).filter((f) => f.message.includes("[test-range-straddles-block]"));
+    expect(straddles).toHaveLength(1);
+    expect(straddles[0]?.severity).toBe("warning");
+  });
+
+  it("under --require-anchors an indented func look-alike, a bare cmd.Run() and an x.Runner( call at the start's indent are not straddle heads", () => {
+    const findings = citationsResolveRule.run(loadGo(true));
+    expect(
+      findingsFor(findings, "internal/sample_test.go:63-70").filter((f) =>
+        f.message.includes("[test-range-straddles-block]"),
+      ),
+    ).toHaveLength(0);
   });
 });
