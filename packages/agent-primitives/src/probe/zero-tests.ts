@@ -29,7 +29,17 @@ import { combinedOutput } from "../exec.js";
  * filter that matched no test inside a package that has tests) or a
  * run whose only package lines are `[no test files]` headers (no
  * `_test.go` in sight) -- and both readings exit `0`, the silent-pass
- * shape this module exists for.
+ * shape this module exists for. Unlike every other reading here, this
+ * one rests on the ABSENCE of vetoing lines (a package line without
+ * the marker, a `--- ` test line), and a detector that reads only the
+ * captured tail cannot tell "absent" from "scrolled out":
+ * `detectKnownZeroTestsEvidence` is never run past a truncated tail
+ * on this branch (its `tailsTruncated` parameter below), so a real
+ * run that printed more than `TAIL_LINES` no-test lines after the
+ * package line that ran keeps its verdict instead of being refused as
+ * zero-tests (round-1 review finding: the scrolled-out vetoing line
+ * read a real baseline as `no_tests_executed`, and on the mutant side
+ * overrode a real verdict).
  *
  * Consumed by `setup.ts` (the baseline-stage check, before a mutant is
  * even applied) and `step.ts` (the mutant-stage check, and the generic
@@ -273,10 +283,26 @@ function findVitestJsonSummary(
  * go's own nothing-ran statements (every package line `[no tests to
  * run]`, or only `[no test files]` headers).
  * `via` names which detector matched, for a caller's own warning text.
+ *
+ * `tailsTruncated` is the run's own `ExecResult.stdoutTruncated ||
+ * ExecResult.stderrTruncated` (`exec.ts`): true when either tail holds
+ * fewer lines than the run actually printed. It gates ONLY the go
+ * branch, which alone rests on the ABSENCE of a line (any package line
+ * without the `[no tests to run]` marker, or any `--- ` test line,
+ * vetoes it) -- and a vetoing line scrolled out of a truncated tail is
+ * indistinguishable from one that never existed, so a truncated tail
+ * never yields the go reading (round-1 review finding: a real run
+ * with more than `TAIL_LINES` no-test lines after the package line
+ * that ran read as zero-tests). The other detectors all read a PRESENT
+ * summary line, which a truncated tail can miss but never invent, so
+ * they are unchanged by this flag. Omitted (unit tests, and any caller
+ * with no exec result to consult) means "not truncated": unchanged
+ * behavior, go branch included.
  */
 export function detectKnownZeroTestsEvidence(
   stdoutTail: string,
   stderrTail: string,
+  tailsTruncated = false,
 ): ZeroTestsEvidence {
   const combined = combinedOutput(stdoutTail, stderrTail);
   const jsonSummary = findVitestJsonSummary(stdoutTail, stderrTail);
@@ -338,8 +364,14 @@ export function detectKnownZeroTestsEvidence(
   // go: every package result line carries go's own `[no tests to run]`
   // marker, or the only package lines are `[no test files]` headers (see
   // `goZeroTestsReading`); both readings exit `0`, which is what makes
-  // them read as a real pass without this branch.
-  if (goZeroTestsReading(combined)) {
+  // them read as a real pass without this branch. The reading is fired
+  // only on an UNTRUNCATED tail (see this function's `tailsTruncated`
+  // parameter): it rests on the absence of a vetoing line, and a
+  // truncated tail has already dropped the lines that could veto it --
+  // a real run with >60 no-test lines after its one package line that
+  // ran would otherwise lose that line to the tail bound and be read
+  // as zero-tests.
+  if (!tailsTruncated && goZeroTestsReading(combined)) {
     return { detected: true, via: "go" };
   }
   return { detected: false };
@@ -403,7 +435,11 @@ const GO_NO_TESTS_TO_RUN_MARKER = /\[no tests to run\]/;
 
 /** go's own package header saying "this package has no `_test.go` file
  * at all": `?   <pkg> [no test files]` (captured real, the `?` padded
- * like the status word and the same tab-separated shape otherwise). */
+ * like the status word and the same tab-separated shape otherwise).
+ * The trailing `$` is load-bearing: go prints nothing after the
+ * header, so a line with any further content is not go's statement
+ * that nothing ran (a `$`-less pattern let a lookalike line read as
+ * one, round-1 review finding). */
 const GO_NO_TEST_FILES_LINE = new RegExp(
   `^\\?${GO_FIELD_SEP}\\S+${GO_FIELD_SEP}\\[no test files\\]$`,
   "m",

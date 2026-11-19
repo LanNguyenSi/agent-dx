@@ -23,7 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exported `GO_FIELD_SEP` fragment as `GO_PACKAGE_RESULT_LINE`, so a
   `FAIL <pkg> [build failed]` marker or a `FAIL <pkg> <time>` package
   line whose pieces sit on separate lines never matches (the `--- FAIL:`
-  veto and every captured go fixture keep their verdicts).
+  veto and every captured go fixture keep their verdicts). The go
+  reading alone among the zero-tests detectors rests on the ABSENCE of
+  a vetoing line, so it never fires on a run whose own captured tail
+  was truncated (`stdoutTruncated`/`stderrTruncated`): a real run that
+  printed more than 60 no-test lines after the package line that ran
+  has that line outside the tail the detector sees, and keeps its
+  verdict instead of reading as zero-tests.
 
 ### Fixed
 

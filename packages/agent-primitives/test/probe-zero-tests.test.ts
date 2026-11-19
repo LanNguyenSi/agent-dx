@@ -995,6 +995,73 @@ describe("detectKnownZeroTestsEvidence(): go zero-tests (captured real go test)"
       ),
     ).toEqual({ detected: false });
   });
+
+  it("go: a TRUNCATED tail is never the go reading: alone among the detectors this one rests on ABSENT vetoing lines, so a tail that exec.ts reports as truncated (a real run's one package line that ran, then >60 no-test lines -- the ran line scrolled out of the 60-line tail) must not read as zero-tests, while the same text untruncated still is (round-1 review finding)", () => {
+    const allNoTestFiles = Array.from(
+      { length: 60 },
+      () => "?   \texample.com/n\t[no test files]",
+    ).join("\n");
+    // Same text untruncated: the reading it always was (the
+    // go-test-no-test-files capture pins the one-header case).
+    expect(detectKnownZeroTestsEvidence(`${allNoTestFiles}\n`, "")).toEqual({
+      detected: true,
+      via: "go",
+    });
+    expect(
+      detectKnownZeroTestsEvidence(`${allNoTestFiles}\n`, "", true),
+    ).toEqual({ detected: false });
+    const allNoTestsToRun = Array.from(
+      { length: 60 },
+      () => "ok  \texample.com/n\t0.262s [no tests to run]",
+    ).join("\n");
+    expect(detectKnownZeroTestsEvidence(allNoTestsToRun, "", true)).toEqual({
+      detected: false,
+    });
+    // A truncated STDERR tail gates it the same way: the callers pass
+    // one OR over both of exec.ts's truncation fields.
+    expect(
+      detectKnownZeroTestsEvidence("", `${allNoTestFiles}\n`, true),
+    ).toEqual({ detected: false });
+  });
+
+  it("go: a `[no test files]` header with ANY content after it is not go's header line: the trailing `$` on GO_NO_TEST_FILES_LINE is load-bearing (round-1 review finding: a mutant removing it survived the suite); the bare header stays detected, so this tests the anchor and nothing else", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        "?   \texample.com/m\t[no test files] extra\n",
+        "",
+      ),
+    ).toEqual({ detected: false });
+    expect(
+      detectKnownZeroTestsEvidence(
+        "?   \texample.com/m\t[no test files]\n",
+        "",
+      ),
+    ).toEqual({ detected: true, via: "go" });
+  });
+
+  it("the truncation flag gates ONLY the go branch: every other detector reads its own PRESENT summary line out of a tail flagged as truncated, unchanged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        " Test Files  1 skipped (1)\n      Tests  2 skipped (2)\n",
+        "",
+        true,
+      ),
+    ).toEqual({ detected: true, via: "vitest" });
+    expect(detectKnownZeroTestsEvidence("# tests 0\n", "", true)).toEqual({
+      detected: true,
+      via: "node_test",
+    });
+    expect(
+      detectKnownZeroTestsEvidence("no tests ran in 0.01s\n", "", true),
+    ).toEqual({ detected: true, via: "pytest" });
+    expect(
+      detectKnownZeroTestsEvidence(
+        "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.\n\nNo tests executed!\n",
+        "",
+        true,
+      ),
+    ).toEqual({ detected: true, via: "phpunit", ambiguous: false });
+  });
 });
 
 // --- probe() through the shared baseline-stage check (setup.ts): a
@@ -1264,6 +1331,55 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
     expect(result.status).toBe("survived");
     expect(result.reason).toBeUndefined();
   });
+
+  it("negative control: a baseline whose go-shaped output printed one package line that ran BEFORE 61 `[no test files]` headers proceeds to a real verdict -- the ran line has scrolled out of exec.ts's 60-line tail, the truncated tail must not read as go zero-tests (round-1 review finding)", async () => {
+    // The real shape this closes: `go test ./...` over a module with
+    // one tested package and a long tail of untested ones prints the
+    // `ok <pkg> <time>` line for the package that ran, then a `[no
+    // test files]` header per untested package; past 60 headers that
+    // ran line is out of the captured tail (stdoutTruncated: true),
+    // leaving a tail of nothing but headers -- exactly the tail the
+    // go reading must not fire on once truncated (zero-tests.ts).
+    const repo = initGitRepo();
+    fs.writeFileSync(
+      path.join(repo, "runner.js"),
+      [
+        "console.log('ok  \\texample.com/m\\t0.329s');",
+        "for (let i = 0; i < 61; i++) console.log('?   \\texample.com/n\\t[no test files]');",
+        "",
+      ].join("\n"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "go-shaped noisy runner",
+      ],
+      { cwd: repo },
+    );
+    // The default mutant (flips `flag`) is a genuine survivor here:
+    // the runner never reads fixture.js, so both runs print the same
+    // 62 lines, exit 0. Without the truncation gate the baseline's
+    // all-header tail is refused as `no_tests_executed` here; with
+    // it, the run proceeds to the real `survived` verdict.
+    const result = await probe(
+      baseOptions(repo, { testCommand: "node runner.js" }),
+    );
+    expect(result.status).toBe("survived");
+    expect(result.reason).toBeUndefined();
+    expect(
+      result.warnings.some((w) =>
+        /the baseline run's own output shows no test was actually executed/.test(
+          w,
+        ),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("probe(): --require-baseline-evidence", () => {
@@ -1511,6 +1627,51 @@ describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
         ),
       ),
     ).toBe(true);
+  });
+
+  it("negative control: a mutant run whose go-shaped output printed one package line that ran BEFORE 61 `[no test files]` headers keeps its real verdict -- the mutant side's truncated tail must not override it with the go zero-tests reading (round-1 review finding)", async () => {
+    // Same scrolled-out-ran-line shape as the baseline-side case,
+    // entered only from the mutant run's own output: the baseline here
+    // is a short, untruncated go-shaped pass line, and only the
+    // MUTANT run prints the 62-line shape whose 60-line tail is all
+    // `[no test files]` headers. Without the truncation gate this
+    // reading fires on the mutant side and turns the run
+    // `inconclusive`/`no_tests_executed` (`mutation_probe.result:
+    // "not_run"`); with it the real verdict stands.
+    const repo = makeTmpDir();
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: repo,
+    });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+    fs.writeFileSync(
+      path.join(repo, "runner.js"),
+      ["console.log('ok  \\texample.com/m\\t0.329s');", ""].join("\n"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+      { cwd: repo },
+    );
+    const result = await probe(
+      baseOptions(repo, {
+        file: "runner.js",
+        line: 1,
+        replaceText:
+          "console.log('ok  \\texample.com/m\\t0.329s'); for (let i = 0; i < 61; i++) console.log('?   \\texample.com/n\\t[no test files]');",
+        testCommand: "node runner.js",
+      }),
+    );
+    expect(result.status).toBe("survived");
+    expect(result.reason).toBeUndefined();
+    expect(
+      result.warnings.some((w) =>
+        /the mutant run's own output shows no test was actually executed/.test(
+          w,
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("negative control: a mutant that ADDS a `[no test files]` header beside the package that ran stays a scored run (a real mixed reading is not zero-tests on the mutant side either)", async () => {

@@ -186,7 +186,7 @@ byte-identical to itself. Consumed by `probe-zero-tests.test.ts`.
 - `go-test-no-tests-to-run.txt`: `go test -run XNoMatch ./...` on the
   same module (exit `0`) -- the package line's ` [no tests to run]`
   marker tail, go's own statement that its test binary ran but the
-  name filter matched no test. The detector reads
+  name filter matched no test. The detector reads this as zero tests
   (`probe`'s `via: "go"` zero-tests branch).
 - `go-test-no-test-files.txt`: `go test ./...` on the same module with
   the `_test.go` file removed (exit `0`) -- go's `? <pkg> [no test
