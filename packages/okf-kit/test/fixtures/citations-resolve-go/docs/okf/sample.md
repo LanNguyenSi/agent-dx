@@ -3,6 +3,7 @@ type: reference
 title: Fixture doc for okf-citations-resolve .go targets and the extension-unrecognised notice
 sources:
   - internal/main.go
+  - internal/sample_test.go
   - web/app.ts
 ---
 
@@ -47,3 +48,13 @@ Anchored recognised `.go` citation, no notice: `internal/main.go:9-12#"needle in
 Anchored recognised `.ts` citation, no notice: `web/app.ts:1-2#"needle in app"`.
 
 CITATION_RE prefix look-alikes, never a `.go` citation: `src/x.gomod:3` gets a `.gomod` notice, `src/x.go.bak:3` gets a `.bak` notice, `src/x.golden:3` gets a `.golden` notice.
+
+Go subtest and suite-method heads, short-form boundaries into `internal/sample_test.go`. The suite method `internal/sample_test.go:7-11` and the `t.Run` subtest `internal/sample_test.go:16-20` each bound a whole block (:7-11, :16-20); a subtest ended on a plain brace (:16-19) and a function ended on `})` (:13-20) are both end-not-closing notices.
+
+Shapes that are not Go heads, so a range starting on one is start-not-head drift, named by `internal/sample_test.go:41-46`: an `x.Runner` call (:42-46), a `t.Run` in a comment (:43-45), a `t.Run` in a string (:44-46).
+
+Straddle check, full citations only: `internal/sample_test.go:25-28` straddles a sibling `t.Run`, while `internal/sample_test.go:34-38` nests one deeper and `internal/sample_test.go:16-20` cites a clean whole subtest.
+
+Value receivers, testify subtests and callback-less Run calls: the value-receiver suite method `internal/sample_test.go:52-54` and the testify `s.Run("x", func() {` subtest `internal/sample_test.go:57-59` each bound a whole block (:52-54, :57-59), and a `suite.Run(t, new(S))` call with no callback is start-not-head drift, not a subtest head (:49-50), and so is a `cmd.Run(newfunc(x))` call whose argument only ends in `func` (:69-71).
+
+Straddle look-alikes, full citations only: `internal/sample_test.go:52-56` straddles from one suite method into the next suite method's head, while `internal/sample_test.go:63-70` runs over an indented `func TestX(` look-alike, a `cmd.Run(newfunc(x))` call (no func literal) and an `x.Runner(` call, all at the range's own start indent, without straddling into any of them.

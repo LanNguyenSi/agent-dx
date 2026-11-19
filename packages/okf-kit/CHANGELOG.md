@@ -40,6 +40,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   between); and `from <citation> to <citation>`. Other wordings are judged
   like any citation. Without the flag `log.md` stays untouched, as before.
 
+### Changed
+
+- `citations-resolve` now recognises two more Go test-block shapes as
+  heads for a `_test.go` target's block-boundary check (`test-range-*`) and
+  the opt-in `test-range-straddles-block`: a testify suite method
+  (`func (r *T) TestXxx(`) and an `<ident>.Run(..., func(` subtest at any
+  indent. The closing line is paired to the head kind, so a subtest block
+  ends on `})` and a function or suite-method block ends on `}`; a
+  mismatched pair keeps the `test-range-end-not-closing` notice. The `(`
+  must follow `Run` exactly and a `func` literal must open on the same line,
+  so an `x.Runner(` call and a callback-less `cmd.Run()` or
+  `suite.Run(t, new(S))` call are not heads, and a look-alike is not a head
+  unless the line starts with it, so a `t.Run` inside a string or comment
+  never is; a generic receiver (`func (s *S[T]) TestX(`) and an unnamed
+  receiver are not recognised. In the straddle check the `func` head
+  alternative counts at column 0 only, exactly as in the boundary check, and
+  two sibling subtests at the same indent inside one range straddle, while a
+  subtest nested deeper than the range's start does not.
+
 ## [0.22.0] - 2026-11-17
 
 ### Added
