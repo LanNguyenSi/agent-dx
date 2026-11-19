@@ -286,6 +286,7 @@ describe("citations-resolve Go subtest and suite-method test heads", () => {
       "internal/sample_test.go:42-46 (short-form)",
       "internal/sample_test.go:43-45 (short-form)",
       "internal/sample_test.go:44-46 (short-form)",
+      "internal/sample_test.go:69-71 (short-form)",
     ]) {
       const f = findingFor(findings, citation);
       expect(f, `expected start-not-head for ${citation}`).toBeDefined();
@@ -354,7 +355,7 @@ describe("citations-resolve Go subtest and suite-method test heads", () => {
     expect(straddles[0]?.severity).toBe("warning");
   });
 
-  it("under --require-anchors an indented func look-alike, a bare cmd.Run() and an x.Runner( call at the start's indent are not straddle heads", () => {
+  it("under --require-anchors an indented func look-alike, a cmd.Run(newfunc(x)) call and an x.Runner( call at the start's indent are not straddle heads", () => {
     const findings = citationsResolveRule.run(loadGo(true));
     expect(
       findingsFor(findings, "internal/sample_test.go:63-70").filter((f) =>

@@ -66,6 +66,6 @@ func TestLookalikes(t *testing.T) {
 	func TestX(t *testing.T) { // synthetic indented head look-alike
 		work()
 	}
-	cmd.Run()
+	cmd.Run(newfunc(x))
 	x.Runner("nope", func() {})
 }
