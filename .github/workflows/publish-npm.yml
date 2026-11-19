@@ -131,19 +131,6 @@ jobs:
             exit 1
           fi
 
-      - name: Fetch the workflow's own helper scripts
-        # The tagged checkout above may predate .github/scripts/check-latest.mjs
-        # (a workflow_dispatch of an old tag), so the latest check runs the
-        # scripts from the revision this workflow runs from. Sparse, outside
-        # every package directory, no credentials, and no repository code is
-        # executed by this step.
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          ref: ${{ github.sha }}
-          path: _publish-scripts
-          sparse-checkout: .github/scripts
-          persist-credentials: false
-
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -180,6 +167,20 @@ jobs:
         # published package (orchestrator-workflow, okf-kit, agent-primitives, friction-log)
         # needs its own separate Trusted Publisher entry pointing at this file.
         run: npm install -g npm@^11.5.1 --no-audit --no-fund
+
+      - name: Fetch the workflow's own helper scripts
+        # The tagged checkout above may predate .github/scripts/check-latest.mjs
+        # (a workflow_dispatch of an old tag), so the latest check runs the
+        # scripts from the revision this workflow runs from. Sparse, outside
+        # every package directory, no credentials, and no repository code is
+        # executed by this step. It sits right before Publish so the package's
+        # own npm ci, build and test never see the nested tree.
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          path: _publish-scripts
+          sparse-checkout: .github/scripts
+          persist-credentials: false
 
       - name: Publish
         env:

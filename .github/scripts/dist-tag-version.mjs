@@ -39,6 +39,7 @@ function selfTest() {
     ["missing tag returns empty (array shape)", '[{"next":"0.20.0"}]', "latest", { version: "" }],
     ["unparsable input is reported as a parse error", 'not json {{{', "latest", { parseError: true }],
     ["empty array returns empty", "[]", "latest", { version: "" }],
+    ["null body returns empty (tag absent, not a parse error)", "null", "latest", { version: "" }],
   ];
   let failed = 0;
   let total = 0;
@@ -64,6 +65,7 @@ function selfTest() {
     ["cli prints the version for the object shape", ["latest"], '{"latest":"0.19.1"}', "0.19.1", 0],
     ["cli prints the version for the array shape", ["latest"], '[{"latest":"0.19.1"}]', "0.19.1", 0],
     ["cli prints nothing for an absent tag", ["latest"], '{"next":"0.20.0"}', "", 0],
+    ["cli treats a null body as an absent tag", ["latest"], "null", "", 0],
     ["cli exits 1 on unparsable input", ["latest"], "not json {{{", "", 1],
     ["cli exits 2 without a tag argument", [], "", "", 2],
   ];

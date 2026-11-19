@@ -79,6 +79,9 @@ describe("publish-npm.yml latest check, wiring", () => {
       (s.with?.path ?? "").startsWith("_publish-scripts"),
     );
     expect(own).toBeGreaterThan(gate);
+    // Right before Publish, so the package's npm ci, build and test never
+    // run next to the nested tree.
+    expect(steps.findIndex((s) => s.name === "Publish")).toBe(own + 1);
     expect(steps[own]?.uses ?? "").toMatch(/^actions\/checkout@/);
     expect(steps[own]?.with?.ref).toBe("${{ github.sha }}");
     expect(steps[own]?.with?.path).toBe("_publish-scripts");
@@ -132,9 +135,11 @@ esac
         mkdirSync(join(ws, ".github"), { recursive: true });
         cpSync(scriptsDir, join(ws, ".github", "scripts"), { recursive: true });
       }
-      return spawnSync("bash", ["-e", "-c", body], {
+      const r = spawnSync("bash", ["-e", "-c", body], {
         cwd: pkgDir,
         encoding: "utf8",
+        timeout: 60000,
+        killSignal: "SIGKILL",
         env: {
           ...process.env,
           PATH: `${bin}:${process.env.PATH ?? ""}`,
@@ -144,6 +149,9 @@ esac
           ...env,
         },
       });
+      // A timeout or spawn failure surfaces as r.error, never as a status.
+      expect(r.error).toBeUndefined();
+      return r;
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
