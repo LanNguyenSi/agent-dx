@@ -8,6 +8,9 @@
  * field here (`wrong-layer-field`) and every field without a layer
  * (`unknown-field`).
  *
+ * `file` and every `fixtures` entry are repo-relative paths without a `..`
+ * segment, not absolute and not starting with `-`.
+ *
  * A `selector` is passed to a test runner later, as one argv element and
  * never through a shell. The parser therefore rejects a selector that is
  * empty, starts with `-`, or contains a control character
@@ -128,7 +131,15 @@ function parseBinding(
       `${tpId}.file`,
       `${rowName}: file`,
     );
-    if (v !== undefined) out.file = v;
+    if (v !== undefined) {
+      if (v.startsWith("-")) {
+        sink.add(
+          "invalid-value",
+          `${tpId}.file`,
+          `${rowName}: file must not start with '-'`,
+        );
+      } else out.file = v;
+    }
   }
   let fixtures: string[] = [];
   if (hasOwn(rec, "fixtures")) {
@@ -138,7 +149,20 @@ function parseBinding(
       `${tpId}.fixtures`,
       `${rowName}: fixtures`,
     );
-    if (v !== undefined) fixtures = v;
+    if (v !== undefined) {
+      v.forEach((entry, i) => {
+        const path = `${tpId}.fixtures[${i}]`;
+        const checked = relativePath(sink, entry, path, `${rowName}: fixture`);
+        if (checked?.startsWith("-")) {
+          sink.add(
+            "invalid-value",
+            path,
+            `${rowName}: fixture must not start with '-'`,
+          );
+        }
+      });
+      fixtures = v;
+    }
   }
   if (hasOwn(rec, "notes")) {
     const v = nonEmptyString(

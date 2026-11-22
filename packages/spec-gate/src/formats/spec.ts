@@ -37,11 +37,19 @@
  * behind an unknown heading. `###` and deeper headings are only allowed
  * inside Context.
  *
+ * Context ends at the next line that starts at column 0 with `## `, and
+ * at nothing else. Code fences, indented headings and setext headings do
+ * not end it, and a `## ` line inside what looks like a code block does,
+ * so it is then a section start or an unknown-section error. Both fail
+ * closed: nothing a reader sees under a real heading is lost.
+ *
  * Outside Context every non-blank line is either an item line
  * `- <ID>: <text>` (column 0) or an attribute line `  - <key>: <value>`
  * (two spaces) below it. One more level, `    - <key>: <value>` (four
  * spaces), exists only below `provenance`. Text is one line; spaces only,
- * no tabs.
+ * no tabs. A line with a control character other than tab, a zero-width or
+ * direction mark, or a bidirectional override is rejected
+ * (`forbidden-character`).
  *
  * Per-line attributes:
  * - AC: `source` (SL IDs, comma separated), `owner` (who stands behind
@@ -51,7 +59,7 @@
  * - DF: `reason` and `affects_behavior` (`true` or `false`), both required.
  * - DC: `question` (a QN ID) and a `provenance` block with `channel`
  *   (`file`, `chat` or `comment`), `author` and `time` (ISO 8601 UTC),
- *   plus optional `url`.
+ *   plus optional `comment_url`.
  * - RS: `class` (`divergence`, `blind-spot` or `untestable`) and `status`
  *   (`open` or `resolved`), optional `question`.
  * - SL: the item text is `<source line ID> -> <targets>` where targets are
@@ -84,6 +92,9 @@ import {
   rejectUnknownKeys,
   urlValue,
 } from "./validate.js";
+
+/** The only value `source` in the frontmatter may have. */
+export const SPEC_SOURCE_PATH = "source/meta.json";
 
 export const SPEC_STATUSES = ["draft", "proposed", "superseded"] as const;
 export type SpecStatus = (typeof SPEC_STATUSES)[number];
@@ -159,7 +170,7 @@ export interface Provenance {
   channel: AnswerChannel;
   author: string;
   time: string;
-  url?: string;
+  comment_url?: string;
 }
 
 export interface DecisionLine extends LineBase {
@@ -253,8 +264,22 @@ function parseFrontmatter(
     }
   }
   if (hasOwn(rec, "source")) {
-    const v = relativePath(sink, rec["source"], "frontmatter.source", "source");
-    if (v !== undefined) out.source = v;
+    const v = nonEmptyString(
+      sink,
+      rec["source"],
+      "frontmatter.source",
+      "source",
+    );
+    if (v !== undefined) {
+      if (v === SPEC_SOURCE_PATH) out.source = v;
+      else {
+        sink.add(
+          "invalid-value",
+          "frontmatter.source",
+          `source must be ${SPEC_SOURCE_PATH}, got ${JSON.stringify(v)}`,
+        );
+      }
+    }
   }
   if (hasOwn(rec, "base_commit")) {
     const v = commitValue(
@@ -366,7 +391,16 @@ interface RawItem {
 const HEADING_RE = /^## (.*)$/;
 const ITEM_RE = /^- (\S+?):(?: (.*))?$/;
 const ATTR_RE = /^( +)- ([a-z][a-z_]*):(?: (.*))?$/;
-const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/;
+/**
+ * Characters that make a line read differently from what the parser sees:
+ * C0 controls other than tab, DEL, zero-width and direction marks
+ * (U+200B to U+200F), bidirectional embeddings and overrides (U+202A to
+ * U+202E) and isolates (U+2066 to U+2069).
+ */
+/* eslint-disable no-control-regex */
+const FORBIDDEN_CHAR_RE =
+  /[\u0000-\u0008\u000a-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/;
+/* eslint-enable no-control-regex */
 
 /** Splits the item and attribute lines of the normative sections. */
 function collectItems(
@@ -380,20 +414,11 @@ function collectItems(
   // After an unknown heading the lines below it are not read again: the
   // heading itself was reported.
   let skipping = false;
-  let fence: { char: string; length: number; line: number } | null = null;
   let item: RawItem | null = null;
   let attr: RawAttr | null = null;
 
   for (const [offset, text] of lines.entries()) {
     const lineNo = firstLine + offset;
-
-    if (section === "Context" && fence) {
-      const closeRe = new RegExp(
-        `^ {0,3}${fence.char === "`" ? "`" : "~"}{${fence.length},}\\s*$`,
-      );
-      if (closeRe.test(text)) fence = null;
-      continue;
-    }
 
     const heading = HEADING_RE.exec(text);
     if (heading) {
@@ -427,13 +452,9 @@ function collectItems(
 
     if (skipping) continue;
 
-    if (section === "Context") {
-      const open = FENCE_OPEN_RE.exec(text);
-      if (open) {
-        fence = { char: open[1]![0]!, length: open[1]!.length, line: lineNo };
-      }
-      continue;
-    }
+    // Context runs to the next line that starts at column 0 with '## '.
+    // Code fences, indented headings and setext headings do not change that.
+    if (section === "Context") continue;
     if (text.trim() === "") continue;
 
     if (section === null) {
@@ -446,6 +467,25 @@ function collectItems(
         lineNo,
       );
       continue;
+    }
+
+    if (FORBIDDEN_CHAR_RE.test(text)) {
+      const idm = /^- (\S+?):/.exec(text);
+      const am0 = ATTR_RE.exec(text);
+      const nested = am0 !== null && am0[1]!.length === 4 && attr !== null;
+      const path = idm
+        ? `${idm[1]}.text`
+        : item && am0
+          ? nested
+            ? `${item.idText}.${attr!.key}.${am0[2]}`
+            : `${item.idText}.${am0[2]}`
+          : "$";
+      sink.add(
+        "forbidden-character",
+        path,
+        "the line contains a control, zero-width or bidirectional formatting character",
+        lineNo,
+      );
     }
 
     if (/^[ \t]*\t/.test(text)) {
@@ -545,14 +585,6 @@ function collectItems(
     );
   }
 
-  if (fence) {
-    sink.add(
-      "unterminated-fence",
-      "section.Context",
-      "a code fence in Context is never closed, so the sections after it would be skipped",
-      fence.line,
-    );
-  }
   return { items, sections };
 }
 
@@ -961,7 +993,7 @@ function readProvenance(
   headerLine: number,
 ): Provenance | undefined {
   const before = sink.errors.length;
-  const allowed = ["channel", "author", "time", "url"];
+  const allowed = ["channel", "author", "time", "comment_url"];
   for (const [key, entry] of block) {
     if (!allowed.includes(key)) {
       sink.add(
@@ -1011,15 +1043,15 @@ function readProvenance(
       `time of ${idPath}`,
     );
   }
-  const url = block.get("url");
+  const url = block.get("comment_url");
   if (url) {
     const v = urlValue(
       sink,
       url.value,
-      `${idPath}.provenance.url`,
-      `url of ${idPath}`,
+      `${idPath}.provenance.comment_url`,
+      `comment_url of ${idPath}`,
     );
-    if (v !== undefined) out.url = v;
+    if (v !== undefined) out.comment_url = v;
   }
   if (sink.errors.length > before) return undefined;
   return out as Provenance;

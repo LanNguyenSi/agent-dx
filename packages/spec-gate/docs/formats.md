@@ -51,7 +51,7 @@ at its base), never at the head of a spec pull request.
 | `commands_ref` | the head of the fetched remote default branch at intake, the same commit as `base_commit` | `intake`; `propose` only verifies and sets nothing | intake | `source/meta.json` and the `spec.md` frontmatter | must be an ancestor of the default branch, checked as for `base_commit`; the approval check resolves the argv lists at this commit itself and prints them |
 | binding reference | `bindings.yaml` at the commit `propose` ran at; after the merge, `bindings.yaml` on the default branch | `propose`, as the hash of `bindings.yaml` in the first `bindings.log` entry | propose | `specs/<id>/bindings.log` (outside the digest) | the propose commit must be an ancestor of the pull request head, and after the merge of the default branch |
 | start commit | the commit the implementation work started from; closing evidence is compared there | the host, passed as `closure --start <commit>` | closure | not stored; an argument of the closing check | must be a descendant of the merged spec commit; otherwise the closing check stops |
-| evidence envelopes | the commit each envelope names in its `commit` field, which the runner reads from its own checkout | the host runner; never a model role | evidence (phase `baseline`) and closure (phase `closure`) | `specs/<id>/evidence/*.json` | `baseline`: the commit must equal `base_commit`, else `stale-evidence`; `closure`: the commit must be the start commit or a descendant of it; after a squash merge the squash rule applies |
+| evidence envelopes | the commit each envelope names in its `commit` field, which the runner reads from its own checkout | the host runner; never a model role | evidence (phase `baseline`) and closure (phase `closure`) | `specs/<id>/evidence/*.json` | `baseline`: the commit must equal `base_commit`, else `stale-evidence`; `closure` (which includes per-slice evidence): the commit must be the start commit or a descendant of it; after a squash merge an envelope stays valid if its commit is reachable from the default branch, otherwise only if it was on the PR branch before the squash and the PR's CI run references it |
 <!-- END generated: reference-states -->
 
 The table is exported as `REFERENCE_STATES`; a test fails when this page and
@@ -101,10 +101,14 @@ request by `L<position>-<hash>`.
 
 - A request is split into units. Line breaks are `\n`, `\r\n` or `\r`. A
   fenced code block (three or more backticks or tildes, up to the matching
-  fence or the end of the text) is one unit, even when empty. A Markdown image
+  fence or the end of the text) is one unit, even when empty. As in
+  CommonMark, a backtick fence opener has no backtick after its opening run,
+  so a line such as "```npm test``` runs" is an ordinary line. A Markdown image
   `![alt](target)` is one unit of its own, cut out of its line; the rest of
   the line is a unit if anything is left, and comes before the images.
-  Every other line is a unit. Indented code blocks are not recognised.
+  Every other line is a unit. Indented code blocks are not recognised. A
+  request over 1 MiB is refused with an `input-too-large` error, and image and
+  link recognition is a linear scan.
 - Text is normalised by: Unicode NFC; stripping leading block markers
   (block quote `>`, heading `#` to `######` plus a space, list bullets `-`,
   `*`, `+`, `<digits>.`, `<digits>)`, task boxes `[ ]`, `[x]`); turning a link
@@ -152,7 +156,8 @@ Free prose. The parser skips it. Nothing in it is normative.
   - owner: alice
 ```
 
-Frontmatter: `id`, `source`, `base_commit`, `commands_ref`, `status`
+Frontmatter: `id`, `source` (always the literal `source/meta.json`),
+`base_commit`, `commands_ref`, `status`
 (`draft`, `proposed` or `superseded`) are required. `superseded_by` is
 required with `superseded` and not allowed otherwise. `retired_ids` is
 optional. Unknown keys are rejected; in particular there is no `approved`:
@@ -166,10 +171,20 @@ reads as empty. Any other `## ` heading is an error, so no normative line can
 hide behind an unknown heading. A line before the first section must be blank
 or a `# ` title line.
 
-Context is skipped by the parser, line by line, except for `## ` headings
-and code fences: a heading inside a fenced code block is ignored, and an
-unclosed fence is an error. `###` and deeper headings are only allowed
-there. The result of parsing never depends on what Context says.
+Context is skipped by the parser, line by line, and ends at the next line
+that starts at column 0 with `## `, and at nothing else. Code fences, indented
+headings and setext headings do not end it: a line that renders as a heading
+or opens a code block is prose here. A `## ` line inside what looks like a
+code block does end Context, so it is a section start or an unknown-section
+error; both fail closed. `###` and deeper headings are only allowed there.
+Apart from those `## ` lines, the result of parsing never depends on what
+Context says.
+
+A line outside Context that contains a control character other than tab
+(including DEL and a lone carriage return), a zero-width or direction mark
+(U+200B to U+200F), a bidirectional embedding or override (U+202A to U+202E)
+or an isolate (U+2066 to U+2069) is rejected (`forbidden-character`): such a
+character makes a line read differently from what the parser sees.
 
 In every other section, every non-blank line is an item or an attribute:
 
@@ -185,7 +200,7 @@ In every other section, every non-blank line is an item or an attribute:
 | Acceptance | `AC-n` | `source`: `SL-n` IDs, comma separated; `owner`: who stands behind the requirement today (`none` records that nobody does); both required |
 | Non-goals | `NG-n` | `paths`: comma separated repo-relative paths or globs, optional; a line without paths describes behaviour and is checked by review only |
 | Defaults | `DF-n` | `reason` and `affects_behavior` (`true` or `false`), both required |
-| Decisions | `DC-n` | `question`: a `QN-n` ID; `provenance` block with `channel` (`file`, `chat`, `comment`), `author`, `time` (ISO 8601 UTC) and optional `url` |
+| Decisions | `DC-n` | `question`: a `QN-n` ID; `provenance` block with `channel` (`file`, `chat`, `comment`), `author`, `time` (ISO 8601 UTC) and optional `comment_url` |
 | Residuals | `RS-n` | `class` (`divergence`, `blind-spot`, `untestable`), `status` (`open`, `resolved`), optional `question` |
 | Source ledger | `SL-n` | the item text is `<source line ID> -> <targets>`: targets are `AC`, `NG`, `DF`, `DC` or `RS` IDs separated by commas, or `out`; `out` takes a required `reason`, and no other entry takes one |
 
@@ -285,7 +300,9 @@ does not use is `field-not-allowed-for-kind`. A missing required field is
 A mapping from `TP-<n>` to a binding. Only `status` is required: `new` (the
 test is to be written) or `existing` (the test already exists). Optional:
 `selector`, `file` (a repo-relative path), `fixtures` (a list of paths,
-default empty) and `notes`. A `manual` row has no binding. A selector is
+default empty) and `notes`. `file` and every `fixtures` entry are
+repo-relative paths: no `..` segment, not absolute, not starting with `-`.
+A `manual` row has no binding. A selector is
 later passed to a test runner as one argument, never through a shell, so the
 parser rejects an empty selector, one that starts with `-`, and one with a
 control character.
@@ -374,7 +391,13 @@ list belongs is rejected (`shell-string`). `{selector}` is the only
 placeholder. It is valid only as a whole argv element (`selector-embedded`
 otherwise) and never as the program (`selector-as-program`). `discovery` is
 the command whose output lists the valid selectors; it takes no placeholder
-and is required once any command uses `{selector}`. Command names are
+and is required once any command uses `{selector}`. At most one command may
+use `{selector}` (`multiple-selector-commands`): a binding carries no command
+reference, so one selector template is the only one a runner can pick; a
+later version may add a binding-layer `command` field and lift this. Any other
+whole element of the form `{name}` (braces around an identifier, any case,
+optional inner spaces) is rejected (`unknown-placeholder`), and so are case
+and spacing variants of `{selector}`. Command names are
 lower-case letters, digits, `.`, `_` and `-`, at most 64 characters; a
 test-plan row refers to one by `check_command_ref`. The parser does not stop
 a person from writing a shell as the program (`["sh", "-c", "..."]`); the
@@ -393,15 +416,18 @@ Evidence has two phases, named by the envelope's `phase`:
 - `baseline`: gathered at `base_commit` while the spec is written.
   Informative, and the only phase that can be marked `stale-evidence` (its
   commit, cleanliness, command-set digest or selector no longer match).
-- `closure`: gathered at the start commit or later, against the finished
-  work. It decides the closing check and is never stale.
+- `closure`: gathered at the start commit or later, against the work as it is
+  built and finished. Per-slice red and green evidence carries this phase. It
+  decides the closing check and is never stale.
 
-After a squash merge, per-slice evidence stays valid only if it names a
-commit that was on the pull request branch before the squash and the pull
-request's CI run references that commit. Otherwise only `closure` evidence
-counts. `closure` evidence is gathered after the merge and is not affected.
-The two facts are git and host questions: the closing check answers them and
-passes them to `evidenceSurvivesSquash`; nothing in the format layer runs git.
+After a squash merge, the rule is keyed on the commit an envelope names, not
+on its phase. An envelope whose commit is reachable from the default branch
+after the merge stays valid. Any other envelope stays valid only if its commit
+was on the pull request branch before the squash and the pull request's CI run
+references that commit; otherwise it does not count. Without a squash merge
+the rule does not apply. The three facts are git and host questions: the
+closing check answers them and passes them to `evidenceSurvivesSquash`;
+nothing in the format layer runs git.
 
 ## YAML and JSON input
 
@@ -410,4 +436,14 @@ and timestamps stay strings. Duplicate mapping keys, aliases, anchors and
 explicit tags are errors; a merge key `<<` is not merged and is then an
 unknown field. A file is exactly one document and must not be empty. JSON is
 parsed strictly, and duplicate object keys are errors (`JSON.parse` would
-silently keep the last one). Inputs over 1 MiB are rejected.
+silently keep the last one). Inputs over 1 MiB are rejected. A collection used
+as a mapping key is an error, and keys are compared as the strings they
+become in the resulting object. The duplicate check is linear in the number
+of keys.
+
+The parsers expect a string (or an already decoded value for the `validate*`
+functions). Anything else is a programming error and may throw a `TypeError`;
+they never throw on a string, whatever it contains.
+
+None of the files carries a format version. A later version key will treat its
+absence as version 1.

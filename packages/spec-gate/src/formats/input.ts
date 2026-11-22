@@ -16,7 +16,8 @@
  * JSON is parsed strictly with `JSON.parse` and additionally checked for
  * duplicate object keys, which `JSON.parse` silently collapses.
  */
-import { parseDocument, visit } from "yaml";
+import { LineCounter, isAlias, isScalar, parseDocument, visit } from "yaml";
+import type { Document } from "yaml";
 import type { FormatError, ParseResult } from "./errors.js";
 import { failResult, okResult } from "./errors.js";
 
@@ -48,42 +49,114 @@ function checkSize<T>(text: string): ParseResult<T> | null {
   return null;
 }
 
+interface DocProblem {
+  code: FormatError["code"];
+  message: string;
+  line?: number;
+}
+
+/**
+ * Walks a parsed document once and reports the first of: an alias or
+ * anchor, an explicit tag, a collection used as a mapping key, a duplicate
+ * mapping key. The duplicate check is a Set per mapping, so it is linear
+ * in the number of keys. Keys are compared as the strings they become when
+ * the document turns into a JavaScript object, so `1` and `"1"` collide.
+ */
+function inspectDocument(
+  doc: Document,
+  lc: LineCounter,
+  checkTags: boolean,
+): DocProblem | null {
+  let problem: DocProblem | null = null;
+  const lineOf = (node: { range?: [number, number, number] | null }) => {
+    const offset = node.range?.[0];
+    return offset === undefined ? undefined : lc.linePos(offset).line;
+  };
+  const report = (p: DocProblem) => {
+    problem ??= p;
+  };
+  visit(doc, {
+    Alias(_key, node) {
+      report({
+        code: "yaml-alias",
+        message: "YAML alias is not allowed",
+        line: lineOf(node),
+      });
+    },
+    Node(_key, node) {
+      if (node.anchor) {
+        report({
+          code: "yaml-alias",
+          message: `YAML anchor &${node.anchor} is not allowed`,
+          line: lineOf(node),
+        });
+      }
+      if (checkTags && node.tag) {
+        report({
+          code: "yaml-tag",
+          message: `YAML tag ${node.tag} is not allowed`,
+          line: lineOf(node),
+        });
+      }
+    },
+    Map(_key, map) {
+      const seen = new Set<string>();
+      for (const pair of map.items) {
+        const key = pair.key;
+        if (!isScalar(key)) {
+          if (!isAlias(key)) {
+            report({
+              code: "invalid-yaml",
+              message: "a mapping key must be a plain scalar",
+              line: lineOf(key as { range?: [number, number, number] }),
+            });
+          }
+          continue;
+        }
+        const name = String(key.value);
+        if (seen.has(name)) {
+          report({
+            code: "duplicate-key",
+            message: `duplicate mapping key ${JSON.stringify(name)}`,
+            line: lineOf(key),
+          });
+        }
+        seen.add(name);
+      }
+    },
+  });
+  return problem;
+}
+
 /** Decodes one YAML document into plain JavaScript values. */
 export function parseYamlText(text: string): ParseResult<unknown> {
   const tooLarge = checkSize<unknown>(text);
   if (tooLarge) return tooLarge;
+  const lc = new LineCounter();
   const doc = parseDocument(text, {
     version: "1.2",
     schema: "core",
-    uniqueKeys: true,
+    uniqueKeys: false,
     merge: false,
+    logLevel: "error",
+    lineCounter: lc,
   });
   const first = doc.errors[0];
   if (first) {
-    const line = first.linePos?.[0]?.line;
-    const code =
-      first.code === "DUPLICATE_KEY" ? "duplicate-key" : "invalid-yaml";
-    return fail(code, first.message.split("\n")[0] ?? first.message, line);
+    return fail(
+      "invalid-yaml",
+      first.message.split("\n")[0] ?? first.message,
+      first.linePos?.[0]?.line,
+    );
   }
-  const seen: { alias: string | null; tag: string | null } = {
-    alias: null,
-    tag: null,
-  };
-  // An alias always refers to an anchored node, so flagging every anchor
-  // also catches every alias.
-  visit(doc, {
-    Node(_key, node) {
-      if (node.anchor) seen.alias ??= `anchor &${node.anchor}`;
-      if (node.tag) seen.tag ??= node.tag;
-    },
-  });
-  if (seen.alias !== null) {
-    return fail("yaml-alias", `YAML ${seen.alias} is not allowed`);
+  const problem = inspectDocument(doc, lc, true);
+  if (problem) return fail(problem.code, problem.message, problem.line);
+  let value: unknown;
+  try {
+    value = doc.toJS();
+  } catch (err) {
+    return fail("invalid-yaml", (err as Error).message.split("\n")[0] ?? "");
   }
-  if (seen.tag !== null) {
-    return fail("yaml-tag", `YAML tag ${seen.tag} is not allowed`);
-  }
-  const value: unknown = doc.toJS();
   if (value === null || value === undefined) {
     return fail("empty-document", "the document is empty");
   }
@@ -101,19 +174,18 @@ export function parseJsonText(text: string): ParseResult<unknown> {
     return fail("invalid-json", (err as Error).message);
   }
   // JSON is a YAML subset, so the YAML parser sees the same structure and
-  // reports duplicate keys that JSON.parse dropped.
+  // the same walk reports duplicate keys that JSON.parse dropped.
+  const lc = new LineCounter();
   const doc = parseDocument(text, {
     version: "1.2",
     schema: "core",
-    uniqueKeys: true,
+    uniqueKeys: false,
+    logLevel: "error",
+    lineCounter: lc,
   });
-  const dup = doc.errors.find((e) => e.code === "DUPLICATE_KEY");
-  if (dup) {
-    return fail(
-      "duplicate-key",
-      dup.message.split("\n")[0] ?? dup.message,
-      dup.linePos?.[0]?.line,
-    );
+  const problem = inspectDocument(doc, lc, false);
+  if (problem?.code === "duplicate-key") {
+    return fail("duplicate-key", problem.message, problem.line);
   }
   return okResult(value);
 }

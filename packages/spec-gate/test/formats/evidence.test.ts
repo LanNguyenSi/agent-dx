@@ -14,7 +14,6 @@ import {
   staleEvidenceApplies,
   validateEvidenceEnvelope,
 } from "../../src/formats/index.js";
-import type { EvidencePhase } from "../../src/formats/index.js";
 import { COMMIT_RE, ISO_UTC_RE } from "../../src/formats/validate.js";
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
@@ -262,64 +261,87 @@ describe("evidence phases", () => {
 });
 
 describe("evidence after a squash merge", () => {
-  const phases: EvidencePhase[] = ["baseline", "closure"];
+  // [squashed, commitOnDefaultBranch, onPrBranchBeforeSquash, referencedInPrCiRun, valid]
+  const TABLE: [boolean, boolean, boolean, boolean, boolean][] = [
+    [false, false, false, false, true],
+    [false, false, false, true, true],
+    [false, false, true, false, true],
+    [false, false, true, true, true],
+    [false, true, false, false, true],
+    [false, true, false, true, true],
+    [false, true, true, false, true],
+    [false, true, true, true, true],
+    [true, false, false, false, false],
+    [true, false, false, true, false],
+    [true, false, true, false, false],
+    [true, false, true, true, true],
+    [true, true, false, false, true],
+    [true, true, false, true, true],
+    [true, true, true, false, true],
+    [true, true, true, true, true],
+  ];
 
-  it("applies the documented rule for every combination of phase and facts", () => {
-    for (const phase of phases) {
-      for (const squashed of [false, true]) {
-        for (const onPrBranchBeforeSquash of [false, true]) {
-          for (const referencedInPrCiRun of [false, true]) {
-            const r = evidenceSurvivesSquash(phase, {
-              squashed,
-              onPrBranchBeforeSquash,
-              referencedInPrCiRun,
-            });
-            const expected =
-              !squashed ||
-              phase === "closure" ||
-              (onPrBranchBeforeSquash && referencedInPrCiRun);
-            expect(
-              r.valid,
-              JSON.stringify({
-                phase,
-                squashed,
-                onPrBranchBeforeSquash,
-                referencedInPrCiRun,
-              }),
-            ).toBe(expected);
-            expect(r.reason.length).toBeGreaterThan(0);
-          }
-        }
-      }
-    }
+  it.each(TABLE)(
+    "squashed=%s onDefault=%s onPrBranch=%s inCiRun=%s -> valid=%s",
+    (
+      squashed,
+      commitOnDefaultBranch,
+      onPrBranchBeforeSquash,
+      referencedInPrCiRun,
+      valid,
+    ) => {
+      const r = evidenceSurvivesSquash({
+        squashed,
+        commitOnDefaultBranch,
+        onPrBranchBeforeSquash,
+        referencedInPrCiRun,
+      });
+      expect(r.valid).toBe(valid);
+      expect(r.reason.length).toBeGreaterThan(0);
+    },
+  );
+
+  it("does not depend on the phase: a closure envelope at a pre-squash commit with neither fact does not count", () => {
+    const r = evidenceSurvivesSquash({
+      squashed: true,
+      commitOnDefaultBranch: false,
+      onPrBranchBeforeSquash: false,
+      referencedInPrCiRun: false,
+    });
+    expect(r.valid).toBe(false);
   });
 
   it("says which fact is missing", () => {
     const base = {
       squashed: true,
+      commitOnDefaultBranch: false,
       onPrBranchBeforeSquash: true,
       referencedInPrCiRun: false,
     };
-    expect(evidenceSurvivesSquash("baseline", base).reason).toMatch(
+    expect(evidenceSurvivesSquash(base).reason).toMatch(
       /CI run does not reference/,
     );
     expect(
-      evidenceSurvivesSquash("baseline", {
+      evidenceSurvivesSquash({
         ...base,
         onPrBranchBeforeSquash: false,
         referencedInPrCiRun: true,
       }).reason,
-    ).toMatch(/not on the PR branch/);
+    ).toMatch(/neither on the default branch nor/);
+    expect(
+      evidenceSurvivesSquash({ ...base, commitOnDefaultBranch: true }).reason,
+    ).toMatch(/reachable from the default branch/);
   });
 
   it("states the rule as data for the closing check", () => {
     expect(SQUASH_EVIDENCE_RULE.requiredFacts).toEqual([
+      "commitOnDefaultBranch",
       "onPrBranchBeforeSquash",
       "referencedInPrCiRun",
     ]);
-    expect(SQUASH_EVIDENCE_RULE.closureUnaffected).toBe(true);
+    expect(SQUASH_EVIDENCE_RULE.perSliceEvidencePhase).toBe("closure");
     expect(SQUASH_EVIDENCE_RULE.summary).toMatch(
-      /only closure evidence counts/,
+      /reachable from the default branch/,
     );
   });
 });

@@ -47,11 +47,13 @@ export const FIELD_LAYERS: Readonly<Record<string, Layer>> = Object.freeze({
   runs: "normative",
   // static
   check_command_ref: "normative",
-  // manual and runtime
+  // manual
   verifier: "normative",
+  // manual and runtime
   evidence_location: "normative",
-  // post-deploy and runtime
+  // post-deploy
   check: "normative",
+  // post-deploy and runtime
   environment: "normative",
   // runtime
   steps: "normative",

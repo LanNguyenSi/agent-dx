@@ -7,6 +7,7 @@ import {
   OPEN_POINT_CLASSES,
   OWNER_NONE,
   SPEC_SECTION_TITLES,
+  SPEC_SOURCE_PATH,
   SPEC_STATUSES,
   parseSpec,
 } from "../../src/formats/index.js";
@@ -15,12 +16,26 @@ import type { Spec } from "../../src/formats/index.js";
 // A byte order mark, spelled out so editors and formatters keep it visible.
 const BOM = String.fromCharCode(0xfeff);
 
+function readFixture(name: string): string {
+  return fs.readFileSync(
+    fileURLToPath(
+      new URL(`../fixtures/formats/spec/valid/${name}.md`, import.meta.url),
+    ),
+    "utf8",
+  );
+}
+
 const fixture = fs.readFileSync(
   fileURLToPath(
     new URL("../fixtures/formats/spec/valid/full.md", import.meta.url),
   ),
   "utf8",
 );
+
+/** 1-based line of the first line of the full example that starts with `prefix`. */
+function lineOf(prefix: string): number {
+  return fixture.split("\n").findIndex((l) => l.startsWith(prefix)) + 1;
+}
 
 function parseOk(text: string): Spec {
   const r = parseSpec(text);
@@ -98,7 +113,7 @@ describe("spec.md grammar", () => {
         channel: "comment",
         author: "alice",
         time: "2000-01-31T12:00:00Z",
-        url: "https://example.com/issues/1#comment-2",
+        comment_url: "https://example.com/issues/1#comment-2",
       },
     });
     expect(spec.residuals[0]).toMatchObject({
@@ -142,7 +157,7 @@ describe("spec.md grammar", () => {
     expect(r.errors[0]).toMatchObject({
       code: "missing-attribute",
       path: "AC-1.owner",
-      line: 30,
+      line: lineOf("- AC-1:"),
     });
   });
 
@@ -218,7 +233,11 @@ describe("spec.md grammar", () => {
       "",
       "Plain words.",
       "- AC-1: hijack\n  - source: SL-9\n  - owner: eve",
-      "```\n## Acceptance\n- GOAL: second\n```",
+      "```\n- GOAL: second\n```",
+      "```npm test``` runs the suite.",
+      " ## Acceptance\n- AC-9: hidden in prose",
+      "Acceptance\n----------\n- AC-9: hidden in prose",
+      "```\nnever closed\n- AC-9: x",
       "### Sub heading\n\n- GOAL: not a goal\n\n    - paths: nowhere\n",
       "<!-- - AC-5: hidden -->",
       "- [ ] a task list item\n- DC-9: note",
@@ -232,22 +251,63 @@ describe("spec.md grammar", () => {
     }
   });
 
-  it("skips headings inside a Context code fence, with either fence character", () => {
+  it("ends Context at a column-0 '## ' line even inside what looks like a code block", () => {
     for (const fence of ["```", "~~~", "````"]) {
       const text = fixture.replace(
         "### A deeper heading is fine here",
         `${fence}\n## Bogus\n${fence}\n\n### A deeper heading`,
       );
-      expect(errorsOf(text), fence).toEqual([]);
+      expect(errorsOf(text), fence).toEqual([
+        "unknown-section @ section.Bogus",
+      ]);
+    }
+    const known = fixture.replace(
+      "### A deeper heading is fine here",
+      "```\n## Defaults\n```\n",
+    );
+    expect(errorsOf(known)).toContain("duplicate-section @ section.Defaults");
+  });
+
+  it("reads every section after a Context line that looks like a fence opener", () => {
+    for (const name of [
+      "context-inline-backticks",
+      "context-open-fence-lookalike",
+    ]) {
+      const spec = parseOk(readFixture(name));
+      expect(spec.ids, name).toEqual(["GOAL", "NG-1", "DF-1", "RS-1"]);
+      expect(spec.sections, name).toEqual([
+        "Goal",
+        "Non-goals",
+        "Context",
+        "Defaults",
+        "Residuals",
+      ]);
+      expect(spec.residuals[0], name).toMatchObject({
+        class: "divergence",
+        status: "open",
+      });
     }
   });
 
-  it("reads sections after a fence that a longer fence keeps open", () => {
+  it("treats an indented or setext heading in Context as prose and parses the real section below", () => {
+    for (const name of ["context-indented-heading", "context-setext-heading"]) {
+      const spec = parseOk(readFixture(name));
+      expect(spec.ids, name).toEqual(["GOAL", "NG-1", "DF-1", "RS-1", "AC-1"]);
+      expect(
+        spec.acceptance.map((a) => [a.id, a.owner]),
+        name,
+      ).toEqual([["AC-1", "alice"]]);
+    }
+  });
+
+  it("does not lose a line that sits under a real heading after a fence in Context", () => {
     const text = fixture.replace(
       "### A deeper heading is fine here",
-      "````\n```\n## Bogus\n```\n````\n\n### after",
+      "```\nunclosed\n",
     );
-    expect(errorsOf(text)).toEqual([]);
+    const spec = parseOk(text);
+    expect(spec.acceptance.map((a) => a.id)).toEqual(["AC-1", "AC-2"]);
+    expect(spec.defaults).toHaveLength(2);
   });
 
   it("stops reading below an unknown heading but still reads later known ones", () => {
@@ -357,8 +417,8 @@ describe("spec.md grammar", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.errors.map((e) => [e.code, e.path, e.line])).toEqual([
-      ["invalid-value", "NG-1.paths", 40],
-      ["invalid-value", "NG-1.paths", 40],
+      ["invalid-value", "NG-1.paths", lineOf("  - paths:")],
+      ["invalid-value", "NG-1.paths", lineOf("  - paths:")],
     ]);
   });
 
@@ -366,9 +426,12 @@ describe("spec.md grammar", () => {
     for (const channel of ANSWER_CHANNELS) {
       const text = fixture
         .replace("channel: comment", `channel: ${channel}`)
-        .replace("    - url: https://example.com/issues/1#comment-2\n", "");
+        .replace(
+          "    - comment_url: https://example.com/issues/1#comment-2\n",
+          "",
+        );
       expect(
-        parseOk(text).decisions[0]!.provenance.url,
+        parseOk(text).decisions[0]!.provenance.comment_url,
         channel,
       ).toBeUndefined();
     }
@@ -389,5 +452,102 @@ describe("spec.md grammar", () => {
         ]);
       }
     }
+  });
+
+  it("accepts only source/meta.json as the frontmatter source", () => {
+    expect(SPEC_SOURCE_PATH).toBe("source/meta.json");
+    expect(parseOk(fixture).frontmatter.source).toBe("source/meta.json");
+    for (const other of [
+      "other/meta.json",
+      "source/meta.json/",
+      "/source/meta.json",
+      "source/../source/meta.json",
+      "meta.json",
+    ]) {
+      expect(
+        errorsOf(
+          fixture.replace("source: source/meta.json", `source: ${other}`),
+        ),
+        other,
+      ).toEqual(["invalid-value @ frontmatter.source"]);
+    }
+  });
+
+  it("uses comment_url for a decision's link, as an answer record does", () => {
+    const spec = parseOk(fixture);
+    expect(spec.decisions[0]!.provenance.comment_url).toBe(
+      "https://example.com/issues/1#comment-2",
+    );
+    expect(
+      errorsOf(fixture.replace("    - comment_url:", "    - url:")),
+    ).toEqual(["unknown-attribute @ DC-1.provenance.url"]);
+  });
+
+  it("rejects control, zero-width and bidirectional characters in item text and attribute values", () => {
+    const chars = [
+      "\u0000",
+      "\u0007",
+      "\u001b",
+      "\u007f",
+      "\u200b",
+      "\u200c",
+      "\u200d",
+      "\u200e",
+      "\u200f",
+      "\u202a",
+      "\u202b",
+      "\u202c",
+      "\u202d",
+      "\u202e",
+      "\u2066",
+      "\u2067",
+      "\u2068",
+      "\u2069",
+    ];
+    for (const ch of chars) {
+      const label = `U+${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+      expect(
+        errorsOf(fixture.replace("- NG-2: Login", `- NG-2: Lo${ch}gin`)),
+        label,
+      ).toEqual(["forbidden-character @ NG-2.text"]);
+      expect(
+        errorsOf(fixture.replace("owner: alice", `owner: al${ch}ice`)),
+        label,
+      ).toEqual(["forbidden-character @ AC-1.owner"]);
+      expect(
+        errorsOf(
+          fixture.replace("    - author: alice", `    - author: al${ch}ice`),
+        ),
+        label,
+      ).toEqual(["forbidden-character @ DC-1.provenance.author"]);
+    }
+  });
+
+  it("rejects a lone carriage return and a line separator inside an item line", () => {
+    const cr = errorsOf(fixture.replace("- NG-2: Login", "- NG-2: Lo\rgin"));
+    expect(cr).toContain("forbidden-character @ NG-2.text");
+    expect(
+      errorsOf(fixture.replace("- NG-2: Login", "- NG-2: Lo\u2029gin")).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("accepts a tab and ordinary non-ASCII text inside item text", () => {
+    expect(
+      errorsOf(
+        fixture.replace("- NG-2: Login", "- NG-2: Lo\tgin \u00e9\u4e2d"),
+      ),
+    ).toEqual([]);
+    for (const ch of ["\u2010", "\u2060", "\u2065", "\u206a"]) {
+      expect(
+        errorsOf(fixture.replace("- NG-2: Login", `- NG-2: Lo${ch}gin`)),
+        ch.charCodeAt(0).toString(16),
+      ).toEqual([]);
+    }
+  });
+
+  it("does not check Context for forbidden characters", () => {
+    expect(
+      errorsOf(fixture.replace("Free prose.", "Free \u202e prose.")),
+    ).toEqual([]);
   });
 });

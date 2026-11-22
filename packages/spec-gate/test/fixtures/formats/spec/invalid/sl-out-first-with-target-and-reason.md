@@ -20,13 +20,14 @@ Free prose. The parser skips it, whatever it contains.
 - AC-77: this line is Context and is not parsed.
 
 ```
-## Not a section, it is inside a fence
+a code block in Context, which is skipped like the rest
 ```
 
-### A deeper heading is fine here
+Inline ```npm test``` runs the suite.
 
-~~~
-never closed
+ ## Acceptance, indented, so it is prose here
+
+### A deeper heading is fine here
 
 ## Acceptance
 
@@ -60,7 +61,7 @@ never closed
     - channel: comment
     - author: alice
     - time: 2000-01-31T12:00:00Z
-    - url: https://example.com/issues/1#comment-2
+    - comment_url: https://example.com/issues/1#comment-2
 
 ## Residuals
 
@@ -71,7 +72,8 @@ never closed
 
 ## Source ledger
 
-- SL-1: L1-0123456789ab -> AC-1
+- SL-1: L1-0123456789ab -> out, AC-1
+  - reason: nothing
 - SL-2: L2-123456789abc -> AC-1, NG-1
 - SL-3: L3-23456789abcd -> AC-2
 - SL-4: L4-3456789abcde -> out

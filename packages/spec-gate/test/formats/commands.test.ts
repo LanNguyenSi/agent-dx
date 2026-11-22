@@ -76,12 +76,101 @@ describe("commands.yaml", () => {
     ).toEqual(["selector-as-program @ commands.c.argv[0]"]);
   });
 
-  it("keeps braces that are not the placeholder", () => {
+  it("keeps braces that are not an identifier in braces", () => {
     expect(
       codes({
         commands: {
-          c: { argv: ["tool", "{file}", '--a={"b":1}', "{select}"] },
+          c: {
+            argv: [
+              "tool",
+              '--a={"b":1}',
+              "{}",
+              "{1}",
+              "{a b}",
+              "x{y}",
+              "{a-b}",
+            ],
+          },
         },
+      }),
+    ).toEqual([]);
+  });
+
+  it("rejects any whole element of the form {name} other than {selector}", () => {
+    for (const element of [
+      "{file}",
+      "{select}",
+      "{Selector}",
+      "{SELECTOR}",
+      "{ selector }",
+      "{selector }",
+      "{ file }",
+      "{_x1}",
+    ]) {
+      expect(
+        codes({ discovery, commands: { c: { argv: ["a", element] } } }),
+        element,
+      ).toEqual(["unknown-placeholder @ commands.c.argv[1]"]);
+    }
+  });
+
+  it("rejects an unknown placeholder in the discovery command and as the program", () => {
+    expect(
+      codes({
+        discovery: { argv: ["list", "{name}"] },
+        commands: { c: { argv: ["a"] } },
+      }),
+    ).toEqual(["unknown-placeholder @ discovery.argv[1]"]);
+    expect(codes({ commands: { c: { argv: ["{name}"] } } })).toEqual([
+      "unknown-placeholder @ commands.c.argv[0]",
+    ]);
+  });
+
+  it("rejects case and spacing variants of {selector} inside a longer element as embedded", () => {
+    for (const element of [
+      "--x={Selector}",
+      "--x={ selector }",
+      "{SELECTOR}x",
+    ]) {
+      expect(
+        codes({ discovery, commands: { c: { argv: ["a", element] } } }),
+        element,
+      ).toEqual(["selector-embedded @ commands.c.argv[1]"]);
+    }
+  });
+
+  it("rejects a variant of {selector} in the discovery command as a selector there", () => {
+    expect(
+      codes({
+        discovery: { argv: ["list", "{Selector}"] },
+        commands: { c: { argv: ["a"] } },
+      }),
+    ).toEqual(["selector-in-discovery @ discovery.argv[1]"]);
+  });
+
+  it("allows at most one command that uses {selector}", () => {
+    const two = {
+      discovery,
+      commands: {
+        unit: { argv: ["a", "{selector}"] },
+        other: { argv: ["b"] },
+        e2e: { argv: ["c", "{selector}"] },
+        third: { argv: ["d", "{selector}"] },
+      },
+    };
+    expect(codes(two)).toEqual([
+      "multiple-selector-commands @ commands.e2e",
+      "multiple-selector-commands @ commands.third",
+    ]);
+    const one = {
+      discovery,
+      commands: { unit: { argv: ["a", "{selector}"] }, other: { argv: ["b"] } },
+    };
+    expect(codes(one)).toEqual([]);
+    expect(
+      codes({
+        discovery,
+        commands: { a: { argv: ["x"] }, b: { argv: ["y"] } },
       }),
     ).toEqual([]);
   });

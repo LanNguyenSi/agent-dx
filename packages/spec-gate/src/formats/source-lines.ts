@@ -11,6 +11,9 @@
  * - A fenced code block (a line starting with up to three spaces and
  *   three or more backticks or tildes, up to the matching closing fence
  *   or the end of the text) is one unit of kind `code`, even when empty.
+ *   As in CommonMark, the opening line of a backtick fence has no backtick
+ *   after the opening run, so a line such as "```npm test``` runs" is an
+ *   ordinary line, not a fence.
  *   Its normalised text is `code:` followed by the block content with
  *   all whitespace runs collapsed to one space. Indented code blocks are
  *   not recognised; they are ordinary lines.
@@ -35,6 +38,10 @@
  * 6. A line that is now made only of `-`, `=`, `:` and spaces (a rule, a
  *    setext underline, a table separator row) becomes empty.
  *
+ * The text is refused above `MAX_INPUT_LENGTH` characters (the result then
+ * carries an `input-too-large` error). Image and link recognition is a
+ * linear scan.
+ *
  * Empty units are dropped. The remaining units are numbered from 1 in
  * order; that number is the unit's position. Case is never changed.
  *
@@ -45,7 +52,7 @@
 import { createHash } from "node:crypto";
 import type { FormatError, ParseResult } from "./errors.js";
 import { failResult, okResult } from "./errors.js";
-import { stripBom } from "./input.js";
+import { MAX_INPUT_LENGTH, stripBom } from "./input.js";
 
 export type SourceLineKind = "text" | "image" | "code";
 
@@ -63,9 +70,9 @@ export interface SourceLine {
 
 export const SOURCE_LINE_HASH_LENGTH = 12;
 
-const IMAGE_RE = /!\[[^\]]*\]\(\s*([^)\s]*)(?:\s+"[^"]*")?\s*\)/g;
-const LINK_RE = /\[([^\]]*)\]\(\s*([^)\s]*)(?:\s+"[^"]*")?\s*\)/g;
 const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/;
+const BLOCK_MARKERS_RE =
+  /^(?:\s*(?:>|#{1,6}\s+|[-*+]\s+|[0-9]+[.)]\s+|\[[ xX]\]\s+))*/;
 const SOURCE_LINE_ID_RE = /^L([1-9][0-9]{0,8})-([0-9a-f]{12})$/;
 
 export function hashSourceText(normalized: string): string {
@@ -107,19 +114,113 @@ export function isSourceLineId(text: string): boolean {
   return SOURCE_LINE_ID_RE.test(text);
 }
 
-/** Normalises one text line; see the module comment for the exact steps. */
-export function normalizeSourceText(line: string): string {
-  let s = line.normalize("NFC");
-  for (;;) {
-    const next = s
-      .replace(/^\s*>/, "")
-      .replace(/^\s*#{1,6}\s+/, "")
-      .replace(/^\s*(?:[-*+]|[0-9]+[.)])\s+/, "")
-      .replace(/^\s*\[[ xX]\]\s+/, "");
-    if (next === s) break;
-    s = next;
+/** Counts the steps of a scan, for tests that bound the work done. */
+export interface ScanStats {
+  steps: number;
+}
+
+interface BracketMatch {
+  start: number;
+  end: number;
+  text: string;
+  target: string;
+}
+
+/**
+ * Index of the first character at or after each position that satisfies
+ * `pred`, or -1. One backward pass; makes every later lookup O(1).
+ */
+function nextIndex(
+  line: string,
+  kind: "close" | "stop" | "nonSpace" | "quote",
+  stats?: ScanStats,
+): Int32Array {
+  const out = new Int32Array(line.length + 1);
+  out[line.length] = -1;
+  for (let i = line.length - 1; i >= 0; i--) {
+    if (stats) stats.steps += 1;
+    const ch = line[i]!;
+    let hit: boolean;
+    if (kind === "close") hit = ch === "]";
+    else if (kind === "quote") hit = ch === '"';
+    else if (kind === "stop") hit = ch === ")" || /\s/.test(ch);
+    else hit = !/\s/.test(ch);
+    out[i] = hit ? i : out[i + 1]!;
   }
-  s = s.replace(LINK_RE, "$1 $2");
+  return out;
+}
+
+/**
+ * Finds every non-overlapping `[text](target "title")` in a line, left to
+ * right, the way the regular expression
+ * `\[([^\]]*)\]\(\s*([^)\s]*)(?:\s+"[^"]*")?\s*\)` does, but in time
+ * linear in the line length. With `image` set, each match must be preceded
+ * by `!` (and starts there).
+ */
+function scanBracketLinks(
+  line: string,
+  image: boolean,
+  stats?: ScanStats,
+): BracketMatch[] {
+  const open = image ? "![" : "[";
+  if (!line.includes(open)) return [];
+  const close = nextIndex(line, "close", stats);
+  const stop = nextIndex(line, "stop", stats);
+  const nonSpace = nextIndex(line, "nonSpace", stats);
+  const quote = nextIndex(line, "quote", stats);
+  const out: BracketMatch[] = [];
+  let i = line.indexOf(open);
+  while (i >= 0) {
+    if (stats) stats.steps += 1;
+    const textStart = i + open.length;
+    const c = close[textStart]!;
+    let end = -1;
+    let target = "";
+    if (c >= 0 && line[c + 1] === "(") {
+      const t0 = nonSpace[c + 2] === -1 ? line.length : nonSpace[c + 2]!;
+      const t1 = stop[t0]! === -1 ? line.length : stop[t0]!;
+      target = line.slice(t0, t1);
+      const j = nonSpace[t1] === -1 ? line.length : nonSpace[t1]!;
+      if (line[j] === ")") end = j + 1;
+      else if (line[j] === '"') {
+        const q = quote[j + 1]!;
+        if (q >= 0) {
+          const k = nonSpace[q + 1] === -1 ? line.length : nonSpace[q + 1]!;
+          if (line[k] === ")") end = k + 1;
+        }
+      }
+    }
+    if (end >= 0) {
+      out.push({ start: i, end, text: line.slice(textStart, c), target });
+      i = line.indexOf(open, end);
+    } else {
+      i = line.indexOf(open, i + 1);
+    }
+  }
+  return out;
+}
+
+function replaceMatches(
+  line: string,
+  matches: BracketMatch[],
+  mode: "link" | "blank",
+): string {
+  let out = "";
+  let at = 0;
+  for (const m of matches) {
+    out +=
+      line.slice(at, m.start) +
+      (mode === "link" ? `${m.text} ${m.target}` : " ");
+    at = m.end;
+  }
+  return out + line.slice(at);
+}
+
+/** Normalises one text line; see the module comment for the exact steps. */
+export function normalizeSourceText(line: string, stats?: ScanStats): string {
+  let s = line.normalize("NFC");
+  s = s.replace(BLOCK_MARKERS_RE, "");
+  s = replaceMatches(s, scanBracketLinks(s, false, stats), "link");
   s = s.replace(/[*_`~|]/g, "");
   s = s.replace(/\s+/g, " ").trim();
   if (/^[-=: ]*$/.test(s)) return "";
@@ -131,15 +232,31 @@ interface Unit {
   normalized: string;
 }
 
-/** Splits a source text into numbered, hashed units. */
-export function splitSourceLines(text: string): SourceLine[] {
+/**
+ * Splits a source text into numbered, hashed units. A text over
+ * `MAX_INPUT_LENGTH` characters is refused with an `input-too-large` error.
+ */
+export function splitSourceLines(
+  text: string,
+  stats?: ScanStats,
+): ParseResult<SourceLine[]> {
+  if (text.length > MAX_INPUT_LENGTH) {
+    return failResult([
+      {
+        code: "input-too-large",
+        path: "$",
+        message: `source text is ${text.length} characters, the limit is ${MAX_INPUT_LENGTH}`,
+      },
+    ]);
+  }
   const units: Unit[] = [];
   const lines = stripBom(text).split(/\r\n|\n|\r/);
   let i = 0;
   while (i < lines.length) {
     const line = lines[i]!;
     const open = FENCE_OPEN_RE.exec(line);
-    if (open) {
+    // A backtick fence opener has no backtick after its opening run.
+    if (open && !(open[1]![0] === "`" && line.includes("`", open[0].length))) {
       const fence = open[1]!;
       const closeRe = new RegExp(
         `^ {0,3}${fence[0] === "`" ? "`" : "~"}{${fence.length},}\\s*$`,
@@ -159,30 +276,29 @@ export function splitSourceLines(text: string): SourceLine[] {
       units.push({ kind: "code", normalized: `code:${body}` });
       continue;
     }
-    const images: string[] = [];
-    const rest = line.replace(IMAGE_RE, (_m, target: string) => {
-      images.push(target);
-      return " ";
-    });
-    const normalized = normalizeSourceText(rest);
+    const found = scanBracketLinks(line, true, stats);
+    const rest = replaceMatches(line, found, "blank");
+    const normalized = normalizeSourceText(rest, stats);
     if (normalized !== "") units.push({ kind: "text", normalized });
-    for (const target of images) {
+    for (const m of found) {
       units.push({
         kind: "image",
-        normalized: `image:${target.normalize("NFC")}`,
+        normalized: `image:${m.target.normalize("NFC")}`,
       });
     }
     i += 1;
   }
-  return units.map((u, index) => {
-    const hash = hashSourceText(u.normalized);
-    const position = index + 1;
-    return {
-      position,
-      kind: u.kind,
-      normalized: u.normalized,
-      hash,
-      id: formatSourceLineId(position, hash),
-    };
-  });
+  return okResult(
+    units.map((u, index) => {
+      const hash = hashSourceText(u.normalized);
+      const position = index + 1;
+      return {
+        position,
+        kind: u.kind,
+        normalized: u.normalized,
+        hash,
+        id: formatSourceLineId(position, hash),
+      };
+    }),
+  );
 }

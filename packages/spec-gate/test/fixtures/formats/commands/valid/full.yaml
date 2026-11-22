@@ -5,5 +5,3 @@ commands:
     argv: ["npx", "vitest", "run", "-t", "{selector}"]
   typecheck:
     argv: ["npm", "run", "typecheck"]
-  e2e-file:
-    argv: ["npx", "playwright", "test", "{selector}"]

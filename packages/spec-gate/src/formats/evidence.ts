@@ -10,8 +10,9 @@
  * Two phases (`phase` in the envelope):
  * - `baseline`: gathered at the spec's `base_commit` while the spec is
  *   written. Informative. Can go stale.
- * - `closure`: gathered at the start commit or later, against the
- *   finished work. Decides the closing check.
+ * - `closure`: gathered at the start commit or later, against the work
+ *   as it is built and finished, per-slice evidence included. Decides the
+ *   closing check.
  *
  * The code here only reads and validates. Whether an envelope matches the
  * commit, the command set or the selector it should is a check for the
@@ -318,8 +319,9 @@ export function parseEvidenceLines(
 /**
  * `stale-evidence` is a finding about `baseline` evidence only: it means
  * the envelope's commit, cleanliness, command-set digest or selector no
- * longer match what the spec was written against. `closure` evidence is
- * compared at the start commit by the closing check, never marked stale.
+ * longer match what the spec was written against. `closure` evidence
+ * (which includes per-slice evidence) is compared at the start commit by
+ * the closing check, never marked stale.
  */
 export function staleEvidenceApplies(phase: EvidencePhase): boolean {
   return phase === "baseline";
@@ -328,48 +330,58 @@ export function staleEvidenceApplies(phase: EvidencePhase): boolean {
 /**
  * Validity of evidence after the pull request was squash-merged.
  *
- * A squash merge replaces the PR branch's commits by one new commit, so
- * evidence that names a branch commit names a commit no longer reachable
- * from the default branch. Rule:
- * - `closure` evidence is gathered on the default branch after the merge
- *   and is not affected.
- * - Other evidence (red evidence per slice) stays valid only if the
- *   commit it names was on the PR branch before the squash AND is
- *   referenced in the CI run of the pull request.
- * - In every other case the evidence does not count, and only `closure`
- *   evidence does.
+ * Per-slice red and green evidence, gathered while the work is built,
+ * carries phase `closure`; the rule below is keyed on the commit the
+ * envelope names, never on its phase. A squash merge replaces the PR
+ * branch's commits by one new commit, so an envelope that names a branch
+ * commit names a commit that is no longer reachable from the default
+ * branch. Rule:
+ * - An envelope whose commit is reachable from the default branch after
+ *   the merge stays valid.
+ * - Any other envelope stays valid only if its commit was on the PR
+ *   branch before the squash AND is referenced in the CI run of the pull
+ *   request.
+ * - In every other case it does not count.
+ * - Without a squash merge the rule does not apply and the evidence stays
+ *   valid.
  *
- * The two facts are git and host questions. The closing check (a later
- * step that reads git) answers them and passes them in; nothing here
- * invokes git.
+ * The facts are git and host questions. The closing check (a later step
+ * that reads git) answers them and passes them in; nothing here invokes
+ * git.
  */
 export const SQUASH_EVIDENCE_RULE = {
   summary:
-    "Per-slice evidence survives a squash merge only if it names a commit that was on the PR branch before the squash and that the PR's CI run references; otherwise only closure evidence counts.",
-  closureUnaffected: true,
-  requiredFacts: ["onPrBranchBeforeSquash", "referencedInPrCiRun"],
+    "After a squash merge an envelope is valid if its commit is reachable from the default branch; otherwise only if its commit was on the PR branch before the squash and the PR's CI run references it.",
+  perSliceEvidencePhase: "closure",
+  requiredFacts: [
+    "commitOnDefaultBranch",
+    "onPrBranchBeforeSquash",
+    "referencedInPrCiRun",
+  ],
 } as const;
 
 export interface SquashFacts {
   /** The merge was a squash merge. */
   squashed: boolean;
+  /** The envelope's commit is reachable from the default branch after the merge. */
+  commitOnDefaultBranch: boolean;
   /** The envelope's commit was on the PR branch before the squash. */
   onPrBranchBeforeSquash: boolean;
   /** The PR's CI run references the envelope's commit. */
   referencedInPrCiRun: boolean;
 }
 
-export function evidenceSurvivesSquash(
-  phase: EvidencePhase,
-  facts: SquashFacts,
-): { valid: boolean; reason: string } {
+export function evidenceSurvivesSquash(facts: SquashFacts): {
+  valid: boolean;
+  reason: string;
+} {
   if (!facts.squashed) {
     return { valid: true, reason: "the merge was not a squash merge" };
   }
-  if (phase === "closure") {
+  if (facts.commitOnDefaultBranch) {
     return {
       valid: true,
-      reason: "closure evidence is gathered after the merge",
+      reason: "the commit is reachable from the default branch",
     };
   }
   if (facts.onPrBranchBeforeSquash && facts.referencedInPrCiRun) {
@@ -382,7 +394,7 @@ export function evidenceSurvivesSquash(
   return {
     valid: false,
     reason: facts.onPrBranchBeforeSquash
-      ? "the PR's CI run does not reference the commit; only closure evidence counts"
-      : "the commit was not on the PR branch before the squash; only closure evidence counts",
+      ? "the commit is not on the default branch and the PR's CI run does not reference it"
+      : "the commit is neither on the default branch nor was it on the PR branch before the squash",
   };
 }

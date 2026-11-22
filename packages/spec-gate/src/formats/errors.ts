@@ -38,7 +38,6 @@ export type FormatErrorCode =
   // spec.md grammar
   | "missing-frontmatter"
   | "unterminated-frontmatter"
-  | "unterminated-fence"
   | "unknown-section"
   | "duplicate-section"
   | "unexpected-line"
@@ -48,6 +47,7 @@ export type FormatErrorCode =
   | "duplicate-attribute"
   | "missing-attribute"
   | "attribute-not-allowed"
+  | "forbidden-character"
   // questions
   | "unknown-question"
   | "unknown-option"
@@ -58,6 +58,8 @@ export type FormatErrorCode =
   | "selector-embedded"
   | "selector-as-program"
   | "selector-in-discovery"
+  | "multiple-selector-commands"
+  | "unknown-placeholder"
   | "discovery-required"
   // evidence
   | "ci-run-required"

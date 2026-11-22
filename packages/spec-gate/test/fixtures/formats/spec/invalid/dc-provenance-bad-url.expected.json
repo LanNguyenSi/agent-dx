@@ -1,6 +1,6 @@
 [
   {
     "code": "invalid-value",
-    "path": "DC-1.provenance.url"
+    "path": "DC-1.provenance.comment_url"
   }
 ]

@@ -200,7 +200,7 @@ export const REFERENCE_STATES: readonly ReferenceState[] = [
     step: "evidence (phase `baseline`) and closure (phase `closure`)",
     storedIn: "`specs/<id>/evidence/*.json`",
     ancestryCheck:
-      "`baseline`: the commit must equal `base_commit`, else `stale-evidence`; `closure`: the commit must be the start commit or a descendant of it; after a squash merge the squash rule applies",
+      "`baseline`: the commit must equal `base_commit`, else `stale-evidence`; `closure` (which includes per-slice evidence): the commit must be the start commit or a descendant of it; after a squash merge an envelope stays valid if its commit is reachable from the default branch, otherwise only if it was on the PR branch before the squash and the PR's CI run references it",
   },
 ];
 

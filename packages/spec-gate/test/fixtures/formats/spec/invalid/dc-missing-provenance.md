@@ -20,8 +20,12 @@ Free prose. The parser skips it, whatever it contains.
 - AC-77: this line is Context and is not parsed.
 
 ```
-## Not a section, it is inside a fence
+a code block in Context, which is skipped like the rest
 ```
+
+Inline ```npm test``` runs the suite.
+
+ ## Acceptance, indented, so it is prose here
 
 ### A deeper heading is fine here
 

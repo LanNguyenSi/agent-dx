@@ -18,6 +18,13 @@
  * command whose output lists the valid selectors; it takes no
  * placeholder and is required as soon as one command uses `{selector}`.
  *
+ * At most one command may use `{selector}`: a binding carries no command
+ * reference, so one selector template is the only one a runner can pick.
+ * A later version may add a binding-layer `command` field and lift this.
+ * Any other whole element of the form `{name}` is rejected
+ * (`unknown-placeholder`), as are case and spacing variants of
+ * `{selector}`.
+ *
  * The file does not stop a person from writing `["sh", "-c", "..."]`. The
  * pull request that adds a command is where that is reviewed.
  */
@@ -49,6 +56,10 @@ export interface CommandSet {
 }
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+/** The selector placeholder in any case, with any inner spaces, anywhere in an element. */
+const SELECTOR_LIKE_RE = /\{\s*selector\s*\}/i;
+/** A whole element that is braces around an identifier. */
+const PLACEHOLDER_ELEMENT_RE = /^\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}$/;
 
 function parseArgv(
   sink: ErrorSink,
@@ -103,7 +114,8 @@ function parseArgv(
       good = false;
       return;
     }
-    if (element.includes(SELECTOR_PLACEHOLDER)) {
+    const exact = element === SELECTOR_PLACEHOLDER;
+    if (SELECTOR_LIKE_RE.test(element)) {
       if (!allowSelector) {
         sink.add(
           "selector-in-discovery",
@@ -111,12 +123,20 @@ function parseArgv(
           `the discovery command takes no ${SELECTOR_PLACEHOLDER} placeholder`,
         );
         good = false;
-      } else if (element !== SELECTOR_PLACEHOLDER) {
-        sink.add(
-          "selector-embedded",
-          p,
-          `${SELECTOR_PLACEHOLDER} must be a whole argv element, got ${JSON.stringify(element)}`,
-        );
+      } else if (!exact) {
+        if (PLACEHOLDER_ELEMENT_RE.test(element)) {
+          sink.add(
+            "unknown-placeholder",
+            p,
+            `${JSON.stringify(element)} looks like a placeholder; the only one is exactly ${SELECTOR_PLACEHOLDER}`,
+          );
+        } else {
+          sink.add(
+            "selector-embedded",
+            p,
+            `${SELECTOR_PLACEHOLDER} must be a whole argv element, got ${JSON.stringify(element)}`,
+          );
+        }
         good = false;
       } else if (i === 0) {
         sink.add(
@@ -126,6 +146,13 @@ function parseArgv(
         );
         good = false;
       }
+    } else if (PLACEHOLDER_ELEMENT_RE.test(element)) {
+      sink.add(
+        "unknown-placeholder",
+        p,
+        `${JSON.stringify(element)} looks like a placeholder; the only one is exactly ${SELECTOR_PLACEHOLDER}`,
+      );
+      good = false;
     }
     out.push(element);
   });
@@ -176,6 +203,7 @@ export function validateCommandSet(doc: unknown): ParseResult<CommandSet> {
   }
 
   const commands: CommandEntry[] = [];
+  let selectorCommand: string | undefined;
   if (!hasOwn(rec, "commands")) {
     sink.add("missing-field", "commands", "file is missing field commands");
   } else if (!isRecord(rec["commands"])) {
@@ -224,6 +252,16 @@ export function validateCommandSet(doc: unknown): ParseResult<CommandSet> {
       }
       const argv = parseArgv(sink, entry["argv"], `${path}.argv`, true);
       if (argv) {
+        if (argv.includes(SELECTOR_PLACEHOLDER)) {
+          if (selectorCommand !== undefined) {
+            sink.add(
+              "multiple-selector-commands",
+              path,
+              `${path} uses ${SELECTOR_PLACEHOLDER} but ${selectorCommand} already does; at most one command may`,
+            );
+          }
+          selectorCommand ??= name;
+        }
         commands.push({
           name,
           argv,
