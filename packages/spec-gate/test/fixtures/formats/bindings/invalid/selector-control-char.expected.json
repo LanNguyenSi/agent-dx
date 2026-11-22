@@ -1,6 +1,6 @@
 [
   {
-    "code": "invalid-selector",
+    "code": "forbidden-character",
     "path": "TP-1.selector"
   }
 ]

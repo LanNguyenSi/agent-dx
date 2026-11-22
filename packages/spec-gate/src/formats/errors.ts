@@ -100,6 +100,14 @@ export class ErrorSink {
   lineHint: number | undefined;
 
   add(code: FormatErrorCode, path: string, message: string, line?: number) {
+    // One forbidden-character error per path: a value can be seen by the
+    // line check and by a field check, and says the same thing twice.
+    if (
+      code === "forbidden-character" &&
+      this.errors.some((e) => e.code === code && e.path === path)
+    ) {
+      return;
+    }
     const error: FormatError = { code, path, message };
     const at = line ?? this.lineHint;
     if (at !== undefined) error.line = at;

@@ -1,6 +1,6 @@
 [
   {
-    "code": "invalid-value",
+    "code": "forbidden-character",
     "path": "commands.unit.argv[0]"
   }
 ]

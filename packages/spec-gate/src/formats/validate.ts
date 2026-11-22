@@ -3,6 +3,7 @@
  * an `ErrorSink` and returns the typed value, or `undefined` after having
  * reported.
  */
+import { findForbiddenCharacter } from "./chars.js";
 import type { ErrorSink } from "./errors.js";
 
 export type Rec = Record<string, unknown>;
@@ -26,14 +27,6 @@ export const ISO_UTC_RE =
 
 export const COMMIT_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 
-/** Control characters other than tab are never valid inside a text value. */
-// eslint-disable-next-line no-control-regex
-const CONTROL_RE = /[\u0000-\u0008\u000a-\u001f\u007f]/;
-
-export function hasControlChars(text: string): boolean {
-  return CONTROL_RE.test(text);
-}
-
 export function nonEmptyString(
   sink: ErrorSink,
   value: unknown,
@@ -50,6 +43,15 @@ export function nonEmptyString(
   }
   if (value.trim() === "") {
     sink.add("empty-value", path, `${what} must not be empty`);
+    return undefined;
+  }
+  const bad = findForbiddenCharacter(value);
+  if (bad) {
+    sink.add(
+      "forbidden-character",
+      path,
+      `${what} contains ${bad.label}, a control, format or separator character`,
+    );
     return undefined;
   }
   return value;
@@ -171,8 +173,7 @@ export function relativePath(
     text.startsWith("/") ||
     /^[A-Za-z]:/.test(text) ||
     text.includes("\\") ||
-    text.split("/").includes("..") ||
-    hasControlChars(text)
+    text.split("/").includes("..")
   ) {
     sink.add(
       "invalid-value",
@@ -200,7 +201,7 @@ export function urlValue(
   } catch {
     ok = false;
   }
-  if (!ok || hasControlChars(text) || /\s/.test(text)) {
+  if (!ok || /\s/.test(text)) {
     sink.add("invalid-value", path, `${what} must be an http(s) URL`);
     return undefined;
   }

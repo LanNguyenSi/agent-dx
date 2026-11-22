@@ -537,7 +537,7 @@ describe("spec.md grammar", () => {
         fixture.replace("- NG-2: Login", "- NG-2: Lo\tgin \u00e9\u4e2d"),
       ),
     ).toEqual([]);
-    for (const ch of ["\u2010", "\u2060", "\u2065", "\u206a"]) {
+    for (const ch of ["\u2010", "\u00a0", "\u2009", "\u0301", "\u4e2d"]) {
       expect(
         errorsOf(fixture.replace("- NG-2: Login", `- NG-2: Lo${ch}gin`)),
         ch.charCodeAt(0).toString(16),

@@ -180,11 +180,24 @@ error; both fail closed. `###` and deeper headings are only allowed there.
 Apart from those `## ` lines, the result of parsing never depends on what
 Context says.
 
-A line outside Context that contains a control character other than tab
-(including DEL and a lone carriage return), a zero-width or direction mark
-(U+200B to U+200F), a bidirectional embedding or override (U+202A to U+202E)
-or an isolate (U+2066 to U+2069) is rejected (`forbidden-character`): such a
-character makes a line read differently from what the parser sees.
+**Forbidden characters.** A text value may not contain a character of Unicode
+general category `Cc` (control: C0 and C1 controls, DEL, line feed, carriage
+return, NEL), `Cf` (format: zero-width and direction marks, bidirectional
+embeddings, overrides and isolates, byte order mark, word joiner, soft hyphen,
+Arabic letter mark, tag characters), `Zl` or `Zp` (line and paragraph
+separators). The rule is by category, so a character added to a category later
+is caught without a change; `Cn` (unassigned) is not part of it because its
+contents depend on the runtime's Unicode version. A tab is allowed in every
+value except an argv element. The function is `findForbiddenCharacter`; the
+error is `forbidden-character`, once per field, naming the code point. Such a
+character makes a text read differently from what a parser or a reviewer
+sees. It applies to every line of `spec.md` outside Context (the title line
+included, attribute values and nested values included), every string field of
+`testplan.yaml`, `triage.json`, `questions.json`, `bindings.yaml` and
+`config.yaml`, every frontmatter value, and every argv element in
+`commands.yaml`. Fields are single-line, so a newline is refused too. The rule
+also refuses the zero-width joiner, so an emoji sequence joined with it is
+refused; a single emoji and accented or CJK text pass.
 
 In every other section, every non-blank line is an item or an attribute:
 
@@ -433,8 +446,11 @@ nothing in the format layer runs git.
 
 YAML is parsed as YAML 1.2 with the core schema, so `yes`, `no`, `on`, `off`
 and timestamps stay strings. Duplicate mapping keys, aliases, anchors and
-explicit tags are errors; a merge key `<<` is not merged and is then an
-unknown field. A file is exactly one document and must not be empty. JSON is
+explicit tags are errors, on every node whatever its type (root, mapping
+value, sequence item, mapping key; block or flow; collection or scalar); a
+merge key `<<` is not merged and is then an unknown field. As a second, independent
+check, a decoded value must hold only plain objects, arrays, strings, numbers,
+booleans and null; a `Set`, `Map` or `Date` is refused. A file is exactly one document and must not be empty. JSON is
 parsed strictly, and duplicate object keys are errors (`JSON.parse` would
 silently keep the last one). Inputs over 1 MiB are rejected. A collection used
 as a mapping key is an error, and keys are compared as the strings they

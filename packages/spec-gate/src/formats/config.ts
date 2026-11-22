@@ -21,7 +21,6 @@ import { parseYamlText } from "./input.js";
 import type { Rec } from "./validate.js";
 import {
   describeType,
-  hasControlChars,
   hasOwn,
   intValue,
   isRecord,
@@ -57,7 +56,7 @@ function identityList(
   if (!list) return undefined;
   let good = true;
   list.forEach((entry, i) => {
-    if (hasControlChars(entry) || /\s/.test(entry)) {
+    if (/\s/.test(entry)) {
       sink.add(
         "invalid-value",
         `${path}[${i}]`,

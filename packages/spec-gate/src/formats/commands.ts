@@ -28,6 +28,7 @@
  * The file does not stop a person from writing `["sh", "-c", "..."]`. The
  * pull request that adds a command is where that is reviewed.
  */
+import { findForbiddenCharacter } from "./chars.js";
 import type { ParseResult } from "./errors.js";
 import { ErrorSink, failResult } from "./errors.js";
 import { parseYamlText } from "./input.js";
@@ -100,8 +101,13 @@ function parseArgv(
       good = false;
       return;
     }
-    if (element.includes("\u0000")) {
-      sink.add("invalid-value", p, "argv element must not contain NUL");
+    const bad = findForbiddenCharacter(element, { allowTab: false });
+    if (bad) {
+      sink.add(
+        "forbidden-character",
+        p,
+        `argv element contains ${bad.label}, a control, format or separator character`,
+      );
       good = false;
       return;
     }

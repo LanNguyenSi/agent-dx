@@ -16,7 +16,14 @@
  * JSON is parsed strictly with `JSON.parse` and additionally checked for
  * duplicate object keys, which `JSON.parse` silently collapses.
  */
-import { LineCounter, isAlias, isScalar, parseDocument, visit } from "yaml";
+import {
+  LineCounter,
+  isAlias,
+  isMap,
+  isScalar,
+  isSeq,
+  parseDocument,
+} from "yaml";
 import type { Document } from "yaml";
 import type { FormatError, ParseResult } from "./errors.js";
 import { failResult, okResult } from "./errors.js";
@@ -55,77 +62,132 @@ interface DocProblem {
   line?: number;
 }
 
+type Located = { range?: [number, number, number] | null };
+
+/** Problems that matter most come first; ties keep document order. */
+const PROBLEM_RANK: Partial<Record<FormatError["code"], number>> = {
+  "yaml-alias": 0,
+  "yaml-tag": 0,
+};
+
 /**
- * Walks a parsed document once and reports the first of: an alias or
- * anchor, an explicit tag, a collection used as a mapping key, a duplicate
- * mapping key. The duplicate check is a Set per mapping, so it is linear
- * in the number of keys. Keys are compared as the strings they become when
- * the document turns into a JavaScript object, so `1` and `"1"` collide.
+ * Checks every node of a parsed document, whatever its type, with one
+ * generic rule: no anchor, no explicit tag, no alias. The walk is a loop
+ * over an explicit stack, so a deeply nested document cannot overflow the
+ * call stack, and there is one handler for all node types, so no handler
+ * can shadow another. Two more rules are checked while walking: a
+ * collection used as a mapping key, and a duplicate mapping key (a Set per
+ * mapping, linear in the number of keys; keys are compared as the strings
+ * they become in a JavaScript object, so `1` and `"1"` collide).
+ *
+ * Returns the most serious problem: alias and tag problems before the
+ * others, then document order. `checkTags` is off for JSON.
  */
 function inspectDocument(
   doc: Document,
   lc: LineCounter,
   checkTags: boolean,
 ): DocProblem | null {
-  let problem: DocProblem | null = null;
-  const lineOf = (node: { range?: [number, number, number] | null }) => {
-    const offset = node.range?.[0];
+  let best: DocProblem | null = null;
+  let bestRank = Infinity;
+  const report = (p: DocProblem) => {
+    const rank = PROBLEM_RANK[p.code] ?? 1;
+    if (rank < bestRank) {
+      best = p;
+      bestRank = rank;
+    }
+  };
+  const lineOf = (node: Located | null | undefined) => {
+    const offset = node?.range?.[0];
     return offset === undefined ? undefined : lc.linePos(offset).line;
   };
-  const report = (p: DocProblem) => {
-    problem ??= p;
-  };
-  visit(doc, {
-    Alias(_key, node) {
+  const stack: unknown[] = [doc.contents];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || node === undefined || typeof node !== "object") {
+      continue;
+    }
+    if (isAlias(node)) {
       report({
         code: "yaml-alias",
         message: "YAML alias is not allowed",
         line: lineOf(node),
       });
-    },
-    Node(_key, node) {
-      if (node.anchor) {
-        report({
-          code: "yaml-alias",
-          message: `YAML anchor &${node.anchor} is not allowed`,
-          line: lineOf(node),
-        });
-      }
-      if (checkTags && node.tag) {
-        report({
-          code: "yaml-tag",
-          message: `YAML tag ${node.tag} is not allowed`,
-          line: lineOf(node),
-        });
-      }
-    },
-    Map(_key, map) {
+      continue;
+    }
+    const n = node as { anchor?: string; tag?: string } & Located;
+    if (n.anchor) {
+      report({
+        code: "yaml-alias",
+        message: `YAML anchor &${n.anchor} is not allowed`,
+        line: lineOf(n),
+      });
+    }
+    if (checkTags && n.tag) {
+      report({
+        code: "yaml-tag",
+        message: `YAML tag ${n.tag} is not allowed`,
+        line: lineOf(n),
+      });
+    }
+    if (isSeq(node)) {
+      for (let i = node.items.length - 1; i >= 0; i--)
+        stack.push(node.items[i]);
+    } else if (isMap(node)) {
       const seen = new Set<string>();
-      for (const pair of map.items) {
+      const children: unknown[] = [];
+      for (const pair of node.items) {
         const key = pair.key;
-        if (!isScalar(key)) {
-          if (!isAlias(key)) {
-            report({
-              code: "invalid-yaml",
-              message: "a mapping key must be a plain scalar",
-              line: lineOf(key as { range?: [number, number, number] }),
-            });
-          }
-          continue;
-        }
-        const name = String(key.value);
-        if (seen.has(name)) {
+        if (isMap(key) || isSeq(key)) {
           report({
-            code: "duplicate-key",
-            message: `duplicate mapping key ${JSON.stringify(name)}`,
+            code: "invalid-yaml",
+            message: "a mapping key must be a plain scalar",
             line: lineOf(key),
           });
+        } else if (isScalar(key)) {
+          const name = String(key.value);
+          if (seen.has(name)) {
+            report({
+              code: "duplicate-key",
+              message: `duplicate mapping key ${JSON.stringify(name)}`,
+              line: lineOf(key),
+            });
+          }
+          seen.add(name);
         }
-        seen.add(name);
+        children.push(pair.key, pair.value);
       }
-    },
-  });
-  return problem;
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
+    }
+  }
+  return best;
+}
+
+/**
+ * Second, independent net: the decoded value holds only plain objects,
+ * arrays, strings, finite or non-finite numbers, booleans and null. Any
+ * other prototype (Set, Map, Date, Uint8Array, a class instance) means a
+ * tag got through the node check.
+ */
+export function isPlainValue(value: unknown): boolean {
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const v = stack.pop();
+    if (v === null) continue;
+    const t = typeof v;
+    if (t === "string" || t === "number" || t === "boolean") continue;
+    if (t !== "object") return false;
+    if (Array.isArray(v)) {
+      for (const item of v) stack.push(item);
+      continue;
+    }
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) return false;
+    for (const key of Object.keys(v as object)) {
+      stack.push((v as Record<string, unknown>)[key]);
+    }
+  }
+  return true;
 }
 
 /** Decodes one YAML document into plain JavaScript values. */
@@ -159,6 +221,12 @@ export function parseYamlText(text: string): ParseResult<unknown> {
   }
   if (value === null || value === undefined) {
     return fail("empty-document", "the document is empty");
+  }
+  if (!isPlainValue(value)) {
+    return fail(
+      "yaml-tag",
+      "the document decodes to a value that is not plain data",
+    );
   }
   return okResult(value);
 }

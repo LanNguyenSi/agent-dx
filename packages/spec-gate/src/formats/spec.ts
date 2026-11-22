@@ -47,9 +47,10 @@
  * `- <ID>: <text>` (column 0) or an attribute line `  - <key>: <value>`
  * (two spaces) below it. One more level, `    - <key>: <value>` (four
  * spaces), exists only below `provenance`. Text is one line; spaces only,
- * no tabs. A line with a control character other than tab, a zero-width or
- * direction mark, or a bidirectional override is rejected
- * (`forbidden-character`).
+ * no tabs. A line with a control character other than tab, a format
+ * character, or a line or paragraph separator (Unicode categories Cc, Cf,
+ * Zl, Zp; see `chars.ts`) is rejected (`forbidden-character`). That
+ * includes the title line.
  *
  * Per-line attributes:
  * - AC: `source` (SL IDs, comma separated), `owner` (who stands behind
@@ -72,6 +73,7 @@
  * completeness, references that point nowhere.
  */
 import type { FormatError, ParseResult } from "./errors.js";
+import { findForbiddenCharacter } from "./chars.js";
 import { ErrorSink, failResult, okResult } from "./errors.js";
 import { MAX_INPUT_LENGTH, parseYamlText, stripBom } from "./input.js";
 import { isSourceLineId } from "./source-lines.js";
@@ -391,16 +393,6 @@ interface RawItem {
 const HEADING_RE = /^## (.*)$/;
 const ITEM_RE = /^- (\S+?):(?: (.*))?$/;
 const ATTR_RE = /^( +)- ([a-z][a-z_]*):(?: (.*))?$/;
-/**
- * Characters that make a line read differently from what the parser sees:
- * C0 controls other than tab, DEL, zero-width and direction marks
- * (U+200B to U+200F), bidirectional embeddings and overrides (U+202A to
- * U+202E) and isolates (U+2066 to U+2069).
- */
-/* eslint-disable no-control-regex */
-const FORBIDDEN_CHAR_RE =
-  /[\u0000-\u0008\u000a-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/;
-/* eslint-enable no-control-regex */
 
 /** Splits the item and attribute lines of the normative sections. */
 function collectItems(
@@ -455,21 +447,8 @@ function collectItems(
     // Context runs to the next line that starts at column 0 with '## '.
     // Code fences, indented headings and setext headings do not change that.
     if (section === "Context") continue;
-    if (text.trim() === "") continue;
-
-    if (section === null) {
-      // Before the first section only a title line is tolerated.
-      if (/^# \S/.test(text)) continue;
-      sink.add(
-        "unexpected-line",
-        "$",
-        "text before the first section; start with a '## ' heading",
-        lineNo,
-      );
-      continue;
-    }
-
-    if (FORBIDDEN_CHAR_RE.test(text)) {
+    const bad = findForbiddenCharacter(text);
+    if (bad) {
       const idm = /^- (\S+?):/.exec(text);
       const am0 = ATTR_RE.exec(text);
       const nested = am0 !== null && am0[1]!.length === 4 && attr !== null;
@@ -483,9 +462,23 @@ function collectItems(
       sink.add(
         "forbidden-character",
         path,
-        "the line contains a control, zero-width or bidirectional formatting character",
+        `the line contains ${bad.label}, a control, format or separator character`,
         lineNo,
       );
+    }
+
+    if (text.trim() === "") continue;
+
+    if (section === null) {
+      // Before the first section only a title line is tolerated.
+      if (/^# \S/.test(text)) continue;
+      sink.add(
+        "unexpected-line",
+        "$",
+        "text before the first section; start with a '## ' heading",
+        lineNo,
+      );
+      continue;
     }
 
     if (/^[ \t]*\t/.test(text)) {

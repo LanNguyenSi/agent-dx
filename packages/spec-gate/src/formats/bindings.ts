@@ -16,6 +16,7 @@
  * empty, starts with `-`, or contains a control character
  * (`invalid-selector`).
  */
+import { findForbiddenCharacter } from "./chars.js";
 import type { ParseResult } from "./errors.js";
 import { ErrorSink, failResult } from "./errors.js";
 import { parseYamlText } from "./input.js";
@@ -25,7 +26,6 @@ import type { Rec } from "./validate.js";
 import {
   describeType,
   enumValue,
-  hasControlChars,
   hasOwn,
   isRecord,
   nonEmptyString,
@@ -52,7 +52,7 @@ export function isSafeSelector(selector: string): boolean {
   return (
     selector.trim() !== "" &&
     !selector.startsWith("-") &&
-    !hasControlChars(selector)
+    findForbiddenCharacter(selector) === null
   );
 }
 

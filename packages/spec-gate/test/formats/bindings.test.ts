@@ -86,12 +86,18 @@ describe("bindings.yaml", () => {
       "a\\b.ts",
       "C:a.ts",
       "c:/a.ts",
-      "a\nb.ts",
     ]) {
       const r = validateBindings({ "TP-1": { status: "new", file } });
       expect(r.ok, JSON.stringify(file)).toBe(false);
       if (!r.ok) expect(r.errors.map((e) => e.code)).toEqual(["invalid-value"]);
     }
+  });
+
+  it("rejects a control character in a file path as a forbidden character", () => {
+    const r = validateBindings({ "TP-1": { status: "new", file: "a\nb.ts" } });
+    expect(r.ok === false && r.errors.map((e) => e.code)).toEqual([
+      "forbidden-character",
+    ]);
   });
 
   it("rejects a field without a layer", () => {
@@ -164,11 +170,14 @@ describe("selector safety", () => {
   });
 
   it("applies the same rule inside a binding", () => {
-    for (const selector of ["-x", "a\nb"]) {
-      const r = validateBindings({ "TP-1": { status: "new", selector } });
-      expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.errors[0]!.code).toBe("invalid-selector");
-    }
+    const dash = validateBindings({
+      "TP-1": { status: "new", selector: "-x" },
+    });
+    expect(dash.ok === false && dash.errors[0]!.code).toBe("invalid-selector");
+    const ctl = validateBindings({
+      "TP-1": { status: "new", selector: "a\nb" },
+    });
+    expect(ctl.ok === false && ctl.errors[0]!.code).toBe("forbidden-character");
     expect(
       validateBindings({ "TP-1": { status: "new", selector: "ok" } }).ok,
     ).toBe(true);
