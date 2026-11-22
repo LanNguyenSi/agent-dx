@@ -97,5 +97,12 @@ describe("spec-gate CLI", () => {
       expect(run.code).not.toBe(0);
       expect(run.stderr).toContain("no version");
     });
+
+    it("fails loudly when package.json has an empty version", async () => {
+      const cli = copyCli(JSON.stringify({ version: "", type: "module" }));
+      const run = await runCli(["--version"], cli);
+      expect(run.code).not.toBe(0);
+      expect(run.stderr).toContain("no version");
+    });
   });
 });

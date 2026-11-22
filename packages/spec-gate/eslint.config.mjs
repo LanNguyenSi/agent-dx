@@ -3,7 +3,7 @@ import tsParser from "@typescript-eslint/parser";
 
 export default [
   {
-    ignores: ["dist/**", "test/fixtures/**"],
+    ignores: ["dist/**", "test/fixtures/**", ".tmp-cli-*/**"],
   },
   js.configs.recommended,
   {
