@@ -1,5 +1,5 @@
 /**
- * Which characters a text value may not contain.
+ * Which characters a text may not contain.
  *
  * The rule is by Unicode general category, not by a list of code points, so
  * a character added to a category later is caught without a change here:
@@ -9,19 +9,30 @@
  *   embeddings, overrides and isolates, the byte order mark, word joiner,
  *   soft hyphen, Arabic letter mark, tag characters.
  * - `Zl` and `Zp` (line and paragraph separators).
+ * - `Cs` (surrogate): a surrogate code unit without its partner, which makes
+ *   the string ill-formed. A well-formed pair is one code point of another
+ *   category and passes. Two different lone surrogates encode to the same
+ *   UTF-8 bytes, so they would be told apart in memory and not in a hash.
  *
  * Such a character makes a text read differently from what a parser or a
  * reviewer sees. `Cn` (unassigned) is not part of the rule because its
- * contents depend on the runtime's Unicode version.
+ * contents depend on the runtime's Unicode version. A character that renders
+ * blank but belongs to another category (a space separator such as U+00A0 or
+ * U+3000, a Hangul filler, a variation selector, a private-use character) is
+ * not refused.
  */
 
-export const FORBIDDEN_CATEGORIES = ["Cc", "Cf", "Zl", "Zp"] as const;
+export const FORBIDDEN_CATEGORIES = ["Cc", "Cf", "Zl", "Zp", "Cs"] as const;
 
-const WITH_TAB_RE = /[\p{Cf}\p{Zl}\p{Zp}]|[^\t\P{Cc}]/u;
-const NO_TAB_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+/** How an error message names what was found. */
+export const FORBIDDEN_WHAT =
+  "a control, format or separator character or a lone surrogate";
+
+const WITH_TAB_RE = /[\p{Cf}\p{Zl}\p{Zp}\p{Cs}]|[^\t\P{Cc}]/u;
+const NO_TAB_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u;
 
 export interface ForbiddenCharacter {
-  /** The code point. */
+  /** The code point; for a lone surrogate, its code unit. */
   codePoint: number;
   /** Index of its first code unit in the text. */
   index: number;
@@ -43,4 +54,32 @@ export function findForbiddenCharacter(
     index: m.index,
     label: `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`,
   };
+}
+
+export interface ForbiddenLine extends ForbiddenCharacter {
+  /** 1-based line that holds the character. */
+  line: number;
+}
+
+/**
+ * Checks a whole text line by line and returns the first forbidden
+ * character of every line that has one. A line ends at a line feed, with or
+ * without a carriage return before it; those are the only line ends, and
+ * they are not part of a line. Every other character is checked, so a
+ * carriage return anywhere else, a line separator or a byte order mark in
+ * the middle of the text is found. A tab is allowed.
+ *
+ * This is the check for text that is read in lines (`spec.md`, a YAML
+ * file): it sees comments and anything else a decoder drops.
+ */
+export function findForbiddenLines(text: string): ForbiddenLine[] {
+  const found: ForbiddenLine[] = [];
+  const lines = text.split("\n");
+  for (const [i, raw] of lines.entries()) {
+    // Only a carriage return that a line feed follows is part of a line end.
+    const crlf = i < lines.length - 1 && raw.endsWith("\r");
+    const bad = findForbiddenCharacter(crlf ? raw.slice(0, -1) : raw);
+    if (bad) found.push({ ...bad, line: i + 1 });
+  }
+  return found;
 }

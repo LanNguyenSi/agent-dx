@@ -3,7 +3,7 @@
  * an `ErrorSink` and returns the typed value, or `undefined` after having
  * reported.
  */
-import { findForbiddenCharacter } from "./chars.js";
+import { FORBIDDEN_WHAT, findForbiddenCharacter } from "./chars.js";
 import type { ErrorSink } from "./errors.js";
 
 export type Rec = Record<string, unknown>;
@@ -41,17 +41,20 @@ export function nonEmptyString(
     );
     return undefined;
   }
-  if (value.trim() === "") {
-    sink.add("empty-value", path, `${what} must not be empty`);
-    return undefined;
-  }
+  // The character rule comes before the emptiness test: trimming removes
+  // some of the characters the rule refuses (a byte order mark, a line
+  // separator), and a value made of them is reported as what it is.
   const bad = findForbiddenCharacter(value);
   if (bad) {
     sink.add(
       "forbidden-character",
       path,
-      `${what} contains ${bad.label}, a control, format or separator character`,
+      `${what} contains ${bad.label}, ${FORBIDDEN_WHAT}`,
     );
+    return undefined;
+  }
+  if (value.trim() === "") {
+    sink.add("empty-value", path, `${what} must not be empty`);
     return undefined;
   }
   return value;

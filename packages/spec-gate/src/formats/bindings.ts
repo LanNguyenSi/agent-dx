@@ -13,7 +13,8 @@
  *
  * A `selector` is passed to a test runner later, as one argv element and
  * never through a shell. The parser therefore rejects a selector that is
- * empty, starts with `-`, or contains a control character
+ * empty (`empty-value`), contains a forbidden character
+ * (`forbidden-character`, see `chars.ts`) or starts with `-`
  * (`invalid-selector`).
  */
 import { findForbiddenCharacter } from "./chars.js";
@@ -119,7 +120,7 @@ function parseBinding(
         sink.add(
           "invalid-selector",
           `${tpId}.selector`,
-          `${rowName}: selector must not start with '-' or contain control characters`,
+          `${rowName}: selector must not start with '-'`,
         );
       }
     }

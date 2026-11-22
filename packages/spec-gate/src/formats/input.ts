@@ -12,6 +12,11 @@
  * - Merge keys (`<<`) are not merged; the key stays literal and is then
  *   rejected as an unknown field by the format that sees it.
  * - Exactly one document per file; an empty document is an error.
+ * - The raw text is checked for forbidden characters line by line before
+ *   it is parsed (`forbidden-character`, see `chars.ts`), so a comment is
+ *   checked like a value. The formats check their string values again
+ *   after decoding, where an escape sequence has become its character.
+ * - One byte order mark at the start of the text is removed first.
  *
  * JSON is parsed strictly with `JSON.parse` and additionally checked for
  * duplicate object keys, which `JSON.parse` silently collapses.
@@ -25,6 +30,7 @@ import {
   parseDocument,
 } from "yaml";
 import type { Document } from "yaml";
+import { FORBIDDEN_WHAT, findForbiddenLines } from "./chars.js";
 import type { FormatError, ParseResult } from "./errors.js";
 import { failResult, okResult } from "./errors.js";
 
@@ -191,9 +197,26 @@ export function isPlainValue(value: unknown): boolean {
 }
 
 /** Decodes one YAML document into plain JavaScript values. */
-export function parseYamlText(text: string): ParseResult<unknown> {
-  const tooLarge = checkSize<unknown>(text);
+export function parseYamlText(input: string): ParseResult<unknown> {
+  const tooLarge = checkSize<unknown>(input);
   if (tooLarge) return tooLarge;
+  // A byte order mark may start a file, as in `spec.md`; anywhere else it
+  // is a format character like any other.
+  const text = stripBom(input);
+  // Before the YAML parser sees the text: it drops comments and reads a
+  // line break only at a line feed, so a character in a comment could show
+  // a reader a line the parser never reads.
+  const forbidden = findForbiddenLines(text);
+  if (forbidden.length > 0) {
+    return failResult(
+      forbidden.map((bad) => ({
+        code: "forbidden-character",
+        path: "$",
+        message: `line ${bad.line} contains ${bad.label}, ${FORBIDDEN_WHAT}`,
+        line: bad.line,
+      })),
+    );
+  }
   const lc = new LineCounter();
   const doc = parseDocument(text, {
     version: "1.2",

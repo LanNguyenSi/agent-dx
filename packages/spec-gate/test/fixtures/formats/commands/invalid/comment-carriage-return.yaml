@@ -1,0 +1,4 @@
+commands:
+  typecheck:
+    argv: ["npm", "run", "typecheck"]
+  # more  deploy:    argv: ["sh", "deploy.sh"]

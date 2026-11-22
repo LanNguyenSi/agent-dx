@@ -147,7 +147,7 @@ retired_ids: []
 
 ## Context
 
-Free prose. The parser skips it. Nothing in it is normative.
+Free prose. Nothing in it is normative.
 
 ## Acceptance
 
@@ -171,33 +171,27 @@ reads as empty. Any other `## ` heading is an error, so no normative line can
 hide behind an unknown heading. A line before the first section must be blank
 or a `# ` title line.
 
-Context is skipped by the parser, line by line, and ends at the next line
-that starts at column 0 with `## `, and at nothing else. Code fences, indented
-headings and setext headings do not end it: a line that renders as a heading
-or opens a code block is prose here. A `## ` line inside what looks like a
-code block does end Context, so it is a section start or an unknown-section
-error; both fail closed. `###` and deeper headings are only allowed there.
-Apart from those `## ` lines, the result of parsing never depends on what
-Context says.
+Context is free prose. It ends at the next line that starts at column 0 with
+`## ` (two hashes and a plain space), and at nothing else. Code fences,
+indented headings and setext headings do not end it: a line that renders as a
+heading or opens a code block is prose here. A `## ` line inside what looks
+like a code block does end Context, so it is a section start or an
+unknown-section error; both fail closed. `###` and deeper headings are only
+allowed there. The parser reads a Context line for two things only: whether it
+is such a `## ` line, and the character rule. Apart from that, the result of
+parsing never depends on what Context says.
 
-**Forbidden characters.** A text value may not contain a character of Unicode
-general category `Cc` (control: C0 and C1 controls, DEL, line feed, carriage
-return, NEL), `Cf` (format: zero-width and direction marks, bidirectional
-embeddings, overrides and isolates, byte order mark, word joiner, soft hyphen,
-Arabic letter mark, tag characters), `Zl` or `Zp` (line and paragraph
-separators). The rule is by category, so a character added to a category later
-is caught without a change; `Cn` (unassigned) is not part of it because its
-contents depend on the runtime's Unicode version. A tab is allowed in every
-value except an argv element. The function is `findForbiddenCharacter`; the
-error is `forbidden-character`, once per field, naming the code point. Such a
-character makes a text read differently from what a parser or a reviewer
-sees. It applies to every line of `spec.md` outside Context (the title line
-included, attribute values and nested values included), every string field of
-`testplan.yaml`, `triage.json`, `questions.json`, `bindings.yaml` and
-`config.yaml`, every frontmatter value, and every argv element in
-`commands.yaml`. Fields are single-line, so a newline is refused too. The rule
-also refuses the zero-width joiner, so an emoji sequence joined with it is
-refused; a single emoji and accented or CJK text pass.
+**Characters.** Every line of `spec.md` is checked against the rule under
+"Forbidden characters" below, before anything else reads the line and with no
+exemption: frontmatter lines and their comments, the title line, `## ` heading
+lines, Context lines, lines that hold nothing visible, and lines below an
+unknown heading are checked like item and attribute lines. Context is included
+because a line is a heading only by its first three characters: with a
+zero-width space in front of `## Defaults`, or between or after the hashes, a
+reader sees a heading and the parser sees prose, and every section below it
+would be read as Context. The error names the item or attribute where the line
+is one (`AC-1.owner`), `frontmatter` for a frontmatter line and `$` for any
+other line, always with the line number, once per line.
 
 In every other section, every non-blank line is an item or an attribute:
 
@@ -317,8 +311,9 @@ default empty) and `notes`. `file` and every `fixtures` entry are
 repo-relative paths: no `..` segment, not absolute, not starting with `-`.
 A `manual` row has no binding. A selector is
 later passed to a test runner as one argument, never through a shell, so the
-parser rejects an empty selector, one that starts with `-`, and one with a
-control character.
+parser rejects an empty selector (`empty-value`), one with a forbidden
+character (`forbidden-character`) and one that starts with `-`
+(`invalid-selector`).
 
 ## triage.json
 
@@ -442,6 +437,71 @@ the rule does not apply. The three facts are git and host questions: the
 closing check answers them and passes them to `evidenceSurvivesSquash`;
 nothing in the format layer runs git.
 
+## Forbidden characters
+
+A text may not contain a character of these Unicode general categories:
+
+- `Cc` (control): C0 and C1 controls, DEL, line feed, carriage return, NEL.
+  A tab is allowed, except in an argv element.
+- `Cf` (format): zero-width and direction marks, bidirectional embeddings,
+  overrides and isolates, byte order mark, word joiner, soft hyphen, Arabic
+  letter mark, tag characters.
+- `Zl` and `Zp`: the line separator and the paragraph separator.
+- `Cs` (surrogate): a surrogate without its partner, which makes a string
+  ill-formed. Two different lone surrogates become the same UTF-8 bytes, so a
+  hash could not tell them apart. A well-formed pair, such as an emoji outside
+  the basic plane, is one character of another category and passes.
+
+Such a character makes a text read differently from what a parser or a
+reviewer sees. The rule is by category, so a character added to a category
+later is caught without a change; `Cn` (unassigned) is not part of it because
+its contents depend on the runtime's Unicode version. The function is
+`findForbiddenCharacter`, the error is `forbidden-character`, and its message
+names the code point.
+
+The rule is applied twice:
+
+- To the raw text, line by line, before anything is parsed: every line of
+  `spec.md` (see there), and every line of `testplan.yaml`, `bindings.yaml`,
+  `config.yaml` and `commands.yaml`, comments included. A line ends at a line
+  feed, alone or after a carriage return, and at nothing else, so any other
+  carriage return, a line separator or NEL is a character of its line and is
+  refused. A YAML parser drops comments and breaks lines only at a line feed;
+  without this check a comment could show a reader a row or a key that the
+  parser never reads. In a YAML file the error is at `$` with the line number,
+  one per line. One byte order mark at the very start of `spec.md` or of a
+  YAML file is accepted and ignored.
+- To decoded values: every string field of `testplan.yaml`, `triage.json`,
+  `questions.json`, `bindings.yaml` and `config.yaml`, every frontmatter
+  value, and every argv element in `commands.yaml`. This finds a character
+  written as an escape sequence (`"​"`), which is clean as raw text. The
+  error is at the field, once per field. The raw text of a JSON file is not
+  checked on its own: JSON has no comments, and outside a string it allows
+  only spaces, tabs, line feeds and carriage returns.
+
+**Single-line fields.** Every string field is one line: a line feed is a
+control character, so a value that holds one is refused. In YAML this refuses
+a literal block scalar (`|`), a folded one that keeps its final line end (`>`,
+`>+`), and any block scalar whose value still holds a line feed after folding.
+A folded, stripped scalar (`>-`) whose lines fold into one, a stripped literal
+scalar (`|-`) of one line, and a plain or quoted scalar continued on the next
+line are accepted, because their value is one line.
+
+**What the rule leaves out.** It refuses categories, not everything that
+renders as nothing. A character outside the five categories that shows as
+blank, or not at all, is accepted: a space separator such as the no-break
+space U+00A0, a thin space or the ideographic space U+3000 (`Zs`), a Hangul
+filler such as U+3164 (`Lo`), a variation selector or the combining grapheme
+joiner (`Mn`), a private-use character (`Co`). In Context this means that a
+line with such a character in front of `## Defaults`, or with a no-break space
+or a tab in place of the plain space after the hashes, is prose, as an
+indented heading is; only a line that starts at column 0 with two hashes and a
+plain space is a heading. The rule does refuse the zero-width joiner, so an
+emoji sequence joined with it is refused; a single emoji and accented or CJK
+text pass. The selector, command and CI run reference of an evidence envelope
+and the raw request in `source/ticket.md` are not subject to the rule: a
+runner writes the first three, and the request is kept unedited.
+
 ## YAML and JSON input
 
 YAML is parsed as YAML 1.2 with the core schema, so `yes`, `no`, `on`, `off`
@@ -450,7 +510,9 @@ explicit tags are errors, on every node whatever its type (root, mapping
 value, sequence item, mapping key; block or flow; collection or scalar); a
 merge key `<<` is not merged and is then an unknown field. As a second, independent
 check, a decoded value must hold only plain objects, arrays, strings, numbers,
-booleans and null; a `Set`, `Map` or `Date` is refused. A file is exactly one document and must not be empty. JSON is
+booleans and null; a `Set`, `Map` or `Date` is refused. A file is exactly one document and must not be empty. Before a YAML
+text is parsed, its lines are checked against the rule under "Forbidden
+characters". JSON is
 parsed strictly, and duplicate object keys are errors (`JSON.parse` would
 silently keep the last one). Inputs over 1 MiB are rejected. A collection used
 as a mapping key is an error, and keys are compared as the strings they

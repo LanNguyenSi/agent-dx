@@ -28,7 +28,7 @@
  * The file does not stop a person from writing `["sh", "-c", "..."]`. The
  * pull request that adds a command is where that is reviewed.
  */
-import { findForbiddenCharacter } from "./chars.js";
+import { FORBIDDEN_WHAT, findForbiddenCharacter } from "./chars.js";
 import type { ParseResult } from "./errors.js";
 import { ErrorSink, failResult } from "./errors.js";
 import { parseYamlText } from "./input.js";
@@ -106,7 +106,7 @@ function parseArgv(
       sink.add(
         "forbidden-character",
         p,
-        `argv element contains ${bad.label}, a control, format or separator character`,
+        `argv element contains ${bad.label}, ${FORBIDDEN_WHAT}`,
       );
       good = false;
       return;

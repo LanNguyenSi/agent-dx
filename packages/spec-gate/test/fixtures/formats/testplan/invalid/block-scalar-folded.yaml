@@ -1,0 +1,8 @@
+- id: TP-1
+  covers: [AC-1]
+  kind: manual
+  claim: >
+    the page
+    looks right
+  verifier: designer
+  evidence_location: review/page.png

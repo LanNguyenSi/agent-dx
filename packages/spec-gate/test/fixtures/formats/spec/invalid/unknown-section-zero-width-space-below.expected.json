@@ -1,0 +1,10 @@
+[
+  {
+    "code": "unknown-section",
+    "path": "section.Notes"
+  },
+  {
+    "code": "forbidden-character",
+    "path": "$"
+  }
+]

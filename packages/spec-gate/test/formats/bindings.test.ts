@@ -174,10 +174,22 @@ describe("selector safety", () => {
       "TP-1": { status: "new", selector: "-x" },
     });
     expect(dash.ok === false && dash.errors[0]!.code).toBe("invalid-selector");
+    // The message names the one thing this code stands for.
+    expect(dash.ok === false && dash.errors[0]!.message).toBe(
+      "binding TP-1: selector must not start with '-'",
+    );
     const ctl = validateBindings({
       "TP-1": { status: "new", selector: "a\nb" },
     });
-    expect(ctl.ok === false && ctl.errors[0]!.code).toBe("forbidden-character");
+    expect(ctl.ok === false && ctl.errors.map((e) => e.code)).toEqual([
+      "forbidden-character",
+    ]);
+    const empty = validateBindings({
+      "TP-1": { status: "new", selector: "  " },
+    });
+    expect(empty.ok === false && empty.errors.map((e) => e.code)).toEqual([
+      "empty-value",
+    ]);
     expect(
       validateBindings({ "TP-1": { status: "new", selector: "ok" } }).ok,
     ).toBe(true);

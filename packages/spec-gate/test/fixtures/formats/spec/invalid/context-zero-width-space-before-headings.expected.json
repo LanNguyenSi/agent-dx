@@ -1,0 +1,10 @@
+[
+  {
+    "code": "forbidden-character",
+    "path": "$"
+  },
+  {
+    "code": "forbidden-character",
+    "path": "$"
+  }
+]

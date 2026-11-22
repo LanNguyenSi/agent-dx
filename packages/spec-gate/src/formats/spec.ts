@@ -21,7 +21,7 @@
  *
  * ## Context
  *
- * Free prose. The parser skips it; nothing in it is normative.
+ * Free prose. Nothing in it is normative; only the character rule reads it.
  *
  * ## Acceptance
  *
@@ -43,14 +43,21 @@
  * so it is then a section start or an unknown-section error. Both fail
  * closed: nothing a reader sees under a real heading is lost.
  *
+ * Every line of the file is checked for forbidden characters before
+ * anything else looks at it: a control character other than tab, a format
+ * character, a line or paragraph separator, or a lone surrogate (Unicode
+ * categories Cc, Cf, Zl, Zp, Cs; see `chars.ts`) is rejected
+ * (`forbidden-character`). There is no exemption: frontmatter lines and
+ * their comments, the title line, `## ` heading lines, Context lines,
+ * blank-looking lines and lines below an unknown heading are checked like
+ * item and attribute lines. Without that, an invisible character in front
+ * of `## ` would turn a heading a reader sees into Context prose.
+ *
  * Outside Context every non-blank line is either an item line
  * `- <ID>: <text>` (column 0) or an attribute line `  - <key>: <value>`
  * (two spaces) below it. One more level, `    - <key>: <value>` (four
  * spaces), exists only below `provenance`. Text is one line; spaces only,
- * no tabs. A line with a control character other than tab, a format
- * character, or a line or paragraph separator (Unicode categories Cc, Cf,
- * Zl, Zp; see `chars.ts`) is rejected (`forbidden-character`). That
- * includes the title line.
+ * no tabs.
  *
  * Per-line attributes:
  * - AC: `source` (SL IDs, comma separated), `owner` (who stands behind
@@ -73,7 +80,7 @@
  * completeness, references that point nowhere.
  */
 import type { FormatError, ParseResult } from "./errors.js";
-import { findForbiddenCharacter } from "./chars.js";
+import { FORBIDDEN_WHAT, findForbiddenCharacter } from "./chars.js";
 import { ErrorSink, failResult, okResult } from "./errors.js";
 import { MAX_INPUT_LENGTH, parseYamlText, stripBom } from "./input.js";
 import { isSourceLineId } from "./source-lines.js";
@@ -412,6 +419,35 @@ function collectItems(
   for (const [offset, text] of lines.entries()) {
     const lineNo = firstLine + offset;
 
+    // The character rule comes first and has no exemption. It reads the raw
+    // line before any heading, section, blank-line or trim logic, so no
+    // `continue` below can skip it: a heading line, a Context line, a line
+    // that trims to nothing and a line below an unknown heading are checked
+    // like an item line. A line that is not read as an item or an attribute
+    // is reported at `$`.
+    const bad = findForbiddenCharacter(text);
+    if (bad) {
+      const unread = skipping || section === "Context";
+      const idm = /^- (\S+?):/.exec(text);
+      const am0 = ATTR_RE.exec(text);
+      const nested = am0 !== null && am0[1]!.length === 4 && attr !== null;
+      const path = unread
+        ? "$"
+        : idm
+          ? `${idm[1]}.text`
+          : item && am0
+            ? nested
+              ? `${item.idText}.${attr!.key}.${am0[2]}`
+              : `${item.idText}.${am0[2]}`
+            : "$";
+      sink.add(
+        "forbidden-character",
+        path,
+        `the line contains ${bad.label}, ${FORBIDDEN_WHAT}`,
+        lineNo,
+      );
+    }
+
     const heading = HEADING_RE.exec(text);
     if (heading) {
       const title = heading[1]!.trim();
@@ -447,25 +483,6 @@ function collectItems(
     // Context runs to the next line that starts at column 0 with '## '.
     // Code fences, indented headings and setext headings do not change that.
     if (section === "Context") continue;
-    const bad = findForbiddenCharacter(text);
-    if (bad) {
-      const idm = /^- (\S+?):/.exec(text);
-      const am0 = ATTR_RE.exec(text);
-      const nested = am0 !== null && am0[1]!.length === 4 && attr !== null;
-      const path = idm
-        ? `${idm[1]}.text`
-        : item && am0
-          ? nested
-            ? `${item.idText}.${attr!.key}.${am0[2]}`
-            : `${item.idText}.${am0[2]}`
-          : "$";
-      sink.add(
-        "forbidden-character",
-        path,
-        `the line contains ${bad.label}, a control, format or separator character`,
-        lineNo,
-      );
-    }
 
     if (text.trim() === "") continue;
 
@@ -1182,7 +1199,27 @@ export function parseSpec(input: string): ParseResult<Spec> {
     );
     return failResult(sink.errors);
   }
-  const yaml = parseYamlText(lines.slice(1, close).join("\n"));
+  // The character rule for the frontmatter lines. The YAML decoder checks
+  // the same text again, but it gets every line ended by a line feed and so
+  // reads a carriage return that ends one of them here as part of a line
+  // end. The sink keeps one report per line.
+  for (let i = 1; i < close; i++) {
+    const bad = findForbiddenCharacter(lines[i]!);
+    if (bad) {
+      sink.add(
+        "forbidden-character",
+        "frontmatter",
+        `the line contains ${bad.label}, ${FORBIDDEN_WHAT}`,
+        i + 1,
+      );
+    }
+  }
+  const yaml = parseYamlText(
+    lines
+      .slice(1, close)
+      .map((line) => `${line}\n`)
+      .join(""),
+  );
   let frontmatter: SpecFrontmatter | undefined;
   if (!yaml.ok) {
     for (const e of yaml.errors) {

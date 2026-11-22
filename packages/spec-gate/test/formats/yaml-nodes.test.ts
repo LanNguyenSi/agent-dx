@@ -164,7 +164,7 @@ describe("every YAML node is checked, whatever its position and form", () => {
     }
   });
 
-  it("rejects the reviewer's mapping cases", () => {
+  it("rejects a tag or an anchor on a mapping, at the root and as a value or sequence item", () => {
     const cases: [Entry, string, string][] = [
       [parseConfig, "approvers: !!set {a, b}\n", "yaml-tag"],
       [parseConfig, "questions: !custom {warn_above: 3}\n", "yaml-tag"],
