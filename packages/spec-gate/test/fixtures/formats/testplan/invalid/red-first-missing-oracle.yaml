@@ -1,0 +1,6 @@
+- id: TP-1
+  covers: [AC-1]
+  kind: red-first
+  claim: "c"
+  red_reason: "r"
+  expected: "e"

@@ -1,0 +1,33 @@
+{
+  "questions": [
+    {
+      "id": "QN-1",
+      "target": "AC-1",
+      "class": "divergence",
+      "blocking": true,
+      "question": "Should old sessions stay valid?",
+      "options": [
+        {
+          "label": "revoke",
+          "consequence": "all sessions end at once"
+        },
+        {
+          "label": "keep",
+          "consequence": "old sessions stay until expiry"
+        }
+      ],
+      "recommended": "revoke",
+      "evidence": "SL-3 says log out everywhere"
+    }
+  ],
+  "answers": [
+    {
+      "question": "QN-1",
+      "answer": "revoke",
+      "option": "revoke",
+      "channel": "comment",
+      "time": "2000-01-31T12:00:00Z",
+      "comment_url": "https://example.com/issues/1#comment-2"
+    }
+  ]
+}

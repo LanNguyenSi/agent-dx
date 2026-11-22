@@ -1,0 +1,18 @@
+[
+  {
+    "code": "missing-field",
+    "path": "TP-1.environment"
+  },
+  {
+    "code": "missing-field",
+    "path": "TP-1.steps"
+  },
+  {
+    "code": "missing-field",
+    "path": "TP-1.expected"
+  },
+  {
+    "code": "missing-field",
+    "path": "TP-1.evidence_location"
+  }
+]

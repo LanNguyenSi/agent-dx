@@ -1,0 +1,22 @@
+{
+  "questions": [
+    {
+      "id": "QN-1",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": true,
+      "question": "Should old sessions stay valid?",
+      "options": [],
+      "evidence": "SL-3 says log out everywhere"
+    }
+  ],
+  "answers": [
+    {
+      "question": "QN-1",
+      "answer": "Use the existing service account policy",
+      "channel": "chat",
+      "author": "alice",
+      "time": "2000-01-31T12:00:00Z"
+    }
+  ]
+}

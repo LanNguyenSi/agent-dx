@@ -1,0 +1,24 @@
+{
+  "questions": [
+    {
+      "id": "QN-1",
+      "target": "AC-1",
+      "class": "divergence",
+      "blocking": true,
+      "question": "Should old sessions stay valid?",
+      "options": [
+        {
+          "label": "revoke",
+          "consequence": "all sessions end at once"
+        },
+        {
+          "label": "keep",
+          "consequence": "old sessions stay until expiry"
+        }
+      ],
+      "recommended": "revoke",
+      "evidence": "SL-3 says log out everywhere",
+      "priority": "high"
+    }
+  ]
+}

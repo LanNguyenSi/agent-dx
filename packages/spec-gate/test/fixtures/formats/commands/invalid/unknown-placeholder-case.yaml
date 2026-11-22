@@ -1,0 +1,5 @@
+discovery:
+  argv: [list]
+commands:
+  a:
+    argv: [tool, "{Selector}"]

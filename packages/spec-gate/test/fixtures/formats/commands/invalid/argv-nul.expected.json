@@ -1,0 +1,6 @@
+[
+  {
+    "code": "forbidden-character",
+    "path": "commands.unit.argv[0]"
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "questions": [
+    {
+      "id": "QN-1",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": false,
+      "question": "Is this \ud800 intended?",
+      "options": [
+        {
+          "label": "yes",
+          "consequence": "it stays"
+        }
+      ]
+    }
+  ]
+}

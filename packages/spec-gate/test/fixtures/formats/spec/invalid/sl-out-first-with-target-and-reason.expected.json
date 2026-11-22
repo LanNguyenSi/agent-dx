@@ -1,0 +1,10 @@
+[
+  {
+    "code": "invalid-value",
+    "path": "SL-1.targets"
+  },
+  {
+    "code": "attribute-not-allowed",
+    "path": "SL-1.reason"
+  }
+]

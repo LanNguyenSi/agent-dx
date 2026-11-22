@@ -1,0 +1,7 @@
+discovery:
+  argv: [list]
+commands:
+  unit:
+    argv: [npx, vitest, "{selector}"]
+  e2e:
+    argv: [npx, playwright, "{selector}"]

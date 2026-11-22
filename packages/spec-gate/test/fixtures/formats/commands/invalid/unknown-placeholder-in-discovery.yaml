@@ -1,0 +1,5 @@
+discovery:
+  argv: [list, "{name}"]
+commands:
+  a:
+    argv: [tool]

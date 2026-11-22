@@ -1,0 +1,14 @@
+[
+  {
+    "code": "missing-field",
+    "path": "TP-1.baseline"
+  },
+  {
+    "code": "missing-field",
+    "path": "TP-1.threshold"
+  },
+  {
+    "code": "missing-field",
+    "path": "TP-1.runs"
+  }
+]

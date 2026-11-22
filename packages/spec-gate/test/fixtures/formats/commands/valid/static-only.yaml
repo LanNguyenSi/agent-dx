@@ -1,0 +1,3 @@
+commands:
+  lint:
+    argv: ["npm", "run", "lint"]

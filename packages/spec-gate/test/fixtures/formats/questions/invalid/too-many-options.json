@@ -1,0 +1,34 @@
+{
+  "questions": [
+    {
+      "id": "QN-1",
+      "target": "AC-1",
+      "class": "divergence",
+      "blocking": true,
+      "question": "Should old sessions stay valid?",
+      "options": [
+        {
+          "label": "0",
+          "consequence": "c"
+        },
+        {
+          "label": "1",
+          "consequence": "c"
+        },
+        {
+          "label": "2",
+          "consequence": "c"
+        },
+        {
+          "label": "3",
+          "consequence": "c"
+        },
+        {
+          "label": "4",
+          "consequence": "c"
+        }
+      ],
+      "evidence": "SL-3 says log out everywhere"
+    }
+  ]
+}

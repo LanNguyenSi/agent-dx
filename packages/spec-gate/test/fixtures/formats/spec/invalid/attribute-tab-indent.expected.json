@@ -1,0 +1,10 @@
+[
+  {
+    "code": "bad-indent",
+    "path": "$"
+  },
+  {
+    "code": "missing-attribute",
+    "path": "AC-1.owner"
+  }
+]

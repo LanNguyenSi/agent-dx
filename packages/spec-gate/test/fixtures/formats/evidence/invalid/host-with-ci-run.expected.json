@@ -1,0 +1,6 @@
+[
+  {
+    "code": "ci-run-not-allowed",
+    "path": "[0].ci_run"
+  }
+]

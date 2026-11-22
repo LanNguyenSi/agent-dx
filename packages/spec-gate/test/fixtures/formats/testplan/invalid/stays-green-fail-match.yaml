@@ -1,0 +1,6 @@
+- id: TP-1
+  covers: [AC-1]
+  kind: stays-green
+  claim: "c"
+  probe_hint: "h"
+  fail_match: "x"

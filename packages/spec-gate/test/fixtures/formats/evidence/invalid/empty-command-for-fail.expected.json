@@ -1,0 +1,6 @@
+[
+  {
+    "code": "command-required",
+    "path": "[0].command"
+  }
+]

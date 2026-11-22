@@ -1,0 +1,18 @@
+[
+  {
+    "code": "forbidden-character",
+    "path": "$"
+  },
+  {
+    "code": "context-heading-lookalike",
+    "path": "section.Defaults"
+  },
+  {
+    "code": "forbidden-character",
+    "path": "$"
+  },
+  {
+    "code": "context-heading-lookalike",
+    "path": "section.Residuals"
+  }
+]

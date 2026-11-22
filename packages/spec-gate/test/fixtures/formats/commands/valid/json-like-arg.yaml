@@ -1,0 +1,3 @@
+commands:
+  report:
+    argv: ["tool", "--config={\"a\": 1}"]
