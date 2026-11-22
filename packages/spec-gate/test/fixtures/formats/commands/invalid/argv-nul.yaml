@@ -1,0 +1,3 @@
+commands:
+  unit:
+    argv: ["a\0b"]

@@ -1,0 +1,6 @@
+[
+  {
+    "code": "selector-in-discovery",
+    "path": "discovery.argv[1]"
+  }
+]

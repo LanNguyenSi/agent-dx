@@ -1,0 +1,10 @@
+TP-1:
+  status: new
+  selector: "auth.test.ts > invalidates tokens on password change"
+  file: test/auth.test.ts
+  fixtures: [test/fixtures/users.json]
+  notes: "write the test first"
+TP-2:
+  status: existing
+  selector: "auth.test.ts > keeps fresh tokens valid"
+  file: test/auth.test.ts

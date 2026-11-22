@@ -1,0 +1,4 @@
+commands:
+  unit:
+    argv: [a]
+    shell: true

@@ -1,0 +1,6 @@
+[
+  {
+    "code": "invalid-value",
+    "path": "commands.unit.argv[0]"
+  }
+]

@@ -1,0 +1,5 @@
+discovery:
+  argv: [list]
+commands:
+  unit:
+    argv: [npx, vitest, "--grep={selector}"]

@@ -1,0 +1,6 @@
+[
+  {
+    "code": "ci-run-required",
+    "path": "[0].ci_run"
+  }
+]

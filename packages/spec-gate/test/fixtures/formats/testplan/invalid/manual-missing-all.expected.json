@@ -1,0 +1,10 @@
+[
+  {
+    "code": "missing-field",
+    "path": "TP-1.verifier"
+  },
+  {
+    "code": "missing-field",
+    "path": "TP-1.evidence_location"
+  }
+]

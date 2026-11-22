@@ -1,0 +1,4 @@
+- id: TP-1
+  covers: [NG-1]
+  kind: static
+  claim: "c"

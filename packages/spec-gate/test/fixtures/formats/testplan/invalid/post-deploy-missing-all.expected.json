@@ -1,0 +1,10 @@
+[
+  {
+    "code": "missing-field",
+    "path": "TP-1.check"
+  },
+  {
+    "code": "missing-field",
+    "path": "TP-1.environment"
+  }
+]

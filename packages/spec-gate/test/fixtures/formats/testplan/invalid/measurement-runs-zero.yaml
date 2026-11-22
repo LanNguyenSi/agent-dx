@@ -1,0 +1,7 @@
+- id: TP-1
+  covers: [NG-1]
+  kind: measurement
+  claim: "c"
+  baseline: 1
+  threshold: 2
+  runs: 0

@@ -1,0 +1,25 @@
+{
+  "single_goal": {
+    "value": "yes",
+    "evidence": "specs/x.md:3"
+  },
+  "code_related": {
+    "value": "yes",
+    "evidence": "specs/x.md:3"
+  },
+  "core_is_decision": {
+    "value": "yes",
+    "evidence": "specs/x.md:3"
+  },
+  "scope_within_request": {
+    "value": "yes",
+    "evidence": "specs/x.md:3"
+  },
+  "multiple_repos": {
+    "value": "yes",
+    "evidence": "specs/x.md:3"
+  },
+  "blocking_unknowns": [],
+  "class": "actionable",
+  "rule_version": 1
+}

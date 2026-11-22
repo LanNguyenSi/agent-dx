@@ -1,0 +1,6 @@
+questions:
+  warn_above: 5
+approvers: [alice, bob]
+agent_identities: [spec-bot]
+signing_keys:
+  - "SHA256:abcdef"

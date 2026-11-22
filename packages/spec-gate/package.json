@@ -9,6 +9,8 @@
   },
   "files": [
     "dist",
+    "docs",
+    "schemas",
     "README.md",
     "CHANGELOG.md"
   ],
@@ -38,7 +40,8 @@
     "directory": "packages/spec-gate"
   },
   "dependencies": {
-    "commander": "^12.1.0"
+    "commander": "^12.1.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

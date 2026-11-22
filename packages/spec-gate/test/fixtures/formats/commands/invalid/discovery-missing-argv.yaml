@@ -1,0 +1,4 @@
+discovery: {}
+commands:
+  unit:
+    argv: [a]

@@ -1,0 +1,8 @@
+- id: TP-1
+  covers: [AC-1]
+  kind: runtime
+  claim: "c"
+  environment: "staging"
+  steps: []
+  expected: "e"
+  evidence_location: "review/x.md"

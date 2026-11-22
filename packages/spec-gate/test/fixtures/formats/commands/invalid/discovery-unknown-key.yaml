@@ -1,0 +1,6 @@
+discovery:
+  argv: [list]
+  output: json
+commands:
+  unit:
+    argv: [a]

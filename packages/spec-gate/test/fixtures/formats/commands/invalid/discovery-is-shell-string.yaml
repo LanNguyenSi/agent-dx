@@ -1,0 +1,4 @@
+discovery: "npx vitest list"
+commands:
+  unit:
+    argv: [a]

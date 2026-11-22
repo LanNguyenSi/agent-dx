@@ -1,0 +1,4 @@
+commands:
+  a:
+    argv: [a]
+hooks: []
