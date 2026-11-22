@@ -794,6 +794,7 @@ jobs:
           - okf-kit
           - orchestrator-workflow
           - slop-detector
+          - spec-gate
     defaults:
       run:
         working-directory: packages/${{ matrix.package }}

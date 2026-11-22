@@ -1,0 +1,64 @@
+{
+  "name": "spec-gate",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Turn a ticket or intent into a checked, reviewable spec and test plan before implementation starts",
+  "type": "module",
+  "bin": {
+    "spec-gate": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "dev": "node --import tsx src/cli.ts",
+    "lint": "eslint .",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "format": "prettier --write \"*.ts\" \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"*.ts\" \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "spec",
+    "dx"
+  ],
+  "author": "Lan Nguyen Si",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LanNguyenSi/agent-dx.git",
+    "directory": "packages/spec-gate"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^20.19.43",
+    "@typescript-eslint/parser": "^8.73.0",
+    "eslint": "^10.14.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "overrides": {
+    "eslint": {
+      "minimatch": "11.0.4"
+    },
+    "@eslint/config-array": {
+      "minimatch": "11.0.4"
+    }
+  }
+}
