@@ -17,6 +17,7 @@ import {
   parseTestPlan,
   parseTriage,
   parseYamlText,
+  scanForbiddenLines,
   splitSourceLines,
 } from "../../src/formats/index.js";
 
@@ -1052,5 +1053,96 @@ describe("what the rule leaves out, as documented", () => {
     }
     const request = splitSourceLines(`Hello${zwsp} world\n${cp(0x202e)}Second`);
     expect(request.ok && request.value).toHaveLength(2);
+  });
+});
+
+// ------------------------------------------------------------ error limits
+
+describe("at most 100 forbidden-character errors per document", () => {
+  const bad = `# no${cp(0x200b)}te\n`;
+
+  it("keeps the first lines and counts them all", () => {
+    const text = `a${cp(0x200b)}\n`.repeat(5);
+    expect(scanForbiddenLines(text, 2)).toEqual({
+      found: findForbiddenLines(text).slice(0, 2),
+      total: 5,
+    });
+    expect(scanForbiddenLines(text, 0)).toEqual({ found: [], total: 5 });
+    expect(scanForbiddenLines(text, 9).found).toHaveLength(5);
+    expect(scanForbiddenLines("clean\n", 2)).toEqual({ found: [], total: 0 });
+  });
+
+  it("lists a YAML file's lines up to the limit and adds nothing", () => {
+    const r = parseYamlText(`${bad.repeat(100)}a: 1\n`);
+    expect(r.ok === false && r.errors.map((e) => e.code)).toEqual(
+      Array(100).fill("forbidden-character"),
+    );
+  });
+
+  it("stops a YAML file's list at the limit and states the total in one more error", () => {
+    for (const doc of RAW_DOCS) {
+      const r = doc.parse(`${bad.repeat(101)}${doc.lines.join("\n")}\n`);
+      expect(r.errors, doc.format).toHaveLength(101);
+      expect(r.errors![99], doc.format).toMatchObject({
+        code: "forbidden-character",
+        line: 100,
+      });
+      expect(r.errors![100], doc.format).toEqual({
+        code: "too-many-errors",
+        path: "$",
+        message:
+          "101 forbidden-character errors in total; the first 100 are listed",
+      });
+    }
+    const many = parseYamlText(bad.repeat(5000));
+    expect(many.ok === false && many.errors).toHaveLength(101);
+    expect(many.ok === false && many.errors[100]!.message).toBe(
+      "5000 forbidden-character errors in total; the first 100 are listed",
+    );
+  });
+
+  it("limits the errors of decoded values the same way", () => {
+    const rows = Array.from({ length: 150 }, (_, i) => ({
+      ...tpRow({ claim: `a${cp(0x200b)}b` }, "red-first"),
+      id: `TP-${i + 1}`,
+    }));
+    const r = parseTestPlan(yamlText(rows));
+    expect(r.ok === false && r.errors).toHaveLength(101);
+    expect(r.ok === false && r.errors.at(-1)).toEqual({
+      code: "too-many-errors",
+      path: "$",
+      message:
+        "150 forbidden-character errors in total; the first 100 are listed",
+    });
+  });
+
+  it("counts a repeated report once and limits no other code", () => {
+    const sink = new ErrorSink();
+    for (let i = 0; i < 200; i++) {
+      sink.add("forbidden-character", "AC-1.owner", "m", 3);
+    }
+    expect(sink.errors).toHaveLength(1);
+    const other = new ErrorSink();
+    for (let i = 0; i < 200; i++) other.add("empty-value", `[${i}]`, "m");
+    expect(other.errors).toHaveLength(200);
+    const mixed = new ErrorSink();
+    for (let i = 0; i < 150; i++) {
+      mixed.add("forbidden-character", "$", "m", i + 1);
+      mixed.add("context-heading-lookalike", "$", "m", i + 1);
+    }
+    expect(mixed.errors.map((e) => e.code).slice(-3)).toEqual([
+      "context-heading-lookalike",
+      "too-many-errors",
+      "too-many-errors",
+    ]);
+    expect(mixed.errors).toHaveLength(202);
+    expect(
+      mixed.errors
+        .filter((e) => e.code === "too-many-errors")
+        .map((e) => e.message),
+    ).toEqual([
+      "150 forbidden-character errors in total; the first 100 are listed",
+      "150 context-heading-lookalike errors in total; the first 100 are listed",
+    ]);
   });
 });

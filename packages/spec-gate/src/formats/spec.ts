@@ -449,22 +449,62 @@ function isUnderline(line: string | undefined): boolean {
   return /^(?:-+|=+)$/.test(rest);
 }
 
+/** Length of the longest reduced title: a longer text cannot be one. */
+const MAX_REDUCED_TITLE = Math.max(
+  ...[...REDUCED_TITLES.keys()].map((reduced) => reduced.length),
+);
+
+/** A line of nothing, or of spaces and tabs: what ends a Markdown paragraph. */
+const BLANK_LINE_RE = /^[ \t]*$/;
+
 /**
- * The known section a Context line reads like, or null. Two shapes count:
- * a line whose reduction is one to six hashes and a known title (an ATX
- * heading that is indented, has another character where the space belongs,
- * or is written in fullwidth forms), and a line whose reduction is a known
- * title when the next line underlines it (a setext heading). A line that
- * starts at column 0 with `## ` never gets here: it ends Context.
+ * The opening tag of an HTML heading, `<h1>` to `<h6>`: any case, with or
+ * without attributes, self-closing, or broken off at the end of the line
+ * (a tag may span lines).
+ */
+const HTML_HEADING_RE = /<h[1-6](?=[\s/>]|$)/i;
+
+/** True for a line that holds the opening tag of an HTML heading. */
+export function hasHtmlHeadingTag(line: string): boolean {
+  return HTML_HEADING_RE.test(line);
+}
+
+/**
+ * The known section a Context line reads like, with the index of the line
+ * the heading text starts on, or null. Two shapes count:
+ * - The reduction of `lines[index]` is one to six hashes and a known title
+ *   (an ATX heading that is indented, has another character where the space
+ *   belongs, or is written in fullwidth forms).
+ * - The next line underlines it (a setext heading) and the reduction of
+ *   this line, alone or together with the lines directly above it, is a
+ *   known title. A setext heading's text may span lines, so the lines above
+ *   are added one by one, up to a blank line or another underline. Every
+ *   such tail is compared, because this is no Markdown parser and cannot
+ *   tell where the paragraph starts. The walk needs no lower bound: the
+ *   heading line that starts Context holds `#`, and a text with `#` in it
+ *   is no title.
+ * A line that starts at column 0 with `## ` never gets here: it ends
+ * Context.
  */
 export function contextHeadingLookalike(
-  line: string,
-  next: string | undefined,
-): SpecSectionTitle | null {
-  const reduced = reduceHeadingText(line);
-  const atx = ATX_LOOKALIKE_RE.exec(reduced);
-  if (atx) return REDUCED_TITLES.get(atx[1]!) ?? null;
-  if (isUnderline(next)) return REDUCED_TITLES.get(reduced) ?? null;
+  lines: readonly string[],
+  index: number,
+): { title: SpecSectionTitle; index: number } | null {
+  const atx = ATX_LOOKALIKE_RE.exec(reduceHeadingText(lines[index]!));
+  if (atx) {
+    const title = REDUCED_TITLES.get(atx[1]!);
+    return title === undefined ? null : { title, index };
+  }
+  if (!isUnderline(lines[index + 1])) return null;
+  let text = "";
+  for (let k = index; k >= 0; k--) {
+    const line = lines[k]!;
+    if (BLANK_LINE_RE.test(line) || isUnderline(line)) break;
+    text = reduceHeadingText(line) + text;
+    if (text.length > MAX_REDUCED_TITLE) break;
+    const title = REDUCED_TITLES.get(text);
+    if (title !== undefined) return { title, index: k };
+  }
   return null;
 }
 
@@ -552,12 +592,23 @@ function collectItems(
     // A Context line that reads like the heading of a known section is an
     // error, because the lines below it would be taken for that section.
     if (section === "Context") {
-      const like = contextHeadingLookalike(text, lines[offset + 1]);
+      const like = contextHeadingLookalike(lines, offset);
       if (like !== null) {
         sink.add(
           "context-heading-lookalike",
-          `section.${like}`,
-          `the line reads like the heading of section ${like} but is Context prose; write '## ${like}' at column 0 to start the section, or reword the line`,
+          `section.${like.title}`,
+          `the line reads like the heading of section ${like.title} but is Context prose; write '## ${like.title}' at column 0 to start the section, or reword the line`,
+          firstLine + like.index,
+        );
+      }
+      // An HTML heading renders as a heading whatever its text, so the tag
+      // is refused as such. It is the same kind of line, under the same
+      // code, at the document because it names no section.
+      if (hasHtmlHeadingTag(text)) {
+        sink.add(
+          "context-heading-lookalike",
+          "$",
+          "the line holds the opening tag of an HTML heading (<h1> to <h6>), which renders as a heading; Context takes prose only",
           lineNo,
         );
       }
@@ -1303,6 +1354,8 @@ export function parseSpec(input: string): ParseResult<Spec> {
   let frontmatter: SpecFrontmatter | undefined;
   if (!yaml.ok) {
     for (const e of yaml.errors) {
+      // The loop above has counted every frontmatter line itself.
+      if (e.code === "too-many-errors") continue;
       sink.add(
         e.code,
         "frontmatter",

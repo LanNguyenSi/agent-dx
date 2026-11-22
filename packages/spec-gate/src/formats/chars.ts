@@ -73,13 +73,28 @@ export interface ForbiddenLine extends ForbiddenCharacter {
  * file): it sees comments and anything else a decoder drops.
  */
 export function findForbiddenLines(text: string): ForbiddenLine[] {
+  return scanForbiddenLines(text, Infinity).found;
+}
+
+/**
+ * As `findForbiddenLines`, but keeps only the first `keep` lines and counts
+ * them all, so a text with a forbidden character on every line does not
+ * turn into a list of that length.
+ */
+export function scanForbiddenLines(
+  text: string,
+  keep: number,
+): { found: ForbiddenLine[]; total: number } {
   const found: ForbiddenLine[] = [];
+  let total = 0;
   const lines = text.split("\n");
   for (const [i, raw] of lines.entries()) {
     // Only a carriage return that a line feed follows is part of a line end.
     const crlf = i < lines.length - 1 && raw.endsWith("\r");
     const bad = findForbiddenCharacter(crlf ? raw.slice(0, -1) : raw);
-    if (bad) found.push({ ...bad, line: i + 1 });
+    if (!bad) continue;
+    total += 1;
+    if (found.length < keep) found.push({ ...bad, line: i + 1 });
   }
-  return found;
+  return { found, total };
 }

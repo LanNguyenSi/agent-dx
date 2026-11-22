@@ -30,9 +30,14 @@ import {
   parseDocument,
 } from "yaml";
 import type { Document } from "yaml";
-import { FORBIDDEN_WHAT, findForbiddenLines } from "./chars.js";
+import { FORBIDDEN_WHAT, scanForbiddenLines } from "./chars.js";
 import type { FormatError, ParseResult } from "./errors.js";
-import { failResult, okResult } from "./errors.js";
+import {
+  MAX_ERRORS_PER_CODE,
+  failResult,
+  okResult,
+  tooManyErrors,
+} from "./errors.js";
 
 /** Upper bound for any single input, in UTF-16 code units. */
 export const MAX_INPUT_LENGTH = 1_048_576;
@@ -206,16 +211,19 @@ export function parseYamlText(input: string): ParseResult<unknown> {
   // Before the YAML parser sees the text: it drops comments and reads a
   // line break only at a line feed, so a character in a comment could show
   // a reader a line the parser never reads.
-  const forbidden = findForbiddenLines(text);
-  if (forbidden.length > 0) {
-    return failResult(
-      forbidden.map((bad) => ({
-        code: "forbidden-character",
-        path: "$",
-        message: `line ${bad.line} contains ${bad.label}, ${FORBIDDEN_WHAT}`,
-        line: bad.line,
-      })),
-    );
+  const forbidden = scanForbiddenLines(text, MAX_ERRORS_PER_CODE);
+  if (forbidden.total > 0) {
+    const errors: FormatError[] = forbidden.found.map((bad) => ({
+      code: "forbidden-character",
+      path: "$",
+      message: `line ${bad.line} contains ${bad.label}, ${FORBIDDEN_WHAT}`,
+      line: bad.line,
+    }));
+    // The list stops at the limit; one more entry states the total.
+    if (forbidden.total > forbidden.found.length) {
+      errors.push(tooManyErrors("forbidden-character", forbidden.total));
+    }
+    return failResult(errors);
   }
   const lc = new LineCounter();
   const doc = parseDocument(text, {

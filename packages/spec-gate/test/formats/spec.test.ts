@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   ANSWER_CHANNELS,
+  MAX_ERRORS_PER_CODE,
   MAX_INPUT_LENGTH,
   OPEN_POINT_CLASSES,
   OWNER_NONE,
@@ -10,6 +11,7 @@ import {
   SPEC_SOURCE_PATH,
   SPEC_STATUSES,
   contextHeadingLookalike,
+  hasHtmlHeadingTag,
   parseSpec,
   reduceHeadingText,
 } from "../../src/formats/index.js";
@@ -1072,6 +1074,13 @@ describe("spec.md: a Context line that reads like a known heading", () => {
     ["a title over box-drawing lines", `Defaults\n${cp(0x2500).repeat(5)}`],
     ["a title over long dashes", `Defaults\n${cp(0x2014).repeat(3)}`],
     ["a title over underscores", "Defaults\n_______"],
+    ["an indented heading with an unknown title", " ## Acceptance criteria"],
+    ["a title with the digit 1 for a small l", " ## Defau1ts"],
+    ["a title over en dashes", `Defaults\n${cp(0x2013).repeat(5)}`],
+    ["a title over Unicode hyphens", `Defaults\n${cp(0x2010).repeat(5)}`],
+    ["a title over minus signs", `Defaults\n${cp(0x2212).repeat(5)}`],
+    ["a blank line between the title and the hyphens", "Defaults\n\n-----"],
+    ["hashes written as HTML character references", "&#x23;&#x23; Defaults"],
   ])("does not recognise, as documented: %s", (_name, lines) => {
     expectProse(withSections(lines, "## Residuals"));
   });
@@ -1157,22 +1166,264 @@ describe("heading lookalike helpers", () => {
   it("does not turn a letter of another script into an ASCII letter", () => {
     // A Cyrillic letter that looks like a Latin one is dropped, not mapped.
     expect(reduceHeadingText(`G${cp(0x043e)}al`)).toBe("gal");
-    expect(
-      contextHeadingLookalike(` ## G${cp(0x043e)}al`, undefined),
-    ).toBeNull();
+    expect(contextHeadingLookalike([` ## G${cp(0x043e)}al`], 0)).toBeNull();
   });
 
   it("names the title for both shapes and nothing otherwise", () => {
-    expect(contextHeadingLookalike("  ## Goal", undefined)).toBe("Goal");
-    expect(contextHeadingLookalike("  ## source LEDGER", "x")).toBe(
-      "Source ledger",
+    const like = (lines: string[], index = 0) =>
+      contextHeadingLookalike(lines, index);
+    expect(like(["  ## Goal"])).toEqual({ title: "Goal", index: 0 });
+    expect(like(["  ## source LEDGER", "x"])).toEqual({
+      title: "Source ledger",
+      index: 0,
+    });
+    expect(like(["Goal", "---"])).toEqual({ title: "Goal", index: 0 });
+    expect(like(["Goal", "==="])).toEqual({ title: "Goal", index: 0 });
+    expect(like(["Goal"])).toBeNull();
+    expect(like(["Goal", ""])).toBeNull();
+    expect(like(["Goal", "text"])).toBeNull();
+    expect(like(["Goals", "---"])).toBeNull();
+    expect(like(["## Goals", "---"])).toBeNull();
+  });
+
+  it("adds the lines above an underlined line, and never across a heading line", () => {
+    const lines = ["Source", "ledger", "---"];
+    expect(contextHeadingLookalike(lines, 1)).toEqual({
+      title: "Source ledger",
+      index: 0,
+    });
+    // Only the line above an underline starts the test.
+    expect(contextHeadingLookalike(lines, 0)).toBeNull();
+    // A line with a hash in it, such as the heading that starts Context,
+    // is never part of a title.
+    expect(
+      contextHeadingLookalike(["Source", "## Context", "ledger", "---"], 2),
+    ).toBeNull();
+    expect(contextHeadingLookalike(["## Context", "Goal", "---"], 1)).toEqual({
+      title: "Goal",
+      index: 1,
+    });
+  });
+
+  it.each([
+    ["<h2>x</h2>", true],
+    ["<H6>", true],
+    ['<h1 class="a">', true],
+    ["<h3/>", true],
+    ["text <h4", true],
+    ["</h2>", false],
+    ["<h7>", false],
+    ["<h0>", false],
+    ["<h2x>", false],
+    ["<h20>", false],
+    ["<hr>", false],
+    ["<header>", false],
+    ["< h2>", false],
+    ["&lt;h2&gt;", false],
+    ["h2 > h1", false],
+  ])("finds an HTML heading tag in %j: %s", (line, expected) => {
+    expect(hasHtmlHeadingTag(line)).toBe(expected);
+  });
+});
+
+// ---------------------------------------------- HTML headings in Context
+
+describe("spec.md: an HTML heading tag in Context", () => {
+  it.each([
+    ["a second-level heading", "<h2>Defaults</h2>"],
+    ["upper case with an attribute", '<H2 align="center">Defaults</H2>'],
+    ["a first-level heading", "<h1>Defaults</h1>"],
+    ["a heading with any other text", "<h3>Notes for later</h3>"],
+    ["an empty heading", "<h4></h4>"],
+    ["a self-closing tag", "<h5/>"],
+    ["a tag with a tab before its attribute", "<h6\tclass=x>y</h6>"],
+    ["an indented tag", "   <h2>Defaults</h2>"],
+    ["a tag after other text", "See <h2>Defaults</h2> below."],
+    ["an opening tag alone", "<h2>"],
+  ])("refuses %s", (_name, line) => {
+    const text = withSections(line, "## Residuals");
+    expect(located(text)).toEqual([[LIKE, "$", lineThatIs(text, line)]]);
+  });
+
+  it.each([1, 2, 3, 4, 5, 6])("refuses level %i", (level) => {
+    const line = `<h${level}>Defaults</h${level}>`;
+    const text = withSections(line, "## Residuals");
+    expect(located(text)).toEqual([[LIKE, "$", lineThatIs(text, line)]]);
+  });
+
+  it("refuses a tag that spans lines, at the line it opens on", () => {
+    const text = withSections(
+      '<h2\nalign="center"\n>Defaults</h2>',
+      "## Residuals",
     );
-    expect(contextHeadingLookalike("Goal", "---")).toBe("Goal");
-    expect(contextHeadingLookalike("Goal", "===")).toBe("Goal");
-    expect(contextHeadingLookalike("Goal", undefined)).toBeNull();
-    expect(contextHeadingLookalike("Goal", "")).toBeNull();
-    expect(contextHeadingLookalike("Goal", "text")).toBeNull();
-    expect(contextHeadingLookalike("Goals", "---")).toBeNull();
-    expect(contextHeadingLookalike("## Goals", "---")).toBeNull();
+    expect(located(text)).toEqual([[LIKE, "$", lineThatIs(text, "<h2")]]);
+  });
+
+  it("says what the line holds", () => {
+    const r = parseSpec(withSections("<h2>Defaults</h2>", "## Residuals"));
+    expect(r.ok === false && r.errors[0]!.message).toContain(
+      "opening tag of an HTML heading",
+    );
+  });
+
+  it.each([
+    ["a closing tag alone", "</h2>"],
+    ["a rule", "<hr>"],
+    ["a level that does not exist", "<h7>Defaults</h7>"],
+    ["another tag that starts with h and a digit", "<h2x>Defaults</h2x>"],
+    ["a header element", "<header>Defaults</header>"],
+    ["an escaped tag", "&lt;h2&gt;Defaults&lt;/h2&gt;"],
+    ["a space after the angle bracket", "< h2>Defaults"],
+    ["a comparison", "h2 > h1 in size"],
+  ])("leaves prose alone: %s", (_name, line) => {
+    expectProse(withSections(line, "## Residuals"));
+  });
+
+  it("applies in Context only", () => {
+    expect(located(`${MIN}<h2>Defaults</h2>\n`)).toEqual([
+      ["unexpected-line", "$", 12],
+    ]);
+  });
+});
+
+// ------------------------------------- underlined titles over several lines
+
+describe("spec.md: an underlined title that spans lines in Context", () => {
+  it.each([
+    ["two lines", "Source\nledger\n---", "Source ledger", "Source"],
+    ["two lines over equals signs", "Non-\ngoals\n=====", "Non-goals", "Non-"],
+    ["three lines", "Sour\nce le\ndger\n---", "Source ledger", "Sour"],
+    [
+      "a line of a no-break space in between",
+      `Source\n${cp(0x00a0)}\nledger\n---`,
+      "Source ledger",
+      "Source",
+    ],
+    [
+      "indented lines",
+      "  Source\n  ledger\n  ---",
+      "Source ledger",
+      "  Source",
+    ],
+    ["other words above the title", "Some words\nGoal\n---", "Goal", "Goal"],
+    [
+      "a heading line above the title",
+      "# Notes\nResiduals\n---",
+      "Residuals",
+      "Residuals",
+    ],
+  ])(
+    "refuses %s, at the line the title starts on",
+    (_n, lines, title, start) => {
+      const text = withSections(lines, "## Residuals");
+      expect(located(text)).toEqual([
+        [LIKE, `section.${title}`, lineThatIs(text, start)],
+      ]);
+    },
+  );
+
+  it.each([
+    ["a blank line inside the title", "Source\n\nledger\n---"],
+    ["a line of spaces inside the title", "Source\n  \nledger\n---"],
+    ["one letter too many", "Sourcex\nledger\n---"],
+    ["the title lines in the wrong order", "ledger\nSource\n---"],
+    ["the first title line only", "Source\nledgers\n---"],
+    ["no underline below", "Source\nledger\nand more"],
+  ])("leaves prose alone: %s", (_name, lines) => {
+    expectProse(withSections(lines, "## Residuals"));
+  });
+
+  it("reports an underlined title once when a second underline follows", () => {
+    const text = withSections("Defaults\n---\n---", "## Residuals");
+    expect(located(text)).toEqual([
+      [LIKE, "section.Defaults", lineThatIs(text, "Defaults")],
+    ]);
+  });
+
+  it("does not reach above the heading that starts Context", () => {
+    // 'Source' would have to come from outside Context.
+    const text = `${MIN}\n## Context\nledger\n---\n`;
+    expect(parseOk(text).sections).toEqual(["Goal", "Context"]);
+    expect(located(`${MIN}\n## Context\nSource\nledger\n---\n`)).toEqual([
+      [LIKE, "section.Source ledger", 14],
+    ]);
+  });
+});
+
+// ------------------------------------------------------------ error limits
+
+describe("spec.md: at most 100 errors of a kind that every line can raise", () => {
+  const context = (line: string, count: number) =>
+    `${MIN}\n## Context\n\n${`${line}\n`.repeat(count)}`;
+  const codes = (text: string) => {
+    const r = parseSpec(text);
+    return r.ok ? [] : r.errors.map((e) => e.code);
+  };
+  const tally = (list: string[]) =>
+    Object.fromEntries(
+      [...new Set(list)].map((c) => [c, list.filter((x) => x === c).length]),
+    );
+
+  it("lists every error up to the limit and adds nothing", () => {
+    expect(MAX_ERRORS_PER_CODE).toBe(100);
+    expect(tally(codes(context(`a${cp(0x200b)}b`, 100)))).toEqual({
+      "forbidden-character": 100,
+    });
+    expect(tally(codes(context(" ## Defaults", 100)))).toEqual({
+      "context-heading-lookalike": 100,
+    });
+  });
+
+  it("stops at the limit and states the total in one more error", () => {
+    const r = parseSpec(context(`a${cp(0x200b)}b`, 101));
+    expect(r.ok === false && r.errors).toHaveLength(101);
+    expect(r.ok === false && r.errors[100]).toEqual({
+      code: "too-many-errors",
+      path: "$",
+      message:
+        "101 forbidden-character errors in total; the first 100 are listed",
+    });
+    // The hundred that are listed are the first hundred lines.
+    expect(r.ok === false && r.errors[99]!.line).toBe(15 + 99);
+  });
+
+  it("keeps counting after the limit", () => {
+    const r = parseSpec(context(" ## Defaults", 5000));
+    expect(r.ok === false && r.errors).toHaveLength(101);
+    expect(r.ok === false && r.errors[100]!.message).toBe(
+      "5000 context-heading-lookalike errors in total; the first 100 are listed",
+    );
+  });
+
+  it("limits each kind on its own, and counts an HTML heading as a lookalike", () => {
+    expect(tally(codes(context(`${cp(0x200b)}## Defaults`, 150)))).toEqual({
+      "forbidden-character": 100,
+      "context-heading-lookalike": 100,
+      "too-many-errors": 2,
+    });
+    const html = parseSpec(context("<h2>x</h2>", 150));
+    expect(html.ok === false && html.errors.at(-1)!.message).toBe(
+      "150 context-heading-lookalike errors in total; the first 100 are listed",
+    );
+  });
+
+  it("states the total of the frontmatter lines once", () => {
+    const text = MIN.replace(
+      "id: tiny\n",
+      `id: tiny\n${`# no${cp(0x200b)}te\n`.repeat(150)}`,
+    );
+    const r = parseSpec(text);
+    expect(tally(codes(text))).toEqual({
+      "forbidden-character": 100,
+      "too-many-errors": 1,
+    });
+    expect(r.ok === false && r.errors.at(-1)!.message).toBe(
+      "150 forbidden-character errors in total; the first 100 are listed",
+    );
+  });
+
+  it("does not limit any other error", () => {
+    const text = `${MIN}${"prose where an item belongs\n".repeat(150)}`;
+    expect(tally(codes(text))).toEqual({ "unexpected-line": 150 });
   });
 });

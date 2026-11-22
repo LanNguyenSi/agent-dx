@@ -194,21 +194,47 @@ lower case. Two shapes are refused:
   an invisible character before, between or after the hashes, has no space
   after them, is written in fullwidth forms, or differs in case or
   punctuation: ` ## Acceptance`, `#Defaults`, `### goal:`.
-- A known title, reduced the same way, on a line whose next line is an
-  underline: after NFKC and without whitespace and other characters that are
-  neither printable ASCII nor a letter or digit, that next line is one or more
-  `-` or one or more `=`.
+- A known title, reduced the same way, above an underline: after NFKC and
+  without whitespace and other characters that are neither printable ASCII nor
+  a letter or digit, the underline is one or more `-` or one or more `=`. The
+  title may span lines (`Source`, then `ledger`, then `---`): the line above
+  the underline is reduced alone and together with the lines directly above
+  it, up to a blank line or another underline, and each of these texts is
+  compared. The error is at the line the title starts on.
+
+A third shape is refused whatever its text: a Context line that holds the
+opening tag of an HTML heading, `<h1>` to `<h6>`, in any case, with or without
+attributes, anywhere in the line, also when the tag breaks off at the end of
+the line and goes on in the next. Such a tag renders as a heading. The error
+is the same `context-heading-lookalike`, at `$`, because it names no section.
+A closing tag alone is not refused.
 
 A heading with any other words stays prose (` ## notes on goals`, `### Open
 points`), and so does a known title with no underline below it. The rule also
 refuses a sub-heading in Context whose only words are a known title, such as
 `### Decisions`; word it differently. It does not apply outside Context, where
 such a line is already an error, and it does not change what a column-0 `## `
-line is. It compares letters after NFKC only: a title spelled with a letter of
-another script that looks the same (the Cyrillic letter U+0435 for the `e` in
-`Defaults`), a line with
-an unknown title, and a title over a row of other line-like characters (box
-drawing, long dashes, underscores) are not recognised.
+line is.
+
+Not recognised, and so still prose:
+
+- a heading with an unknown title, indented or not at column 0, such as
+  ` ## Acceptance criteria`;
+- a known title spelled with a letter of another script that looks the same
+  (the Cyrillic letter U+0435 for the `e` in `Defaults`), or with an ASCII
+  character that looks the same (a capital `I` or the digit `1` for a small
+  `l`): the rule compares ASCII letters after NFKC and nothing else;
+- a title over a row of other line-like characters: dash punctuation other
+  than `-` (en dash, em dash, U+2010, the minus sign), box drawing,
+  underscores;
+- a title with a blank line between it and the `---`;
+- hashes written as HTML character references, such as `&#x23;&#x23;`.
+
+**Error limits.** A document lists at most 100 `forbidden-character` errors
+and at most 100 `context-heading-lookalike` errors. When there are more, one
+more error, `too-many-errors` at `$`, states the total for that code. This
+holds for `spec.md` and for the raw-text check of a YAML file; no other error
+is limited.
 
 **Characters.** Every line of `spec.md` is checked against the rule under
 "Forbidden characters" below, before anything else reads the line and with no

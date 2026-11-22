@@ -9,6 +9,7 @@
 export type FormatErrorCode =
   // input handling
   | "input-too-large"
+  | "too-many-errors"
   | "empty-document"
   | "invalid-yaml"
   | "invalid-json"
@@ -93,6 +94,30 @@ export function failResult<T>(errors: FormatError[]): ParseResult<T> {
   return { ok: false, errors };
 }
 
+/**
+ * How many errors of one capped code a document lists. A text can repeat
+ * the same fault on every line; past this number the list would only grow.
+ */
+export const MAX_ERRORS_PER_CODE = 100;
+
+/** The codes that are capped: the two that a single line can raise. */
+export const CAPPED_CODES = [
+  "forbidden-character",
+  "context-heading-lookalike",
+] as const;
+
+/** The one entry that stands for every error of `code` past the limit. */
+export function tooManyErrors(
+  code: FormatErrorCode,
+  total: number,
+): FormatError {
+  return {
+    code: "too-many-errors",
+    path: "$",
+    message: `${total} ${code} errors in total; the first ${MAX_ERRORS_PER_CODE} are listed`,
+  };
+}
+
 /** Collects errors while a parser walks a document. */
 export class ErrorSink {
   readonly errors: FormatError[] = [];
@@ -106,6 +131,12 @@ export class ErrorSink {
    */
   private readonly forbiddenAt = new Map<string, Set<number | null>>();
 
+  /** Per capped code: how many errors were added, and the error that says so. */
+  private readonly capped = new Map<
+    FormatErrorCode,
+    { total: number; overflow?: FormatError }
+  >();
+
   add(code: FormatErrorCode, path: string, message: string, line?: number) {
     const at = line ?? this.lineHint;
     // One forbidden-character error per path and line: a value can be seen
@@ -115,6 +146,22 @@ export class ErrorSink {
       this.repeatsForbidden(path, at ?? null)
     ) {
       return;
+    }
+    // A capped code is listed up to the limit. From the next one on, a
+    // single `too-many-errors` entry carries the running total.
+    if ((CAPPED_CODES as readonly FormatErrorCode[]).includes(code)) {
+      const count = this.capped.get(code) ?? { total: 0 };
+      this.capped.set(code, count);
+      count.total += 1;
+      if (count.total > MAX_ERRORS_PER_CODE) {
+        const summary = tooManyErrors(code, count.total);
+        if (count.overflow) count.overflow.message = summary.message;
+        else {
+          count.overflow = summary;
+          this.errors.push(summary);
+        }
+        return;
+      }
     }
     const error: FormatError = { code, path, message };
     if (at !== undefined) error.line = at;
