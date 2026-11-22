@@ -9,7 +9,9 @@ import {
   SPEC_SECTION_TITLES,
   SPEC_SOURCE_PATH,
   SPEC_STATUSES,
+  contextHeadingLookalike,
   parseSpec,
+  reduceHeadingText,
 } from "../../src/formats/index.js";
 import type { Spec } from "../../src/formats/index.js";
 
@@ -235,8 +237,8 @@ describe("spec.md grammar", () => {
       "- AC-1: hijack\n  - source: SL-9\n  - owner: eve",
       "```\n- GOAL: second\n```",
       "```npm test``` runs the suite.",
-      " ## Acceptance\n- AC-9: hidden in prose",
-      "Acceptance\n----------\n- AC-9: hidden in prose",
+      " ## Acceptance criteria\n- AC-9: hidden in prose",
+      "Acceptance criteria\n----------\n- AC-9: hidden in prose",
       "```\nnever closed\n- AC-9: x",
       "### Sub heading\n\n- GOAL: not a goal\n\n    - paths: nowhere\n",
       "<!-- - AC-5: hidden -->",
@@ -289,9 +291,26 @@ describe("spec.md grammar", () => {
     }
   });
 
-  it("treats an indented or setext heading in Context as prose and parses the real section below", () => {
-    for (const name of ["context-indented-heading", "context-setext-heading"]) {
-      const spec = parseOk(readFixture(name));
+  it("refuses an indented or setext heading with a known title in Context, and reads one with other words as prose", () => {
+    for (const name of [
+      "context-lookalike-indented-heading",
+      "context-lookalike-setext-heading",
+    ]) {
+      const text = fs.readFileSync(
+        fileURLToPath(
+          new URL(
+            `../fixtures/formats/spec/invalid/${name}.md`,
+            import.meta.url,
+          ),
+        ),
+        "utf8",
+      );
+      expect(errorsOf(text), name).toEqual([
+        "context-heading-lookalike @ section.Acceptance",
+      ]);
+      // With one more word the same line is prose, and the real section
+      // below is read.
+      const spec = parseOk(text.replace("Acceptance\n", "Acceptance notes\n"));
       expect(spec.ids, name).toEqual(["GOAL", "NG-1", "DF-1", "RS-1", "AC-1"]);
       expect(
         spec.acceptance.map((a) => [a.id, a.owner]),
@@ -635,9 +654,13 @@ describe("spec.md: the character rule on every line", () => {
     ["a lone carriage return before the hashes", "\r## Defaults"],
     ["a lone surrogate before the hashes", "\ud800## Defaults"],
   ])("refuses a Context line that reads as a heading: %s", (_name, heading) => {
+    // Two rules see the line: the character rule, and the rule against a
+    // line that reads like a known heading.
     const text = withSections(heading, "## Residuals");
+    const line = lineWith(text, "Defaults");
     expect(located(text)).toEqual([
-      ["forbidden-character", "$", lineWith(text, "Defaults")],
+      ["forbidden-character", "$", line],
+      ["context-heading-lookalike", "section.Defaults", line],
     ]);
   });
 
@@ -649,7 +672,9 @@ describe("spec.md: the character rule on every line", () => {
     expect(lineWith(text, "Defaults")).toBe(21);
     expect(located(text)).toEqual([
       ["forbidden-character", "$", 21],
+      ["context-heading-lookalike", "section.Defaults", 21],
       ["forbidden-character", "$", 27],
+      ["context-heading-lookalike", "section.Residuals", 27],
     ]);
   });
 
@@ -830,28 +855,324 @@ describe("spec.md: the character rule on every line", () => {
   });
 });
 
-describe("spec.md: what the character rule leaves out, as documented", () => {
+// ------------------------------------------- heading lookalikes in Context
+
+const LIKE = "context-heading-lookalike";
+
+/** 1-based line of the first line of `text` that is exactly `line`. */
+function lineThatIs(text: string, line: string): number {
+  return text.split("\n").indexOf(line) + 1;
+}
+
+/** A known title in fullwidth letters. */
+const fullwidth = (word: string) =>
+  [...word].map((ch) => cp(ch.charCodeAt(0) + 0xfee0)).join("");
+
+/**
+ * Characters that render blank or not at all. The first two are plain; the
+ * character rule refuses none of them.
+ */
+const BLANKS: [string, string][] = [
+  ["a space", " "],
+  ["a tab", "\t"],
+  ["a no-break space (U+00A0)", cp(0x00a0)],
+  ["an ideographic space (U+3000)", cp(0x3000)],
+  ["a hair space (U+200A)", cp(0x200a)],
+  ["a variation selector (U+FE0F)", cp(0xfe0f)],
+  ["a combining grapheme joiner (U+034F)", cp(0x034f)],
+  ["a Hangul filler (U+3164)", cp(0x3164)],
+  ["a private-use character (U+E000)", cp(0xe000)],
+];
+
+const POSITIONS = [
+  ["before the hashes", (c: string) => `${c}## Defaults`],
+  ["between the hashes", (c: string) => `#${c}# Defaults`],
+  ["in place of the space after the hashes", (c: string) => `##${c}Defaults`],
+  ["inside the title", (c: string) => ` ## Def${c}aults`],
+  ["after the title", (c: string) => ` ## Defaults${c}`],
+] as const;
+
+/** Every blank at every position, except the one combination that is the real heading. */
+const BLANK_CASES: [string, string][] = POSITIONS.flatMap(([where, build]) =>
+  BLANKS.filter(([, c]) => build(c) !== "## Defaults").map(
+    ([what, c]) => [`${what} ${where}`, build(c)] as [string, string],
+  ),
+);
+
+/** The result of a spec in which the line under test stayed Context prose. */
+function expectProse(text: string): void {
+  const spec = parseOk(text);
+  expect(spec.sections).toEqual(["Goal", "Non-goals", "Context", "Residuals"]);
+  expect(spec.ids).toEqual(["GOAL", "NG-1", "RS-1"]);
+}
+
+describe("spec.md: a Context line that reads like a known heading", () => {
+  it("has one combination per blank and position, less the real heading", () => {
+    expect(BLANK_CASES).toHaveLength(BLANKS.length * POSITIONS.length - 1);
+  });
+
+  it.each(BLANK_CASES)("refuses %s", (_name, heading) => {
+    const text = withSections(heading, "## Residuals");
+    expect(located(text)).toEqual([
+      [LIKE, "section.Defaults", lineWith(text, "aults")],
+    ]);
+  });
+
   it.each([
-    ["a no-break space before the hashes", `${cp(0x00a0)}## Defaults`],
-    ["an ideographic space before the hashes", `${cp(0x3000)}## Defaults`],
-    ["a variation selector before the hashes", `${cp(0xfe0f)}## Defaults`],
-    ["a Hangul filler before the hashes", `${cp(0x3164)}## Defaults`],
-    ["a no-break space after the hashes", `##${cp(0x00a0)}Defaults`],
-    ["a tab after the hashes", "##\tDefaults"],
-  ])(
-    "keeps a Context line prose, like an indented heading: %s",
-    (_name, heading) => {
-      // The character is in no refused category, and the line does not start
-      // with two hashes and a plain space, so Context runs on to the next
-      // real heading and the default below this line is not read.
-      const spec = parseOk(withSections(heading, "## Residuals"));
-      expect(spec.sections).toEqual([
-        "Goal",
-        "Non-goals",
-        "Context",
-        "Residuals",
+    ["indented by one space", " ## Defaults"],
+    ["indented by three spaces", "   ## Defaults"],
+    ["indented by four spaces", "    ## Defaults"],
+    ["indented by a tab", "\t## Defaults"],
+    ["without the space after the hashes", "##Defaults"],
+    ["with one hash and no space", "#Defaults"],
+    [
+      "with fullwidth number signs and a fullwidth letter",
+      `${cp(0xff03)}${cp(0xff03)} ${cp(0xff24)}efaults`,
+    ],
+    [
+      "with the whole title in fullwidth letters",
+      ` ## ${fullwidth("Defaults")}`,
+    ],
+    ["with small number signs", `${cp(0xfe5f)}${cp(0xfe5f)} Defaults`],
+    ["with a mathematical bold letter", ` ## ${cp(0x1d403)}efaults`],
+    ["in lower case", " ## defaults"],
+    ["in upper case", " ## DEFAULTS"],
+    ["in mixed case without a space", "##dEfAuLtS"],
+    ["with closing hashes", " ## Defaults ##"],
+    ["with closing hashes and no spaces", "###Defaults###"],
+    ["with a colon", " ## Defaults:"],
+    ["in bold", " ## **Defaults**"],
+    ["with a number", " ## 2. Defaults"],
+    ["in a block quote", "> ## Defaults"],
+    ["in a list item", "- ## Defaults"],
+  ])("refuses a heading %s", (_name, heading) => {
+    const text = withSections(heading, "## Residuals");
+    expect(located(text)).toEqual([
+      [LIKE, "section.Defaults", lineThatIs(text, heading)],
+    ]);
+  });
+
+  it.each([1, 2, 3, 4, 5, 6])(
+    "refuses an indented heading of %i hashes",
+    (count) => {
+      const heading = ` ${"#".repeat(count)} Defaults`;
+      const text = withSections(heading, "## Residuals");
+      expect(located(text)).toEqual([
+        [LIKE, "section.Defaults", lineThatIs(text, heading)],
       ]);
-      expect(spec.ids).toEqual(["GOAL", "NG-1", "RS-1"]);
     },
   );
+
+  it.each([1, 3, 4, 5, 6])(
+    "refuses a column-0 heading of %i hashes, which does not end Context",
+    (count) => {
+      const heading = `${"#".repeat(count)} Defaults`;
+      const text = withSections(heading, "## Residuals");
+      expect(located(text)).toEqual([
+        [LIKE, "section.Defaults", lineThatIs(text, heading)],
+      ]);
+    },
+  );
+
+  it.each([...SPEC_SECTION_TITLES])(
+    "refuses an indented heading and an underlined line for the title %s",
+    (title) => {
+      const atx = withSections(`  ## ${title}`, "## Residuals");
+      expect(located(atx)).toEqual([
+        [LIKE, `section.${title}`, lineThatIs(atx, `  ## ${title}`)],
+      ]);
+      const setext = withSections(`${title}\n---`, "## Residuals");
+      expect(located(setext)).toEqual([
+        [LIKE, `section.${title}`, lineThatIs(setext, title)],
+      ]);
+    },
+  );
+
+  it.each([
+    ["a row of hyphens", "----------"],
+    ["one hyphen", "-"],
+    ["a row of equals signs", "=========="],
+    ["one equals sign", "="],
+    ["hyphens with spaces around them", "  ---  "],
+    ["hyphens after a tab", "\t---"],
+    ["hyphens after a no-break space", `${cp(0x00a0)}---`],
+    ["hyphens before an ideographic space", `---${cp(0x3000)}`],
+    ["fullwidth hyphens", cp(0xff0d).repeat(3)],
+    ["fullwidth equals signs", cp(0xff1d).repeat(3)],
+    ["hyphens after a variation selector", `${cp(0xfe0f)}---`],
+    ["hyphens after a Hangul filler", `${cp(0x3164)}---`],
+    ["hyphens after a Braille blank", `${cp(0x2800)}---`],
+    ["hyphens after a private-use character", `${cp(0xe000)}---`],
+    ["hyphens with spaces between them", "- - -"],
+  ])("refuses a known title over %s", (_name, underline) => {
+    const text = withSections(`Defaults\n${underline}`, "## Residuals");
+    expect(located(text)).toEqual([
+      [LIKE, "section.Defaults", lineThatIs(text, "Defaults")],
+    ]);
+  });
+
+  it.each([
+    ["indented", "  Defaults"],
+    ["in upper case", "DEFAULTS"],
+    ["in bold", "**Defaults**"],
+    ["with a colon", "Defaults:"],
+    ["after a no-break space", `${cp(0x00a0)}Defaults`],
+    ["after a variation selector", `${cp(0xfe0f)}Defaults`],
+    ["in fullwidth letters", fullwidth("Defaults")],
+  ])("refuses an underlined title %s", (_name, title) => {
+    const text = withSections(`${title}\n=====`, "## Residuals");
+    expect(located(text)).toEqual([
+      [LIKE, "section.Defaults", lineThatIs(text, title)],
+    ]);
+  });
+
+  it.each([
+    ["an indented heading with other words", " ## notes on goals"],
+    ["an indented heading with a plural", " ## Goals"],
+    ["an indented heading with part of a title", " ## Default"],
+    ["an indented heading with a title and more", " ## Defaults and decisions"],
+    ["seven hashes, which is no heading", "####### Defaults"],
+    ["seven hashes, indented", " ####### Defaults"],
+    ["hashes inside a sentence", "The ## Defaults marker is described below."],
+    ["hashes after the title only", "Defaults ##"],
+    ["a deeper heading with other words", "### Open points"],
+    ["a title alone, with a blank line below", "Defaults"],
+    ["a title with a blank line before the hyphens", "Defaults\n\n----------"],
+    ["a title over mixed hyphens and equals signs", "Defaults\n-=-=-=-="],
+    ["a title over a list item", "Defaults\n- a first point"],
+    [
+      "a title over a list item in another script",
+      `Defaults\n- ${cp(0x76ee)}${cp(0x6a19)}`,
+    ],
+    ["a title over a list item that is a digit", `Defaults\n- ${cp(0x0663)}`],
+    [
+      "a title over hyphens after an unassigned code point",
+      `Defaults\n${cp(0xfdd0)}---`,
+    ],
+    ["a title over hyphens and a word", "Defaults\n--- and more"],
+    [
+      "other words over a line that is no underline",
+      "Goal-setting matters\nand so does the next line.",
+    ],
+    ["other words over hyphens", "Goal-setting matters\n--------------------"],
+  ])("leaves prose alone: %s", (_name, lines) => {
+    expectProse(withSections(lines, "## Residuals"));
+  });
+
+  it.each([
+    [
+      "a title with a Cyrillic letter that looks like a Latin one",
+      `${cp(0x00a0)}## D${cp(0x0435)}faults`,
+    ],
+    ["a title with a capital I for a small l", " ## DefauIts"],
+    [
+      "an unknown title after a no-break space",
+      `${cp(0x00a0)}## Open questions`,
+    ],
+    ["a title over box-drawing lines", `Defaults\n${cp(0x2500).repeat(5)}`],
+    ["a title over long dashes", `Defaults\n${cp(0x2014).repeat(3)}`],
+    ["a title over underscores", "Defaults\n_______"],
+  ])("does not recognise, as documented: %s", (_name, lines) => {
+    expectProse(withSections(lines, "## Residuals"));
+  });
+
+  it("leaves prose alone in the fixture of heading-like prose", () => {
+    const text = readFixture("context-heading-like-prose");
+    for (const line of [
+      " ## notes on goals",
+      "####### Goal",
+      "Goal-setting matters",
+      "Goal",
+      "-=-=-=-=",
+    ]) {
+      expect(lineThatIs(text, line), line).toBeGreaterThan(0);
+    }
+    expectProse(text);
+  });
+
+  it("accepts a known title as the last line of the file, where no line follows", () => {
+    for (const last of ["Defaults", "Goal", "prose"]) {
+      const spec = parseOk(`${MIN}\n## Context\n\n${last}`);
+      expect(spec.sections, last).toEqual(["Goal", "Context"]);
+    }
+  });
+
+  it("keeps the handling of real column-0 headings", () => {
+    // The heading that starts Context.
+    expect(parseOk(`${MIN}\n## Context\n\nprose\n`).sections).toEqual([
+      "Goal",
+      "Context",
+    ]);
+    // A known heading ends Context and is read.
+    expect(parseOk(withSections("## Defaults", "## Residuals")).ids).toEqual([
+      "GOAL",
+      "NG-1",
+      "DF-1",
+      "RS-1",
+    ]);
+    // A second Context heading and an unknown heading are what they were.
+    expect(located(`${MIN}\n## Context\n\nprose\n\n## Context\n`)).toEqual([
+      ["duplicate-section", "section.Context", 17],
+    ]);
+    expect(located(`${MIN}\n## Context\n\n## notes on goals\n`)).toEqual([
+      ["unknown-section", "section.notes on goals", 15],
+    ]);
+  });
+
+  it("applies in Context only: elsewhere such a line keeps its own error", () => {
+    // In a normative section.
+    expect(located(`${MIN} ## Defaults\n`)).toEqual([
+      ["unexpected-line", "$", 12],
+    ]);
+    // Before the first section.
+    expect(located(MIN.replace("## Goal", " ## Defaults\n\n## Goal"))).toEqual([
+      ["unexpected-line", "$", 9],
+    ]);
+    // Below an unknown heading, where no line is read.
+    expect(
+      located(`${MIN}\n## Bogus\n\n ## Defaults\nDefaults\n---\n`),
+    ).toEqual([["unknown-section", "section.Bogus", 13]]);
+  });
+
+  it("names the section and how to write its heading in the message", () => {
+    const r = parseSpec(withSections(" ## Source ledger", "## Residuals"));
+    expect(r.ok === false && r.errors[0]!.message).toContain(
+      "write '## Source ledger' at column 0",
+    );
+  });
+});
+
+describe("heading lookalike helpers", () => {
+  it.each([
+    [" ## Non-goals ", "##nongoals"],
+    ["Source ledger", "sourceledger"],
+    [`${cp(0xff03)}${cp(0xff03)} ${fullwidth("Goal")}`, "##goal"],
+    ["#1 Goal!", "#goal"],
+    [`${cp(0x65e5)}${cp(0x672c)}`, ""],
+    ["", ""],
+  ])("reduces %j to %j", (text, reduced) => {
+    expect(reduceHeadingText(text)).toBe(reduced);
+  });
+
+  it("does not turn a letter of another script into an ASCII letter", () => {
+    // A Cyrillic letter that looks like a Latin one is dropped, not mapped.
+    expect(reduceHeadingText(`G${cp(0x043e)}al`)).toBe("gal");
+    expect(
+      contextHeadingLookalike(` ## G${cp(0x043e)}al`, undefined),
+    ).toBeNull();
+  });
+
+  it("names the title for both shapes and nothing otherwise", () => {
+    expect(contextHeadingLookalike("  ## Goal", undefined)).toBe("Goal");
+    expect(contextHeadingLookalike("  ## source LEDGER", "x")).toBe(
+      "Source ledger",
+    );
+    expect(contextHeadingLookalike("Goal", "---")).toBe("Goal");
+    expect(contextHeadingLookalike("Goal", "===")).toBe("Goal");
+    expect(contextHeadingLookalike("Goal", undefined)).toBeNull();
+    expect(contextHeadingLookalike("Goal", "")).toBeNull();
+    expect(contextHeadingLookalike("Goal", "text")).toBeNull();
+    expect(contextHeadingLookalike("Goals", "---")).toBeNull();
+    expect(contextHeadingLookalike("## Goals", "---")).toBeNull();
+  });
 });

@@ -40,6 +40,7 @@ export type FormatErrorCode =
   | "unterminated-frontmatter"
   | "unknown-section"
   | "duplicate-section"
+  | "context-heading-lookalike"
   | "unexpected-line"
   | "invalid-item-line"
   | "bad-indent"

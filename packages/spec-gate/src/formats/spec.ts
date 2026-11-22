@@ -43,6 +43,15 @@
  * so it is then a section start or an unknown-section error. Both fail
  * closed: nothing a reader sees under a real heading is lost.
  *
+ * A Context line that reads like the heading of a known section is an
+ * error (`context-heading-lookalike`), because a reader would take the
+ * lines below it for that section while the parser reads them as prose.
+ * The test ignores everything but ASCII letters and `#` after NFKC, in any
+ * case: one to six hashes and a known title (indented, with a tab or a
+ * no-break space where the space belongs, in fullwidth forms, without the
+ * space), or a known title with a line of `-` or `=` below it. A heading
+ * with any other words stays prose.
+ *
  * Every line of the file is checked for forbidden characters before
  * anything else looks at it: a control character other than tab, a format
  * character, a line or paragraph separator, or a lone surrogate (Unicode
@@ -401,6 +410,64 @@ const HEADING_RE = /^## (.*)$/;
 const ITEM_RE = /^- (\S+?):(?: (.*))?$/;
 const ATTR_RE = /^( +)- ([a-z][a-z_]*):(?: (.*))?$/;
 
+/**
+ * What is left of a line for the heading lookalike test: after NFKC
+ * (which turns a fullwidth number sign or letter into its ASCII form), only
+ * the ASCII letters and `#`, in lower case. Spaces, tabs, punctuation, digits
+ * and every character that renders as nothing are gone, so no blank or
+ * invisible character can keep a line from matching.
+ */
+export function reduceHeadingText(text: string): string {
+  return text
+    .normalize("NFKC")
+    .replace(/[^A-Za-z#]/g, "")
+    .toLowerCase();
+}
+
+/** The known section titles by their reduced form. */
+const REDUCED_TITLES: ReadonlyMap<string, SpecSectionTitle> = new Map(
+  SPEC_SECTION_TITLES.map((title) => [reduceHeadingText(title), title]),
+);
+
+/** One to six hashes, a title, and the closing hashes a Markdown heading may end with. */
+const ATX_LOOKALIKE_RE = /^#{1,6}([a-z]+)#*$/;
+
+/**
+ * True for a line that underlines the line above it: after NFKC and
+ * without the characters that are neither printable ASCII nor a letter or
+ * digit of any script, it is one or more `-` or one or more `=`. Default
+ * ignorable characters (fillers, variation selectors) are dropped first,
+ * and an unassigned code point counts as a letter, so that a later Unicode
+ * version can only add to what is refused.
+ */
+function isUnderline(line: string | undefined): boolean {
+  if (line === undefined) return false;
+  const rest = line
+    .normalize("NFKC")
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, "")
+    .replace(/[^\x21-\x7e\p{L}\p{N}\p{Cn}]/gu, "");
+  return /^(?:-+|=+)$/.test(rest);
+}
+
+/**
+ * The known section a Context line reads like, or null. Two shapes count:
+ * a line whose reduction is one to six hashes and a known title (an ATX
+ * heading that is indented, has another character where the space belongs,
+ * or is written in fullwidth forms), and a line whose reduction is a known
+ * title when the next line underlines it (a setext heading). A line that
+ * starts at column 0 with `## ` never gets here: it ends Context.
+ */
+export function contextHeadingLookalike(
+  line: string,
+  next: string | undefined,
+): SpecSectionTitle | null {
+  const reduced = reduceHeadingText(line);
+  const atx = ATX_LOOKALIKE_RE.exec(reduced);
+  if (atx) return REDUCED_TITLES.get(atx[1]!) ?? null;
+  if (isUnderline(next)) return REDUCED_TITLES.get(reduced) ?? null;
+  return null;
+}
+
 /** Splits the item and attribute lines of the normative sections. */
 function collectItems(
   sink: ErrorSink,
@@ -482,7 +549,20 @@ function collectItems(
 
     // Context runs to the next line that starts at column 0 with '## '.
     // Code fences, indented headings and setext headings do not change that.
-    if (section === "Context") continue;
+    // A Context line that reads like the heading of a known section is an
+    // error, because the lines below it would be taken for that section.
+    if (section === "Context") {
+      const like = contextHeadingLookalike(text, lines[offset + 1]);
+      if (like !== null) {
+        sink.add(
+          "context-heading-lookalike",
+          `section.${like}`,
+          `the line reads like the heading of section ${like} but is Context prose; write '## ${like}' at column 0 to start the section, or reword the line`,
+          lineNo,
+        );
+      }
+      continue;
+    }
 
     if (text.trim() === "") continue;
 

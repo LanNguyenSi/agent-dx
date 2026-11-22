@@ -15,12 +15,12 @@ Some prose before any section.
 
 ## Context
 
-Free prose. The parser skips it, whatever it contains.
+Free prose. Nothing in it is normative, whatever it says.
 
 - AC-77: this line is Context and is not parsed.
 
 ```
-a code block in Context, which is skipped like the rest
+a code block in Context, which is prose like the rest
 ```
 
 Inline ```npm test``` runs the suite.

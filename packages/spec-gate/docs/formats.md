@@ -177,9 +177,38 @@ indented headings and setext headings do not end it: a line that renders as a
 heading or opens a code block is prose here. A `## ` line inside what looks
 like a code block does end Context, so it is a section start or an
 unknown-section error; both fail closed. `###` and deeper headings are only
-allowed there. The parser reads a Context line for two things only: whether it
-is such a `## ` line, and the character rule. Apart from that, the result of
-parsing never depends on what Context says.
+allowed there. The parser reads a Context line for three things only: whether
+it is such a `## ` line, the character rule, and the lookalike rule. Apart from
+that, the result of parsing never depends on what Context says.
+
+**Heading lookalikes.** A Context line that reads like the heading of a known
+section is an error (`context-heading-lookalike`, at `section.<title>` with
+the line number). A reader would take the lines below it for that section,
+while the parser reads them as prose. So an indented or underlined heading is
+prose only as long as its words are not a known title. The test reduces a
+line: Unicode NFKC, then everything but ASCII letters and `#` is removed, then
+lower case. Two shapes are refused:
+
+- One to six `#`, a known title reduced the same way, and optionally closing
+  `#`. This covers a heading that is indented, has a tab, a no-break space or
+  an invisible character before, between or after the hashes, has no space
+  after them, is written in fullwidth forms, or differs in case or
+  punctuation: ` ## Acceptance`, `#Defaults`, `### goal:`.
+- A known title, reduced the same way, on a line whose next line is an
+  underline: after NFKC and without whitespace and other characters that are
+  neither printable ASCII nor a letter or digit, that next line is one or more
+  `-` or one or more `=`.
+
+A heading with any other words stays prose (` ## notes on goals`, `### Open
+points`), and so does a known title with no underline below it. The rule also
+refuses a sub-heading in Context whose only words are a known title, such as
+`### Decisions`; word it differently. It does not apply outside Context, where
+such a line is already an error, and it does not change what a column-0 `## `
+line is. It compares letters after NFKC only: a title spelled with a letter of
+another script that looks the same (the Cyrillic letter U+0435 for the `e` in
+`Defaults`), a line with
+an unknown title, and a title over a row of other line-like characters (box
+drawing, long dashes, underscores) are not recognised.
 
 **Characters.** Every line of `spec.md` is checked against the rule under
 "Forbidden characters" below, before anything else reads the line and with no
@@ -212,7 +241,8 @@ In every other section, every non-blank line is an item or an attribute:
 | Source ledger | `SL-n` | the item text is `<source line ID> -> <targets>`: targets are `AC`, `NG`, `DF`, `DC` or `RS` IDs separated by commas, or `out`; `out` takes a required `reason`, and no other entry takes one |
 
 The parser rejects: a missing frontmatter or section grammar violation, an
-unknown section or attribute, a missing required attribute, an ID of the
+unknown section or attribute, a Context line that reads like a known heading,
+a forbidden character on any line, a missing required attribute, an ID of the
 wrong shape or in the wrong section, a duplicate ID, an ID listed in
 `retired_ids` that is also live, a duplicate attribute, a source line mapped
 by two ledger entries, bad indentation.
@@ -492,11 +522,10 @@ renders as nothing. A character outside the five categories that shows as
 blank, or not at all, is accepted: a space separator such as the no-break
 space U+00A0, a thin space or the ideographic space U+3000 (`Zs`), a Hangul
 filler such as U+3164 (`Lo`), a variation selector or the combining grapheme
-joiner (`Mn`), a private-use character (`Co`). In Context this means that a
-line with such a character in front of `## Defaults`, or with a no-break space
-or a tab in place of the plain space after the hashes, is prose, as an
-indented heading is; only a line that starts at column 0 with two hashes and a
-plain space is a heading. The rule does refuse the zero-width joiner, so an
+joiner (`Mn`), a private-use character (`Co`). In Context, where such a
+character at the hashes could make a line read like a heading, the lookalike
+rule of `spec.md` refuses the line when the title is a known one. The rule
+does refuse the zero-width joiner, so an
 emoji sequence joined with it is refused; a single emoji and accented or CJK
 text pass. The selector, command and CI run reference of an evidence envelope
 and the raw request in `source/ticket.md` are not subject to the rule: a
