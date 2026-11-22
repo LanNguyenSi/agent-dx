@@ -1427,3 +1427,71 @@ describe("spec.md: at most 100 errors of a kind that every line can raise", () =
     expect(tally(codes(text))).toEqual({ "unexpected-line": 150 });
   });
 });
+
+// --------------------------------------------- work of the underline walk
+
+describe("the walk above an underline does bounded work", () => {
+  /** The longest reduced title: no longer text can be one. */
+  const longest = Math.max(
+    ...SPEC_SECTION_TITLES.map((title) => reduceHeadingText(title).length),
+  );
+  const walk = (lines: string[], index: number) => {
+    const work = { linesRead: 0 };
+    const like = contextHeadingLookalike(lines, index, work);
+    return { like, linesRead: work.linesRead };
+  };
+
+  it("knows the longest title", () => {
+    expect(longest).toBe("sourceledger".length);
+  });
+
+  it("stops one line after the text has outgrown every title, however long the run", () => {
+    for (const count of [50, 5000, 50000]) {
+      const lines = [...Array<string>(count).fill("a"), "---"];
+      expect(walk(lines, count - 1), String(count)).toEqual({
+        like: null,
+        linesRead: longest + 1,
+      });
+    }
+  });
+
+  it("stops at once on a line that is longer than every title", () => {
+    const lines = [
+      ...Array<string>(5000).fill("abcdefghijklmnopqrstuvwxyz"),
+      "===",
+    ];
+    expect(walk(lines, 4999).linesRead).toBe(1);
+  });
+
+  it("reads exactly the lines of a title that spans lines", () => {
+    expect(walk(["x", "Source", "ledger", "---"], 2)).toEqual({
+      like: { title: "Source ledger", index: 1 },
+      linesRead: 2,
+    });
+    const letters = [..."Sourceledger", "---"];
+    expect(walk(letters, 11)).toEqual({
+      like: { title: "Source ledger", index: 0 },
+      linesRead: 12,
+    });
+  });
+
+  it("reads no line above for a hash heading or without an underline", () => {
+    expect(walk(["a", "a", " ## Goal", "---"], 2).linesRead).toBe(0);
+    expect(walk(["a", "a", "Goal", "text"], 2).linesRead).toBe(0);
+  });
+
+  it("reads a line that adds no letter once, and stops at a blank line or an underline", () => {
+    // Such a line does not grow the text; each is read one time.
+    const dots = [...Array<string>(5000).fill("."), "---"];
+    expect(walk(dots, 4999).linesRead).toBe(5000);
+    expect(walk(["a", "", ".", ".", "---"], 3).linesRead).toBe(2);
+    expect(walk(["a", "===", ".", ".", "---"], 3).linesRead).toBe(2);
+  });
+
+  it("keeps the result the same with and without the counter", () => {
+    const lines = ["Source", "ledger", "---"];
+    expect(contextHeadingLookalike(lines, 1)).toEqual(
+      contextHeadingLookalike(lines, 1, { linesRead: 0 }),
+    );
+  });
+});

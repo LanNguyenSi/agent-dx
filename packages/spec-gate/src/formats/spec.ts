@@ -485,10 +485,17 @@ export function hasHtmlHeadingTag(line: string): boolean {
  *   is no title.
  * A line that starts at column 0 with `## ` never gets here: it ends
  * Context.
+ *
+ * The walk stops as soon as the collected text is longer than the longest
+ * title. That stop is what bounds its work: without it every step would
+ * handle a text that keeps growing, which is quadratic in a long run of
+ * lines above an underline. `work`, when given, counts the lines the walk
+ * reads, so that a test can hold the bound without measuring time.
  */
 export function contextHeadingLookalike(
   lines: readonly string[],
   index: number,
+  work?: { linesRead: number },
 ): { title: SpecSectionTitle; index: number } | null {
   const atx = ATX_LOOKALIKE_RE.exec(reduceHeadingText(lines[index]!));
   if (atx) {
@@ -500,6 +507,7 @@ export function contextHeadingLookalike(
   for (let k = index; k >= 0; k--) {
     const line = lines[k]!;
     if (BLANK_LINE_RE.test(line) || isUnderline(line)) break;
+    if (work) work.linesRead += 1;
     text = reduceHeadingText(line) + text;
     if (text.length > MAX_REDUCED_TITLE) break;
     const title = REDUCED_TITLES.get(text);
