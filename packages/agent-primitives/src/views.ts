@@ -63,6 +63,7 @@ export const VERIFY_PRINTABLE_FIELDS: readonly string[] = [
   "reason",
   "checks",
   "totalDurationMs",
+  "evidence",
 ];
 
 function oneLine(value: string): string {

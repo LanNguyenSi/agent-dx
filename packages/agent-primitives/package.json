@@ -6,10 +6,16 @@
   "bin": {
     "agent-primitives": "./dist/cli.js"
   },
+  "exports": {
+    "./schemas/evidence-envelope.json": "./schemas/evidence-envelope.json",
+    "./package.json": "./package.json",
+    "./*": "./*"
+  },
   "files": [
     "dist",
     "assets",
     "docs",
+    "schemas",
     "README.md",
     "CHANGELOG.md"
   ],

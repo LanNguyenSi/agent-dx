@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `verify` can write evidence envelopes and run checks without a shell.
+  `--evidence <file>` (with `--phase baseline|closure`, `--producer
+  ci|host|local` and, for `ci`, `--ci-run`) writes one JSON line per
+  resolved check, shaped by the new JSON Schema shipped as
+  `schemas/evidence-envelope.json` and exported as
+  `agent-primitives/schemas/evidence-envelope.json`; `commit` and `dirty`
+  are read from git by the tool, `commands_digest` is a SHA-256 over the
+  run's argv lists, a skipped check is `skip` and never `pass`, and
+  `producer: ci` is only valid with a `ci_run` reference. `--argv
+  <name=json>` runs a check straight from an argv list, and `--selector` /
+  `--discovery` fill a whole `{selector}` element from it only when it does
+  not start with `-` and exactly equals one line of the discovery file;
+  every other case is a usage error with its own `reason` and nothing runs.
+  Without these options `verify`'s output and exit codes are unchanged; the
+  package now carries an `exports` map that keeps every existing file path
+  (with its extension) reachable; an extensionless deep path such as
+  `agent-primitives/dist/index` no longer resolves.
 - `probe` gained a `go test` zero-tests detector: when every package
   result line carries go's own `[no tests to run]` marker (a
   `-run`/name filter that matched no test inside a package that has

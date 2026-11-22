@@ -9,6 +9,20 @@ import { CHECK_NAME_PATTERN } from "../check-names.js";
 import { containmentRoot } from "../probe/containment.js";
 import type { DefaultsFileVerify } from "../probe/defaults-file.js";
 import { readDefaultsFile } from "../probe/defaults-file.js";
+import {
+  buildEvidenceEnvelope,
+  checkArgvTemplate,
+  checkEvidenceOptions,
+  checkSelector,
+  checkSelectorInputs,
+  commandsDigest,
+  hasSelectorPlaceholder,
+  readGitState,
+  shellArgv,
+  shellQuoteArgv,
+  substituteSelector,
+} from "./evidence.js";
+import type { EvidenceEnvelope } from "./evidence.js";
 import { genericDetector } from "./detectors/generic.js";
 import { vitestDetector } from "./detectors/vitest.js";
 import { tscDetector } from "./detectors/tsc.js";
@@ -604,6 +618,7 @@ async function runCheck(
   command: string,
   source: CheckSource,
   ctx: CheckRunContext,
+  argv?: string[],
 ): Promise<CheckOutcome> {
   const { options, maxFailures, repeat } = ctx;
   const runs: RunOutcome[] = [];
@@ -632,6 +647,7 @@ async function runCheck(
       // interleave); a single run keeps today's `<name>.log`, so a
       // `--repeat 1` run's log paths are byte-identical to before.
       repeat === 1 ? `${name}.log` : `${name}.${run}.log`,
+      argv,
     );
     runs.push(outcome);
     // An aborted run concluded nothing, and an `execFn` that rejected
@@ -696,6 +712,7 @@ async function runOnce(
   source: CheckSource,
   ctx: CheckRunContext,
   logFileName: string,
+  argv?: string[],
 ): Promise<RunOutcome> {
   const { options, logDir, detectors, fallbackDetector, execFn, passRegexes } =
     ctx;
@@ -711,6 +728,7 @@ async function runOnce(
       logDir,
       logFileName,
       ...(options.signal ? { signal: options.signal } : {}),
+      ...(argv ? { argv } : {}),
     });
   } catch (err) {
     // execFn itself rejecting (e.g. exec.ts's own `fs.mkdirSync(logDir,
@@ -1084,6 +1102,8 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const start = Date.now();
   const explicitOverrides = options.overrides ?? {};
   const passRegexes = options.passRegexes ?? {};
+  const argvTemplates = options.argvChecks ?? {};
+  const argvNames = Object.keys(argvTemplates);
   // The repo preset (`.agent-primitives.json`'s `verify` section) is read at
   // the repository root -- the git work-tree root, or `cwd` outside a
   // repository, exactly probe's own containment root -- while `package.json`
@@ -1124,6 +1144,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     if (CHECK_NAME_PATTERN.test(item)) takenNames.add(item);
   }
   for (const key of Object.keys(explicitOverrides)) takenNames.add(key);
+  for (const key of argvNames) takenNames.add(key);
 
   const requestedNames: string[] = [];
   for (const item of requestedItems) {
@@ -1158,13 +1179,33 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
 
   const overrides = { ...implicitOverrides, ...explicitOverrides };
 
+  // An `--argv` check and an `-x` check of one name would be two commands
+  // for one check; refused rather than one silently winning.
+  for (const name of argvNames) {
+    if (Object.prototype.hasOwnProperty.call(overrides, name)) {
+      throw new VerifyUsageError(
+        `verify: check "${name}" is given both as -x and as --argv; use one`,
+        "argv_name_collision",
+      );
+    }
+    const refusal = checkArgvTemplate(name, argvTemplates[name]);
+    if (refusal) throw new VerifyUsageError(refusal.message, refusal.reason);
+  }
+
   // A check name that only exists as an `-x` override (not in the
   // requested/default list) is still run: an override that is never used
   // would be a silent no-op, which this package's principles rule out.
   const overrideOnlyNames = Object.keys(overrides).filter(
     (name) => !requestedNames.includes(name),
   );
-  const requestedAndOverrideNames = [...requestedNames, ...overrideOnlyNames];
+  const argvOnlyNames = argvNames.filter(
+    (name) => !requestedNames.includes(name),
+  );
+  const requestedAndOverrideNames = [
+    ...requestedNames,
+    ...overrideOnlyNames,
+    ...argvOnlyNames,
+  ];
 
   // Every resolved name is validated before any command is built (from
   // `-c`/the default list and from `-x` keys alike): a name carrying a
@@ -1197,6 +1238,94 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   }
 
   const names = dedupePreservingOrder(requestedAndOverrideNames);
+
+  // Selector rules, all settled before anything runs: a selector is only
+  // ever one whole argv element of an argv-form command, and only when it
+  // is exactly an entry of that check's discovery list.
+  const selectors = options.selectors ?? {};
+  const discovery = options.discovery ?? {};
+  const refuseSelector = (reason: string, message: string): never => {
+    throw new VerifyUsageError(message, reason);
+  };
+  const inputRefusal = checkSelectorInputs(selectors, discovery);
+  if (inputRefusal) {
+    throw new VerifyUsageError(inputRefusal.message, inputRefusal.reason);
+  }
+  for (const name of Object.keys(selectors)) {
+    if (!names.includes(name)) {
+      refuseSelector(
+        "selector_check_not_run",
+        `verify: --selector names check "${name}", which is not in the run list`,
+      );
+    }
+    if (!Object.prototype.hasOwnProperty.call(argvTemplates, name)) {
+      refuseSelector(
+        "selector_for_shell_command",
+        `verify: --selector names check "${name}", which runs as a shell command; a selector is only accepted for an argv-form check (--argv)`,
+      );
+    }
+    if (!hasSelectorPlaceholder(argvTemplates[name])) {
+      refuseSelector(
+        "selector_without_placeholder",
+        `verify: --selector names check "${name}", whose --argv has no {selector} element to put it in`,
+      );
+    }
+    if (!Object.prototype.hasOwnProperty.call(discovery, name)) {
+      refuseSelector(
+        "selector_without_discovery",
+        `verify: --selector for check "${name}" needs its discovery list (--discovery ${name}=<file>)`,
+      );
+    }
+    const refusal = checkSelector(name, selectors[name], discovery[name]);
+    if (refusal) throw new VerifyUsageError(refusal.message, refusal.reason);
+  }
+  for (const name of Object.keys(discovery)) {
+    if (!Object.prototype.hasOwnProperty.call(selectors, name)) {
+      refuseSelector(
+        "discovery_without_selector",
+        `verify: --discovery names check "${name}", which has no --selector to validate against it`,
+      );
+    }
+  }
+  const argvPlan = new Map<
+    string,
+    { template: string[]; argv: string[]; selector: string | null }
+  >();
+  for (const name of argvNames) {
+    const template = argvTemplates[name];
+    if (!hasSelectorPlaceholder(template)) {
+      argvPlan.set(name, { template, argv: template, selector: null });
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(selectors, name)) {
+      refuseSelector(
+        "selector_missing",
+        `verify: --argv for check "${name}" has a {selector} element but no --selector was given for it`,
+      );
+    }
+    argvPlan.set(name, {
+      template,
+      argv: substituteSelector(template, selectors[name]),
+      selector: selectors[name],
+    });
+  }
+
+  // Evidence is opt-in: without `options.evidence` nothing below this point
+  // changes what verify runs or returns.
+  const evidenceOptions = options.evidence;
+  const evidence: EvidenceEnvelope[] = [];
+  let evidenceDigest = "";
+  if (evidenceOptions !== undefined) {
+    const refusal = checkEvidenceOptions(evidenceOptions);
+    if (refusal) throw new VerifyUsageError(refusal.message, refusal.reason);
+    const probe = readGitState(options.cwd);
+    if (!probe.ok) {
+      throw new VerifyUsageError(
+        `verify: evidence needs a git work tree to read the commit from: ${probe.message}`,
+        "evidence_requires_git",
+      );
+    }
+  }
 
   const maxFailures = options.maxFailures ?? DEFAULT_MAX_FAILURES;
   if (!Number.isInteger(maxFailures) || maxFailures < 1) {
@@ -1244,8 +1373,22 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
         : XOVERRIDE_WITHOUT_CHECKS_HINT,
     );
   }
+  // The same hint for `--argv`: its check is added to the run list, not
+  // the whole list, so the default (or preset) list still runs beside it.
+  // `-x` already said so above when both were given.
+  if (
+    options.checks === undefined &&
+    Object.keys(explicitOverrides).length === 0 &&
+    argvNames.length > 0
+  ) {
+    warnings.push(
+      `hint: --argv given without -c: the ${preset ? "repo preset" : "default"} check list (${(preset ? presetRunList(preset) : DEFAULT_CHECKS).join(",")}) still runs; pass -c <names> to choose the run set`,
+    );
+  }
   const namesNeedingScripts = names.some(
-    (name) => !Object.prototype.hasOwnProperty.call(overrides, name),
+    (name) =>
+      !Object.prototype.hasOwnProperty.call(overrides, name) &&
+      !argvPlan.has(name),
   );
   if (scripts === undefined && namesNeedingScripts) {
     warnings.push(
@@ -1263,6 +1406,25 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   // checks it did not reach, and must not read as a run that did.
   let aborted = false;
   let notStarted: string[] = [];
+
+  if (evidenceOptions !== undefined) {
+    // The command set the run is configured with, whatever executes: every
+    // check that resolves to a command, in run order, the argv-form ones
+    // with their placeholder still in place.
+    const argvLists: string[][] = [];
+    for (const name of names) {
+      const planned = argvPlan.get(name);
+      if (planned) {
+        argvLists.push(planned.template);
+        continue;
+      }
+      const resolved = resolveCommand(name, overrides, scripts, preset);
+      if (!resolved.skipped && resolved.command !== undefined) {
+        argvLists.push(shellArgv(resolved.command));
+      }
+    }
+    evidenceDigest = commandsDigest(argvLists);
+  }
 
   const ctx: CheckRunContext = {
     options,
@@ -1287,7 +1449,41 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       notStarted = names.slice(index);
       break;
     }
-    const resolved = resolveCommand(name, overrides, scripts, preset);
+    const planned = argvPlan.get(name);
+    const resolved: Resolution = planned
+      ? {
+          command: shellQuoteArgv(planned.argv),
+          skipped: false,
+          source: "argv",
+        }
+      : resolveCommand(name, overrides, scripts, preset);
+    // The checkout the check is about to run against, read before it runs.
+    const gitBefore =
+      evidenceOptions !== undefined ? readGitState(options.cwd) : undefined;
+    const recordEvidence = (
+      result: CheckResult,
+      command: string[],
+      selector: string | null,
+    ): void => {
+      if (evidenceOptions === undefined || gitBefore === undefined) return;
+      if (!gitBefore.ok) {
+        warnings.push(
+          `${name}: evidence not recorded, the git state could not be read: ${gitBefore.message}`,
+        );
+        return;
+      }
+      evidence.push(
+        buildEvidenceEnvelope({
+          options: evidenceOptions,
+          git: gitBefore,
+          digest: evidenceDigest,
+          selector,
+          command,
+          exit: result.exitCode,
+          status: result.status,
+        }),
+      );
+    };
 
     if (resolved.skipped || resolved.command === undefined) {
       const skippedResult: CheckResult = {
@@ -1303,6 +1499,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       };
       checks.push(skippedResult);
       fullChecks.push(skippedResult);
+      recordEvidence(skippedResult, [], null);
       // A `--pass-regex` naming a check that WAS requested/-x-overridden
       // (so the validation above let it through) but resolved to
       // `skipped` anyway (no matching `package.json` script and no `-x`
@@ -1333,6 +1530,16 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       resolved.command,
       resolved.source,
       ctx,
+      planned?.argv,
+    );
+    if (planned) {
+      outcome.result = { ...outcome.result, argv: planned.argv };
+      outcome.fullResult = { ...outcome.fullResult, argv: planned.argv };
+    }
+    recordEvidence(
+      outcome.result,
+      planned ? planned.argv : shellArgv(resolved.command),
+      planned ? planned.selector : null,
     );
     checks.push(outcome.result);
     fullChecks.push(outcome.fullResult);
@@ -1398,5 +1605,6 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     // the full-result file whether or not `maxFailures` cut anything.
     ...(truncatedByMaxFailures || repeat > 1 ? { fullChecks } : {}),
     ...(reason ? { reason } : {}),
+    ...(evidenceOptions !== undefined ? { evidence } : {}),
   };
 }

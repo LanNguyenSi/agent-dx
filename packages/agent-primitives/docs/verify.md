@@ -204,8 +204,9 @@ name.
 
 Every `CheckResult` carries `source` saying where its command came from:
 `exec` (an explicit or implicit `-x`), `preset` (the repo preset's script),
-`script` (the `package.json` fallback on the check's own name) or `none`
-(the `no_script` skip). The text renderer shows it on each per-check line
+`script` (the `package.json` fallback on the check's own name), `argv` (an
+`--argv` check, see [Argv-form checks and selectors](#argv-form-checks-and-selectors))
+or `none` (the `no_script` skip). The text renderer shows it on each per-check line
 (`  [pass] build [preset] (npm run compile --silent) - 120ms`) and the JSON
 envelope carries it per check, so a reader can tell a preset's script from
 a `-x` command without recomputing the precedence.
@@ -487,6 +488,127 @@ in the warning instead).
 `--repeat` measures; it does not raise a limit for you. To bound a repeated
 run by wall-clock time or memory (a repeat multiplies both), wrap it in
 `guard`, which caps the whole `verify` invocation rather than any one run.
+
+## Argv-form checks and selectors
+
+`-x` and every default check run through `sh -c`. To run a command with no
+shell in between, give it as a JSON array of strings:
+
+```sh
+agent-primitives verify -c unit \
+  --argv 'unit=["npx","vitest","run","-t","{selector}"]' \
+  --selector 'unit=parses an empty file' \
+  --discovery unit=discovered-tests.txt
+```
+
+- `--argv <name=json>` (repeatable): check `name` is executed straight from
+  the list, program first. The result row says `source: "argv"` and carries
+  the executed list as `argv`; `command` is only its display form: the same
+  list as a POSIX shell string, every element that is not a plain word in
+  single quotes. The label is also what `verify()` hands to a custom
+  `execFn` as `cmd` (with the list in `options.argv`), so an `execFn` that
+  ignores `options.argv` and runs `cmd` through `sh -c` still executes
+  exactly that list. This holds for POSIX sh-compatible shells (sh, bash,
+  zsh, dash, ksh); an `execFn` that uses csh, tcsh, fish or cmd.exe must
+  honour `options.argv`. A selector must be one line without control
+  characters (`selector_invalid` otherwise). The name follows the same rules as any check name. It runs where
+  `-c` puts it, or after the listed checks when `-c` does not name it, and
+  it wins over a repository preset entry and a `package.json` script of the
+  same name. Naming the same check with `-x` is a usage error
+  (`argv_name_collision`), and so is giving `--argv` twice for one check.
+  Like `-x`, the list is executed as given: never fill it from untrusted
+  text. `-x` itself is unchanged.
+- An element equal to `{selector}` is replaced by the check's selector as
+  ONE argv element, so the selector is never split, quoted or interpreted. A
+  list may carry it any number of times, but never as the program and never
+  inside a longer element (`--name={selector}`): `argv_invalid`.
+- `--selector <name=value>` and `--discovery <name=file>` (repeatable, one
+  of each per check). The discovery file lists the allowed selectors, one
+  per line; lines are split on `\n` only (a `\r` stays part of the entry),
+  empty lines and lines with a NUL are not entries, and nothing is trimmed.
+  A selector is accepted only when it does not start with `-` and is
+  exactly equal to one entry: no prefix, substring, case-insensitive or
+  pattern match. Anything else is a usage error before any command runs,
+  each with its own `reason`:
+
+| reason                         | when                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| `selector_leading_dash`        | the selector starts with `-`, even if the discovery list holds it       |
+| `selector_not_in_discovery`    | the selector is not exactly equal to an entry (an empty one included)   |
+| `selector_for_shell_command`   | `--selector` names a check that runs as a shell string (`-x`, a script) |
+| `selector_check_not_run`       | `--selector` names a check that is not in the run list                  |
+| `selector_without_placeholder` | the check's `--argv` has no `{selector}` element                        |
+| `selector_without_discovery`   | no `--discovery` for the check                                          |
+| `discovery_without_selector`   | a `--discovery` with no `--selector`                                    |
+| `selector_missing`             | the `--argv` has `{selector}` but no `--selector` was given             |
+| `discovery_not_readable`       | the discovery file is missing, not a regular file or over 1 MiB         |
+| `argv_invalid`                 | not a non-empty array of strings, no program, a NUL, a bad placeholder  |
+| `selector_invalid`             | (library) a selector that is not a string, or contains a newline or other control character |
+| `discovery_invalid`            | (library) a discovery list that is not an array of strings              |
+
+On the command line, two mistakes are caught by the option parser before
+`verify` runs and reported as a plain `usage_error`: an `--argv` value
+without `name=` (or with an empty name), an `--argv` value that is not valid
+JSON, and the same check given twice for `--argv`, `--selector` or
+`--discovery`. A well-formed JSON value of the wrong shape reaches
+`verify` and is `argv_invalid`.
+
+Without `--argv`, `--selector` and `--discovery` nothing in this section
+applies and the output of `verify` is what it was.
+
+## Evidence envelopes
+
+`--evidence <file>` makes `verify` also write one evidence envelope per
+resolved check (JSON Lines, one object per line, in run order) and name the
+file and the count in its own envelope (`evidence: { file, count }`, also
+available through `--print evidence`). It is
+opt-in: without it `verify`'s output and exit codes are byte-for-byte what
+they were. The shape is the JSON Schema (draft 2020-12) shipped with the
+package and exported as `agent-primitives/schemas/evidence-envelope.json`;
+`additionalProperties` is false.
+
+| field             | content                                                                                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`  | `1`                                                                                                                                       |
+| `phase`           | `baseline` or `closure`, from `--phase` (required with `--evidence`)                                                                      |
+| `producer`        | `ci`, `host` or `local`, from `--producer` (default `local`), recorded as the caller states it                                            |
+| `ci_run`          | the CI run id or URL from `--ci-run`; present, and required, exactly for producer `ci`; any other producer with `--ci-run` is an error     |
+| `time`            | ISO 8601 UTC, when the check finished                                                                                                     |
+| `commit`          | HEAD of the git work tree `verify` runs in                                                                                                |
+| `dirty`           | whether that tree had a tracked change or an untracked, non-ignored file                                                                  |
+| `commands_digest` | SHA-256 hex over the run's command set, see below                                                                                         |
+| `selector`        | the selector substituted into the command, or `null`                                                                                      |
+| `command`         | the argv that was executed: `["sh","-c","<command>"]` for a shell check, the substituted list for an `--argv` check, `[]` for a skip      |
+| `exit`            | the exit code, `null` when there is none (skipped, timed out, killed, not started)                                                        |
+| `result`          | `pass`, `fail`, `skip` or `error` (the check's status, `skipped` becoming `skip`: a check that did not run is never a `pass`)             |
+
+- `commit` and `dirty` are read by running git, once per check just before
+  it starts, so they describe the tree that check ran against (an earlier
+  check that writes into the tree shows up as `dirty` on the next one).
+  They are never taken from input. Outside a git work tree `--evidence` is
+  a usage error (`evidence_requires_git`) and nothing runs; a tree that
+  becomes unreadable mid-run leaves that check without an envelope and a
+  warning says so. An evidence file inside the work tree that git does not
+  ignore makes the tree dirty for the checks after it was written, so keep
+  it outside the tree or ignored.
+- `commands_digest`: SHA-256 (lower-case hex) of the UTF-8 JSON text of an
+  array holding one argv array per check that resolved to a command, in run
+  order, with no whitespace. Each argv is as it is spawned:
+  `["sh","-c","<command>"]` for a shell check, and the `--argv` list with
+  its `{selector}` element still unsubstituted. For arrays of strings that
+  text is the RFC 8785 canonical form. Checks without a command (skipped)
+  contribute nothing; the selector and the outcome are not part of it. Every
+  envelope of one run carries the same digest.
+- `--repeat` yields one envelope per check, with the merged result and the
+  last run's exit code.
+- `producer` and `phase` are labels the caller supplies; `verify` cannot
+  tell a CI job from a workstation. A consumer that trusts `producer: ci`
+  checks the `ci_run` reference against the CI itself.
+- An evidence file that cannot be written makes a `pass` run an `error`
+  (`reason: "evidence_write_failed"`, exit `2`); a run that already failed
+  keeps its status. `--phase`, `--producer` and `--ci-run`
+  without `--evidence` are a usage error (`evidence_option_without_file`),
+  and `--evidence` without `--phase` is `evidence_phase_required`.
 
 ## Compact views: --summary and --print
 
