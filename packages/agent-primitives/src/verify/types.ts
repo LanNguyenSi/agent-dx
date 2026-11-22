@@ -193,8 +193,10 @@ export interface VerifyResult {
  * check `options.argv` is the list to execute directly, and `cmd` is that
  * same argv rendered as a shell-safe string (single-quoted wherever
  * needed), so an implementation that ignores `argv` and runs `cmd`
- * through a shell still executes exactly that argv: a selector can never
- * be interpreted by a shell, whatever the implementation does.
+ * through a POSIX sh-compatible shell (sh, bash, zsh, dash, ksh) still
+ * executes exactly that argv. Other shells (csh, tcsh, fish, cmd.exe) quote
+ * differently; an implementation must honour `options.argv` or use a POSIX
+ * shell.
  */
 export type ExecLike = (
   cmd: string,

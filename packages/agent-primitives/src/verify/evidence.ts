@@ -242,6 +242,15 @@ export function checkSelectorInputs(
         message: `verify: the selector for check "${name}" must be a string`,
       };
     }
+    // One line, no control characters: the CLI reads discovery entries line
+    // by line, and a newline inside a selector would survive the single
+    // quotes of the display label under shells such as csh.
+    if (/[\u0000-\u001f\u007f]/.test(selector)) {
+      return {
+        reason: "selector_invalid",
+        message: `verify: the selector for check "${name}" must not contain a newline or other control character`,
+      };
+    }
   }
   for (const [name, entries] of Object.entries(discovery)) {
     if (

@@ -67,7 +67,7 @@ is a real capture of a broken import (a file that fails to collect: the
 is a real capture of `tsc --noEmit` without `--pretty false`, run
 non-interactively (no TTY) against the same `tsc-project` sources as
 `tsc-errors.txt`, showing the shape is identical either way.
-`vitest-all-expected-fail.txt` is a real capture of a run whose _only_
+`vitest-all-expected-fail.txt` is a real capture of a run whose *only*
 test is `it.fails` (`Tests  1 expected fail (1)`, no `passed`/`failed`
 segment at all): unlike the mixed `vitest-expected-fail.txt` capture
 above, this is the only fixture that can tell whether the `expected
@@ -75,7 +75,7 @@ fail` alternative in the detector's own summary-line pattern is actually
 load-bearing, since no other segment is present to select the detector
 on its own. `vitest-fail-bracket-name.txt` is a real capture of a
 failing test whose own name ends in a bracketed segment (`parses row
-[1,2,3]`), exercising the `FAIL` line's suite/name shape against a
+[1,2,3]`), exercising the ` FAIL ` line's suite/name shape against a
 name that could otherwise be mistaken for the file-only shape's
 collection-error marker. `tsc-space-in-path.txt` is a real capture of a
 type error in a file whose relative path contains a space, exercising
@@ -136,13 +136,13 @@ wall-clock times (`Start at`, `Duration`) and Go's package timings
   line beside a diagnostic: the ambiguous shape). Exit `1`.
 - `pnpm-filter-tsc-error.txt`: `pnpm --filter @scope/a test` where the
   package's test is `tsc -p .` and fails (`[ELIFECYCLE]`, `Error:
-ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, the `×` footer). Exit `1`.
+  ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, the `×` footer). Exit `1`.
 - `pnpm-recursive-tsc-error.txt`: `pnpm -r test` over two packages, the
   failing one's lines prefixed `packages/a test: ` (a prefixed shape the
   detection does not recognize). Exit `1`.
 - `vitest-transform-failed.txt`: `vitest run` where the imported source
   file has a syntax error (`Transform failed with 1 error`, `Tests  no
-tests`), ANSI escapes kept as captured. Exit `1`.
+  tests`), ANSI escapes kept as captured. Exit `1`.
 - `vitest-transform-failed-beside-failed-test.txt`: the same, with a
   second test file that loads and fails an assertion. Exit `1`.
 - `vitest-runtime-syntaxerror-at-import.txt`: `vitest run` where the
@@ -190,7 +190,7 @@ byte-identical to itself. Consumed by `probe-zero-tests.test.ts`.
   (`probe`'s `via: "go"` zero-tests branch).
 - `go-test-no-test-files.txt`: `go test ./...` on the same module with
   the `_test.go` file removed (exit `0`) -- go's `? <pkg> [no test
-files]` package header, its statement that no `_test.go` exists. A
+  files]` package header, its statement that no `_test.go` exists. A
   zero-tests reading too.
 - `go-test-no-tests-mixed.txt`: `go test -run TestAdd ./...` on a
   two-package module (`m` with `TestAdd`, `n` with only `TestSize`;
@@ -212,13 +212,13 @@ above use. Tool versions used for the capture: PHP 8.3.33 (cli),
 PHPUnit 9.6.36, PHPStan 2.2.13, PHP_CodeSniffer 3.13.6 (`--standard=PSR12`).
 
 - `phpunit-pass.txt`: `vendor/bin/phpunit --colors=never
-tests/CalcTest.php` against a two-test suite, both passing. Exit `0`.
+  tests/CalcTest.php` against a two-test suite, both passing. Exit `0`.
 - `phpunit-fail.txt`: the same command against a suite with one failing
   assertion (`assertSame(5, Calc::add(2, 2))`), exercising the numbered
   `N) Class::method` entry, its message, and its `file:line` locator
   line. Exit `1`.
 - `phpunit-no-tests-executed.txt`: `vendor/bin/phpunit --colors=never
-tests/CalcTest.php --filter=NoSuchTest` (a filter matching nothing).
+  tests/CalcTest.php --filter=NoSuchTest` (a filter matching nothing).
   Exit `0` -- the shape `probe`'s zero-tests guard exists to catch,
   since a `0` exit here is not a real pass.
 - `phpunit-deprecation-notice.txt`: a green single-test run against a
@@ -232,12 +232,12 @@ tests/CalcTest.php --filter=NoSuchTest` (a filter matching nothing).
   on PHP 8.3; this fixture is therefore the deprecation-notice capture
   the task asked for, on a `0` exit, not the non-zero-exit variant.
 - `phpstan-clean.txt` / `phpstan-errors.txt`: `vendor/bin/phpstan
-analyse --level=5 --no-progress --no-ansi <dir>` against a clean
+  analyse --level=5 --no-progress --no-ansi <dir>` against a clean
   one-class file (exit `0`, ` [OK] No errors`) and a two-error file (a
   wrong return type, an undefined variable; exit `1`, the per-file table
   plus ` [ERROR] Found 2 errors`).
 - `phpcs-clean.txt` / `phpcs-errors.txt`: `vendor/bin/phpcs
---standard=PSR12 --no-colors <dir>` against a PSR-12-clean one-class
+  --standard=PSR12 --no-colors <dir>` against a PSR-12-clean one-class
   file (exit `0`, empty stdout -- PHPCS's own default report prints
   nothing at all on a clean run, so there is no "no errors" shape to
   capture) and a file with tabs, missing braces/visibility, and no
@@ -253,7 +253,7 @@ PHP_CodeSniffer 3.13.6, `--standard=PSR12`). See CHANGELOG (Unreleased)
 for the detector behaviour these captures pin.
 
 - `phpunit-skip-and-fail.txt`: `vendor/bin/phpunit --colors=never
-tests/SkipFailTest.php` against a three-test suite (one pass, one
+  tests/SkipFailTest.php` against a three-test suite (one pass, one
   failing assertion, one `markTestSkipped`). Exit `1`. `FAILURES!` plus
   `Tests: 3, Assertions: 2, Failures: 1, Skipped: 1.` -- a tally regex
   that assumed a fixed `Failures`-then-`Skipped` order parses this to
@@ -261,14 +261,14 @@ tests/SkipFailTest.php` against a three-test suite (one pass, one
   executed.
 - `phpunit-all-skipped.txt`: the same command against a two-test suite
   where both tests `markTestSkipped`. Exit `0`. `OK, but incomplete,
-skipped, or risky tests!` plus `Tests: 2, Assertions: 0, Skipped: 2.`
+  skipped, or risky tests!` plus `Tests: 2, Assertions: 0, Skipped: 2.`
   -- no `FAILURES!`/`ERRORS!` marker at all, a shape `probe`'s
   zero-tests guard must still recognize as zero tests executed.
 - `phpunit-errors-and-failures.txt`: the same command against a
   six-test suite (two pass, one failing assertion, one thrown
   exception, one skipped, one incomplete). Exit `2`. `ERRORS!` (not
   `FAILURES!`, even though the run has both) plus `Tests: 6, Assertions:
-3, Errors: 1, Failures: 1, Skipped: 1, Incomplete: 1.` -- PHPUnit
+  3, Errors: 1, Failures: 1, Skipped: 1, Incomplete: 1.` -- PHPUnit
   prints `Errors:` before `Failures:` in the tally whenever a run has
   both, and only the `ERRORS!` marker (never both), exercising the
   order-independent named-count parsing.
@@ -279,7 +279,7 @@ skipped, or risky tests!` plus `Tests: 2, Assertions: 0, Skipped: 2.`
   code as `2` was wrong). A PHPUnit-level warning does not fail the run
   under 9.6, which is why `probe`'s zero-tests guard, not the exit
   code, is what catches this shape. `WARNINGS!` plus `Tests: 1,
-Assertions: 0, Warnings: 1.`
+  Assertions: 0, Warnings: 1.`
 - `phpcs-two-files.txt`: `vendor/bin/phpcs --standard=PSR12 --no-colors
   <dir>` against two files, each with the same tab-indentation and
   missing-visibility violations. Exit `2`. Two separate `FILE: ...` /
@@ -306,23 +306,23 @@ three exist to pin the executed/not-executed line drawn through
 PHPUnit's tally categories (see CHANGELOG (Unreleased)).
 
 - `phpunit-risky-and-real.txt`: `vendor/bin/phpunit --colors=never
-tests/RiskyRealTest.php` against a two-test class, one asserting, one
+  tests/RiskyRealTest.php` against a two-test class, one asserting, one
   performing no assertion at all (PHPUnit 9.6 flags that as risky by
   default). Exit `0`. `OK, but incomplete, skipped, or risky tests!`
   plus `Tests: 2, Assertions: 1, Risky: 1.`, and a numbered `1)
-RiskyRealTest::testNoAssertions` entry under a `There was 1 risky
-test:` header -- a real `Class::method` entry that is NOT a failure,
+  RiskyRealTest::testNoAssertions` entry under a `There was 1 risky
+  test:` header -- a real `Class::method` entry that is NOT a failure,
   which is why the entry loop keys on the section header rather than on
   the entry header's own grammar.
 - `phpunit-risky-only.txt`: the same command against a one-test class
   whose single test performs no assertion. Exit `0`. `Tests: 1,
-Assertions: 0, Risky: 1.` -- one test ran, so this is NOT a
+  Assertions: 0, Risky: 1.` -- one test ran, so this is NOT a
   zero-tests-executed run, even though it carries the same marker an
   all-skipped run does.
 - `phpunit-errors-and-skipped.txt`: the same command against a
   three-test class (one passing, one throwing, one `markTestSkipped`),
   with no failing assertion anywhere. Exit `2`. `ERRORS!` plus `Tests:
-3, Assertions: 1, Errors: 1, Skipped: 1.` -- an `Errors:` count with
+  3, Assertions: 1, Errors: 1, Skipped: 1.` -- an `Errors:` count with
   no `Failures:` count beside it.
 
 ### Entry-locator and plural-header captures
@@ -332,19 +332,19 @@ disposable-Docker-container (`composer:2`, `php:8.3-cli`), same trimming
 convention as the captures above; PHP 8.3.33 (cli), PHPUnit 9.6.36.
 
 - `phpunit-error-message-with-port.txt`: `vendor/bin/phpunit
---colors=never tests/PortTest.php` against a two-test class, one
+  --colors=never tests/PortTest.php` against a two-test class, one
   passing, one throwing `RuntimeException('upstream unreachable at
-api.example.com:8080')`. Exit `2`. The entry's message ("RuntimeException:
+  api.example.com:8080')`. Exit `2`. The entry's message ("RuntimeException:
   upstream unreachable at api.example.com:8080") ends in `:8080` and
   sits on the entry's own first line, not preceded by a blank line, so
   it is never mistaken for the `file:line` locator that follows it two
   lines later (`tests/PortTest.php:14`), which IS preceded by a blank
   line.
 - `phpunit-two-failures-and-risky.txt`: `vendor/bin/phpunit
---colors=never tests/PluralTest.php` against a four-test class (two
+  --colors=never tests/PluralTest.php` against a four-test class (two
   failing assertions, two tests performing no assertion at all). Exit
   `1`. `There were 2 failures:` and, after a `--` divider, `There were 2
-risky tests:` in the same run -- pins the plural form of the
+  risky tests:` in the same run -- pins the plural form of the
   defect-section header (`DEFECT_SECTION_HEADER`'s `s?` is otherwise
   only exercised by its singular forms) and that both risky entries are
   excluded from `failures` even when a plural section precedes them.
@@ -444,10 +444,10 @@ fixture is trimmed to the project-relative path either way).
   directly followed by an UNINDENTED `abc:99` line
   (`tests/RawBlankCheckTest.php`, `testSingleSpaceLineThenLocator`).
   Exit `2`. Pins that the entry loop's blank check tests the RAW line's
-  _length_, not its trimmed length: `ENTRY_FILE_LINE`'s `\S` anchor does
+  *length*, not its trimmed length: `ENTRY_FILE_LINE`'s `\S` anchor does
   NOT protect here, because `abc:99` is already unindented and matches
   the anchor fine, so a trim-based blank check (`line.trim().length ===
-0`) would treat the one-space line as blank and misread the following
+  0`) would treat the one-space line as blank and misread the following
   `abc:99` as the locator, discarding the real one
   (`tests/RawBlankCheckTest.php:9`) as a dropped extra frame; only
   testing the raw line's own length keeps that from happening. Unlike
@@ -471,7 +471,7 @@ fixture is trimmed to the project-relative path either way).
   the message line, the `Caused by` line itself sit in between), so both
   are folded into `message` as ordinary text
   (`RuntimeException: outer Caused by LogicException: inner:42
-tests/ChainedThrowTest.php:9`) instead of being silently dropped the
+  tests/ChainedThrowTest.php:9`) instead of being silently dropped the
   way a true consecutive frame is. This is the fixture that discriminates
   a broader "any later locator-shaped line is a frame" rule (which would
   drop the `Caused by` block's message text entirely) from the narrower
@@ -499,7 +499,7 @@ banner that PHPUnit 9.6 never printed; kept verbatim, untrimmed, since
 it is part of the real captured shape.
 
 - `phpunit-error-data-provider.txt`: `vendor/bin/phpunit --colors=never
-tests/DataProviderThrowsTest.php` against a two-test class
+  tests/DataProviderThrowsTest.php` against a two-test class
   (`testOk`, which asserts and passes; `testSomething`, whose
   `@dataProvider provider` static method throws a `RuntimeException`
   before PHPUnit can ever call the test method itself). Exit `2`.
@@ -509,7 +509,7 @@ tests/DataProviderThrowsTest.php` against a two-test class
   followed by a `1) DataProviderThrowsTest::testSomething` entry, its
   message, and a `file:line` locator two lines later
   (`tests/DataProviderThrowsTest.php:20`). `ERRORS!` plus `Tests: 1,
-Assertions: 1, Errors: 1, PHPUnit Deprecations: 1.` -- the tally's own
+  Assertions: 1, Errors: 1, PHPUnit Deprecations: 1.` -- the tally's own
   `Errors: 1` is what the `PHPUnit error` section kind is collected
   against (see `COLLECTED_SECTION_KINDS`'s own docblock); the tally's
   `PHPUnit Deprecations: 1` (from using the old doc-comment
@@ -526,23 +526,23 @@ Assertions: 1, Errors: 1, PHPUnit Deprecations: 1.` -- the tally's own
   tally), not something this capture's parsing change introduces or
   fixes.
 - `phpunit-two-word-deprecation-tally.txt`: `vendor/bin/phpunit
---colors=never tests/OldAnnotationProviderTest.php` against a
+  --colors=never tests/OldAnnotationProviderTest.php` against a
   two-test class using the old doc-comment `@dataProvider` annotation on
   a data provider that returns two values normally (no error, unlike
   the fixture above). Exit `0`. `OK, but there were issues!` (PHPUnit
   11's own replacement for `OK, but incomplete, skipped, or risky
-tests!` when the only issue is a deprecation/notice, not a
+  tests!` when the only issue is a deprecation/notice, not a
   skip/incomplete/risky test; recognized here via `TALLY_LINE` alone,
   the same way every other marker-less all-skipped-style run already is)
   plus `Tests: 2, Assertions: 2, PHPUnit Deprecations: 1.` -- BOTH tests
   genuinely ran and passed, isolating the two-word tally token from any
   accompanying error/failure, which is what proves `PHPUnit
-Deprecations` must NOT be treated as a not-executed category the way
+  Deprecations` must NOT be treated as a not-executed category the way
   `Skipped`/`Incomplete` (and PHPUnit 9's plain `Warnings`) are (see
   `TALLY_CATEGORIES`'s own docblock): doing so would misderive
   `summary.passed` as `1` here, not `2`.
 - `phpunit-exit-mid-suite.txt`: `vendor/bin/phpunit --colors=never
-tests/ExitMidSuiteTest.php` against a three-test class whose SECOND
+  tests/ExitMidSuiteTest.php` against a three-test class whose SECOND
   test (`testExits`) calls `exit(0)` as its entire body, before either
   test after it (`testNeverRuns`) or PHPUnit's own summary ever prints.
   Exit `0`. The captured bytes are exactly PHPUnit's own version banner,
@@ -564,10 +564,10 @@ tests/ExitMidSuiteTest.php` against a three-test class whose SECOND
   `die()` produces the identical shape to `exit()`; this fixture stands
   in for both.
 - `phpunit-warning-test-executed.txt`: `vendor/bin/phpunit --colors=never
-tests/WarnOnlyTest.php` against a one-test class whose single test
+  tests/WarnOnlyTest.php` against a one-test class whose single test
   calls `trigger_error('a test-level warning', E_USER_WARNING)` and then
   asserts. Exit `0`. `OK, but there were issues!` plus `Tests: 1,
-Assertions: 1, Warnings: 1.` -- captured to pin the version-aware
+  Assertions: 1, Warnings: 1.` -- captured to pin the version-aware
   plain `Warnings` reading (tracker 3a0c5242): under PHPUnit 9 a plain
   `Warnings: N` token counts a synthetic per-class warning that never
   ran a body (not executed), but here the ONE test genuinely ran,
@@ -584,8 +584,8 @@ Assertions: 1, Warnings: 1.` -- captured to pin the version-aware
   against a three-test class, one test each calling `trigger_error` with
   `E_USER_WARNING`, `E_USER_DEPRECATED`, and `E_USER_NOTICE`
   respectively, each then asserting. Exit `0`. `OK, but there were
-issues!` plus `Tests: 3, Assertions: 3, Warnings: 1, Deprecations: 1,
-Notices: 1.` -- isolates the plain (one-word) `Warnings`, `Deprecations`
+  issues!` plus `Tests: 3, Assertions: 3, Warnings: 1, Deprecations: 1,
+  Notices: 1.` -- isolates the plain (one-word) `Warnings`, `Deprecations`
   and `Notices` tokens together, all three genuinely-run and passing
   tests: `deriveCounts` must derive `passed: 3` here (the version-aware
   `Warnings` reading plus the pre-existing unspent `Deprecations`/
@@ -627,7 +627,7 @@ path.
 - `phpunit-no-results-green.txt`: `--no-results tests/GreenTwoTest.php`
   against a two-test class that both asserts and passes. Exit `0`.
   Banner, `Runtime:       PHP 8.3.33`, `..` padded out to `2 / 2
-(100%)`, and `Time: 00:00.007, Memory: 8.00 MB`. No `OK (`, no
+  (100%)`, and `Time: 00:00.007, Memory: 8.00 MB`. No `OK (`, no
   marker, no tally: `--no-results` suppresses PHPUnit's result report,
   not the run, and both tests genuinely ran and passed. This is the
   round-3 counterexample that made the banner-without-completion arm a
@@ -648,7 +648,7 @@ path.
   Pins that the pass-only zero-tests warning never fires here, since
   the check's own status is `fail`.
 - `phpunit-no-results-filter-miss.txt`: `--no-results --filter
-NoSuchTest tests/GreenTwoTest.php`. Exit `0`. Banner and `Runtime:`
+  NoSuchTest tests/GreenTwoTest.php`. Exit `0`. Banner and `Runtime:`
   alone -- no progress row at all, hence no counter, and no `Time:`
   line either, since the suppressed report takes it with it. Reads as
   an unreadable result (`"ambiguous"`), so `probe` refuses it
@@ -665,7 +665,7 @@ NoSuchTest tests/GreenTwoTest.php`. Exit `0`. Banner and `Runtime:`
   unreadable result too, which is documented over-caution: a listing
   never claimed to run anything. Measured wording difference on the
   same flag under 9.6.36: `Available test(s):` instead of `Available
-tests:` (banner, that header, and three ` - ExitMidSuiteTest::testX`
+  tests:` (banner, that header, and three ` - ExitMidSuiteTest::testX`
   lines, exit `0`) -- neither header is parsed, so the difference costs
   nothing here.
 - `phpunit-exit-mid-suite-9.txt`: `tests/ExitMidSuiteTest.php` under
@@ -681,7 +681,7 @@ Two more measurements from the same runs, recorded here rather than
 captured as files:
 
 - `--no-results --no-progress tests/GreenTwoTest.php` and `--no-output
-tests/GreenTwoTest.php` (both PHPUnit 11.5.56) print NOTHING at all:
+  tests/GreenTwoTest.php` (both PHPUnit 11.5.56) print NOTHING at all:
   zero bytes, exit `0`. A zero-byte fixture file would pin nothing
   about which tool produced it, so both shapes are pinned as
   constructed empty-output tests instead (`test/verify.test.ts`): such
@@ -800,10 +800,10 @@ twins). Exit codes as observed: pass/skipped-only `0`, fail/error/mixed
   allows `errors?` plural only).
 - `pytest-no-tests-ran.txt` / `pytest-no-tests-ran-quiet.txt`: a test
   file with no `test_*` function at all (pytest's own `no tests ran
-in X.XXs` statement, exit `5` -- the zero-tests shape).
+  in X.XXs` statement, exit `5` -- the zero-tests shape).
 - `pytest-mixed.txt` / `pytest-mixed-quiet.txt`: one failing suite run
   carrying every count word at once (`1 failed, 2 passed, 1 skipped, 1
-deselected, 1 xfailed, 1 xpassed, 1 warning`), produced with a
+  deselected, 1 xfailed, 1 xpassed, 1 warning`), produced with a
   `-k "not deselect"` filter; confirms the banner form's padding stays
   exactly `= text =` even at that width.
 - `pytest-skipped-only.txt` / `pytest-skipped-only-quiet.txt`: two
@@ -829,20 +829,20 @@ deselected, 1 xfailed, 1 xpassed, 1 warning`), produced with a
   zero-tests once the neutral warning is ignored.
 - `pytest-deselected-warning.txt`: the same import-time warning beside
   a `-k notthis` run deselecting the only test (`1 deselected, 1
-warning`, exit `5`) -- zero-tests the same way.
+  warning`, exit `5`) -- zero-tests the same way.
 - `pytest-passed-warning.txt` / `pytest-failed-warning.txt`: one
   warning-emitting test that passes (`1 passed, 1 warning`, exit `0`)
   and one that fails after warning (`1 failed, 1 warning`, exit `1`)
   -- the not-zero side of the same rule: a warning beside a real count
   changes nothing.
 - `pytest-long-run.txt`: one test sleeping 61s (`1 passed in 61.15s
-(0:01:01)`, exit `0`) -- pytest's own ` (H:MM:SS)` long-run suffix,
+  (0:01:01)`, exit `0`) -- pytest's own ` (H:MM:SS)` long-run suffix,
   captured from a real 61s run, the shape that used to leave the
   summary line unrecognized (round-1 review finding).
 - `pytest-timing-run1.txt` / `pytest-timing-run2.txt`: two real runs of
   the same single-test suite with deliberately different sleeps, pinned
   at different timing digits (`1 passed in 0.11s` vs `1 passed in
-0.25s`) -- the pair the byte-identity fallback can never call equal.
+  0.25s`) -- the pair the byte-identity fallback can never call equal.
 
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 

@@ -847,7 +847,7 @@ describe("verify: argv-form checks and selectors", () => {
       ["another case", "gamma"],
       ["a leading space", " delta"],
       ["a trailing space", "delta "],
-      ["a trailing newline", "delta\n"],
+      ["a trailing no-break space", "delta\u00a0"],
       ["a regular expression", "del.*"],
     ] as const) {
       it(`rejects ${label}`, async () => {
@@ -997,7 +997,6 @@ describe("verify: argv-form checks and selectors", () => {
       "$(touch PWNED_LIB)",
       "`touch PWNED_LIB`",
       "a' ; touch PWNED_LIB ; echo '",
-      "x\ntouch PWNED_LIB",
       "a | touch PWNED_LIB",
     ]) {
       it(`creates no file for ${JSON.stringify(selector)}`, async () => {
@@ -1070,6 +1069,23 @@ describe("verify: argv-form checks and selectors", () => {
         discovery: { t: null as unknown as string[] },
       });
       expect(refused.reason).toBe("discovery_invalid");
+    });
+
+    it("a selector with a newline or control character is refused before anything runs", async () => {
+      for (const selector of [
+        "x\ntouch PWNED_LIB",
+        "x\rtouch",
+        "a\u0000b",
+        "a\tb",
+        "a\u007fb",
+      ]) {
+        const refused = await run({
+          selectors: { t: selector },
+          discovery: { t: [selector] },
+        });
+        expect(refused.reason).toBe("selector_invalid");
+        expect(refused.message).toContain("control character");
+      }
     });
 
     it("a non-string selector is refused", async () => {

@@ -508,8 +508,10 @@ agent-primitives verify -c unit \
   single quotes. The label is also what `verify()` hands to a custom
   `execFn` as `cmd` (with the list in `options.argv`), so an `execFn` that
   ignores `options.argv` and runs `cmd` through `sh -c` still executes
-  exactly that list: a selector is never interpreted by a shell, whatever
-  the exec function does. The name follows the same rules as any check name. It runs where
+  exactly that list. This holds for POSIX sh-compatible shells (sh, bash,
+  zsh, dash, ksh); an `execFn` that uses csh, tcsh, fish or cmd.exe must
+  honour `options.argv`. A selector must be one line without control
+  characters (`selector_invalid` otherwise). The name follows the same rules as any check name. It runs where
   `-c` puts it, or after the listed checks when `-c` does not name it, and
   it wins over a repository preset entry and a `package.json` script of the
   same name. Naming the same check with `-x` is a usage error
@@ -541,13 +543,14 @@ agent-primitives verify -c unit \
 | `selector_missing`             | the `--argv` has `{selector}` but no `--selector` was given             |
 | `discovery_not_readable`       | the discovery file is missing, not a regular file or over 1 MiB         |
 | `argv_invalid`                 | not a non-empty array of strings, no program, a NUL, a bad placeholder  |
-| `selector_invalid`             | (library) a selector that is not a string                               |
+| `selector_invalid`             | (library) a selector that is not a string, or contains a newline or other control character |
 | `discovery_invalid`            | (library) a discovery list that is not an array of strings              |
 
 On the command line, two mistakes are caught by the option parser before
-`verify` runs and reported as a plain `usage_error`: an `--argv` value that
-is not valid JSON, and the same check given twice for `--argv`, `--selector`
-or `--discovery`. A well-formed JSON value of the wrong shape reaches
+`verify` runs and reported as a plain `usage_error`: an `--argv` value
+without `name=` (or with an empty name), an `--argv` value that is not valid
+JSON, and the same check given twice for `--argv`, `--selector` or
+`--discovery`. A well-formed JSON value of the wrong shape reaches
 `verify` and is `argv_invalid`.
 
 Without `--argv`, `--selector` and `--discovery` nothing in this section
