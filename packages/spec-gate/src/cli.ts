@@ -3,14 +3,12 @@ import fs from "node:fs";
 import { Command } from "commander";
 
 function readVersion(): string {
-  try {
-    const url = new URL("../package.json", import.meta.url);
-    const text = fs.readFileSync(url, "utf8");
-    const pkg = JSON.parse(text) as { version?: string };
-    return pkg.version ?? "0.0.0";
-  } catch {
-    return "0.0.0";
+  const url = new URL("../package.json", import.meta.url);
+  const pkg = JSON.parse(fs.readFileSync(url, "utf8")) as { version?: unknown };
+  if (typeof pkg.version !== "string" || pkg.version === "") {
+    throw new Error(`spec-gate: no version in ${url.pathname}`);
   }
+  return pkg.version;
 }
 
 const program = new Command();

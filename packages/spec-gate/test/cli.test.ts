@@ -3,7 +3,8 @@ import fs from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 
@@ -18,10 +19,10 @@ interface CliRun {
   stderr: string;
 }
 
-async function runCli(args: string[]): Promise<CliRun> {
+async function runCli(args: string[], cli = cliPath): Promise<CliRun> {
   try {
     const { stdout, stderr } = await execFileAsync(process.execPath, [
-      cliPath,
+      cli,
       ...args,
     ]);
     return { code: 0, stdout, stderr };
@@ -60,5 +61,41 @@ describe("spec-gate CLI", () => {
     expect(run.code).not.toBe(0);
     expect(run.stderr).toContain("too many arguments");
     expect(run.stderr).toContain("Usage: spec-gate");
+  });
+
+  describe("version source", () => {
+    const tmpRoots: string[] = [];
+    afterEach(() => {
+      for (const dir of tmpRoots.splice(0)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // The copy lives inside the package so that `commander` still resolves
+    // from the package's node_modules.
+    function copyCli(pkgJson: string): string {
+      const root = fs.mkdtempSync(
+        path.join(fileURLToPath(new URL("..", import.meta.url)), ".tmp-cli-"),
+      );
+      tmpRoots.push(root);
+      fs.mkdirSync(path.join(root, "dist"));
+      fs.copyFileSync(cliPath, path.join(root, "dist", "cli.js"));
+      fs.writeFileSync(path.join(root, "package.json"), pkgJson);
+      return path.join(root, "dist", "cli.js");
+    }
+
+    it("--version reads the version from the package.json next to dist", async () => {
+      const cli = copyCli(JSON.stringify({ version: "9.8.7", type: "module" }));
+      const run = await runCli(["--version"], cli);
+      expect(run.code).toBe(0);
+      expect(run.stdout.trim()).toBe("9.8.7");
+    });
+
+    it("fails loudly when package.json has no version", async () => {
+      const cli = copyCli(JSON.stringify({ type: "module" }));
+      const run = await runCli(["--version"], cli);
+      expect(run.code).not.toBe(0);
+      expect(run.stderr).toContain("no version");
+    });
   });
 });
