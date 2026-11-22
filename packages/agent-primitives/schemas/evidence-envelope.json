@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agent-primitives evidence envelope",
+  "description": "One piece of evidence about one check: what was executed, against which checkout, and how it ended. Written by `agent-primitives verify --evidence`, one envelope per JSON line.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "phase",
+    "producer",
+    "time",
+    "commit",
+    "dirty",
+    "commands_digest",
+    "selector",
+    "command",
+    "exit",
+    "result"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "The version of this schema the envelope follows.",
+      "const": 1
+    },
+    "phase": {
+      "description": "Which moment the evidence was gathered at, as the caller named it.",
+      "enum": ["baseline", "closure"]
+    },
+    "producer": {
+      "description": "Who produced the run, as the caller stated it. `ci` additionally needs `ci_run`.",
+      "enum": ["ci", "host", "local"]
+    },
+    "ci_run": {
+      "description": "A CI run id or URL. Required for producer `ci`, not allowed for any other producer. The schema cannot check it against a CI; a consumer that trusts `ci` does.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "time": {
+      "description": "When the check finished, ISO 8601 in UTC.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "commit": {
+      "description": "HEAD of the git work tree the check ran in, read by code.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "dirty": {
+      "description": "Whether that work tree had a tracked change or an untracked, non-ignored file when the check started, read by code.",
+      "type": "boolean"
+    },
+    "commands_digest": {
+      "description": "SHA-256 (lower-case hex) over the canonical JSON of the run's argv lists, selector placeholders unsubstituted.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "selector": {
+      "description": "The selector substituted into the command, or null.",
+      "type": ["string", "null"]
+    },
+    "command": {
+      "description": "The argv that was executed, program first. Empty only when the check was skipped.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "exit": {
+      "description": "The exit code, or null when the command has none (skipped, timed out, killed, never started).",
+      "type": ["integer", "null"]
+    },
+    "result": {
+      "description": "pass, fail, skip (not run, proves nothing) or error (could not be run to a verdict).",
+      "enum": ["pass", "fail", "skip", "error"]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "producer": { "const": "ci" } },
+        "required": ["producer"]
+      },
+      "then": { "required": ["ci_run"] },
+      "else": { "not": { "required": ["ci_run"] } }
+    },
+    {
+      "if": {
+        "properties": { "result": { "const": "skip" } },
+        "required": ["result"]
+      },
+      "else": { "properties": { "command": { "minItems": 1 } } }
+    }
+  ]
+}

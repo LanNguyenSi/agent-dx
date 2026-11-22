@@ -29,6 +29,12 @@ export interface ExecOptions {
    * the returned promise: see `stdioClosed` below for why the two can
    * differ. Additive: omitted, behavior is unchanged. */
   onStdioClosed?: () => void;
+  /** When present, the child is spawned directly from this argv list
+   * (program first, no shell anywhere) and `cmd` is only the label the
+   * caller shows for it. Omitted, the child is `sh -c <cmd>` exactly as
+   * before. Never filled from untrusted text without validation: the list
+   * is executed as given. */
+  argv?: string[];
 }
 
 export interface ExecResult {
@@ -342,11 +348,16 @@ export function execCommand(
     // direct child and any grandchild survives: it keeps running, and,
     // because it inherited the stdout/stderr pipes, it also keeps the
     // pipes open, so the run's own bound is not a bound at all.
-    const child = spawn("sh", ["-c", cmd], {
-      cwd: options.cwd,
-      env: options.env ?? process.env,
-      detached: true,
-    });
+    const child = spawn(
+      options.argv ? options.argv[0] : "sh",
+      options.argv ? options.argv.slice(1) : ["-c", cmd],
+      {
+        cwd: options.cwd,
+        env: options.env ?? process.env,
+        detached: true,
+        shell: false,
+      },
+    );
 
     /**
      * Signals the child's whole process group (the negated pid), so a

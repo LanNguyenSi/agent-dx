@@ -20,6 +20,13 @@ import {
 } from "./doctor/index.js";
 import { execCommand, stdioWatchBoundMs, type ExecResult } from "./exec.js";
 import {
+  EVIDENCE_PHASES,
+  EVIDENCE_PRODUCERS,
+  parseDiscoveryText,
+  type EvidencePhase,
+  type EvidenceProducer,
+} from "./verify/evidence.js";
+import {
   verify,
   VerifyUsageError,
   DEFAULT_CHECKS,
@@ -375,6 +382,142 @@ export function parsePassRegexOverride(
       `--pass-regex must be a valid regular expression for check "${name}" (got "${source}"): ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+}
+
+/** Splits a `name=value` option value on its first `=`; the name is
+ * trimmed, the value is kept exactly as given. */
+function splitNameValue(
+  flag: string,
+  value: string,
+): { name: string; rest: string } {
+  const idx = value.indexOf("=");
+  if (idx <= 0) {
+    throw new InvalidArgumentError(
+      `${flag} must be name=value (got "${value}")`,
+    );
+  }
+  const name = value.slice(0, idx).trim();
+  if (!name) {
+    throw new InvalidArgumentError(`${flag}: empty check name in "${value}"`);
+  }
+  return { name, rest: value.slice(idx + 1) };
+}
+
+/** A per-check option that takes one value per check: giving the same
+ * check twice is refused rather than silently keeping one of the two, since
+ * the value decides what runs. */
+function refuseRepeatedName<T>(
+  flag: string,
+  name: string,
+  previous: Record<string, T>,
+): void {
+  if (Object.prototype.hasOwnProperty.call(previous, name)) {
+    throw new InvalidArgumentError(
+      `${flag} was given twice for check "${name}"`,
+    );
+  }
+}
+
+/** `verify --argv name=<json array of strings>`: a check executed straight
+ * from that argv list, without a shell. The list's own rules (program
+ * first, `{selector}` only as a whole element) are `verify()`'s to check. */
+export function parseArgvOption(
+  value: string,
+  previous: Record<string, string[]>,
+): Record<string, string[]> {
+  const { name, rest } = splitNameValue("--argv", value);
+  refuseRepeatedName("--argv", name, previous);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rest);
+  } catch (err) {
+    throw new InvalidArgumentError(
+      `--argv for check "${name}" must be a JSON array of strings: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!Array.isArray(parsed) || !parsed.every((x) => typeof x === "string")) {
+    throw new InvalidArgumentError(
+      `--argv for check "${name}" must be a JSON array of strings`,
+    );
+  }
+  return { ...previous, [name]: parsed as string[] };
+}
+
+/** `verify --selector name=value`: the value is kept exactly as given. */
+export function parseSelectorOption(
+  value: string,
+  previous: Record<string, string>,
+): Record<string, string> {
+  const { name, rest } = splitNameValue("--selector", value);
+  refuseRepeatedName("--selector", name, previous);
+  return { ...previous, [name]: rest };
+}
+
+/** `verify --discovery name=<file>`: the path of the file listing the
+ * selectors the check's `--selector` has to equal. */
+export function parseDiscoveryOption(
+  value: string,
+  previous: Record<string, string>,
+): Record<string, string> {
+  const { name, rest } = splitNameValue("--discovery", value);
+  if (rest === "") {
+    throw new InvalidArgumentError(
+      `--discovery: empty file path for check "${name}"`,
+    );
+  }
+  refuseRepeatedName("--discovery", name, previous);
+  return { ...previous, [name]: rest };
+}
+
+function parseEvidencePhase(value: string): EvidencePhase {
+  if (!(EVIDENCE_PHASES as readonly string[]).includes(value)) {
+    throw new InvalidArgumentError(
+      `--phase must be one of ${EVIDENCE_PHASES.join(", ")} (got "${value}")`,
+    );
+  }
+  return value as EvidencePhase;
+}
+
+function parseEvidenceProducer(value: string): EvidenceProducer {
+  if (!(EVIDENCE_PRODUCERS as readonly string[]).includes(value)) {
+    throw new InvalidArgumentError(
+      `--producer must be one of ${EVIDENCE_PRODUCERS.join(", ")} (got "${value}")`,
+    );
+  }
+  return value as EvidenceProducer;
+}
+
+/** The most a `--discovery` file may hold. */
+const DISCOVERY_FILE_MAX_BYTES = 1024 * 1024;
+
+/** Reads each `--discovery` file into its list of entries. A file that is
+ * missing, is not a regular file or is too large is a usage error before
+ * anything runs. */
+function readDiscoveryFiles(
+  files: Record<string, string>,
+  cwd: string,
+): Record<string, string[]> {
+  const entries: Record<string, string[]> = {};
+  for (const [name, file] of Object.entries(files)) {
+    const resolved = path.resolve(cwd, file);
+    try {
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile() || stat.size > DISCOVERY_FILE_MAX_BYTES) {
+        throw new Error(
+          stat.isFile()
+            ? `larger than ${DISCOVERY_FILE_MAX_BYTES} bytes`
+            : "not a regular file",
+        );
+      }
+      entries[name] = parseDiscoveryText(fs.readFileSync(resolved, "utf8"));
+    } catch (err) {
+      throw new VerifyUsageError(
+        `verify: the discovery file for check "${name}" cannot be used (${file}): ${err instanceof Error ? err.message : String(err)}`,
+        "discovery_not_readable",
+      );
+    }
+  }
+  return entries;
 }
 
 /** `--`-prefixed flags this matcher knows take a following argument, so
@@ -1177,6 +1320,13 @@ interface VerifyCliOptions {
   checks?: string[];
   exec: Record<string, string>;
   passRegex: Record<string, RegExp>;
+  argv: Record<string, string[]>;
+  selector: Record<string, string>;
+  discovery: Record<string, string>;
+  evidence?: string;
+  phase?: EvidencePhase;
+  producer?: EvidenceProducer;
+  ciRun?: string;
   failFast?: boolean;
   timeout?: string;
   maxFailures?: string;
@@ -1206,6 +1356,42 @@ program
     "opt-in per-check success predicate (repeatable): a match against that check's combined stdout+stderr is a pass, its absence a fail, in place of the exit code -- for a test runner whose exit code alone is not trustworthy (e.g. phpunit exiting non-zero on a green suite over deprecation notices); naming a check that is not requested/-x-overridden is a usage error",
     parsePassRegexOverride,
     {},
+  )
+  .option(
+    "--argv <name=json>",
+    'a check given as a JSON argv list (repeatable), executed without a shell; one whole element may be "{selector}", filled from --selector',
+    parseArgvOption,
+    {},
+  )
+  .option(
+    "--selector <name=value>",
+    "the selector for an --argv check (repeatable): accepted only when it does not start with - and is exactly equal to one line of that check's --discovery file",
+    parseSelectorOption,
+    {},
+  )
+  .option(
+    "--discovery <name=file>",
+    "the file listing the selectors allowed for an --argv check (one per line, compared exactly)",
+    parseDiscoveryOption,
+    {},
+  )
+  .option(
+    "--evidence <file>",
+    "write one evidence envelope per check to <file> (JSON Lines, schema schemas/evidence-envelope.json); needs --phase and a git work tree",
+  )
+  .option(
+    "--phase <phase>",
+    `the evidence phase (${EVIDENCE_PHASES.join(" or ")}); only with --evidence`,
+    parseEvidencePhase,
+  )
+  .option(
+    "--producer <producer>",
+    `who produced the run (${EVIDENCE_PRODUCERS.join(", ")}; default local), as the caller states it; only with --evidence`,
+    parseEvidenceProducer,
+  )
+  .option(
+    "--ci-run <ref>",
+    "the CI run id or URL; required with --producer ci, refused otherwise; only with --evidence",
   )
   .option("--fail-fast", "stop after the first non-pass check")
   .option("--timeout <s>", "per-check timeout in seconds", parseTimeoutSeconds)
@@ -1243,6 +1429,22 @@ program
     // from it is not verify's own refusal and must reach the top-level
     // mapper, ahead of any preset error the run would otherwise report.
     try {
+      if (opts.evidence === undefined) {
+        const stray = (["phase", "producer", "ciRun"] as const).find(
+          (key) => opts[key] !== undefined,
+        );
+        if (stray !== undefined) {
+          throw new VerifyUsageError(
+            `verify: --${stray === "ciRun" ? "ci-run" : stray} only applies together with --evidence`,
+            "evidence_option_without_file",
+          );
+        }
+      } else if (opts.phase === undefined) {
+        throw new VerifyUsageError(
+          `verify: --evidence needs --phase (${EVIDENCE_PHASES.join(" or ")})`,
+          "evidence_phase_required",
+        );
+      }
       result = await verify({
         cwd: global.cwd,
         logDir: global.logDir,
@@ -1250,6 +1452,22 @@ program
         checks: opts.checks,
         overrides: opts.exec,
         passRegexes: opts.passRegex,
+        ...(Object.keys(opts.argv).length > 0 ? { argvChecks: opts.argv } : {}),
+        ...(Object.keys(opts.selector).length > 0
+          ? { selectors: opts.selector }
+          : {}),
+        ...(Object.keys(opts.discovery).length > 0
+          ? { discovery: readDiscoveryFiles(opts.discovery, global.cwd) }
+          : {}),
+        ...(opts.evidence !== undefined && opts.phase !== undefined
+          ? {
+              evidence: {
+                phase: opts.phase,
+                producer: opts.producer ?? "local",
+                ...(opts.ciRun !== undefined ? { ciRun: opts.ciRun } : {}),
+              },
+            }
+          : {}),
         failFast: Boolean(opts.failFast),
         signal: shutdownController.signal,
         // Not the default `execCommand`: the tracking wrapper, so the
@@ -1280,6 +1498,32 @@ program
         maxChars: global.maxChars,
       });
       return;
+    }
+
+    // Opt-in evidence: the envelopes are written to their own file, one per
+    // line, and the verify envelope only says where and how many. A file
+    // that cannot be written leaves the run without the evidence the caller
+    // asked for, so a pass is turned into an error rather than reported.
+    let evidenceNote: { file: string; count: number } | undefined;
+    if (opts.evidence !== undefined && result.evidence !== undefined) {
+      const lines = result.evidence.map((e) => `${JSON.stringify(e)}\n`);
+      try {
+        fs.writeFileSync(
+          path.resolve(global.cwd, opts.evidence),
+          lines.join(""),
+        );
+        evidenceNote = { file: opts.evidence, count: lines.length };
+      } catch (err) {
+        result = {
+          ...result,
+          status: result.status === "pass" ? "error" : result.status,
+          reason: result.reason ?? "evidence_write_failed",
+          warnings: [
+            ...result.warnings,
+            `evidence: could not write ${opts.evidence}: ${err instanceof Error ? err.message : String(err)}`,
+          ],
+        };
+      }
     }
 
     // The log path this writes is appended to `logs` BEFORE buildEnvelope
@@ -1313,6 +1557,7 @@ program
         checks: result.checks,
         totalDurationMs: result.totalDurationMs,
         ...(result.reason ? { reason: result.reason } : {}),
+        ...(evidenceNote ? { evidence: evidenceNote } : {}),
       },
       maxChars: global.maxChars,
       logDir: global.logDir,

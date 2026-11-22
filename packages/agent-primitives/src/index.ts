@@ -45,6 +45,22 @@ export type {
   VerifyStatus,
 } from "./verify/index.js";
 export {
+  EVIDENCE_PHASES,
+  EVIDENCE_PRODUCERS,
+  EVIDENCE_SCHEMA_VERSION,
+  SELECTOR_PLACEHOLDER,
+  checkSelector,
+  commandsDigest,
+  evidenceResult,
+} from "./verify/evidence.js";
+export type {
+  EvidenceEnvelope,
+  EvidenceOptions,
+  EvidencePhase,
+  EvidenceProducer,
+  EvidenceResult,
+} from "./verify/evidence.js";
+export {
   acquireLock,
   isPidAlive,
   listMarkers,

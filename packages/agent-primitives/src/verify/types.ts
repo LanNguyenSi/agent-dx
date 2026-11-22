@@ -1,4 +1,5 @@
 import type { ExecOptions, ExecResult } from "../exec.js";
+import type { EvidenceEnvelope, EvidenceOptions } from "./evidence.js";
 
 /** One parsed failure, as reported by a detector or synthesized by the
  * failures invariant. `file`/`line`/`name` are optional: a detector that
@@ -91,9 +92,11 @@ export type CheckStatus = "pass" | "fail" | "skipped" | "error";
  *   `verify.checks` map named the npm script to run.
  * - `"script"`: no override and no preset entry, and `package.json`
  *   `scripts[name]` matched the check's own name (today's fallback).
+ * - `"argv"`: an `--argv name=<json list>` check, executed from that
+ *   list without a shell.
  * - `"none"`: nothing could be resolved, so the check is the
  *   `no_script` skipped result. */
-export type CheckSource = "exec" | "preset" | "script" | "none";
+export type CheckSource = "exec" | "preset" | "script" | "argv" | "none";
 
 /** One run of a repeated check, as listed by `CheckResult.runLogs`: where
  * that run's own log is and how it ended. `logPath` is absent exactly when
@@ -111,6 +114,10 @@ export interface CheckResult {
    * a repo preset's script from a `-c` name's own script from a `-x`
    * command out of the envelope alone (see `CheckSource`). */
   source: CheckSource;
+  /** Present only on an argv-form check (`source: "argv"`): the exact list
+   * that was executed, selector substituted. `command` is its display
+   * form only. */
+  argv?: string[];
   status: CheckStatus;
   exitCode: number | null;
   durationMs: number;
@@ -175,6 +182,10 @@ export interface VerifyResult {
    * `aborted` when the run was stopped by `VerifyOptions.signal` (status
    * `error`, with the checks that never ran named in `warnings`). */
   reason?: string;
+  /** Present only when `VerifyOptions.evidence` was given: one envelope
+   * per resolved check, in run order (see `evidence.ts`). Absent
+   * otherwise, so a run without the opt-in carries no new key. */
+  evidence?: EvidenceEnvelope[];
 }
 
 export type ExecLike = (
@@ -263,4 +274,22 @@ export interface VerifyOptions {
    * Defaults to a fresh UUID; a caller that already has a run id (e.g.
    * the CLI's envelope run id) should pass it through here instead. */
   runId?: string;
+  /** `--argv name=<json>`: checks given as an argv list, executed without a
+   * shell. A `{selector}` element (the whole element, never part of one)
+   * is replaced by the check's entry in `selectors`. A name here must not
+   * also be an `-x` key; it wins over a repo preset entry and a
+   * `package.json` script of the same name, the way `-x` does. */
+  argvChecks?: Record<string, string[]>;
+  /** `--selector name=value`: the selector for the argv-form check `name`.
+   * Accepted only when it does not start with `-` and is exactly equal to
+   * one entry of `discovery[name]`. Naming a check that is not argv-form,
+   * not run, or has no placeholder is a usage error. */
+  selectors?: Record<string, string>;
+  /** `--discovery name=<file>`, already read: the entries a selector for
+   * check `name` has to equal. Required for, and only allowed with, a
+   * selector for that check. */
+  discovery?: Record<string, string[]>;
+  /** Opt-in evidence: when given, the result carries one envelope per
+   * resolved check. Omitted, verify's result is exactly as before. */
+  evidence?: EvidenceOptions;
 }

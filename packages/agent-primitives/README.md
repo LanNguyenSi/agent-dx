@@ -29,7 +29,9 @@ for teams shipping with AI agents.
 - `verify`: runs named checks (`build`, `typecheck`, `lint`, `test` by
   default, or the repository `.agent-primitives.json` preset when it has a
   `verify` section) and reports a compact, bounded summary instead of raw
-  output.
+  output. Opt-in, it also runs argv-form checks without a shell (with a
+  validated selector) and writes one evidence envelope per check, described
+  by the shipped JSON Schema `schemas/evidence-envelope.json`.
 - `probe`: runs one mutation probe (or a `--plan` of several), confirms the
   baseline passes first, and reports whether the target test caught the
   mutant, restoring the file afterward either way.
@@ -154,7 +156,8 @@ or type check needs `--no-build-detect` (see [`probe`](docs/probe.md)).
 
 - [`doctor`](docs/doctor.md): PATH and environment checks.
 - [`verify`](docs/verify.md): run named checks with a bounded summary, from
-  the command line or a repository preset.
+  the command line or a repository preset; argv-form checks, selectors and
+  the evidence envelope.
 - [`probe`](docs/probe.md): the mutation-probe runner, `--plan`, and the
   result shape.
 - [`init`](docs/init.md): install the package's skill into a harness.
@@ -185,7 +188,7 @@ maps the status to the exit code. Each command lives in its own module:
 | Command | Module |
 | --- | --- |
 | `doctor` | `src/doctor/index.ts` |
-| `verify` | `src/verify/index.ts`, output detectors in `src/verify/detectors/` |
+| `verify` | `src/verify/index.ts`, output detectors in `src/verify/detectors/`, evidence envelope and selector rules in `src/verify/evidence.ts` (schema: `schemas/evidence-envelope.json`) |
 | `probe` | `src/probe/` (`index.ts`, `setup.ts`, `step.ts`, `session.ts`, `isolation.ts` and helpers) |
 | `init` | `src/init/index.ts`, digest ledger in `src/init/ledger.ts`; installs `assets/skill/SKILL.md` |
 | `drift` | `src/drift/` |
