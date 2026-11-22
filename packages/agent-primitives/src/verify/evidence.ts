@@ -205,6 +205,58 @@ export function checkArgvTemplate(
   return undefined;
 }
 
+/** Characters that need no quoting in a POSIX shell word. `=` is not among
+ * them: an unquoted `NAME=value` in the program position is an assignment,
+ * not a program. */
+const SHELL_SAFE_WORD = /^[A-Za-z0-9_@%+:,./-]+$/;
+
+/**
+ * Renders an argv as one shell-safe string: every element that is not a
+ * plain word is wrapped in single quotes (with an embedded quote written
+ * as `'\''`), so `sh -c <label>` executes exactly this argv and nothing
+ * else, whatever the elements contain. This is the `command` label an
+ * argv-form check is handed to an `ExecLike` with: an exec function that
+ * does not honour `ExecOptions.argv` and runs the label through a shell
+ * still runs the same argv. A caller must still treat a label as display
+ * text and prefer `argv`.
+ */
+export function shellQuoteArgv(argv: readonly string[]): string {
+  return argv
+    .map((item) =>
+      SHELL_SAFE_WORD.test(item) ? item : `'${item.replaceAll("'", "'\\''")}'`,
+    )
+    .join(" ");
+}
+
+/** Validates the runtime types of the selector and discovery inputs, which
+ * a library caller can get wrong (a raw string as a discovery list would
+ * turn the exact-equality check into a substring match). */
+export function checkSelectorInputs(
+  selectors: Record<string, unknown>,
+  discovery: Record<string, unknown>,
+): Refusal | undefined {
+  for (const [name, selector] of Object.entries(selectors)) {
+    if (typeof selector !== "string") {
+      return {
+        reason: "selector_invalid",
+        message: `verify: the selector for check "${name}" must be a string`,
+      };
+    }
+  }
+  for (const [name, entries] of Object.entries(discovery)) {
+    if (
+      !Array.isArray(entries) ||
+      !entries.every((entry) => typeof entry === "string")
+    ) {
+      return {
+        reason: "discovery_invalid",
+        message: `verify: the discovery list for check "${name}" must be an array of strings`,
+      };
+    }
+  }
+  return undefined;
+}
+
 /** Whether an argv template carries the selector placeholder. */
 export function hasSelectorPlaceholder(template: string[]): boolean {
   return template.includes(SELECTOR_PLACEHOLDER);

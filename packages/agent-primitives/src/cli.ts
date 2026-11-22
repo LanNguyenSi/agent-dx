@@ -423,8 +423,8 @@ function refuseRepeatedName<T>(
  * first, `{selector}` only as a whole element) are `verify()`'s to check. */
 export function parseArgvOption(
   value: string,
-  previous: Record<string, string[]>,
-): Record<string, string[]> {
+  previous: Record<string, unknown>,
+): Record<string, unknown> {
   const { name, rest } = splitNameValue("--argv", value);
   refuseRepeatedName("--argv", name, previous);
   let parsed: unknown;
@@ -435,12 +435,9 @@ export function parseArgvOption(
       `--argv for check "${name}" must be a JSON array of strings: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  if (!Array.isArray(parsed) || !parsed.every((x) => typeof x === "string")) {
-    throw new InvalidArgumentError(
-      `--argv for check "${name}" must be a JSON array of strings`,
-    );
-  }
-  return { ...previous, [name]: parsed as string[] };
+  // Whether the JSON is a non-empty array of strings is `verify()`'s to
+  // judge (`argv_invalid`), like every other rule about the list.
+  return { ...previous, [name]: parsed };
 }
 
 /** `verify --selector name=value`: the value is kept exactly as given. */
@@ -1320,7 +1317,7 @@ interface VerifyCliOptions {
   checks?: string[];
   exec: Record<string, string>;
   passRegex: Record<string, RegExp>;
-  argv: Record<string, string[]>;
+  argv: Record<string, unknown>;
   selector: Record<string, string>;
   discovery: Record<string, string>;
   evidence?: string;
@@ -1452,7 +1449,9 @@ program
         checks: opts.checks,
         overrides: opts.exec,
         passRegexes: opts.passRegex,
-        ...(Object.keys(opts.argv).length > 0 ? { argvChecks: opts.argv } : {}),
+        ...(Object.keys(opts.argv).length > 0
+          ? { argvChecks: opts.argv as Record<string, string[]> }
+          : {}),
         ...(Object.keys(opts.selector).length > 0
           ? { selectors: opts.selector }
           : {}),

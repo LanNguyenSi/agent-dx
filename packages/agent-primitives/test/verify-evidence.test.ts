@@ -17,6 +17,7 @@ import { verify, VerifyUsageError } from "../src/verify/index.js";
 import type { ExecLike, VerifyOptions } from "../src/verify/types.js";
 import type { ExecResult } from "../src/exec.js";
 import { parseArgvOption, parseSelectorOption } from "../src/cli.js";
+import { shellQuoteArgv } from "../src/verify/evidence.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 import { validate } from "./helpers/json-schema-lite.js";
 
@@ -965,12 +966,130 @@ describe("verify: argv-form checks and selectors", () => {
     });
   });
 
+  describe("no shell can interpret an argv check, whatever execFn does", () => {
+    // An exec function that ignores `options.argv` and runs the label
+    // through a real shell, the way `execCommand` runs a shell check.
+    const shellRunningExec: ExecLike = async (cmd, options) => {
+      let exitCode = 0;
+      try {
+        execFileSync("sh", ["-c", cmd], { cwd: options.cwd, stdio: "ignore" });
+      } catch (err) {
+        exitCode = (err as { status?: number }).status ?? 1;
+      }
+      return {
+        exitCode,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(options.logDir, "x.log"),
+        timedOut: false,
+        aborted: false,
+        logWriteFailed: false,
+        outputMayBeIncomplete: false,
+        stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    };
+
+    for (const selector of [
+      "; touch PWNED_LIB",
+      "$(touch PWNED_LIB)",
+      "`touch PWNED_LIB`",
+      "a' ; touch PWNED_LIB ; echo '",
+      "x\ntouch PWNED_LIB",
+      "a | touch PWNED_LIB",
+    ]) {
+      it(`creates no file for ${JSON.stringify(selector)}`, async () => {
+        const cwd = makeRepo();
+        const out = path.join(makeTmpDir(), "argv.json");
+        const result = await verify({
+          cwd,
+          logDir: makeTmpDir(),
+          checks: ["t"],
+          argvChecks: {
+            t: [
+              process.execPath,
+              "-e",
+              "require('fs').writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))",
+              out,
+              "{selector}",
+            ],
+          },
+          selectors: { t: selector },
+          discovery: { t: [selector] },
+          execFn: shellRunningExec,
+        });
+        expect(result.status).toBe("pass");
+        expect(fs.existsSync(path.join(cwd, "PWNED_LIB"))).toBe(false);
+        // The shell ran exactly the argv, the selector as one element.
+        expect(JSON.parse(fs.readFileSync(out, "utf8"))).toEqual([selector]);
+      });
+    }
+
+    it("shellQuoteArgv leaves plain words alone and quotes everything else", () => {
+      expect(shellQuoteArgv(["npx", "vitest", "run", "-t", "a/b.c-d"])).toBe(
+        "npx vitest run -t a/b.c-d",
+      );
+      expect(
+        shellQuoteArgv(["a b", "", "it's", "$X", "A=b", "{selector}"]),
+      ).toBe("'a b' '' 'it'\\''s' '$X' 'A=b' '{selector}'");
+    });
+  });
+
+  describe("library inputs are type-checked at runtime", () => {
+    const run = (extra: Partial<VerifyOptions>) =>
+      refusal({
+        cwd: makeRepo(),
+        logDir: makeTmpDir(),
+        checks: ["t"],
+        argvChecks: { t: ["run", "{selector}"] },
+        execFn: makeStubExec().fn,
+        ...extra,
+      });
+
+    it("a raw string as a discovery list is refused, not read as a substring match", async () => {
+      const refused = await run({
+        selectors: { t: "lph" },
+        discovery: { t: "alpha" as unknown as string[] },
+      });
+      expect(refused.reason).toBe("discovery_invalid");
+    });
+
+    it("a discovery list with a non-string entry is refused", async () => {
+      const refused = await run({
+        selectors: { t: "1" },
+        discovery: { t: [1 as unknown as string] },
+      });
+      expect(refused.reason).toBe("discovery_invalid");
+    });
+
+    it("a discovery list without a selector is also type-checked", async () => {
+      const refused = await run({
+        argvChecks: { t: ["run"] },
+        discovery: { t: null as unknown as string[] },
+      });
+      expect(refused.reason).toBe("discovery_invalid");
+    });
+
+    it("a non-string selector is refused", async () => {
+      for (const selector of [1, null, ["alpha"], { a: 1 }]) {
+        const refused = await run({
+          selectors: { t: selector as unknown as string },
+          discovery: { t: ["alpha"] },
+        });
+        expect(refused.reason).toBe("selector_invalid");
+      }
+    });
+  });
+
   it("parseArgvOption and parseSelectorOption refuse a repeated check and bad input", () => {
     expect(parseArgvOption('t=["a","b"]', {})).toEqual({ t: ["a", "b"] });
     expect(() => parseArgvOption('t=["a"]', { t: ["b"] })).toThrow(/twice/);
     expect(() => parseArgvOption("t=not json", {})).toThrow(/JSON array/);
-    expect(() => parseArgvOption('t={"a":1}', {})).toThrow(/array of strings/);
-    expect(() => parseArgvOption("t=[1]", {})).toThrow(/array of strings/);
+    // A well-formed value of the wrong shape is verify()'s to refuse.
+    expect(parseArgvOption('t={"a":1}', {})).toEqual({ t: { a: 1 } });
+    expect(parseArgvOption("t=[1]", {})).toEqual({ t: [1] });
     expect(() => parseArgvOption('["a"]', {})).toThrow(/name=value/);
     expect(parseSelectorOption("t=a=b c", {})).toEqual({ t: "a=b c" });
     expect(() => parseSelectorOption("t=a", { t: "b" })).toThrow(/twice/);
@@ -1033,6 +1152,59 @@ describe("cli verify: evidence and argv", () => {
       status: "pass",
       exitCode: 0,
     });
+  });
+
+  it("-f text and --summary render exactly as before without the opt-in flags", async () => {
+    const cwd = makeRepo();
+    const normalise = (text: string) =>
+      text
+        .replace(/\d+ms/g, "Nms")
+        .replace(/totalDurationMs([:=] ?)\d+/g, "totalDurationMs$1N")
+        .replace(/\/\S*?([0-9a-f-]{36})\S*/g, "<path>");
+    const args = ["-C", cwd, "-l", makeTmpDir()];
+    const verifyArgs = [
+      "verify",
+      "-c",
+      "a,b",
+      "-x",
+      "a=exit 0",
+      "-x",
+      "b=exit 1",
+    ];
+    const text = await spawnCli([...args, "-f", "text", ...verifyArgs]);
+    expect(text.code).toBe(1);
+    expect(normalise(text.stdout)).toBe(
+      [
+        "status: fail",
+        "",
+        "checks:",
+        "  [pass] a [exec] (exit 0) - Nms",
+        "  [fail] b [exec] (exit 1) - Nms",
+        "    - exit code 1: (no output)",
+        "",
+        "totalDurationMs: N",
+        "",
+        "logs:",
+        "  - <path>",
+        "  - <path>",
+        "  - <path>",
+        "",
+        "warnings:",
+        "  - b: detector_matched_nothing",
+        "",
+      ].join("\n"),
+    );
+    const summary = await spawnCli([...args, ...verifyArgs, "--summary"]);
+    expect(summary.code).toBe(1);
+    expect(normalise(summary.stdout)).toBe(
+      [
+        "a | pass | exit=0 | Nms | passed=1 failed=0 skipped=0 errors=0",
+        "b | fail | exit=1 | Nms | passed=0 failed=1 skipped=0 errors=0 | first failure: exit code 1: (no output)",
+        "warning: b: detector_matched_nothing",
+        "totals: status=fail checks=2 pass=1 fail=1 skipped=0 error=0 totalDurationMs=N warnings=1 fullResult=<path>",
+        "",
+      ].join("\n"),
+    );
   });
 
   it("exit codes are the same with and without the opt-in", async () => {
@@ -1310,6 +1482,46 @@ describe("cli verify: evidence and argv", () => {
       't=["false"]',
     ]);
     expect(run.code).toBe(2);
+  });
+
+  it("--print evidence prints the evidence note, and is accepted next to status", async () => {
+    const cwd = makeRepo();
+    const file = path.join(makeTmpDir(), "e.jsonl");
+    const run = await cli(cwd, [
+      "-c",
+      "",
+      "-x",
+      "a=exit 0",
+      "--evidence",
+      file,
+      "--phase",
+      "baseline",
+      "--print",
+      "status,evidence",
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.json).toEqual({ status: "pass", evidence: { file, count: 1 } });
+  });
+
+  it("--argv values of the wrong shape are argv_invalid; unparseable JSON stays a parse-time usage error", async () => {
+    const cwd = makeRepo();
+    for (const value of ['t={"a":1}', "t=[1]", "t=[]", 't=[""]']) {
+      const run = await cli(cwd, ["-c", "t", "--argv", value]);
+      expect(run.code, value).toBe(2);
+      expect(run.json.reason, value).toBe("argv_invalid");
+    }
+    const bad = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      makeTmpDir(),
+      "verify",
+      "-c",
+      "t",
+      "--argv",
+      "t=not json",
+    ]);
+    expect(bad.code).toBe(2);
   });
 
   it("an --argv check reports source argv and the executed list", async () => {

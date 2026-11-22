@@ -23,7 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not start with `-` and exactly equals one line of the discovery file;
   every other case is a usage error with its own `reason` and nothing runs.
   Without these options `verify`'s output and exit codes are unchanged; the
-  package now carries an `exports` map that keeps every existing deep path.
+  package now carries an `exports` map that keeps every existing file path
+  (with its extension) reachable; an extensionless deep path such as
+  `agent-primitives/dist/index` no longer resolves.
 - `probe` gained a `go test` zero-tests detector: when every package
   result line carries go's own `[no tests to run]` marker (a
   `-run`/name filter that matched no test inside a package that has

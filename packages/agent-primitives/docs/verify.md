@@ -503,8 +503,13 @@ agent-primitives verify -c unit \
 
 - `--argv <name=json>` (repeatable): check `name` is executed straight from
   the list, program first. The result row says `source: "argv"` and carries
-  the executed list as `argv`; `command` is only its space-joined display
-  form. The name follows the same rules as any check name. It runs where
+  the executed list as `argv`; `command` is only its display form: the same
+  list as a POSIX shell string, every element that is not a plain word in
+  single quotes. The label is also what `verify()` hands to a custom
+  `execFn` as `cmd` (with the list in `options.argv`), so an `execFn` that
+  ignores `options.argv` and runs `cmd` through `sh -c` still executes
+  exactly that list: a selector is never interpreted by a shell, whatever
+  the exec function does. The name follows the same rules as any check name. It runs where
   `-c` puts it, or after the listed checks when `-c` does not name it, and
   it wins over a repository preset entry and a `package.json` script of the
   same name. Naming the same check with `-x` is a usage error
@@ -536,6 +541,14 @@ agent-primitives verify -c unit \
 | `selector_missing`             | the `--argv` has `{selector}` but no `--selector` was given             |
 | `discovery_not_readable`       | the discovery file is missing, not a regular file or over 1 MiB         |
 | `argv_invalid`                 | not a non-empty array of strings, no program, a NUL, a bad placeholder  |
+| `selector_invalid`             | (library) a selector that is not a string                               |
+| `discovery_invalid`            | (library) a discovery list that is not an array of strings              |
+
+On the command line, two mistakes are caught by the option parser before
+`verify` runs and reported as a plain `usage_error`: an `--argv` value that
+is not valid JSON, and the same check given twice for `--argv`, `--selector`
+or `--discovery`. A well-formed JSON value of the wrong shape reaches
+`verify` and is `argv_invalid`.
 
 Without `--argv`, `--selector` and `--discovery` nothing in this section
 applies and the output of `verify` is what it was.
@@ -544,7 +557,8 @@ applies and the output of `verify` is what it was.
 
 `--evidence <file>` makes `verify` also write one evidence envelope per
 resolved check (JSON Lines, one object per line, in run order) and name the
-file and the count in its own envelope (`evidence: { file, count }`). It is
+file and the count in its own envelope (`evidence: { file, count }`, also
+available through `--print evidence`). It is
 opt-in: without it `verify`'s output and exit codes are byte-for-byte what
 they were. The shape is the JSON Schema (draft 2020-12) shipped with the
 package and exported as `agent-primitives/schemas/evidence-envelope.json`;

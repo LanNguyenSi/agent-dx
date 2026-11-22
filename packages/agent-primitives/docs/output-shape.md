@@ -36,9 +36,10 @@ exported from the built `dist/index.js` together with every command
 function except `hygiene` and `patch` (`doctor()`, `verify()`, `probe()`,
 `probePlan()`, `init()`, `drift()`, `captureSnapshot()` and
 `compareSnapshots()`). `package.json` declares
-no `main` or `exports` entry, so `import ... from "agent-primitives"`
-does not resolve; a library caller imports
-`agent-primitives/dist/index.js` instead.
+no `main` and its `exports` map has no `.` entry, so
+`import ... from "agent-primitives"` does not resolve; a library caller
+imports `agent-primitives/dist/index.js` instead (every existing file path
+with its extension resolves through the `./*` entry).
 
 ## Global options
 

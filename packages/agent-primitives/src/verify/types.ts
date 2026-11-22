@@ -188,6 +188,14 @@ export interface VerifyResult {
   evidence?: EvidenceEnvelope[];
 }
 
+/**
+ * Runs one check's command. `cmd` is what `sh -c` runs. For an argv-form
+ * check `options.argv` is the list to execute directly, and `cmd` is that
+ * same argv rendered as a shell-safe string (single-quoted wherever
+ * needed), so an implementation that ignores `argv` and runs `cmd`
+ * through a shell still executes exactly that argv: a selector can never
+ * be interpreted by a shell, whatever the implementation does.
+ */
 export type ExecLike = (
   cmd: string,
   options: ExecOptions,

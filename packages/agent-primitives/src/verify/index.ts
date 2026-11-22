@@ -14,10 +14,12 @@ import {
   checkArgvTemplate,
   checkEvidenceOptions,
   checkSelector,
+  checkSelectorInputs,
   commandsDigest,
   hasSelectorPlaceholder,
   readGitState,
   shellArgv,
+  shellQuoteArgv,
   substituteSelector,
 } from "./evidence.js";
 import type { EvidenceEnvelope } from "./evidence.js";
@@ -1245,6 +1247,10 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const refuseSelector = (reason: string, message: string): never => {
     throw new VerifyUsageError(message, reason);
   };
+  const inputRefusal = checkSelectorInputs(selectors, discovery);
+  if (inputRefusal) {
+    throw new VerifyUsageError(inputRefusal.message, inputRefusal.reason);
+  }
   for (const name of Object.keys(selectors)) {
     if (!names.includes(name)) {
       refuseSelector(
@@ -1445,7 +1451,11 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     }
     const planned = argvPlan.get(name);
     const resolved: Resolution = planned
-      ? { command: planned.argv.join(" "), skipped: false, source: "argv" }
+      ? {
+          command: shellQuoteArgv(planned.argv),
+          skipped: false,
+          source: "argv",
+        }
       : resolveCommand(name, overrides, scripts, preset);
     // The checkout the check is about to run against, read before it runs.
     const gitBefore =
