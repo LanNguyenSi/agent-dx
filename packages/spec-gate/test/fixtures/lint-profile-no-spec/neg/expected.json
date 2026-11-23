@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "rule": "profile-no-spec",
+      "file": "triage.json",
+      "path": "class"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

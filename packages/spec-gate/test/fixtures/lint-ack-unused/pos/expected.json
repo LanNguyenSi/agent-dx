@@ -1,0 +1,13 @@
+{
+  "errors": [],
+  "warnings": [],
+  "acked": [
+    {
+      "rule": "profile-default",
+      "file": "triage.json",
+      "path": "$",
+      "id": "triage",
+      "reason": "triage runs later in this flow"
+    }
+  ]
+}

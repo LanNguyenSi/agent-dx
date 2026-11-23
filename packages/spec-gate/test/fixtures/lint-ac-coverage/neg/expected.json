@@ -1,0 +1,13 @@
+{
+  "errors": [
+    {
+      "rule": "ac-coverage",
+      "file": "spec.md",
+      "path": "AC-1",
+      "id": "AC-1",
+      "line": 15
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

@@ -1,0 +1,13 @@
+{
+  "errors": [
+    {
+      "rule": "format",
+      "file": "testplan.yaml",
+      "path": "TP-1.claim",
+      "id": "TP-1",
+      "code": "missing-field"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

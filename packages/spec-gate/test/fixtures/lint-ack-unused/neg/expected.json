@@ -1,0 +1,12 @@
+{
+  "errors": [],
+  "warnings": [
+    {
+      "rule": "ack-unused",
+      "file": "acks.yaml",
+      "path": "[0]",
+      "id": "triage"
+    }
+  ],
+  "acked": []
+}

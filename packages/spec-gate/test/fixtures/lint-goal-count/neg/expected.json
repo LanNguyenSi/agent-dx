@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "rule": "goal-count",
+      "file": "spec.md",
+      "path": "Goal",
+      "id": "GOAL"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

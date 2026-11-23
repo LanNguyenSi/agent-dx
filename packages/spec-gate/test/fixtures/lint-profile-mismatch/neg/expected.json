@@ -1,0 +1,14 @@
+{
+  "options": {
+    "profile": "light"
+  },
+  "errors": [
+    {
+      "rule": "profile-mismatch",
+      "file": "triage.json",
+      "path": "class"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

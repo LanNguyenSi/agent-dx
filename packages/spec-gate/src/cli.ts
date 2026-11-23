@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import process from "node:process";
-import { Command, CommanderError } from "commander";
+import { Command, CommanderError, Option } from "commander";
 import { intakeFile } from "./adapters/file.js";
 import {
   DigestError,
@@ -9,6 +9,7 @@ import {
   describeDigestError,
 } from "./canonical/index.js";
 import { IntakeError } from "./intake/index.js";
+import { ACKS_FILE, lintSpecDir, writeAck } from "./lint/index.js";
 import { runTriage } from "./triage/index.js";
 
 function readVersion(): string {
@@ -156,12 +157,94 @@ program
     process.exitCode = 1;
   });
 
+// `lint` and `lint-ack` exit 0 or 1 only for a result (a clean report or one
+// with findings, a written ack), and 2 for everything else: a usage error, a
+// spec directory that is not one, a refused write, an unexpected exception.
+// exitOverride makes commander throw instead of calling process.exit(1); the
+// outer catch below maps that to 2 and keeps 0 for help.
+program
+  .command("lint")
+  .description(
+    "check a spec directory and print one JSON report line " +
+      "(spec-gate-lint/1); exits 0 without errors, 1 with findings, 2 on usage errors",
+  )
+  .argument("<spec-dir>", "directory with spec.md and testplan.yaml")
+  .option("--strict", "unacknowledged warnings fail the run, like errors")
+  .option(
+    "--final",
+    "check as at approval: rules gated on status proposed apply whatever the status",
+  )
+  .addOption(
+    new Option(
+      "--profile <profile>",
+      "profile to use when triage.json gives none; an error when it disagrees with triage.json",
+    ).choices(["light", "full"]),
+  )
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action(
+    (
+      specDir: string,
+      options: {
+        strict?: boolean;
+        final?: boolean;
+        profile?: "light" | "full";
+      },
+    ) => {
+      const result = lintSpecDir(specDir, options);
+      if (!result.ok) {
+        process.stderr.write(`spec-gate: ${result.message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      process.stdout.write(`${JSON.stringify(result.report)}\n`);
+      process.exitCode = result.report.ok ? 0 : 1;
+    },
+  );
+
+program
+  .command("lint-ack")
+  .description(
+    "acknowledge one warning: append { rule, id, reason } to <spec-dir>/acks.yaml; " +
+      "exits 0 when written, 2 on any refusal",
+  )
+  .argument("<spec-dir>", "directory with spec.md and testplan.yaml")
+  .argument("<rule>", "the warning rule to acknowledge")
+  .argument("<id>", "the ID the warning is about, or the rule's target")
+  .requiredOption("--reason <text>", "why the warning is accepted (one line)")
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action(
+    (
+      specDir: string,
+      rule: string,
+      id: string,
+      options: { reason: string },
+    ) => {
+      const result = writeAck(specDir, rule, id, options.reason);
+      if (!result.ok) {
+        process.stderr.write(`spec-gate: ${result.message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      if (result.normalised) {
+        process.stderr.write(
+          `spec-gate: lint-ack: ${ACKS_FILE} was rewritten as a block list; its comments were dropped\n`,
+        );
+      }
+      process.stdout.write(`acknowledged ${rule} ${id}\n`);
+    },
+  );
+
 try {
   await program.parseAsync();
 } catch (err) {
-  // Only the `intake file` command has exitOverride, so every CommanderError
-  // comes from it: help and version keep their exit code 0, a usage error
-  // exits 2; anything else is an unexpected exception and also exits 2.
+  // Only `intake file`, `lint` and `lint-ack` have exitOverride, so every
+  // CommanderError comes from one of them: help and version keep their exit
+  // code 0, a usage error exits 2; anything else is an unexpected exception
+  // and also exits 2.
   if (err instanceof CommanderError) {
     // commander has already written the usage message to stderr.
     process.exitCode = err.exitCode === 0 ? 0 : 2;
