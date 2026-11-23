@@ -2,9 +2,10 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { probe, type ProbeOptions } from "../src/probe/index.js";
 import { matchLineNumbers } from "../src/probe/mutant.js";
+import { parsePlanFile } from "../src/probe/plan.js";
 import { expectNoIsolationLeftovers } from "./helpers/no-leftovers.js";
 import { CLI_PATH, spawnCli } from "./helpers/spawn-cli.js";
 
@@ -32,6 +33,13 @@ import { CLI_PATH, spawnCli } from "./helpers/spawn-cli.js";
  * file and say to pass `-n`. An empty `-M` is never searched: the
  * existing "must not be empty" refusal answers.
  */
+
+// Every case here runs real probes (git, node, one process per baseline
+// and per mutant; a worktree run adds a `git worktree add`), and the
+// rows that compare a run without `-n` to the same run with it run two.
+// On a loaded machine one of them can run past vitest's 5 s default, so
+// the file sets its own bound; a test that names a timeout keeps it.
+vi.setConfig({ testTimeout: 60_000 });
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -115,6 +123,139 @@ function matchOptions(
   };
 }
 
+type Answer = { status: string; reason?: string; text: string };
+
+/** Blanks what differs between two otherwise identical runs: the uuid a
+ * worktree run puts into its scratch and log paths. */
+function blankRunIds(text: string): string {
+  return text.replace(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g,
+    "<uuid>",
+  );
+}
+
+/** What a probe call answers, throw or result, reduced to what the
+ * derivation guard decides -- the outcome, the reason and the refusal
+ * text -- so that two calls differing only in `line` can be compared
+ * with `toEqual`. */
+async function answerOf(options: ProbeOptions): Promise<Answer> {
+  try {
+    const r = await probe(options);
+    return {
+      status: r.status,
+      reason: r.reason,
+      text: blankRunIds(r.warnings.join("\n")),
+    };
+  } catch (e) {
+    return { status: "threw", text: blankRunIds((e as Error).message) };
+  }
+}
+
+/** Runs the built CLI as a child in its own process group and kills the
+ * whole group after `ms`: for a `--file` (a FIFO) whose read would
+ * block forever under the regression such a test guards. The child
+ * blocks inside one `readFileSync` in that case and has spawned nothing
+ * by then, but the group kill makes sure a regression can never leave
+ * anything behind. */
+async function runCliBounded(
+  args: string[],
+  ms = 8000,
+): Promise<{ timedOut: boolean; stdout: string }> {
+  const child = spawn(process.execPath, [CLI_PATH, ...args], {
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  child.stdout.on("data", (d: Buffer) => {
+    stdout += d.toString("utf8");
+  });
+  child.stderr.resume();
+  const timedOut = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      try {
+        process.kill(-(child.pid as number), "SIGKILL");
+      } catch {
+        // already gone
+      }
+      resolve(true);
+    }, ms);
+    child.on("close", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+  });
+  return { timedOut, stdout };
+}
+
+const SUB_FIXTURE_JS = "// one\n// two\nconst positive = (n) => n > 0;\n";
+const TWO_HITS = "n > 0 a\nn > 0 b\n";
+
+interface Layered {
+  /** A git repository (see the list below). */
+  repo: string;
+  /** A directory outside the repository. */
+  outside: string;
+}
+
+/**
+ * The fixture for the rows that reach the derivation guard through a
+ * layer in front of it (isolation mode, path resolution, links). On top
+ * of `initRepo()` (`n > 0` on line 2 of `fixture.js`), all committed
+ * unless noted:
+ *
+ * - `sub/fixture.js` (`n > 0` on line 3) and `sub/deep.js` (line 4);
+ * - `dirty.js`, committed with `n > 0` on line 1 and rewritten in the
+ *   working tree with it on line 3; `untracked.js` (line 4, untracked);
+ * - links to in-repo targets: `link-in.js` -> `fixture.js` (relative),
+ *   `link-in-abs.js` (absolute target), `chain2.js` -> `chain1.js` ->
+ *   `link-in.js`, `link-dir` -> `sub`;
+ * - links that leave the repository: `link-out.js` -> `outside/two.js`
+ *   (two lines carry the text, so a derivation that read it would
+ *   answer `match_ambiguous` and name them), `link-out1.js` ->
+ *   `outside/one.js` (line 3), `chain-out.js` -> `link-out.js`,
+ *   `link-outdir` -> `outside/odir` (holding `f.js`, two hits);
+ * - links that resolve to nothing: `link-dangling.js` (in-repo target),
+ *   `link-dangling-out.js` (outside target), `loop-a.js` <-> `loop-b.js`;
+ * - `link-null` -> `/dev/null`, a character device: outside the
+ *   repository and not a regular file, and unlike a FIFO or `/dev/zero`
+ *   safe to have in a library call, because a regression that read it
+ *   would get an empty file back at once instead of blocking.
+ */
+function initLayeredRepo(): Layered {
+  const repo = initRepo();
+  const outside = makeTmpDir();
+  fs.writeFileSync(path.join(outside, "one.js"), "a\nb\nn > 0\n");
+  fs.writeFileSync(path.join(outside, "two.js"), TWO_HITS);
+  fs.mkdirSync(path.join(outside, "odir"));
+  fs.writeFileSync(path.join(outside, "odir", "f.js"), TWO_HITS);
+  fs.mkdirSync(path.join(repo, "sub"));
+  fs.writeFileSync(path.join(repo, "sub", "fixture.js"), SUB_FIXTURE_JS);
+  fs.writeFileSync(path.join(repo, "sub", "deep.js"), "a\nb\nc\nn > 0\n");
+  fs.writeFileSync(path.join(repo, "dirty.js"), "n > 0\nfiller\nfiller\n");
+  const link = (target: string, name: string): void => {
+    fs.symlinkSync(target, path.join(repo, name));
+  };
+  link("fixture.js", "link-in.js");
+  link(path.join(repo, "fixture.js"), "link-in-abs.js");
+  link("link-in.js", "chain1.js");
+  link("chain1.js", "chain2.js");
+  link("sub", "link-dir");
+  link(path.join(outside, "two.js"), "link-out.js");
+  link(path.join(outside, "one.js"), "link-out1.js");
+  link("link-out.js", "chain-out.js");
+  link(path.join(outside, "odir"), "link-outdir");
+  link("nowhere.js", "link-dangling.js");
+  link(path.join(outside, "gone.js"), "link-dangling-out.js");
+  link("loop-b.js", "loop-a.js");
+  link("loop-a.js", "loop-b.js");
+  link("/dev/null", "link-null");
+  git(repo, ["add", "-A"]);
+  git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "layers"]);
+  fs.writeFileSync(path.join(repo, "dirty.js"), "filler\nfiller\nn > 0\n");
+  fs.writeFileSync(path.join(repo, "untracked.js"), "u\nu\nu\nn > 0\n");
+  return { repo, outside };
+}
+
 describe("matchLineNumbers (the derivation's line search)", () => {
   it("returns the one 1-indexed line whose text contains the substring", () => {
     expect(matchLineNumbers("a\nbb\nccc", "cc")).toEqual([3]);
@@ -132,6 +273,9 @@ describe("matchLineNumbers (the derivation's line search)", () => {
 
   it("keeps a CRLF file's \\r as part of the line (the same split computeMatch uses)", () => {
     expect(matchLineNumbers("a\r\nb\r\r\nc", "b")).toEqual([2]);
+    // The `\r` is searchable: a split that swallowed it would not find
+    // a text that ends in one.
+    expect(matchLineNumbers("a\r\nb\r\nc", "b\r")).toEqual([2]);
   });
 
   it("the empty substring counts as contained in every line", () => {
@@ -292,53 +436,22 @@ describe("probe(): the -M-without--n read guard matches the explicit -n answers"
     // content.
     const fifo = path.join(repo, "fifo.pipe");
     execFileSync("mkfifo", [fifo]);
-    // The child spawns nothing itself (it blocks inside one
-    // `readFileSync` under the regression this guards), but it runs in
-    // its own process group and the whole group is killed on timeout, so
-    // a regression can never leave anything behind.
-    const child = spawn(
-      process.execPath,
-      [
-        CLI_PATH,
-        "-C",
-        repo,
-        "probe",
-        "--file",
-        "fifo.pipe",
-        "-M",
-        "anything",
-        "-w",
-        "true",
-        "-t",
-        "node fixture.test.js",
-        "-i",
-        "inplace",
-      ],
-      { detached: true, stdio: ["ignore", "pipe", "pipe"] },
-    );
-    let stdout = "";
-    child.stdout.on("data", (d: Buffer) => {
-      stdout += d.toString("utf8");
-    });
-    const timedOut = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        try {
-          process.kill(-(child.pid as number), "SIGKILL");
-        } catch {
-          // already gone
-        }
-        resolve(true);
-      }, 8000);
-      child.on("close", () => {
-        clearTimeout(timer);
-        resolve(false);
-      });
-    });
-    const run = {
-      error: timedOut ? new Error("timed out") : undefined,
-      stdout,
-    };
-    expect(run.error).toBeUndefined();
+    const run = await runCliBounded([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fifo.pipe",
+      "-M",
+      "anything",
+      "-w",
+      "true",
+      "-t",
+      "node fixture.test.js",
+      "-i",
+      "inplace",
+    ]);
+    expect(run.timedOut).toBe(false);
     expect(run.stdout).toContain("not a regular file");
     expect(run.stdout).toContain(fifo);
     expectNoIsolationLeftovers(repo, lockDir);
@@ -597,7 +710,7 @@ describe("probe(): the derivation guard's decision table, each row against the s
     expect(withFlag.reason).toBe("line_required");
   }, 30000);
 
-  it("an unreadable regular file (mode 000) keeps the line_required refusal, with nothing derived", async () => {
+  it("an unreadable regular file (mode 000) answers the failed read, exactly as the same call with -n, never line_required", async () => {
     if (process.getuid?.() === 0) return;
     useLockDir();
     const repo = initRepo();
@@ -605,15 +718,759 @@ describe("probe(): the derivation guard's decision table, each row against the s
     fs.writeFileSync(secret, "n > 0\n");
     fs.chmodSync(secret, 0o000);
     try {
-      const result = await probe(
-        matchOptions(repo, { file: "secret.js", matchText: "n > 0" }),
-      );
-      expect(result.status).toBe("usage_error");
-      expect(result.reason).toBe("line_required");
-      expect(result.warnings.join("\n")).toContain("-n/--line is required");
+      const options = matchOptions(repo, {
+        file: "secret.js",
+        matchText: "n > 0",
+      });
+      const without = await answer(options);
+      const withN = await answer({ ...options, line: 1 });
+      expect(without).toEqual(withN);
+      expect(without.status).toBe("threw");
+      expect(without.text).toContain("EACCES");
+      expect(without.text).toContain(secret);
+      expect(without.text).not.toContain("-n/--line is required");
     } finally {
       fs.chmodSync(secret, 0o644);
     }
+  });
+});
+
+describe("probe(): the layers in front of the derivation guard (isolation, path resolution, links)", () => {
+  type Mode = "inplace" | "worktree";
+  const MODES: Mode[] = ["inplace", "worktree"];
+
+  /** A symlink, in a directory of its own, that points at `target`. */
+  function linkTo(target: string): string {
+    const link = path.join(makeTmpDir(), "link");
+    fs.symlinkSync(target, link);
+    return link;
+  }
+
+  interface DeriveRow {
+    name: string;
+    /** The line the unique `n > 0` (or the row's own text) sits on. */
+    line: number;
+    options: (fx: Layered) => Partial<ProbeOptions>;
+    modes?: Mode[];
+  }
+
+  const deriveRows: DeriveRow[] = [
+    {
+      name: "a contained file with allowOutside left unset",
+      line: 2,
+      options: () => ({}),
+    },
+    {
+      name: "a contained file with allowOutside false",
+      line: 2,
+      options: () => ({ allowOutside: false }),
+    },
+    {
+      name: "an absolute --file inside the repository",
+      line: 2,
+      options: (fx) => ({ file: path.join(fx.repo, "fixture.js") }),
+    },
+    {
+      name: "a --file with `..` segments that stays inside",
+      line: 2,
+      options: () => ({ file: "sub/../fixture.js" }),
+    },
+    {
+      name: "a --file relative to a cwd below the repository root (resolved against the cwd, not the root)",
+      line: 3,
+      options: (fx) => ({ cwd: path.join(fx.repo, "sub"), file: "fixture.js" }),
+    },
+    {
+      name: "a `../` --file from a cwd below the root that stays inside",
+      line: 2,
+      options: (fx) => ({
+        cwd: path.join(fx.repo, "sub"),
+        file: "../fixture.js",
+      }),
+    },
+    {
+      name: "a cwd reached through a symlink to the repository",
+      line: 2,
+      options: (fx) => ({ cwd: linkTo(fx.repo) }),
+    },
+    {
+      name: "a symlink to an in-repo file (relative target)",
+      line: 2,
+      options: () => ({ file: "link-in.js" }),
+    },
+    {
+      name: "a symlink to an in-repo file (absolute target)",
+      line: 2,
+      options: () => ({ file: "link-in-abs.js" }),
+    },
+    {
+      name: "a chain of symlinks ending at an in-repo file",
+      line: 2,
+      options: () => ({ file: "chain2.js" }),
+    },
+    {
+      name: "a file below a symlinked in-repo directory",
+      line: 4,
+      options: () => ({ file: "link-dir/deep.js" }),
+    },
+    {
+      name: "a tracked file whose working-tree content differs from HEAD (the working tree is read and mutated)",
+      line: 3,
+      options: () => ({ file: "dirty.js" }),
+    },
+    {
+      name: "an untracked file",
+      line: 4,
+      options: () => ({ file: "untracked.js" }),
+    },
+    {
+      name: "a -M text with non-ASCII characters",
+      line: 2,
+      options: (fx) => {
+        fs.writeFileSync(
+          path.join(fx.repo, "uni.js"),
+          "const a = 1;\nconst s = 'größe ≥ 0';\n",
+        );
+        return { file: "uni.js", matchText: "größe ≥ 0", withText: "x" };
+      },
+    },
+    {
+      name: "--allow-outside: a symlink to an outside file",
+      line: 3,
+      options: () => ({ file: "link-out1.js", allowOutside: true }),
+      modes: ["inplace"],
+    },
+    {
+      name: "--allow-outside: a relative --file that leaves the repository",
+      line: 3,
+      options: (fx) => ({
+        file: path.relative(fx.repo, path.join(fx.outside, "one.js")),
+        allowOutside: true,
+      }),
+      modes: ["inplace"],
+    },
+  ];
+
+  for (const row of deriveRows) {
+    for (const mode of row.modes ?? MODES) {
+      it(`derives under ${mode} isolation: ${row.name}`, async () => {
+        useLockDir();
+        const fx = initLayeredRepo();
+        const options = matchOptions(fx.repo, {
+          testCommand: "true",
+          isolation: mode,
+          ...row.options(fx),
+        });
+        const displayFile = path.resolve(options.cwd, options.file as string);
+        const derived = await probe(options);
+        expect(derived.mutant?.line).toBe(row.line);
+        expect(derived.warnings).toContain(
+          `-n/--line derived from the unique -M/--match occurrence: line ${String(row.line)} of ${displayFile}`,
+        );
+        // A run the guard wrongly declined reaches the mutation with no
+        // line at all and reports this instead.
+        expect(derived.warnings.join("\n")).not.toContain("line 0");
+        // The derived run IS the run with that `-n`: same verdict, same
+        // mutant record, same isolation.
+        const explicit = await probe({ ...options, line: row.line });
+        expect(explicit.mutant?.line).toBe(row.line);
+        expect({
+          status: derived.status,
+          reason: derived.reason,
+          mutant: derived.mutant,
+          isolation: derived.isolation.mode,
+        }).toEqual({
+          status: explicit.status,
+          reason: explicit.reason,
+          mutant: explicit.mutant,
+          isolation: explicit.isolation.mode,
+        });
+        expect(derived.status).toBe("survived");
+        expect(derived.isolation.mode).toBe(mode);
+      });
+    }
+  }
+
+  interface SameRow {
+    name: string;
+    options: (fx: Layered) => Partial<ProbeOptions>;
+    /** The `reason` both calls answer with ... */
+    reason?: string;
+    /** ... or the message both throw. */
+    threw?: RegExp;
+    modes?: Mode[];
+  }
+
+  const sameRows: SameRow[] = [
+    {
+      name: "a symlink to an outside file",
+      options: () => ({ file: "link-out.js" }),
+      reason: "file_outside_root",
+    },
+    {
+      name: "a chain of symlinks ending outside",
+      options: () => ({ file: "chain-out.js" }),
+      reason: "file_outside_root",
+    },
+    {
+      name: "a file below a symlinked outside directory",
+      options: () => ({ file: "link-outdir/f.js" }),
+      reason: "file_outside_root",
+    },
+    {
+      name: "a symlink to an outside directory",
+      options: () => ({ file: "link-outdir" }),
+      reason: "file_outside_root",
+    },
+    {
+      name: "a relative --file that leaves the repository",
+      options: (fx) => ({
+        file: path.relative(fx.repo, path.join(fx.outside, "two.js")),
+      }),
+      reason: "file_outside_root",
+    },
+    {
+      name: "a `../` --file from a cwd below the root that leaves the repository",
+      options: (fx) => ({
+        cwd: path.join(fx.repo, "sub"),
+        file: path.relative(
+          path.join(fx.repo, "sub"),
+          path.join(fx.outside, "two.js"),
+        ),
+      }),
+      reason: "file_outside_root",
+    },
+    {
+      name: "a symlink to an in-repo directory",
+      options: () => ({ file: "link-dir" }),
+      threw: /not a regular file/,
+    },
+    {
+      name: "a directory",
+      options: () => ({ file: "sub" }),
+      threw: /not a regular file/,
+    },
+    {
+      name: "a dangling symlink (in-repo target)",
+      options: () => ({ file: "link-dangling.js" }),
+      reason: "file_not_found",
+    },
+    {
+      name: "a dangling symlink (outside target)",
+      options: () => ({ file: "link-dangling-out.js" }),
+      reason: "file_not_found",
+    },
+    {
+      name: "a symlink loop",
+      options: () => ({ file: "loop-a.js" }),
+      reason: "file_not_found",
+    },
+    {
+      name: "a missing file",
+      options: () => ({ file: "missing.js" }),
+      reason: "file_not_found",
+    },
+    {
+      name: "a symlink to a character device",
+      options: () => ({ file: "link-null" }),
+      reason: "file_outside_root",
+    },
+    {
+      name: "--allow-outside: a character device",
+      options: () => ({ file: "/dev/null", allowOutside: true }),
+      threw: /not a regular file/,
+      modes: ["inplace"],
+    },
+    {
+      name: "--allow-outside: a symlink to a character device",
+      options: () => ({ file: "link-null", allowOutside: true }),
+      threw: /not a regular file/,
+      modes: ["inplace"],
+    },
+    {
+      name: "--allow-outside: a symlink to an outside directory",
+      options: () => ({ file: "link-outdir", allowOutside: true }),
+      threw: /not a regular file/,
+      modes: ["inplace"],
+    },
+    {
+      name: "--allow-outside: a dangling symlink",
+      options: () => ({ file: "link-dangling-out.js", allowOutside: true }),
+      reason: "file_not_found",
+      modes: ["inplace"],
+    },
+    {
+      name: "--allow-outside: a symlink to an outside file",
+      options: () => ({ file: "link-out.js", allowOutside: true }),
+      reason: "worktree_allow_outside_unsupported",
+      modes: ["worktree"],
+    },
+    {
+      name: "--allow-outside: a symlink to an in-repo file",
+      options: () => ({ file: "link-in.js", allowOutside: true }),
+      reason: "worktree_allow_outside_unsupported",
+      modes: ["worktree"],
+    },
+    {
+      name: "--allow-outside: a missing file",
+      options: () => ({ file: "missing.js", allowOutside: true }),
+      reason: "worktree_allow_outside_unsupported",
+      modes: ["worktree"],
+    },
+    {
+      name: "--allow-outside: an empty -M",
+      options: () => ({ matchText: "", allowOutside: true }),
+      reason: "worktree_allow_outside_unsupported",
+      modes: ["worktree"],
+    },
+    {
+      name: "an empty -M on a multi-line file",
+      options: () => ({ matchText: "" }),
+      reason: "mutant_not_applicable",
+    },
+    {
+      name: "an empty -M on a one-line file",
+      options: (fx) => {
+        fs.writeFileSync(path.join(fx.repo, "single.js"), "n > 0");
+        return { file: "single.js", matchText: "" };
+      },
+      reason: "mutant_not_applicable",
+    },
+    {
+      name: "an empty -M on an empty file",
+      options: (fx) => {
+        fs.writeFileSync(path.join(fx.repo, "empty.js"), "");
+        return { file: "empty.js", matchText: "" };
+      },
+      reason: "mutant_not_applicable",
+    },
+    {
+      name: "an empty -M on a missing file",
+      options: () => ({ file: "missing.js", matchText: "" }),
+      reason: "file_not_found",
+    },
+    {
+      name: "an empty -M on a symlink to an outside file",
+      options: () => ({ file: "link-out.js", matchText: "" }),
+      reason: "file_outside_root",
+    },
+  ];
+
+  /** Runs the row without a line and with `line: 1` and asserts both
+   * answer the same thing, which is the row's own named answer, and that
+   * nothing in it comes from a search of the file. */
+  async function expectSameAsExplicitLine(
+    options: ProbeOptions,
+    row: Pick<SameRow, "reason" | "threw">,
+  ): Promise<void> {
+    const without = await answerOf(options);
+    const withLine = await answerOf({ ...options, line: 1 });
+    expect(without).toEqual(withLine);
+    if (row.threw !== undefined) {
+      expect(without.status).toBe("threw");
+      expect(without.text).toMatch(row.threw);
+    } else {
+      expect(without.reason).toBe(row.reason);
+    }
+    expect(without.text).not.toContain("occurs on");
+    expect(without.text).not.toContain("derived from");
+    expect(without.text).not.toContain("-n/--line is required");
+  }
+
+  for (const row of sameRows) {
+    for (const mode of row.modes ?? MODES) {
+      it(`answers as with -n under ${mode} isolation, nothing read: ${row.name}`, async () => {
+        useLockDir();
+        const lockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR as string;
+        const fx = initLayeredRepo();
+        const options = matchOptions(fx.repo, {
+          isolation: mode,
+          ...row.options(fx),
+        });
+        await expectSameAsExplicitLine(options, row);
+        expectNoIsolationLeftovers(fx.repo, lockDir);
+      });
+    }
+  }
+
+  for (const mode of MODES) {
+    it.skipIf(process.getuid?.() === 0)(
+      `answers as with -n under ${mode} isolation: a regular file that cannot be read (mode 000)`,
+      async () => {
+        useLockDir();
+        const fx = initLayeredRepo();
+        const secret = path.join(fx.repo, "secret.js");
+        fs.writeFileSync(secret, "n > 0\n");
+        fs.chmodSync(secret, 0o000);
+        try {
+          // The metadata checks pass (a regular file under the cap); only
+          // the read fails. The answer is the failed read the mutation
+          // itself runs into, never a request for a `-n` that would end
+          // in that same failure.
+          await expectSameAsExplicitLine(
+            matchOptions(fx.repo, { file: "secret.js", isolation: mode }),
+            mode === "inplace"
+              ? { threw: /EACCES/ }
+              : { reason: "worktree_sync_failed" },
+          );
+        } finally {
+          fs.chmodSync(secret, 0o644);
+        }
+      },
+    );
+  }
+
+  it.skipIf(process.getuid?.() === 0)(
+    "answers as with -n: an outside regular file that cannot be read, with --allow-outside",
+    async () => {
+      useLockDir();
+      const fx = initLayeredRepo();
+      const secret = path.join(fx.outside, "secret.js");
+      fs.writeFileSync(secret, "n > 0\n");
+      fs.chmodSync(secret, 0o000);
+      try {
+        await expectSameAsExplicitLine(
+          matchOptions(fx.repo, { file: secret, allowOutside: true }),
+          { threw: /EACCES/ },
+        );
+      } finally {
+        fs.chmodSync(secret, 0o644);
+      }
+    },
+  );
+
+  for (const mode of MODES) {
+    it(`outside a git work tree, ${mode} isolation (worktree falls back to inplace): a contained file derives, an outside one answers as with -n`, async () => {
+      useLockDir();
+      const plain = makeTmpDir();
+      fs.writeFileSync(path.join(plain, "t.js"), "a\nn > 0\n");
+      const options = matchOptions(plain, {
+        file: "t.js",
+        testCommand: "true",
+        isolation: mode,
+      });
+      const derived = await probe(options);
+      expect(derived.mutant?.line).toBe(2);
+      expect(derived.status).toBe("survived");
+      expect(derived.isolation.mode).toBe("inplace");
+      const outside = path.join(makeTmpDir(), "two.js");
+      fs.writeFileSync(outside, TWO_HITS);
+      await expectSameAsExplicitLine(
+        { ...options, file: outside },
+        { reason: "file_outside_root" },
+      );
+    });
+  }
+
+  it("the ambiguous list at exactly the cap (20 lines) has no count tail; one line more names it as `and 1 more`", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const lines = (n: number): string =>
+      Array.from({ length: n }, (_, i) => `hit${String(i)}`).join("\n") + "\n";
+    fs.writeFileSync(path.join(repo, "twenty.js"), lines(20));
+    const twenty = await probe(
+      matchOptions(repo, { file: "twenty.js", matchText: "hit" }),
+    );
+    expect(twenty.reason).toBe("match_ambiguous");
+    expect(twenty.warnings.join("\n")).toContain("occurs on 20 lines");
+    expect(twenty.warnings.join("\n")).toContain("19, 20; pass -n/--line");
+    fs.writeFileSync(path.join(repo, "twentyone.js"), lines(21));
+    const twentyOne = await probe(
+      matchOptions(repo, { file: "twentyone.js", matchText: "hit" }),
+    );
+    expect(twentyOne.warnings.join("\n")).toContain(
+      "19, 20, and 1 more; pass -n/--line",
+    );
+  });
+});
+
+describe("probe(): which calls reach the derivation at all (the form and its texts)", () => {
+  it("the match form with no -M text and no line has nothing to derive from: line_required", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const result = await probe(matchOptions(repo, { matchText: undefined }));
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("line_required");
+    expect(result.warnings).toContain("-n/--line is required");
+  });
+
+  it("the replace form never derives, even with a stray matchText that is unique in the file", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const result = await probe(
+      matchOptions(repo, {
+        form: "replace",
+        replaceText: "  return false;",
+        matchText: "n > 0",
+        withText: undefined,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("line_required");
+    expect(result.warnings.join("\n")).not.toContain("derived");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+      FIXTURE_JS,
+    );
+  });
+
+  it("the patch form never derives: a stray matchText that is on no line does not refuse the run", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const patch = path.join(makeTmpDir(), "m.patch");
+    fs.writeFileSync(
+      patch,
+      [
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return true;",
+        " }",
+        "",
+      ].join("\n"),
+    );
+    const result = await probe(
+      matchOptions(repo, {
+        file: undefined,
+        form: "patch",
+        patchPath: patch,
+        matchText: "on no line of the file",
+        withText: undefined,
+      }),
+    );
+    expect(result.status).toBe("killed");
+    expect(result.mutant?.line).toBe(2);
+    expect(result.warnings.join("\n")).not.toContain("derived");
+  });
+
+  it("a plan entry is untouched: a match mutant with no line is still refused by the plan's own validation", () => {
+    const planPath = path.join(makeTmpDir(), "plan.json");
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        test: "node fixture.test.js",
+        mutants: [{ file: "fixture.js", match: "n > 0", with: "true" }],
+      }),
+    );
+    const parsed = parsePlanFile(planPath);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reason).toBe("plan_invalid");
+    expect(parsed.message).toContain("plan.mutants[0].line");
+  });
+});
+
+describe("cli: a FIFO --file without -n never blocks, whatever leads to it", () => {
+  interface FifoRow {
+    name: string;
+    /** Creates the FIFO and returns the `--file` value and extra args. */
+    setup: (repo: string) => { file: string; extra: string[] };
+    /** What both runs must say: an envelope `reason`, or a message part. */
+    reason?: string;
+    message?: string;
+  }
+
+  const rows: FifoRow[] = [
+    {
+      name: "under the default isolation (worktree)",
+      setup: (repo) => {
+        execFileSync("mkfifo", [path.join(repo, "fifo.pipe")]);
+        return { file: "fifo.pipe", extra: [] };
+      },
+      reason: "target_not_synced",
+    },
+    {
+      name: "through a symlink, -i inplace",
+      setup: (repo) => {
+        execFileSync("mkfifo", [path.join(repo, "fifo.pipe")]);
+        fs.symlinkSync("fifo.pipe", path.join(repo, "link-fifo"));
+        return { file: "link-fifo", extra: ["-i", "inplace"] };
+      },
+      message: "not a regular file",
+    },
+    {
+      name: "outside the repository with --allow-outside, -i inplace",
+      setup: () => {
+        const fifo = path.join(makeTmpDir(), "fifo.pipe");
+        execFileSync("mkfifo", [fifo]);
+        return { file: fifo, extra: ["-i", "inplace", "--allow-outside"] };
+      },
+      message: "not a regular file",
+    },
+  ];
+
+  for (const row of rows) {
+    it(`${row.name}: the same answer as with -n, well inside the bound`, async () => {
+      useLockDir();
+      const repo = initRepo();
+      const { file, extra } = row.setup(repo);
+      const args = (line: string[]): string[] => [
+        "-C",
+        repo,
+        "probe",
+        "--file",
+        file,
+        ...line,
+        "-M",
+        "anything",
+        "-w",
+        "true",
+        "-t",
+        "node fixture.test.js",
+        ...extra,
+      ];
+      const without = await runCliBounded(args([]));
+      expect(without.timedOut).toBe(false);
+      const withLine = await runCliBounded(args(["-n", "1"]));
+      expect(withLine.timedOut).toBe(false);
+      const a = JSON.parse(without.stdout);
+      const b = JSON.parse(withLine.stdout);
+      expect({
+        status: a.status,
+        reason: a.reason,
+        message: a.message,
+      }).toEqual({ status: b.status, reason: b.reason, message: b.message });
+      if (row.reason !== undefined) expect(a.reason).toBe(row.reason);
+      if (row.message !== undefined) {
+        expect(without.stdout).toContain(row.message);
+      }
+      expect(without.stdout).not.toContain("-n/--line is required");
+    }, 20000);
+  }
+});
+
+describe("cli: probe -M without -n under the CLI's own defaults", () => {
+  function cliArgs(
+    cwd: string,
+    file: string,
+    testCommand: string,
+    extra: string[] = [],
+  ): string[] {
+    return [
+      "-C",
+      cwd,
+      "probe",
+      "--file",
+      file,
+      "-M",
+      "n > 0",
+      "-w",
+      "true",
+      "-t",
+      testCommand,
+      ...extra,
+    ];
+  }
+
+  for (const isolationArgs of [[], ["-i", "worktree"]]) {
+    it(`${isolationArgs.length === 0 ? "no -i (the default isolation, worktree)" : "-i worktree"} and no --allow-outside in a git repository: the line is derived and the mutant is killed in the worktree`, async () => {
+      const fx = initLayeredRepo();
+      const run = await spawnCli(
+        cliArgs(fx.repo, "fixture.js", "node fixture.test.js", isolationArgs),
+      );
+      expect(run.code).toBe(0);
+      const envelope = JSON.parse(run.stdout);
+      expect(envelope.status).toBe("killed");
+      expect(envelope.isolation.mode).toBe("worktree");
+      expect(envelope.mutant.line).toBe(2);
+      expect(JSON.stringify(envelope.warnings)).toContain(
+        `derived from the unique -M/--match occurrence: line 2 of ${path.join(fx.repo, "fixture.js")}`,
+      );
+      expect(JSON.stringify(envelope.warnings)).not.toContain("line 0");
+      // The working tree itself was never the mutation target.
+      expect(fs.readFileSync(path.join(fx.repo, "fixture.js"), "utf8")).toBe(
+        FIXTURE_JS,
+      );
+    });
+  }
+
+  it("no -i: --report mutation-probes carries the derived line as the item's anchor", async () => {
+    const fx = initLayeredRepo();
+    const run = await spawnCli(
+      cliArgs(fx.repo, "fixture.js", "node fixture.test.js", [
+        "--report",
+        "mutation-probes",
+      ]),
+    );
+    expect(run.code).toBe(0);
+    const items = JSON.parse(run.stdout);
+    expect(items).toHaveLength(1);
+    expect(items[0].anchor).toBe(2);
+    expect(items[0].result).toBe("killed");
+  });
+
+  it("no -i: a symlink to an in-repo file derives, a symlink to an outside file answers file_outside_root as with -n and names no line of it", async () => {
+    const fx = initLayeredRepo();
+    const inRepo = await spawnCli(
+      cliArgs(fx.repo, "link-in.js", "node fixture.test.js"),
+    );
+    expect(inRepo.code).toBe(0);
+    expect(JSON.parse(inRepo.stdout).mutant.line).toBe(2);
+    const without = await spawnCli(
+      cliArgs(fx.repo, "link-out.js", "node -e 0"),
+    );
+    const withLine = await spawnCli(
+      cliArgs(fx.repo, "link-out.js", "node -e 0", ["-n", "1"]),
+    );
+    const a = JSON.parse(without.stdout);
+    const b = JSON.parse(withLine.stdout);
+    expect(a.reason).toBe("file_outside_root");
+    expect({ code: without.code, status: a.status, reason: a.reason }).toEqual({
+      code: withLine.code,
+      status: b.status,
+      reason: b.reason,
+    });
+    expect(a.warnings).toEqual(b.warnings);
+    expect(without.stdout).not.toContain("occurs on");
+  });
+
+  it("no -i with --allow-outside in a git repository: worktree_allow_outside_unsupported as with -n, the outside file is not searched", async () => {
+    const fx = initLayeredRepo();
+    const outside = path.join(fx.outside, "two.js");
+    const without = await spawnCli(
+      cliArgs(fx.repo, outside, "node -e 0", ["--allow-outside"]),
+    );
+    const withLine = await spawnCli(
+      cliArgs(fx.repo, outside, "node -e 0", ["--allow-outside", "-n", "1"]),
+    );
+    const a = JSON.parse(without.stdout);
+    const b = JSON.parse(withLine.stdout);
+    expect(a.reason).toBe("worktree_allow_outside_unsupported");
+    expect({ code: without.code, status: a.status, reason: a.reason }).toEqual({
+      code: withLine.code,
+      status: b.status,
+      reason: b.reason,
+    });
+    expect(a.warnings).toEqual(b.warnings);
+    expect(without.stdout).not.toContain("occurs on");
+  });
+
+  it("no -i outside a git work tree: the default falls back to inplace and the line is derived", async () => {
+    const plain = makeTmpDir();
+    fs.writeFileSync(path.join(plain, "t.js"), "a\nn > 0\n");
+    const run = await spawnCli(cliArgs(plain, "t.js", "node -e 0"));
+    const envelope = JSON.parse(run.stdout);
+    expect(envelope.status).toBe("survived");
+    expect(envelope.isolation.mode).toBe("inplace");
+    expect(envelope.mutant.line).toBe(2);
+    expect(fs.readFileSync(path.join(plain, "t.js"), "utf8")).toBe(
+      "a\nn > 0\n",
+    );
+  });
+
+  it("-C below the repository root: a relative --file resolves against -C, and the line is derived from THAT file", async () => {
+    const fx = initLayeredRepo();
+    // `fixture.js` exists at the root too, with the text on line 2.
+    const run = await spawnCli(
+      cliArgs(path.join(fx.repo, "sub"), "fixture.js", "node -e 0"),
+    );
+    const envelope = JSON.parse(run.stdout);
+    expect(envelope.status).toBe("survived");
+    expect(envelope.mutant.line).toBe(3);
+    expect(JSON.stringify(envelope.warnings)).toContain(
+      `line 3 of ${path.join(fx.repo, "sub", "fixture.js")}`,
+    );
   });
 });
 

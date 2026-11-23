@@ -796,10 +796,10 @@ async function runProbePipeline(
   // its size: the derivation refuses instead, a usage error naming the
   // file and saying to pass `-n`. A file that passes every metadata
   // check but fails only the READ (a permissions failure on a regular
-  // file) is NOT deferred -- the deferral exists for what the metadata
-  // checks could already see; here the line stays underived and the
-  // `line_required` refusal below reports the missing `-n` exactly as
-  // it did before this derivation existed. An empty `-M` text is never
+  // file) is deferred like the shapes above: nothing was read, so the
+  // run goes on to the read the mutation itself makes, and that read's
+  // own failure answers, exactly as with an explicit `-n` -- never a
+  // request for a `-n` that would not help. An empty `-M` text is never
   // searched either: `String.includes("")` is true for every line, so
   // the search would answer `match_ambiguous` for any multi-line file;
   // instead `line` is set to 1 (every existing file has at least one
@@ -860,7 +860,7 @@ async function runProbePipeline(
         try {
           derivationContent = fs.readFileSync(displayFile, "utf8");
         } catch {
-          derivationContent = undefined;
+          derivationDeferred = true;
         }
       }
     }
@@ -902,14 +902,14 @@ async function runProbePipeline(
   }
   // `patch` is exempt: its line comes from the applied diff, so there is
   // nothing for the caller to be required to supply; a `match` run
-  // reached here without one only when the derivation above could not
-  // read the file, or got no `-M` text to derive from. A run the
-  // derivation DECLINED to read (`derivationDeferred`) is exempt too:
-  // it must reach the containment, existence and regular-file checks
-  // that an explicit `-n` run reaches, so that the file's own problem
-  // -- `file_outside_root`, the not-a-regular-file refusal,
-  // `file_not_found` -- is what answers, not a message about the
-  // missing `-n`.
+  // reached here without one only when it got no `-M` text to derive
+  // from. A run the derivation DECLINED to read, or could not read
+  // (`derivationDeferred`), is exempt too: it must reach the
+  // containment, existence, regular-file and read checks that an
+  // explicit `-n` run reaches, so that the file's own problem --
+  // `file_outside_root`, the not-a-regular-file refusal,
+  // `file_not_found`, the failed read -- is what answers, not a message
+  // about the missing `-n`.
   if (line === undefined && opts.form !== "patch" && !derivationDeferred) {
     return {
       status: "usage_error",

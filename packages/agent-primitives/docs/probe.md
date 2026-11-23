@@ -226,7 +226,9 @@ that refusal answers, as with an explicit `-n`) and `statSync` reports a regular
 `PATCH_MAX_BYTES`). A resolved `--file` outside the root, a not-a-regular
 file (a FIFO, a directory) and a missing file are never read -- the run
 then answers exactly what the same run with an explicit `-n` answers
-(`file_outside_root`, the not-a-regular-file refusal, `file_not_found`);
+(`file_outside_root`, the not-a-regular-file refusal, `file_not_found`),
+and a regular file that cannot be read (no read permission) gets the
+answer of the same run with `-n` too;
 a regular file over the cap is never read either, and instead refuses
 as a `usage_error` (`reason: "line_required"`) naming the file and its
 size and saying to pass `-n`, which reads the file anyway because the
@@ -473,11 +475,11 @@ regenerate the patch from the repository root.
 `file_required` and `line_required` are `reason` values a library
 caller of `probe()` can see when it omits `--file`/`-n` for a form that
 cannot derive them (for `line`, a `-M`/`-w` run with no `-M` text, or
-one whose `--file` passes the derivation's metadata checks but cannot
-be read, or over the derivation's size cap, counts as such a form; a
-run the derivation declined for the file's shape -- outside the root,
-not a regular file, missing -- is not: it answers what the same run
-with an explicit `-n` answers). The CLI never emits `file_required`,
+one whose `--file` is over the derivation's size cap, counts as such a
+form; a run the derivation declined for the file's shape -- outside
+the root, not a regular file, missing, or a regular file that cannot
+be read -- is not: it answers what the same run with an explicit `-n`
+answers). The CLI never emits `file_required`,
 since `requireFile` (see `cli.ts`) rejects that case before `probe()`
 is even called; it can emit `line_required` only for those `-M`/`-w`
 cases, and otherwise hands the library's `line_required`,
@@ -2780,9 +2782,8 @@ checks (`src/probe/index.ts`), before `openRunSetup` is ever called:
 single `--file` for it (`patch_file_ambiguous`), a missing `--file`
 (`file_required`), a missing `-n`/`--line` where nothing can derive it
 (`line_required`: always for `-r`, and for `-M`/`-w` only when there is
-no `-M` text to derive from, the file passes the `-n` derivation's
-metadata checks but cannot be read, or it is over the derivation's size
-cap -- the message then names the file and says to pass `-n`), a
+no `-M` text to derive from, or the file is over the `-n` derivation's
+size cap -- the message then names the file and says to pass `-n`), a
 `-M`/`--match` text
 that occurs on no line of `--file` for a `-n`-less `-M`/`-w` run
 (`match_not_found`), and the same text occurring on several lines
