@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   closeSync,
   existsSync,
@@ -152,13 +152,52 @@ export interface ProcessPlaces {
 }
 
 /**
+ * Runs lsof without blocking the event loop: sweeps of concurrent sessions
+ * overlap instead of queueing behind one synchronous call. Returns its
+ * output, or the failure text.
+ */
+function readLsof(
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<string | { failed: string }> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      "lsof",
+      args,
+      {
+        encoding: "utf8",
+        env: { PATH: env.PATH ?? "/usr/sbin:/usr/bin:/bin" },
+        timeout: 30_000,
+        maxBuffer: 256 * 1024 * 1024,
+      },
+      (error, stdout) => {
+        if (error === null) {
+          resolve(stdout);
+          return;
+        }
+        // lsof exits 1 when one of its filters matched nothing; the output still counts.
+        if (typeof stdout !== "string" || stdout.length === 0) {
+          resolve({
+            failed: `lsof failed: ${error.message.split("\n")[0]}`,
+          });
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+    // lsof never reads its input; close the pipe so it cannot wait on it.
+    child.stdin?.end();
+  });
+}
+
+/**
  * Working directories and open files of the user's processes, from /proc or
  * lsof. Open files catch a process that changed its working directory out of
  * the root but still holds a log, a pipe target or a lock file inside it.
  */
-function processTable(
+async function processTable(
   env: NodeJS.ProcessEnv,
-): Map<number, ProcessPlaces> | string {
+): Promise<Map<number, ProcessPlaces> | string> {
   const found = new Map<number, ProcessPlaces>();
   if (process.platform === "linux" && existsSync("/proc/self/cwd")) {
     for (const name of readdirSync("/proc")) {
@@ -187,37 +226,21 @@ function processTable(
     }
     return found;
   }
-  let text: string;
-  try {
-    text = execFileSync(
-      "lsof",
-      [
-        "-a",
-        "-d",
-        LSOF_DESCRIPTORS,
-        "-u",
-        String(process.getuid?.() ?? 0),
-        "-F",
-        "pfn",
-        "-w",
-      ],
-      {
-        encoding: "utf8",
-        env: { PATH: env.PATH ?? "/usr/sbin:/usr/bin:/bin" },
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 30_000,
-        maxBuffer: 256 * 1024 * 1024,
-      },
-    );
-  } catch (error) {
-    // lsof exits 1 when one of its filters matched nothing; the output still counts.
-    const out = (error as { stdout?: unknown }).stdout;
-    if (typeof out !== "string" || out.length === 0) {
-      return `lsof failed: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`;
-    }
-    text = out;
-  }
-  return parseLsofPlaces(text);
+  const read = await readLsof(
+    [
+      "-a",
+      "-d",
+      LSOF_DESCRIPTORS,
+      "-u",
+      String(process.getuid?.() ?? 0),
+      "-F",
+      "pfn",
+      "-w",
+    ],
+    env,
+  );
+  if (typeof read !== "string") return read.failed;
+  return parseLsofPlaces(read);
 }
 
 /** Parses `lsof -F pfn` output: `p<pid>`, then per descriptor `f<fd>` and `n<name>`. */
@@ -286,11 +309,14 @@ export function placesInside(
  * its environment) stays invisible to the sweep; it remains bound by the
  * sandbox the session ran under.
  */
-export function sweepByCwd(
+export async function sweepByCwd(
   roots: string[],
   env: NodeJS.ProcessEnv,
-): SweepResult {
-  const table = processTable(env);
+): Promise<SweepResult> {
+  // Nothing to look for: do not read the process table (one lsof run over
+  // every process on macOS).
+  if (roots.length === 0) return { killed: [], unavailable: null };
+  const table = await processTable(env);
   if (typeof table === "string") return { killed: [], unavailable: table };
   const killed: SweptProcess[] = [];
   for (const hit of placesInside(table, roots)) {
@@ -448,7 +474,7 @@ export async function runGuarded(
     stdoutFile: envelopeFile,
     stderrFile: guardErr,
   });
-  const swept = sweepByCwd(options.sweepRoots, options.env);
+  const swept = await sweepByCwd(options.sweepRoots, options.env);
   const report = parseGuardEnvelope(readFileSync(envelopeFile, "utf8"));
   if (outer.spawnError !== null || report === null) {
     return {
