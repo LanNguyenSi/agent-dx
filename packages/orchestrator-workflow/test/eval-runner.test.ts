@@ -38,7 +38,7 @@ import {
   sessionNpmCache,
   setupEnv,
 } from "../eval/isolation.js";
-import { runGuarded } from "../eval/processes.js";
+import { runGuarded, sweepByCwd } from "../eval/processes.js";
 import { makeVariant, sha256 } from "../eval/variants.js";
 import {
   FAKE_GUARD,
@@ -1072,6 +1072,108 @@ describe("runGuarded outcomes reported by guard", () => {
     expect(result.timedOut).toBe(true);
     expect(result.rssCapHit).toBe(false);
   });
+});
+
+/**
+ * A directory with an `lsof` that logs each call and then sleeps before it
+ * runs the real one. lsof is only the process table off Linux, so the
+ * assertions that depend on it skip there.
+ */
+function slowLsof(dir: string, seconds: number): { path: string; log: string } {
+  const bin = join(dir, "bin");
+  mkdirSync(bin, { recursive: true });
+  const log = join(dir, "lsof-calls.log");
+  // A fixed location first: another lsof wrapper on PATH must not run twice.
+  const real =
+    ["/usr/sbin/lsof", "/usr/bin/lsof"].find((file) => existsSync(file)) ??
+    spawnSync("sh", ["-c", "command -v lsof"], {
+      encoding: "utf8",
+    }).stdout.trim();
+  writeFileSync(
+    join(bin, "lsof"),
+    [
+      "#!/bin/sh",
+      `echo "$$" >> '${log}'`,
+      `sleep ${seconds}`,
+      `exec '${real}' "$@"`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return { path: `${bin}:${process.env.PATH ?? ""}`, log };
+}
+
+const usesLsof = process.platform !== "linux";
+
+describe("the sweep and a slow lsof", () => {
+  it("never reads the process table when there is no root to sweep", async () => {
+    const dir = mkdtempSync(join(work, "slow-"));
+    const shim = slowLsof(dir, 3);
+    const started = Date.now();
+    expect(await sweepByCwd([], { PATH: shim.path })).toEqual({
+      killed: [],
+      unavailable: null,
+    });
+    const guarded = await runGuarded("true", [], {
+      guardBin: guardBin(work, {}),
+      cwd: dir,
+      env: { PATH: shim.path },
+      timeoutMs: 20_000,
+      maxRssMiB: 512,
+      stdinFile: null,
+      stdoutFile: join(dir, "o"),
+      stderrFile: join(dir, "e"),
+      logDir: join(dir, "log"),
+      sweepRoots: [],
+    });
+    expect(guarded.swept).toEqual({ killed: [], unavailable: null });
+    expect(existsSync(shim.log)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it.skipIf(!usesLsof)(
+    "reads the process table through lsof when there is a root to sweep",
+    async () => {
+      const dir = mkdtempSync(join(work, "slow-"));
+      const shim = slowLsof(dir, 1);
+      const swept = await sweepByCwd([join(dir, "root")], {
+        PATH: shim.path,
+      });
+      expect(swept.unavailable).toBeNull();
+      expect(readFileSync(shim.log, "utf8").trim().split("\n")).toHaveLength(1);
+    },
+  );
+
+  it.skipIf(!usesLsof)(
+    "leaves the event loop running while lsof is slow",
+    async () => {
+      const dir = mkdtempSync(join(work, "slow-"));
+      const shim = slowLsof(dir, 2);
+      let timerFired = false;
+      setTimeout(() => {
+        timerFired = true;
+      }, 100);
+      await sweepByCwd([join(dir, "root")], { PATH: shim.path });
+      expect(timerFired).toBe(true);
+    },
+  );
+
+  it.skipIf(!usesLsof)(
+    "lets sweeps of concurrent sessions overlap instead of queueing",
+    async () => {
+      const dir = mkdtempSync(join(work, "slow-"));
+      const shim = slowLsof(dir, 2);
+      const started = Date.now();
+      await Promise.all(
+        [1, 2, 3, 4].map((n) =>
+          sweepByCwd([join(dir, `root-${n}`)], { PATH: shim.path }),
+        ),
+      );
+      // Queued behind one another the four calls take 8 s or more.
+      expect(Date.now() - started).toBeLessThan(6000);
+      expect(readFileSync(shim.log, "utf8").trim().split("\n")).toHaveLength(4);
+    },
+  );
 });
 
 describe("blindness and checkout guards", () => {

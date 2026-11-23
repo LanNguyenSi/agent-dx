@@ -1117,7 +1117,7 @@ describe("guarded commands and the sweep", { timeout: 60_000 }, () => {
     const a = start(inside);
     const b = start(outside);
     await new Promise((r) => setTimeout(r, 300));
-    const swept = sweepByCwd([inside], { PATH: process.env.PATH });
+    const swept = await sweepByCwd([inside], { PATH: process.env.PATH });
     expect(swept.unavailable).toBeNull();
     expect(swept.killed.map((p) => p.pid)).toEqual([a]);
     await new Promise((r) => setTimeout(r, 200));
@@ -1147,7 +1147,7 @@ describe("guarded commands and the sweep", { timeout: 60_000 }, () => {
     });
     bystander.unref();
     await new Promise((r) => setTimeout(r, 300));
-    const swept = sweepByCwd([inside], { PATH: process.env.PATH });
+    const swept = await sweepByCwd([inside], { PATH: process.env.PATH });
     expect(swept.unavailable).toBeNull();
     expect(swept.killed).toEqual([
       { pid: child.pid, cwd: outside, via: "open_file", file: log },
