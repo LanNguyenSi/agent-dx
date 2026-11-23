@@ -126,6 +126,105 @@ request by `L<position>-<hash>`.
 A line keeps its ID while its text does not change, wherever the formatting
 changes; inserting a line above it changes the position part only.
 
+## source/meta.json
+
+Written by `intake`. A file adapter records a local ticket file:
+
+```json
+{
+  "adapter": "file",
+  "origin": "ticket.txt",
+  "fetched_at": "2000-01-31T12:00:00.000Z",
+  "sha256": "<sha256 of the raw bytes>",
+  "trust": "untrusted",
+  "sections": [{ "name": "body", "author": null, "sha256": "<same hash>" }],
+  "attachments": [],
+  "raw": true,
+  "lines": [{ "id": "L1-64ec88ca00b2", "kind": "text" }],
+  "base_commit": "<40 or 64 hex>",
+  "commands_ref": "<40 or 64 hex>"
+}
+```
+
+The keys appear in exactly this order, the file is 2-space JSON with a
+trailing newline. `origin` is the source path as given on the command line,
+informative only. `fetched_at` is the wall-clock time of the intake in ISO
+8601 UTC. `sha256` is the hash of the raw bytes of the file. `trust` is
+always `untrusted`: intake never vouches for content. `sections` for the
+file adapter is exactly one entry, `{ "name": "body", "author": <--author
+or null>, "sha256": <hash of the raw bytes> }`. `attachments` holds one
+entry per `--attach` in command-line order: `{ "name": <basename>,
+"sha256": <hash>, "size": <bytes>, "type": <type from the extension> }`;
+the extension table is small and fixed, an extension outside it becomes
+`application/octet-stream`, and the attachment file itself is never copied
+into the repository. `raw` is `false` with `--no-raw`, when
+`source/ticket.md` is not written. `lines` is always present, with and
+without raw: `{ "id", "kind" }` per non-empty unit of `splitSourceLines`,
+with the ID from `formatSourceLineId`, so the ledger works either way.
+`base_commit` and `commands_ref` are the same commit: the head of
+`refs/heads/<default branch>` on the remote, 40 hex characters (SHA-1) or 64
+(SHA-256), and nothing else. Only code sets them; no option and no input file
+sets or overrides them. The default branch is read from the remote's own HEAD
+symref and must be a valid branch name under `refs/heads/` that does not start
+with `-`; otherwise intake stops with `bad-default-branch`. The remote is named
+by `--remote` and must be a configured remote (a plain name; a URL, a path or
+`.` is refused with `bad-remote`, an unknown name with `no-remote`). Intake
+fetches the full ref `refs/heads/<default branch>` only, so a tag of the same
+name is never picked; it writes no local ref, fetches no tag, prunes nothing,
+reads the commit id from the one line `FETCH_HEAD` holds and peels it to a
+commit. Every git call runs without a shell, without any `GIT_*` variable of
+the caller, without a terminal prompt and with a timeout that kills the whole
+process group; an error message never carries a command line, a URL or git's
+own output. The fetch passes `--write-fetch-head` explicitly, so a repo-local
+`fetch.writeFetchHEAD=false` cannot leave a stale FETCH_HEAD standing in for
+the fetch.
+
+The remote is trusted as configured: its URL and the repository-local git
+config (a `url.<base>.insteadOf` rewrite, a remote whose URL is a local path)
+are used as given, so a configured remote whose URL is a local path yields
+that repository's default-branch head. Integrity against the shared upstream
+is checked later by lint, not by intake.
+
+Before anything is written the raw bytes are scanned for secret patterns: a
+private key header (also `PRIVATE KEY BLOCK`), an AWS access key id, a GitHub
+token (`ghp_`, `gho_`, `ghs_`, `ghu_`, `ghr_`, `github_pat_`), a Slack token,
+and a generic assignment whose key contains `password`, `secret`, `token`,
+`api_key`, `api-key` or `apikey` anywhere (`DB_PASSWORD`,
+`AWS_SECRET_ACCESS_KEY`, `access_token`, `apiKey`) with an optional closing
+quote after the key (`"password": "..."`) and a quoted value of 12 characters
+or more. A value without quotes is not caught by the generic pattern. A match
+is an error that names the pattern and the line and never prints the value,
+and nothing is written. Input that is UTF-16 (a byte order mark) or holds a
+NUL byte is refused with `source-encoding`, because the scan reads UTF-8 text.
+
+`intake file` writes `specs/<id>/source/` with `ticket.md` first and
+`meta.json` last, each through a temporary name and a rename. `source/` is
+created without overwriting anything: an existing one (also a dangling
+symlink) is `source-exists`. A `specs` or `specs/<id>` that already exists as
+a symlink (to anywhere) is refused as `source-not-in-repo` before anything is
+created, so nothing is written outside the repository through it. If a write
+fails, everything the command created is removed again. `meta.json` is written
+last, so a `source/` directory without a `meta.json` is the leftover of a run
+that was killed.
+
+Exit codes of `intake file`: 0 on success, 2 on an error (a named code on
+stderr, nothing on stdout, nothing written). A usage error of this command (a
+missing `--id` or `<path>`, an unknown option) and an unexpected exception
+also exit 2. `--help` and `--version` exit 0. With `--check`: 0 when the file
+is unchanged, 1 on drift, 2 on an error (no recorded `meta.json`, a
+`meta.json` that is not strict JSON, not an object, or without a `sha256`
+string and a `lines` array of `{ id, kind }`). `intake file --check` reads the
+existing `meta.json` and the file again, fetches nothing and writes nothing:
+same hash exits 0 with `{ "status": "ok" }`, a different hash exits 1 with
+`{ "status": "source-drift", "changed_lines": [...], "added": [...],
+"removed": [...] }`, where the diff aligns the recorded `lines` with the
+current ones by position and `changed_lines` lists `{ "old", "new" }` IDs
+of positions whose ID changed, `removed` old IDs of positions no longer
+present and `added` new IDs of new positions, each in position order. A
+different hash can come with three empty lists: a change that the line
+normalisation does not see (extra blank lines, for example) still exits 1,
+because the bytes changed.
+
 ## spec.md
 
 Markdown with YAML frontmatter, read by a line grammar. A model can write it,

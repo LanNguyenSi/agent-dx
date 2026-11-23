@@ -2,11 +2,16 @@
 
 `spec-gate` turns a ticket or intent into a checked, reviewable spec and
 test plan before implementation starts. The package is young: the CLI
-answers `--help` and `--version` and runs the `triage` verb described
-below, and further capabilities land as subcommands on top of this entry
+answers `--help` and `--version` and runs the `intake file`, `triage`
+and `digest` verbs described below, and further capabilities land as subcommands on top of this entry
 point as they are built.
 
 ## Commands
+
+`spec-gate intake file <path> --id <spec-id>` creates `specs/<id>/source/`
+in the target repository from a local file, with `base_commit` and
+`commands_ref` set to the head of the remote default branch. The file
+format is described in [docs/formats.md](docs/formats.md).
 
 `spec-gate triage <spec-dir>` derives the triage class from
 `<spec-dir>/triage.json`, writes `class` and `rule_version` back through a
