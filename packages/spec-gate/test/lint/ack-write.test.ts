@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   lintSpecDir,
   parseAcks,
@@ -156,15 +156,23 @@ describe("lint-ack writer: what it refuses", () => {
 
   it("an id or a reason that is empty, blank, multi-line or has a control character", () => {
     const d = dir();
-    for (const bad of ["", "   ", "a\nb", "a\rb", "a\tb", "a\u0000b", "a b"]) {
+    for (const bad of [
+      "",
+      "   ",
+      "a\nb",
+      "a\rb",
+      "a\tb",
+      "a\u0000b",
+      "a\u2028b",
+    ]) {
       expect(
-        writeAck(d, "profile-default", bad, "r").ok,
+        refused(writeAck(d, "profile-default", bad, "r")),
         JSON.stringify(bad),
-      ).toBe(false);
+      ).toMatch(/^lint-ack: id /);
       expect(
-        writeAck(d, "profile-default", "triage", bad).ok,
+        refused(writeAck(d, "profile-default", "triage", bad)),
         JSON.stringify(bad),
-      ).toBe(false);
+      ).toMatch(/^lint-ack: reason /);
     }
     expect(fs.existsSync(acksPath(d))).toBe(false);
   });
@@ -242,12 +250,17 @@ describe("lint-ack writer: what it refuses", () => {
   it("a spec directory that does not exist or is a file", () => {
     const holder = scratch();
     expect(
-      writeAck(path.join(holder, "nope"), "profile-default", "triage", "r").ok,
-    ).toBe(false);
+      refused(
+        writeAck(path.join(holder, "nope"), "profile-default", "triage", "r"),
+      ),
+    ).toContain("not a directory");
     fs.writeFileSync(path.join(holder, "file"), "x");
     expect(
-      writeAck(path.join(holder, "file"), "profile-default", "triage", "r").ok,
-    ).toBe(false);
+      refused(
+        writeAck(path.join(holder, "file"), "profile-default", "triage", "r"),
+      ),
+    ).toContain("not a directory");
+    expect(fs.readFileSync(path.join(holder, "file"), "utf8")).toBe("x");
   });
 
   it("every refusal message starts with lint-ack and holds no absolute path", () => {
@@ -255,6 +268,56 @@ describe("lint-ack writer: what it refuses", () => {
     const message = refused(writeAck(d, "no-such-rule", "x", "r"));
     expect(message.startsWith("lint-ack: ")).toBe(true);
     expect(message).not.toContain(d);
+  });
+});
+
+describe("lint-ack writer: duplicates and fallbacks", () => {
+  const rule = (id: string): RuleDef => ({
+    id,
+    level: "warning",
+    profiles: ["light", "full"],
+    gated: false,
+    ackable: true,
+    summary: "s",
+    needs: [],
+  });
+
+  it("the same id under another rule is not a duplicate", () => {
+    const d = specDir();
+    const rules = [rule("w-one"), rule("w-two")];
+    expect(writeAck(d, "w-one", "AC-1", "r", rules).ok).toBe(true);
+    expect(writeAck(d, "w-two", "AC-1", "r", rules)).toMatchObject({
+      ok: true,
+      entries: 2,
+    });
+    expect(refused(writeAck(d, "w-one", "AC-1", "r", rules))).toContain(
+      "already acknowledged",
+    );
+  });
+
+  it("a document closed by an end marker is rewritten as a block list", () => {
+    const d = specDir({
+      ...NO_TRIAGE,
+      "acks.yaml": "- {rule: other-warning, id: AC-1, reason: kept}\n...\n",
+    });
+    expect(
+      writeAck(d, "profile-default", "triage", "triage runs later"),
+    ).toMatchObject({ ok: true, entries: 2, normalised: true });
+    const parsed = parseAcks(read(d));
+    expect(parsed.ok && parsed.value.map((a) => a.rule)).toEqual([
+      "other-warning",
+      "profile-default",
+    ]);
+  });
+
+  it("a rule that is not registered is refused with that reason, not another", () => {
+    const d = specDir();
+    expect(refused(writeAck(d, "goal-count", "GOAL", "r"))).toContain(
+      "error rule",
+    );
+    expect(refused(writeAck(d, "no-such-rule", "x", "r"))).toContain(
+      "not a known rule",
+    );
   });
 });
 
@@ -294,6 +357,23 @@ describe("lint-ack writer: atomic write", () => {
       expect(fs.readdirSync(d).filter((n) => n.includes(".tmp-"))).toEqual([]);
     },
   );
+
+  it("a failed rename removes the temporary file it created and keeps the original", () => {
+    const existing = ENTRY.replace("triage", "other");
+    const d = specDir({ ...NO_TRIAGE, "acks.yaml": existing });
+    const spy = vi.spyOn(fs, "renameSync").mockImplementation(() => {
+      throw Object.assign(new Error("denied"), { code: "EXDEV" });
+    });
+    try {
+      expect(refused(writeAck(d, "profile-default", "triage", "r"))).toContain(
+        "cannot write acks.yaml: EXDEV",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(read(d)).toBe(existing);
+    expect(fs.readdirSync(d).filter((n) => n.includes(".tmp-"))).toEqual([]);
+  });
 
   it("replaces the file by rename: another handle on the old file keeps the old text", () => {
     const existing = ENTRY.replace("triage", "other");

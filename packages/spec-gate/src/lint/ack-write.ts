@@ -9,14 +9,15 @@
  * setgid or sticky).
  *
  * The existing text is kept byte for byte and the entry is appended after it
- * (with a line feed first when the file does not end in one). That works for
- * a block list. A file whose list is written in flow style (`[]`) cannot be
- * appended to; it is then rewritten as a block list of its entries, which
- * drops its comments. Either result is parsed again before it is written.
+ * (with a line feed first when the file does not end in one). The result is
+ * parsed again. A file that cannot take another item that way, such as a list
+ * written in flow style (`[]`) or a document closed by an end marker, is
+ * rewritten as a block list of its entries, which drops its comments. The
+ * rewrite is parsed again as well, and nothing is written when either result
+ * does not hold exactly the old entries plus the new one.
  */
 import fs from "node:fs";
 import path from "node:path";
-import { isSeq, parseDocument } from "yaml";
 import {
   ACKS_FILE,
   ackTextProblem,
@@ -38,12 +39,6 @@ function refuse(message: string): AckWriteResult {
 
 function sameAcks(a: readonly Ack[], b: readonly Ack[]): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
-}
-
-/** True when the text is one block-style list that can take another item. */
-function isBlockList(text: string): boolean {
-  const doc = parseDocument(text, { version: "1.2", schema: "core" });
-  return isSeq(doc.contents) && doc.contents.flow !== true;
 }
 
 export function writeAck(
@@ -113,25 +108,18 @@ export function writeAck(
 
   const entry: Ack = { rule, id, reason };
   const expected = [...existing, entry];
-  let text: string;
+  const holds = (candidate: string): boolean => {
+    const parsed = parseAcks(candidate);
+    return parsed.ok && sameAcks(parsed.value, expected);
+  };
+  const glue = existingText === "" || existingText.endsWith("\n") ? "" : "\n";
+  let text = existingText + glue + serializeAck(entry);
   let normalised = false;
-  if (existingText === "") {
-    text = serializeAck(entry);
-  } else {
-    const glue = existingText.endsWith("\n") ? "" : "\n";
-    text = existingText + glue + serializeAck(entry);
-    const check = parseAcks(text);
-    if (
-      !isBlockList(existingText) ||
-      !check.ok ||
-      !sameAcks(check.value, expected)
-    ) {
-      text = expected.map(serializeAck).join("");
-      normalised = true;
-    }
+  if (!holds(text)) {
+    text = expected.map(serializeAck).join("");
+    normalised = true;
   }
-  const final = parseAcks(text);
-  if (!final.ok || !sameAcks(final.value, expected)) {
+  if (!holds(text)) {
     return refuse(
       `could not produce a valid ${ACKS_FILE}; nothing was written`,
     );

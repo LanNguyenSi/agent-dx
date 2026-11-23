@@ -7,6 +7,7 @@ import {
   lintSpecDir,
   parseAcks,
   type Finding,
+  type RuleDef,
   type LintReport,
 } from "../../src/lint/index.js";
 import { specDir } from "./helpers.js";
@@ -288,5 +289,84 @@ describe("applyAcks", () => {
     expect(out.acked).toEqual([]);
     expect(out.warnings).toHaveLength(1);
     expect(out.findings.map((f) => f.rule)).toEqual(["ack-unused"]);
+  });
+
+  const rule = (
+    id: string,
+    level: "error" | "warning",
+    ackable: boolean,
+  ): RuleDef => ({
+    id,
+    level,
+    profiles: ["light", "full"],
+    gated: false,
+    ackable,
+    summary: "s",
+    needs: [],
+  });
+
+  it("names why an ack is invalid: unknown rule, error rule, not acknowledgeable, repeat", () => {
+    const rules = [
+      rule("an-error", "error", false),
+      rule("an-error-marked-ackable", "error", true),
+      rule("a-warning", "warning", true),
+      rule("a-fixed-warning", "warning", false),
+    ];
+    const messages = (id: string) =>
+      applyAcks([{ rule: id, id: "x", reason: "r" }], [], rules).findings.map(
+        (f) => f.finding.message,
+      );
+    expect(messages("nope")).toEqual([
+      expect.stringContaining("not a known rule"),
+    ]);
+    expect(messages("an-error")).toEqual([
+      expect.stringContaining("is an error"),
+    ]);
+    // the level decides even when the registry marks the error rule ackable
+    expect(messages("an-error-marked-ackable")).toEqual([
+      expect.stringContaining("is an error"),
+    ]);
+    expect(messages("a-fixed-warning")).toEqual([
+      expect.stringContaining("cannot be acknowledged"),
+    ]);
+    expect(messages("a-warning")).toEqual([
+      expect.stringContaining("matches no warning"),
+    ]);
+    const repeat = applyAcks(
+      [
+        { rule: "a-warning", id: "x", reason: "r" },
+        { rule: "a-warning", id: "x", reason: "r" },
+      ],
+      [],
+      rules,
+    );
+    expect(repeat.findings.map((f) => f.finding.message)).toEqual([
+      expect.stringContaining("acknowledged twice"),
+      expect.stringContaining("matches no warning"),
+    ]);
+  });
+
+  it("the same id under another rule is neither a match nor a repeat", () => {
+    const rules = [
+      rule("w-one", "warning", true),
+      rule("w-two", "warning", true),
+    ];
+    const out = applyAcks(
+      [{ rule: "w-one", id: "AC-1", reason: "r" }],
+      [warn("w-two", "AC-1")],
+      rules,
+    );
+    expect(out.acked).toEqual([]);
+    expect(out.warnings).toHaveLength(1);
+    const both = applyAcks(
+      [
+        { rule: "w-one", id: "AC-1", reason: "r" },
+        { rule: "w-two", id: "AC-1", reason: "r" },
+      ],
+      [warn("w-one", "AC-1"), warn("w-two", "AC-1")],
+      rules,
+    );
+    expect(both.findings).toEqual([]);
+    expect(both.acked.map((f) => f.rule)).toEqual(["w-one", "w-two"]);
   });
 });

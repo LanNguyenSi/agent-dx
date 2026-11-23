@@ -168,9 +168,11 @@ that can be acknowledged, refuses a duplicate `(rule, id)`, and refuses a
 reason or id that is empty, has a line break or has a control character. It
 does not need the warning to be present now. The existing text is kept byte for
 byte and the entry is added after it, with a line feed first when the file did
-not end in one. A list written in flow style (`[]`) cannot take an item; it is
-then rewritten as a block list, which drops its comments, and the result is
-parsed again before it is written.
+not end in one. The result is parsed again. A file that cannot take an item
+that way, such as a list written in flow style (`[]`) or a document closed by
+an end marker, is rewritten as a block list, which drops its comments; that
+result is parsed again too, and nothing is written when it does not hold
+exactly the old entries plus the new one.
 
 The write is atomic: a temporary file next to `acks.yaml`, created exclusively
 and renamed over it, so a reader sees the old or the new file whole. The
