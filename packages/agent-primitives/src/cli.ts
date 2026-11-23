@@ -2132,7 +2132,7 @@ function requireFile(opts: ProbeCliOptions, flag: string): void {
  * (see the derivation in `src/probe/index.ts`), which refuses
  * `match_not_found`/`match_ambiguous` when the text occurs on no line
  * or several -- so what reaches a library `line_required` for the
- * `match` form is only the file the derivation could not read. */
+ * `match` form is only a file over the derivation's size cap. */
 function requireLine(opts: ProbeCliOptions, flag: string): void {
   if (opts.line === undefined) {
     throw new UsageError(
