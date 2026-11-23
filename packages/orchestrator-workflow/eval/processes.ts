@@ -240,8 +240,7 @@ async function processTable(
     env,
   );
   if (typeof read !== "string") return read.failed;
-  const text = read;
-  return parseLsofPlaces(text);
+  return parseLsofPlaces(read);
 }
 
 /** Parses `lsof -F pfn` output: `p<pid>`, then per descriptor `f<fd>` and `n<name>`. */

@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The replay evaluation under `eval/` (development tooling, not shipped) no
-  longer reads the process table when a guarded command has no directory to
-  sweep, and reads it without blocking the event loop on macOS, where it runs
-  `lsof`. A slow `lsof` used to make every guarded command slow and kept
-  parallel sessions (`--jobs`) from overlapping.
+- The replay evaluation under `eval/` (development tooling, not shipped) on
+  macOS, where it runs `lsof` to find leftover processes: a sweep with no
+  directory to sweep no longer runs `lsof`, and the table read no longer
+  blocks the event loop. Every real guarded command still runs `lsof` once;
+  what changed is that a slow `lsof` no longer stalls the other sessions of the
+  runner, which kept parallel sessions (`--jobs`) from overlapping.
 
 ## [0.53.0] - 2026-11-18
 

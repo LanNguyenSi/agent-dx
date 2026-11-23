@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -1075,41 +1075,63 @@ describe("runGuarded outcomes reported by guard", () => {
 });
 
 /**
- * A directory with an `lsof` that logs each call and then sleeps before it
- * runs the real one. lsof is only the process table off Linux, so the
- * assertions that depend on it skip there.
+ * A directory with an `lsof` stand-in: it records a start and an end time
+ * (epoch milliseconds, one line per call) in `log`, waits `milliseconds`, then
+ * prints `output` and exits with `exitCode`. It never runs the real lsof, so
+ * the tests do not depend on how fast the real one is. lsof is only the
+ * process table off Linux, so the assertions that depend on it skip there.
  */
-function slowLsof(dir: string, seconds: number): { path: string; log: string } {
+function lsofShim(
+  dir: string,
+  options: { milliseconds?: number; output?: string; exitCode?: number } = {},
+): { path: string; log: string } {
   const bin = join(dir, "bin");
   mkdirSync(bin, { recursive: true });
   const log = join(dir, "lsof-calls.log");
-  // A fixed location first: another lsof wrapper on PATH must not run twice.
-  const real =
-    ["/usr/sbin/lsof", "/usr/bin/lsof"].find((file) => existsSync(file)) ??
-    spawnSync("sh", ["-c", "command -v lsof"], {
-      encoding: "utf8",
-    }).stdout.trim();
+  const script = join(bin, "lsof-shim.cjs");
   writeFileSync(
-    join(bin, "lsof"),
+    script,
     [
-      "#!/bin/sh",
-      `echo "$$" >> '${log}'`,
-      `sleep ${seconds}`,
-      `exec '${real}' "$@"`,
+      'const fs = require("node:fs");',
+      `const log = ${JSON.stringify(log)};`,
+      'fs.appendFileSync(log, "start " + Date.now() + "\\n");',
+      "setTimeout(() => {",
+      '  fs.appendFileSync(log, "end " + Date.now() + "\\n");',
+      `  process.stdout.write(${JSON.stringify(options.output ?? "")}, () => {`,
+      `    process.exit(${options.exitCode ?? 0});`,
+      "  });",
+      `}, ${options.milliseconds ?? 0});`,
       "",
     ].join("\n"),
+  );
+  writeFileSync(
+    join(bin, "lsof"),
+    ["#!/bin/sh", `exec '${process.execPath}' '${script}'`, ""].join("\n"),
     { mode: 0o755 },
   );
-  return { path: `${bin}:${process.env.PATH ?? ""}`, log };
+  return { path: bin, log };
+}
+
+/** The calls the shim logged: one `[start, end]` pair per call, in start order. */
+function lsofCalls(log: string): Array<[number, number]> {
+  if (!existsSync(log)) return [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  for (const line of readFileSync(log, "utf8").trim().split("\n")) {
+    const [kind, time] = line.split(" ");
+    (kind === "start" ? starts : ends).push(Number(time));
+  }
+  starts.sort((a, b) => a - b);
+  ends.sort((a, b) => a - b);
+  return starts.map((start, index): [number, number] => [start, ends[index]!]);
 }
 
 const usesLsof = process.platform !== "linux";
 
-describe("the sweep and a slow lsof", () => {
+describe("the sweep and a slow lsof", { timeout: 30_000 }, () => {
   it("never reads the process table when there is no root to sweep", async () => {
     const dir = mkdtempSync(join(work, "slow-"));
-    const shim = slowLsof(dir, 3);
-    const started = Date.now();
+    const shim = lsofShim(dir, { milliseconds: 3000 });
     expect(await sweepByCwd([], { PATH: shim.path })).toEqual({
       killed: [],
       unavailable: null,
@@ -1128,19 +1150,18 @@ describe("the sweep and a slow lsof", () => {
     });
     expect(guarded.swept).toEqual({ killed: [], unavailable: null });
     expect(existsSync(shim.log)).toBe(false);
-    expect(Date.now() - started).toBeLessThan(3000);
   });
 
   it.skipIf(!usesLsof)(
     "reads the process table through lsof when there is a root to sweep",
     async () => {
       const dir = mkdtempSync(join(work, "slow-"));
-      const shim = slowLsof(dir, 1);
+      const shim = lsofShim(dir);
       const swept = await sweepByCwd([join(dir, "root")], {
         PATH: shim.path,
       });
-      expect(swept.unavailable).toBeNull();
-      expect(readFileSync(shim.log, "utf8").trim().split("\n")).toHaveLength(1);
+      expect(swept).toEqual({ killed: [], unavailable: null });
+      expect(lsofCalls(shim.log)).toHaveLength(1);
     },
   );
 
@@ -1148,7 +1169,7 @@ describe("the sweep and a slow lsof", () => {
     "leaves the event loop running while lsof is slow",
     async () => {
       const dir = mkdtempSync(join(work, "slow-"));
-      const shim = slowLsof(dir, 2);
+      const shim = lsofShim(dir, { milliseconds: 2000 });
       let timerFired = false;
       setTimeout(() => {
         timerFired = true;
@@ -1162,18 +1183,61 @@ describe("the sweep and a slow lsof", () => {
     "lets sweeps of concurrent sessions overlap instead of queueing",
     async () => {
       const dir = mkdtempSync(join(work, "slow-"));
-      const shim = slowLsof(dir, 2);
-      const started = Date.now();
+      const shim = lsofShim(dir, { milliseconds: 2000 });
       await Promise.all(
         [1, 2, 3, 4].map((n) =>
           sweepByCwd([join(dir, `root-${n}`)], { PATH: shim.path }),
         ),
       );
-      // Queued behind one another the four calls take 8 s or more.
-      expect(Date.now() - started).toBeLessThan(6000);
-      expect(readFileSync(shim.log, "utf8").trim().split("\n")).toHaveLength(4);
+      const calls = lsofCalls(shim.log);
+      expect(calls).toHaveLength(4);
+      // Every call began before any call ended; queued, the second would
+      // start only after the first had ended.
+      const lastStart = Math.max(...calls.map(([start]) => start));
+      const firstEnd = Math.min(...calls.map(([, end]) => end));
+      expect(lastStart).toBeLessThan(firstEnd);
     },
   );
+
+  describe.skipIf(!usesLsof)("when lsof fails", () => {
+    it("reports the table as unavailable when lsof is not on PATH", async () => {
+      const dir = mkdtempSync(join(work, "slow-"));
+      const empty = join(dir, "empty-bin");
+      mkdirSync(empty);
+      const swept = await sweepByCwd([join(dir, "root")], { PATH: empty });
+      expect(swept.killed).toEqual([]);
+      expect(swept.unavailable).toMatch(/^lsof failed/);
+    });
+
+    it("reports the table as unavailable when lsof exits 127 without output", async () => {
+      const dir = mkdtempSync(join(work, "slow-"));
+      const shim = lsofShim(dir, { exitCode: 127 });
+      const swept = await sweepByCwd([join(dir, "root")], {
+        PATH: shim.path,
+      });
+      expect(swept.killed).toEqual([]);
+      expect(swept.unavailable).toMatch(/^lsof failed/);
+      expect(lsofCalls(shim.log)).toHaveLength(1);
+    });
+
+    it("still uses the output of an lsof that exits 1", async () => {
+      const dir = mkdtempSync(join(work, "slow-"));
+      const root = join(dir, "root");
+      mkdirSync(root);
+      const child = spawn("sleep", ["300"], { cwd: root, stdio: "ignore" });
+      try {
+        const shim = lsofShim(dir, {
+          output: `p${child.pid}\nfcwd\nn${root}\n`,
+          exitCode: 1,
+        });
+        const swept = await sweepByCwd([root], { PATH: shim.path });
+        expect(swept.unavailable).toBeNull();
+        expect(swept.killed.map((hit) => hit.pid)).toEqual([child.pid]);
+      } finally {
+        child.kill("SIGKILL");
+      }
+    });
+  });
 });
 
 describe("blindness and checkout guards", () => {
