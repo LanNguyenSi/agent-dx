@@ -655,14 +655,16 @@ test('the local search index builds with the same pages and holds the heading te
   assert.doesNotMatch(text, /<\/script/i)
 })
 
-test('an icon that is null, a number, a boolean or a list is dropped and the page builds', () => {
+test('an icon that is null, a boolean or a list is dropped, a finite number renders as text and the page builds', () => {
   const page = pages['icon-kinds']
   const home = app(page)
   assertNoLiveMarkup(home, ['VPFeatures'])
   const titles = [...home.matchAll(/<h2 class="title"[^>]*>([^<]*)<\/h2>/g)].map((m) => m[1])
-  assert.deepEqual(titles, ['iconnull', 'iconnumber', 'iconbool', 'iconlist', 'iconstring', 'iconobject'])
+  assert.deepEqual(titles, ['iconnull', 'iconnumber', 'iconzero', 'iconbool', 'iconlist', 'iconstring', 'iconobject'])
   assert.equal(tagsOf(home).filter((t) => t.name === 'img').length, 1)
   assert.match(home, /<div class="icon"[^>]*>✓<\/div>/)
+  assert.match(home, /<div class="icon"[^>]*>5<\/div>/)
+  assert.match(home, /<div class="icon"[^>]*>0<\/div>/)
   const icons = pageData('icon-kinds').frontmatter.features.map((f) => f.icon)
-  assert.deepEqual(icons, [undefined, undefined, undefined, undefined, '✓', { src: '/missing-kinds.png' }])
+  assert.deepEqual(icons, [undefined, '5', '0', undefined, undefined, '✓', { src: '/missing-kinds.png' }])
 })

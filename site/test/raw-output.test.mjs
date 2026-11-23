@@ -372,15 +372,19 @@ test('a themed image keeps light and dark with the same rule, and nothing else',
   assert.deepEqual(safeImage({ src: '/a.png', light: '/l.png', dark: { src: '/d.png' } }), { src: '/a.png' })
 })
 
-test('an icon that is neither text nor an image object is dropped, the other keys stay', () => {
-  for (const icon of [null, 5, 0, true, false, ['a'], [], () => 1, Symbol('s')]) {
+test('an icon that is neither text, a finite number nor an image object is dropped, the other keys stay', () => {
+  for (const icon of [null, true, false, ['a'], [], () => 1, Symbol('s'), NaN, Infinity, -Infinity]) {
     const out = sanitizeFrontmatter({ features: [{ title: 'T', details: 'D', icon, link: '/y' }] })
     assert.deepEqual(out.features, [{ title: 'T', details: 'D', link: '/y' }], String(icon))
     assert.equal('icon' in out.features[0], false)
   }
-  // Text, a date and an image object are still icons.
+  // Text, a date, a finite number and an image object are still icons. A
+  // finite number becomes its decimal string, so the theme renders it.
   assert.equal(sanitizeFrontmatter({ features: [{ icon: '<u>' }] }).features[0].icon, '&lt;u&gt;')
   assert.deepEqual(sanitizeFrontmatter({ features: [{ icon: { src: '/i.png' } }] }).features[0].icon, { src: '/i.png' })
+  assert.equal(sanitizeFrontmatter({ features: [{ icon: 5 }] }).features[0].icon, '5')
+  assert.equal(sanitizeFrontmatter({ features: [{ icon: 0 }] }).features[0].icon, '0')
+  assert.equal(sanitizeFrontmatter({ features: [{ icon: -1.5 }] }).features[0].icon, '-1.5')
 })
 
 test('hero.image and an icon object are limited, other hero and feature keys stay', () => {

@@ -5,6 +5,8 @@ features:
     icon: null
   - title: iconnumber
     icon: 5
+  - title: iconzero
+    icon: 0
   - title: iconbool
     icon: true
   - title: iconlist
