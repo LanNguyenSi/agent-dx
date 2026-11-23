@@ -1728,7 +1728,10 @@ interface ProbeCliOptions {
   file?: string;
   /** Optional for the same reason, except that `-p` does not derive a
    * line so much as report the one the patch changed: passing it with
-   * `-p` neither moves the mutation nor changes what is reported. */
+   * `-p` neither moves the mutation nor changes what is reported. For
+   * `-M`/`-w` an omitted `-n` asks `probe()` to derive the line from a
+   * unique occurrence of the `-M` text (see the derivation in
+   * `src/probe/index.ts`); `-r` still gets `requireLine` outright. */
   line?: number;
   replace?: string;
   match?: string;
@@ -2107,22 +2110,33 @@ type MutantChoice =
   | { form: "match"; matchText: string; withText: string }
   | { form: "patch"; patchPath: string };
 
-/** `-r/--replace` and `-M/--match` (with `-w/--with`) mutate a line the
+/** `-r/--replace` and `-M/--match` (with `-w/--with`) mutate a file the
  * caller names outright, so unlike `-p/--patch` they have nothing to
- * derive `--file`/`-n` from: both stay required for them. Commander's
- * own `requiredOption` no longer enforces this, since `--file` and `-n`
+ * derive `--file` from: it stays required for both. Commander's own
+ * `requiredOption` no longer enforces this, since `--file` and `-n`
  * had to become plain options so `-p` alone could omit them; checked
  * here instead, as a plain `UsageError` that flows through the same
  * `mapTopLevelError` path as every other usage error in this CLI. */
-function requireFileAndLine(opts: ProbeCliOptions, flag: string): void {
+function requireFile(opts: ProbeCliOptions, flag: string): void {
   if (opts.file === undefined) {
     throw new UsageError(
       `probe: --file is required for ${flag} (only -p/--patch can derive it from the patch)`,
     );
   }
+}
+
+/** The `-n/--line` half of the same check, still required for
+ * `-r/--replace`, which has nothing to derive a line from. `-M/--match`
+ * no longer asks for it: a `-M` run without `-n` asks `probe()` to
+ * derive the line from a unique occurrence of the `-M` text in `--file`
+ * (see the derivation in `src/probe/index.ts`), which refuses
+ * `match_not_found`/`match_ambiguous` when the text occurs on no line
+ * or several -- so what reaches a library `line_required` for the
+ * `match` form is only the file the derivation could not read. */
+function requireLine(opts: ProbeCliOptions, flag: string): void {
   if (opts.line === undefined) {
     throw new UsageError(
-      `probe: -n/--line is required for ${flag} (only -p/--patch can derive it from the patch)`,
+      `probe: -n/--line is required for ${flag} (only -p/--patch derives it from the patch, and -M/--match from a unique occurrence in --file)`,
     );
   }
 }
@@ -2151,11 +2165,12 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
         "probe: -M/--match and -w/--with must be given together",
       );
     }
-    requireFileAndLine(opts, "-M/--match and -w/--with");
+    requireFile(opts, "-M/--match and -w/--with");
     return { form: "match", matchText: opts.match, withText: opts.with };
   }
   if (hasReplace) {
-    requireFileAndLine(opts, "-r/--replace");
+    requireFile(opts, "-r/--replace");
+    requireLine(opts, "-r/--replace");
     return { form: "replace", replaceText: opts.replace as string };
   }
   return { form: "patch", patchPath: opts.patch as string };

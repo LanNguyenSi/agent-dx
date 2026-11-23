@@ -250,12 +250,19 @@ show:
 ```bash
 agent-primitives probe --file <path> -n <line> -r '<replacement>' -t '<test command>'
 agent-primitives probe --file <path> -n <line> -M '<substring>' -w '<replacement>' -t '<test command>'
+agent-primitives probe --file <path> -M '<substring>' -w '<replacement>' -t '<test command>'
 agent-primitives probe -p <patch> -t '<test command>'
 agent-primitives probe --plan <plan.json>
 agent-primitives verify -c build,typecheck,lint,test   # name only the checks the repo has a script for
 agent-primitives doctor
 agent-primitives guard <timeout-s> <max-rss-MiB> -- <command...>
 ```
+
+In the third template `-n <line>` is omitted on purpose: when the
+`-M` substring occurs on exactly one line of `--file`, the probe
+derives that line (the envelope warns that it did); when it occurs on
+none or on several, the run is a usage error (`match_not_found` or
+`match_ambiguous`) and mutates nothing.
 
 To read a probe's verdict, add `--summary` to any `probe` form instead
 of writing a python or jq reader of the JSON: one line per mutant (id as

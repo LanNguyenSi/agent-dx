@@ -45,7 +45,10 @@ for teams shipping with AI agents.
   `git diff` produces (not `--no-prefix` or `--relative`; such a patch is
   refused with a hint), may touch only the
   `--file` target, and applies the same in `inplace` and `worktree` isolation,
-  including when the log directory is inside the checkout.
+  including when the log directory is inside the checkout. `-M`/`-w` may
+  omit `-n/--line` when the `-M` text occurs on exactly one line of
+  `--file`: the probe derives that line (a warning says so) and refuses
+  `match_not_found`/`match_ambiguous` when it occurs on none or several.
 - `init`: installs the package's own skill document into a harness's skill
   directory.
 - `drift`: finds prose and comments that still cite an identifier a change

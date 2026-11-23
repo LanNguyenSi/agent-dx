@@ -20,6 +20,7 @@ import {
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
   listPatchTouchedPaths,
   derivedFileBaseHint,
+  matchLineNumbers,
   PATCH_MAX_BYTES,
   type MutantForm,
 } from "./mutant.js";
@@ -109,11 +110,14 @@ export interface ProbeOptions {
    * containment root. Every other form still requires it. */
   file?: string;
   /** 1-indexed line number of the line to mutate. Required for every
-   * form except `patch`, whose line is decided by the patch itself: the
+   * form except `patch` (whose line is decided by the patch itself: the
    * reported `mutant.line` is always the first line the applied diff
    * changes, and a `line` passed alongside `form: "patch"` is neither
    * used nor echoed -- when it names a different line, that disagreement
-   * is reported as a warning. */
+   * is reported as a warning) and `match`: a `match` run with no `line`
+   * derives one when exactly one line of `file` contains the `matchText`
+   * (a `warnings` entry says so, and the refusal is `match_not_found`
+   * or `match_ambiguous` when the text occurs on no line or several). */
   line?: number;
   form: MutantForm;
   replaceText?: string;
@@ -554,6 +558,13 @@ export function patchUnusableReason(
   return undefined;
 }
 
+/** How many line numbers the `match_ambiguous` refusal of the `-n`
+ * derivation lists before closing with "and N more": the full count is
+ * always in the message, only the list is capped, so the refusal stays
+ * one readable line for a `-M` text that occurs on hundreds of lines.
+ * The same 20 the plan-result truncation notice uses above. */
+const MATCH_LINE_LIST_CAP = 20;
+
 /**
  * Runs the full probe pipeline: containment -> lock -> stale-marker
  * recovery -> baseline -> mutate -> pre+test -> restore -> verify ->
@@ -644,12 +655,14 @@ async function runProbePipeline(
   // an explicit `--file` is ambiguous and refused outright, rather than
   // guessed at: the caller has to say which one is the mutation target.
   //
-  // `-n/--line` is NOT derived here, and for the `patch` form it is not
+  // `-n/--line` is NOT derived here (the `match` form's own derivation,
+  // from a unique `-M/--match` occurrence, runs once `displayFile` is
+  // known, below), and for the `patch` form it is not
   // required at all: the line a patch changes is whatever the applied
   // diff changed, which the dry run below reports back as
   // `computed.line`. Nothing between here and there needs it.
   let displayFile: string;
-  const line = opts.line;
+  let line = opts.line;
   let derivationLogPaths: string[] = [];
   // Check the `-p/--patch` path once here, before anything else looks
   // at it: an unusable `-p` (missing, a directory or another
@@ -734,8 +747,76 @@ async function runProbePipeline(
       isolation: isolationField,
     };
   }
+  // A `match` run with no `-n/--line` gets one from its own `-M` text
+  // before the requirement below is enforced: when exactly one line of
+  // the file contains the text, that line is the only one the run could
+  // honestly mean, so the probe continues as if `-n <that line>` had
+  // been given (the derived number lands in `mutant.line` like an
+  // explicit one, and a `warnings` entry says it was derived). No line
+  // containing the text is `match_not_found`; several are
+  // `match_ambiguous`, listing the numbers (capped at
+  // `MATCH_LINE_LIST_CAP`) and asking for `-n`. The read is of
+  // `displayFile` itself -- the same resolution the mutation and every
+  // later check use, before any isolation copy exists -- and it counts
+  // LINES (see `matchLineNumbers`). An unreadable file is NOT diagnosed
+  // here: the line stays underived and the `line_required` refusal
+  // below reports the missing `-n` exactly as it did before this
+  // derivation existed, leaving the file's own problem
+  // (`file_not_found`, a permissions refusal) to the checks that know
+  // how to name it once `-n` is supplied. Both refusals fire before the
+  // lock, the marker and any worktree exist, so neither leaves anything
+  // behind.
+  if (
+    opts.form === "match" &&
+    line === undefined &&
+    opts.matchText !== undefined
+  ) {
+    let derivationContent: string | undefined;
+    try {
+      derivationContent = fs.readFileSync(displayFile, "utf8");
+    } catch {
+      derivationContent = undefined;
+    }
+    if (derivationContent !== undefined) {
+      const hits = matchLineNumbers(derivationContent, opts.matchText);
+      if (hits.length === 1) {
+        line = hits[0];
+        warnings.push(
+          `-n/--line derived from the unique -M/--match occurrence: line ${String(line)} of ${displayFile}`,
+        );
+      } else if (hits.length === 0) {
+        return {
+          status: "usage_error",
+          reason: "match_not_found",
+          warnings: [
+            ...warnings,
+            `-M/--match text ${JSON.stringify(opts.matchText)} occurs on no line of ${displayFile}`,
+          ],
+          isolation: isolationField,
+          dryRunLogPaths: derivationLogPaths,
+        };
+      } else {
+        const listed = hits.slice(0, MATCH_LINE_LIST_CAP);
+        const more = hits.length - listed.length;
+        return {
+          status: "usage_error",
+          reason: "match_ambiguous",
+          warnings: [
+            ...warnings,
+            `-M/--match text ${JSON.stringify(opts.matchText)} occurs on ${String(hits.length)} lines of ${displayFile}: ${listed.join(", ")}${
+              more > 0 ? `, and ${String(more)} more` : ""
+            }; pass -n/--line to name the line to mutate`,
+          ],
+          isolation: isolationField,
+          dryRunLogPaths: derivationLogPaths,
+        };
+      }
+    }
+  }
   // `patch` is exempt: its line comes from the applied diff, so there is
-  // nothing for the caller to be required to supply.
+  // nothing for the caller to be required to supply; a `match` run
+  // reached here without one only when the derivation above could not
+  // read the file, or got no `-M` text to derive from.
   if (line === undefined && opts.form !== "patch") {
     return {
       status: "usage_error",
