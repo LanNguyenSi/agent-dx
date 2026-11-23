@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "rule": "file",
+      "file": "testplan.yaml",
+      "path": "$",
+      "code": "input-missing"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

@@ -1,0 +1,3 @@
+- rule: "goal-count"
+  id: "GOAL"
+  reason: "an error cannot be acknowledged"

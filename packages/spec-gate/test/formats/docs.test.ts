@@ -73,3 +73,18 @@ describe("docs/formats.md", () => {
     expect(doc).not.toContain("/Users/");
   });
 });
+
+describe("docs/lint.md", () => {
+  const lintDoc = fs.readFileSync(
+    fileURLToPath(new URL("../../docs/lint.md", import.meta.url)),
+    "utf8",
+  );
+
+  it("carries no run identifiers, dates, long dashes or home paths", () => {
+    expect(lintDoc).not.toMatch(/\b(?:F|N|P|Q|R5|D|O|T)-\d+\b/);
+    expect(lintDoc).not.toMatch(/\b20\d\d-\d\d-\d\d\b(?!T)/);
+    expect(lintDoc).not.toContain(String.fromCharCode(0x2014));
+    expect(lintDoc).not.toContain(String.fromCharCode(0x2013));
+    expect(lintDoc).not.toContain("/Users/");
+  });
+});

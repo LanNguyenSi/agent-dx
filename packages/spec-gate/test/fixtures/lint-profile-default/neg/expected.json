@@ -1,0 +1,12 @@
+{
+  "errors": [],
+  "warnings": [
+    {
+      "rule": "profile-default",
+      "file": "triage.json",
+      "path": "$",
+      "id": "triage"
+    }
+  ],
+  "acked": []
+}

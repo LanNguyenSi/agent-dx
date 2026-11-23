@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "rule": "ack-invalid",
+      "file": "acks.yaml",
+      "path": "[0]"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

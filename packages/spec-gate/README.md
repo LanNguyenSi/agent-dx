@@ -2,9 +2,10 @@
 
 `spec-gate` turns a ticket or intent into a checked, reviewable spec and
 test plan before implementation starts. The package is young: the CLI
-answers `--help` and `--version` and runs the `intake file`, `triage`
-and `digest` verbs described below, and further capabilities land as subcommands on top of this entry
-point as they are built.
+answers `--help` and `--version` and runs the `intake file`, `triage`,
+`digest`, `lint` and `lint-ack` verbs described below, and further
+capabilities land as subcommands on top of this entry point as they are
+built.
 
 ## Commands
 
@@ -19,6 +20,14 @@ temporary file renamed into place, and prints the derivation; a
 `triage.json` that is a symlink, or a file or directory that cannot be
 written, is refused with a named error. The rule is documented in
 [docs/triage.md](docs/triage.md).
+
+`spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>]`
+checks a spec directory and prints one JSON report line (`spec-gate-lint/1`);
+it exits 0 without errors, 1 with findings (with `--strict`, also for
+unacknowledged warnings) and 2 on a usage error. `spec-gate lint-ack <spec-dir>
+<rule> <id> --reason <text>` acknowledges one warning in `acks.yaml`. The
+rules, the report, profiles and exit codes are described in
+[docs/lint.md](docs/lint.md); the code lives in `src/lint/`.
 
 ## Formats
 

@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "rule": "non-goals-empty",
+      "file": "spec.md",
+      "path": "Non-goals"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}
