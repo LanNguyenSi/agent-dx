@@ -15,7 +15,7 @@ import type {
   TestPlan,
   Triage,
 } from "../formats/index.js";
-import type { SourceMetaLines } from "./meta.js";
+import type { LintSourceMeta } from "./meta.js";
 
 export type Level = "error" | "warning";
 export type Profile = "light" | "full";
@@ -99,17 +99,26 @@ export interface LintInputs {
   bindings: Loaded<Bindings>;
   questions: Loaded<Questions>;
   triage: Loaded<Triage>;
-  meta: Loaded<SourceMetaLines>;
+  meta: Loaded<LintSourceMeta>;
 }
 
 /**
- * Where rules that read the repository get it. No rule in the engine reads
- * it; the field is the seam for rules that need a repository and a base
- * revision. The engine skips a rule that needs it while it is absent.
+ * The repository a rule that needs git reads, resolved once before any rule
+ * runs (`resolveGitInputs`): every commit is a full commit id of a commit
+ * object in `repo`. The lint only reads; it never fetches.
  */
 export interface GitInputs {
+  /** The top level of the work tree; never printed in a report. */
   repo: string;
-  base: string;
+  /**
+   * The commit the ancestry checks compare against: `--base` when given
+   * (the pull request base), otherwise the commit `--default-ref` names.
+   */
+  reference: string;
+  /** `merge-base(head, reference)`: the commit a diff of the spec change starts at. */
+  diffBase: string;
+  /** `HEAD` of the repository. */
+  head: string;
 }
 
 export interface RuleContext {

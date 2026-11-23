@@ -1,0 +1,5 @@
+{
+  "base_commit": "0123456789abcdef0123456789abcdef01234567",
+  "commands_ref": "0123456789abcdef0123456789abcdef01234567",
+  "lines": [{ "id": "L1-0123456789ab", "kind": "text" }]
+}

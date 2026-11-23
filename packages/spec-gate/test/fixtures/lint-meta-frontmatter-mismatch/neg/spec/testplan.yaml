@@ -1,0 +1,8 @@
+- id: TP-1
+  covers: [AC-1]
+  kind: red-first
+  claim: "an old token is rejected after a password change"
+  input: "old token after a password change"
+  expected: "HTTP 401"
+  oracle: "AC-1"
+  red_reason: "the endpoint does not invalidate tokens today"

@@ -237,14 +237,35 @@ describe("loader findings", () => {
 
 describe("parseSourceMeta", () => {
   const line = { id: "L1-0123456789ab", kind: "text" };
+  const sha1 = "0123456789abcdef0123456789abcdef01234567";
+  const sha256 = "0123456789abcdef".repeat(4);
+  const commits = { base_commit: sha1, commands_ref: sha1 };
+  const meta = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ ...commits, ...extra });
 
-  it("accepts a list of { id, kind } and ignores the other fields", () => {
-    expect(
-      parseSourceMeta(JSON.stringify({ sha256: "x", lines: [line] })),
-    ).toEqual({ ok: true, value: { lines: [line] } });
-    expect(parseSourceMeta('{"lines": []}')).toEqual({
+  it("accepts the commits and a list of { id, kind } and ignores the other fields", () => {
+    expect(parseSourceMeta(meta({ sha256: "x", lines: [line] }))).toEqual({
       ok: true,
-      value: { lines: [] },
+      value: { ...commits, lines: [line] },
+    });
+    expect(parseSourceMeta(meta({ lines: [] }))).toEqual({
+      ok: true,
+      value: { ...commits, lines: [] },
+    });
+  });
+
+  it("accepts a 64-digit commit id, the SHA-256 object format", () => {
+    expect(
+      parseSourceMeta(
+        JSON.stringify({
+          base_commit: sha256,
+          commands_ref: sha256,
+          lines: [],
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      value: { base_commit: sha256, commands_ref: sha256, lines: [] },
     });
   });
 
@@ -255,13 +276,46 @@ describe("parseSourceMeta", () => {
     };
     expect(codes("{ nope")).toEqual(["invalid-json $"]);
     expect(codes("[]")).toEqual(["wrong-type $"]);
-    expect(codes("{}")).toEqual(["missing-field lines"]);
-    expect(codes('{"lines": {}}')).toEqual(["wrong-type lines"]);
+    expect(codes(meta())).toEqual(["missing-field lines"]);
+    expect(codes(meta({ lines: {} }))).toEqual(["wrong-type lines"]);
+  });
+
+  it("rejects a missing, mistyped or malformed base_commit and commands_ref, each on its own", () => {
+    const codes = (over: Record<string, unknown>) => {
+      const r = parseSourceMeta(
+        JSON.stringify({ lines: [], ...commits, ...over }),
+      );
+      return r.ok ? [] : r.errors.map((e) => `${e.code} ${e.path}`);
+    };
+    const without = (key: string) => {
+      const rest: Record<string, unknown> = { ...commits };
+      delete rest[key];
+      const r = parseSourceMeta(JSON.stringify({ lines: [], ...rest }));
+      return r.ok ? [] : r.errors.map((e) => `${e.code} ${e.path}`);
+    };
+    expect(codes({})).toEqual([]);
+    expect(without("base_commit")).toEqual(["missing-field base_commit"]);
+    expect(without("commands_ref")).toEqual(["missing-field commands_ref"]);
+    expect(codes({ base_commit: 7 })).toEqual(["wrong-type base_commit"]);
+    expect(codes({ commands_ref: null })).toEqual(["wrong-type commands_ref"]);
+    // a branch name, an abbreviation, upper case and a 41-digit id are no commit ids
+    for (const bad of ["main", "0123456", sha1.toUpperCase(), `${sha1}0`, ""]) {
+      expect(codes({ base_commit: bad }), bad).toEqual([
+        "invalid-value base_commit",
+      ]);
+      expect(codes({ commands_ref: bad }), bad).toEqual([
+        "invalid-value commands_ref",
+      ]);
+    }
+    expect(codes({ base_commit: "x", commands_ref: "y" })).toEqual([
+      "invalid-value base_commit",
+      "invalid-value commands_ref",
+    ]);
   });
 
   it("rejects an entry with a bad id, kind or shape, and a repeated id", () => {
     const codes = (lines: unknown[]) => {
-      const r = parseSourceMeta(JSON.stringify({ lines }));
+      const r = parseSourceMeta(meta({ lines }));
       return r.ok ? [] : r.errors.map((e) => `${e.code} ${e.path}`);
     };
     expect(codes(["x"])).toEqual(["wrong-type lines[0]"]);

@@ -41,9 +41,16 @@ function runFixture(dir: string) {
   return { report, expected };
 }
 
+/**
+ * A rule that needs git cannot have a static fixture directory (a nested
+ * `.git` is not committable): its passing and failing cases are built in
+ * `git-rules.test.ts`, which has a guard that every such rule has both.
+ */
+const STATIC_RULES = RULES.filter((rule) => rule.needsGit !== true);
+
 describe("lint fixtures", () => {
-  it("every registered rule has a positive and a negative fixture", () => {
-    for (const rule of RULES) {
+  it("every registered rule that does not need git has a positive and a negative fixture", () => {
+    for (const rule of STATIC_RULES) {
       for (const kind of ["pos", "neg"]) {
         const dir = path.join(FIXTURES, `lint-${rule.id}`, kind);
         expect(
@@ -62,15 +69,15 @@ describe("lint fixtures", () => {
     }
   });
 
-  it("no fixture directory names a rule that is not registered", () => {
-    const ids = new Set(RULES.map((r) => `lint-${r.id}`));
+  it("no fixture directory names a rule that is not registered, or one that needs git", () => {
+    const ids = new Set(STATIC_RULES.map((r) => `lint-${r.id}`));
     for (const name of fs.readdirSync(FIXTURES)) {
       if (!name.startsWith("lint-") || name === "lint-valid") continue;
       expect(ids.has(name), name).toBe(true);
     }
   });
 
-  for (const rule of RULES) {
+  for (const rule of STATIC_RULES) {
     it(`${rule.id}: the positive fixture raises no finding of the rule`, () => {
       const dir = path.join(FIXTURES, `lint-${rule.id}`, "pos");
       const { report } = runFixture(dir);

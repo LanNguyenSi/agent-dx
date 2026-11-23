@@ -182,7 +182,24 @@ program
   )
   .option(
     "--config <path>",
-    "a .spec-gate/config.yaml-format file for the rules that read repo-wide settings",
+    "a .spec-gate/config.yaml-format file for the rules that read repo-wide settings; " +
+      "not allowed with --default-ref or --base (the config is read at the reference commit then)",
+  )
+  .option(
+    "--repo <dir>",
+    "git work tree for the reference-state rules (default: the git top level of <spec-dir>); " +
+      "<spec-dir> must lie inside it",
+  )
+  .option(
+    "--default-ref <ref>",
+    "full ref name under refs/ (for example refs/remotes/origin/main) of the fetched default branch, " +
+      "the reference commit for the ancestry checks; resolved offline, never fetched. " +
+      "Without --default-ref and --base the git rules are skipped (no-git)",
+  )
+  .option(
+    "--base <commit>",
+    "full commit id of the pull request base: the reference commit for the ancestry checks " +
+      "and, with HEAD, the merge base the diff of .spec-gate/ starts at; wins over --default-ref",
   )
   .exitOverride((err: CommanderError) => {
     throw err;
@@ -195,6 +212,9 @@ program
         final?: boolean;
         profile?: "light" | "full";
         config?: string;
+        repo?: string;
+        defaultRef?: string;
+        base?: string;
       },
     ) => {
       const result = lintSpecDir(specDir, {
@@ -202,6 +222,11 @@ program
         final: options.final,
         profile: options.profile,
         configPath: options.config,
+        git: {
+          repo: options.repo,
+          defaultRef: options.defaultRef,
+          base: options.base,
+        },
       });
       if (!result.ok) {
         process.stderr.write(`spec-gate: ${result.message}\n`);

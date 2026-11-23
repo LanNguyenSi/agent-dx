@@ -1,0 +1,37 @@
+{
+  "options": {
+    "final": true
+  },
+  "errors": [
+    {
+      "rule": "rule-skipped",
+      "file": "$",
+      "path": "$",
+      "id": "base-commit-not-ancestor",
+      "code": "no-git"
+    },
+    {
+      "rule": "rule-skipped",
+      "file": "$",
+      "path": "$",
+      "id": "commands-ref-not-ancestor",
+      "code": "no-git"
+    },
+    {
+      "rule": "rule-skipped",
+      "file": "$",
+      "path": "$",
+      "id": "spec-changes-config",
+      "code": "no-git"
+    },
+    {
+      "rule": "rule-skipped",
+      "file": "$",
+      "path": "$",
+      "id": "static-command-unknown",
+      "code": "no-git"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

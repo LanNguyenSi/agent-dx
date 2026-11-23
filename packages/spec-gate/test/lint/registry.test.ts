@@ -17,7 +17,7 @@ describe("rule registry", () => {
     for (const id of ids) expect(id, id).toMatch(RULE_ID_RE);
   });
 
-  it("registers the engine, form and content rules in the order of the docs", () => {
+  it("registers the engine, form, content and reference-state rules in the order of the docs", () => {
     expect(RULES.map((r) => r.id)).toEqual([
       "file",
       "format",
@@ -25,6 +25,7 @@ describe("rule registry", () => {
       "profile-mismatch",
       "profile-default",
       "ack-invalid",
+      "rule-skipped",
       "ack-unused",
       "goal-count",
       "ac-coverage",
@@ -44,12 +45,27 @@ describe("rule registry", () => {
       "prose",
       "question-budget",
       "triage-stale",
+      "meta-frontmatter-mismatch",
+      "base-commit-not-ancestor",
+      "commands-ref-not-ancestor",
+      "spec-changes-config",
+      "static-command-unknown",
     ]);
   });
 
-  it("the engine and form rules run in both profiles; so does triage-stale, the rest of the content rules is full only", () => {
+  it("the engine, form and reference-state rules run in both profiles; so does triage-stale, the rest of the content rules is full only", () => {
+    const REFS = new Set([
+      "meta-frontmatter-mismatch",
+      "base-commit-not-ancestor",
+      "commands-ref-not-ancestor",
+      "spec-changes-config",
+      "static-command-unknown",
+    ]);
     for (const rule of RULES) {
-      const fullOnly = RULES.indexOf(rule) >= 10 && rule.id !== "triage-stale";
+      const fullOnly =
+        RULES.indexOf(rule) >= 11 &&
+        rule.id !== "triage-stale" &&
+        !REFS.has(rule.id);
       expect(rule.profiles, rule.id).toEqual(
         fullOnly ? ["full"] : ["light", "full"],
       );
@@ -91,7 +107,34 @@ describe("rule registry", () => {
       "prose",
       "question-budget",
       "triage-stale",
+      "meta-frontmatter-mismatch",
+      "base-commit-not-ancestor",
+      "commands-ref-not-ancestor",
+      "spec-changes-config",
+      "static-command-unknown",
     ]);
+  });
+
+  it("exactly the four repository rules need git, and every reference-state rule is an error that cannot be acknowledged", () => {
+    expect(RULES.filter((r) => r.needsGit === true).map((r) => r.id)).toEqual([
+      "base-commit-not-ancestor",
+      "commands-ref-not-ancestor",
+      "spec-changes-config",
+      "static-command-unknown",
+    ]);
+    for (const id of [
+      "rule-skipped",
+      "meta-frontmatter-mismatch",
+      "base-commit-not-ancestor",
+      "commands-ref-not-ancestor",
+      "spec-changes-config",
+      "static-command-unknown",
+    ]) {
+      const rule = RULES.find((r) => r.id === id)!;
+      expect(rule.level, id).toBe("error");
+      expect(rule.ackable, id).toBe(false);
+      expect(rule.gated, id).toBe(false);
+    }
   });
 });
 
@@ -168,9 +211,8 @@ describe("activeRules", () => {
   it("a rule that needs git is skipped without a repository", () => {
     const git = [rule({ needsGit: true })];
     expect(ids(git, ctx())).toEqual([]);
-    expect(ids(git, ctx({ git: { repo: "r", base: "b" } }))).toEqual([
-      "test-rule",
-    ]);
+    const inputs = { repo: "r", reference: "a", diffBase: "b", head: "c" };
+    expect(ids(git, ctx({ git: inputs }))).toEqual(["test-rule"]);
   });
 
   it("a rule needs its inputs parsed; an absent or failed one skips it", () => {
@@ -220,7 +262,11 @@ describe("the engine applies the registry", () => {
     const final = run({}, true);
     expect(final.mode).toBe("final");
     expect(final.status).toBe("draft");
-    expect(final.errors.map((f) => f.rule)).toEqual(["gated-test"]);
+    // the four rules that need a repository did not run: that is a final error
+    expect(final.errors.map((f) => f.rule)).toEqual([
+      ...Array(4).fill("rule-skipped"),
+      "gated-test",
+    ]);
   });
 
   it("the level of a finding is the registered level, not the rule's choice", () => {
