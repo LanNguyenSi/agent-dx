@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `probe -M`/`-w` may now omit `-n`/`--line`: when the `-M` text occurs
+  on exactly one line of `--file` (lines counted, not occurrences, and
+  a text containing a newline never matches one), the probe derives
+  that line and runs as if `-n <that line>` had been given --
+  `mutant.line` carries it and a `warnings` entry says it was derived
+  from the unique `-M` occurrence. The text occurring on no line is a
+  `usage_error` with `reason: "match_not_found"` and on several lines a
+  `usage_error` with `reason: "match_ambiguous"` listing the line
+  numbers (the first 20, the rest as a count) and asking for `-n`; both
+  name the file and the text and leave nothing behind. An explicit
+  `-n` never triggers the search (its `mutant_not_applicable` refusal
+  is unchanged), `-r` still requires `-n`, `-M` still requires
+  `--file`, and `--plan` and plan entries are untouched. The search
+  reads only a contained (or `--allow-outside`, where the isolation
+  accepts it) regular file of at most 8 MiB: a regular file over that
+  cap refuses with `reason: "line_required"` naming the file and its
+  size and asking for `-n`, and every other file shape (outside the
+  root, a FIFO, a directory, missing, an empty `-M`) gets the same
+  answer as the same run with `-n`.
 - `verify` can write evidence envelopes and run checks without a shell.
   `--evidence <file>` (with `--phase baseline|closure`, `--producer
   ci|host|local` and, for `ci`, `--ci-run`) writes one JSON line per

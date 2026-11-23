@@ -9,16 +9,18 @@ the result. Part of the [agent-primitives](../README.md) CLI.
 ## Options
 
 Exactly one mutant form (`-r`, `-M` with `-w`, or `-p`) is required
-unless `--plan` supplies the mutants. The global options (`-f`, `-C`,
-`-m`, `-l`, `--json`; see [Output shape](output-shape.md)) apply as for
-every command.
+unless `--plan` supplies the mutants. `-M`/`-w` may omit `-n, --line`
+when the `-M` text occurs on exactly one line of `--file`: the line is
+derived (see [Mutant forms](#mutant-forms--r--m-w--p)). The global
+options (`-f`, `-C`, `-m`, `-l`, `--json`; see
+[Output shape](output-shape.md)) apply as for every command.
 
 | Option | Meaning | Default |
 | --- | --- | --- |
 | `--file <path>` | file to mutate; long-only, since the global `-f` is `--format` | required unless `-p` derives it from a single-path patch |
-| `-n, --line <n>` | 1-indexed line to mutate | required except with `-p` |
+| `-n, --line <n>` | 1-indexed line to mutate | required except with `-p` and with `-M`/`-w` when the `-M` text occurs on exactly one line of `--file` (then derived) |
 | `-r, --replace <text>` | replace the whole line with this text | none |
-| `-M, --match <substr>` | substring to find on the line; requires `-w` | none |
+| `-M, --match <substr>` | substring to find on the line; requires `-w`; with `-n` omitted, must occur on exactly one line of `--file` (that line is derived) | none |
 | `-w, --with <text>` | replacement for the first match of `-M` | none |
 | `-p, --patch <path>` | unified diff, applied with `git apply`; a relative path resolves against `-C/--cwd`, the same base as `--file` and a plan patch | none |
 | `-t, --test <command>` | shell command that runs the test | required unless `--plan` supplies it |
@@ -192,10 +194,51 @@ agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
   -t 'npm test'
 agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
   -t 'npm test' -i inplace
+agent-primitives probe --file src/foo.js -M 'n > 0' -w 'n >= 0' \
+  -t 'npm test' -i inplace
 agent-primitives probe -p mutant.patch -t 'npm test'
 agent-primitives verify -c build,typecheck,lint,test
 agent-primitives doctor
 ```
+
+The `-M`/`-w` form may omit `-n` (the third command above): when the
+`-M` text occurs on exactly one line of `--file`, that line is the only
+one the run could mean, so the probe derives it and runs as if `-n
+<that line>` had been given -- `mutant.line` carries the derived number
+and a `warnings` entry says it was derived from the unique `-M`
+occurrence. The text occurring on no line is a `usage_error` with
+`reason: "match_not_found"`, and on several lines a `usage_error` with
+`reason: "match_ambiguous"` listing the line numbers (the first 20, the
+rest as a count) and asking for `-n`; both name the file and the text,
+and both fire before the lock, the marker and any worktree exist, so
+neither leaves anything behind. The search reads the `--file` the probe
+would mutate (before any isolation copy), counts LINES not occurrences
+(two hits on one line derive that line), and a `-M` text containing a
+newline therefore matches no line at all. It reads only a file the run
+could honestly mutate, checked by metadata before anything is opened:
+the path is resolved exactly as the mutation resolves it, and the
+search runs only when it lies within the containment root (or
+`--allow-outside` is given and the run's effective isolation accepts it:
+with `-i worktree` in a git work tree that flag pair is refused by
+`worktree_allow_outside_unsupported`, so the derivation reads nothing and
+that refusal answers, as with an explicit `-n`) and `statSync` reports a regular file of at most the 8&nbsp;MiB
+`MATCH_DERIVATION_MAX_BYTES` cap (the same bound as `-p`'s
+`PATCH_MAX_BYTES`). A resolved `--file` outside the root, a not-a-regular
+file (a FIFO, a directory) and a missing file are never read -- the run
+then answers exactly what the same run with an explicit `-n` answers
+(`file_outside_root`, the not-a-regular-file refusal, `file_not_found`),
+and a regular file that cannot be read (no read permission) gets the
+answer of the same run with `-n` too;
+a regular file over the cap is never read either, and instead refuses
+as a `usage_error` (`reason: "line_required"`) naming the file and its
+size and saying to pass `-n`, which reads the file anyway because the
+mutation itself must. An empty `-M` text is never searched (every line
+contains it, so the search would answer `match_ambiguous` for any
+multi-line file): the existing `mutant_not_applicable` refusal
+`-M/--match text must not be empty` answers, the same one an explicit
+`-n` run gets. An explicit `-n` always wins: it never triggers the
+search, and a `-M` text missing from the named line stays the existing
+`mutant_not_applicable` refusal.
 
 The third form needs neither `--file` nor `-n`. `--file` is derived from
 the single path the patch touches (resolved against the containment
@@ -431,8 +474,17 @@ regenerate the patch from the repository root.
 
 `file_required` and `line_required` are `reason` values a library
 caller of `probe()` can see when it omits `--file`/`-n` for a form that
-cannot derive them; the CLI never emits either, since `requireFileAndLine`
-(see `cli.ts`) rejects that case before `probe()` is even called.
+cannot derive them (for `line`, a `-M`/`-w` run with no `-M` text, or
+one whose `--file` is over the derivation's size cap, counts as such a
+form; a run the derivation declined for the file's shape -- outside
+the root, not a regular file, missing, or a regular file that cannot
+be read -- is not: it answers what the same run with an explicit `-n`
+answers). The CLI never emits `file_required`,
+since `requireFile` (see `cli.ts`) rejects that case before `probe()`
+is even called; it can emit `line_required` only for those `-M`/`-w`
+cases, and otherwise hands the library's `line_required`,
+`match_not_found` and `match_ambiguous` refusals through unchanged
+(exit `2`, the reason in `reason`, the detail in `warnings`).
 
 ## Isolation (-i worktree / -i inplace)
 
@@ -1277,9 +1329,12 @@ mutant form is required: `-r, --replace` (replace the whole line),
 `-M, --match` with `-w, --with` (replace the first occurrence of a
 substring on the line), or `-p, --patch` (apply a unified diff via
 `git apply`, applied against the worktree for `-i worktree`, against
-the working tree itself for `-i inplace`). `--file` and `-n, --line`
-are required for `-r` and for `-M`/`-w`, which have nothing to derive
-them from; `-p` alone needs neither, as described above.
+the working tree itself for `-i inplace`). `--file` is required for
+`-r` and for `-M`/`-w`; `-n, --line` is required for `-r`, which has
+nothing to derive it from, while `-M`/`-w` may omit it and have it
+derived from a unique occurrence of the `-M` text in `--file` (see
+[Mutant forms](#mutant-forms--r--m-w--p)); `-p` alone needs neither, as
+described above.
 
 `-p, --patch` supports a patch whose applied result deletes the whole
 target file (a `deleted file mode`/`+++ /dev/null` unified diff, the
@@ -2718,14 +2773,22 @@ fails to compile); `test/probe-refusal-contract.test.ts` provokes every
 row below through `probe()` itself and asserts the presence matches
 exactly, in both directions, so this table cannot drift from what
 `REFUSAL_RESULT_SHAPE` itself declares, and every reason below is
-provoked at the table-named site the row below describes. Eight more
+provoked at the table-named site the row below describes. Eleven more
 `usage_error` reasons fire earlier, in `probe()`'s own option-shape
 checks (`src/probe/index.ts`), before `openRunSetup` is ever called:
 `--patch` combined with `--allow-outside` outside its supported shape
 (`patch_allow_outside_unsupported`), an unreadable `--patch` file
 (`patch_not_readable`), a `--patch` whose touched paths cannot pick a
 single `--file` for it (`patch_file_ambiguous`), a missing `--file`
-(`file_required`), a missing `-n`/`--line` (`line_required`), and a
+(`file_required`), a missing `-n`/`--line` where nothing can derive it
+(`line_required`: always for `-r`, and for `-M`/`-w` only when there is
+no `-M` text to derive from, or the file is over the `-n` derivation's
+size cap -- the message then names the file and says to pass `-n`), a
+`-M`/`--match` text
+that occurs on no line of `--file` for a `-n`-less `-M`/`-w` run
+(`match_not_found`), and the same text occurring on several lines
+(`match_ambiguous`, the message listing the line numbers -- the first
+20, the rest as a count -- and asking for `-n`), and a
 `--link`/`--plan` file's/defaults file's `link` value whose source is
 not an existing directory (`link_source_not_found`, see "Non-JS
 repositories" above), and a repository defaults file

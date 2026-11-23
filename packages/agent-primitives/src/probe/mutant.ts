@@ -475,6 +475,29 @@ function computeMatch(
 }
 
 /**
+ * The 1-indexed numbers of the lines of `content` that contain
+ * `matchText`, at most one entry per line however often the text
+ * occurs on it: this decides the `-n/--line` a `-M/--match` run with
+ * no `-n` derives (see `src/probe/index.ts`), and the line such a
+ * mutant mutates is one line, so the derivation counts lines, not
+ * occurrences. The split is on `"\n"` alone, exactly the split
+ * `computeMatch` mutates through, so a line hit here is a line that
+ * same function can apply to (`\r` kept as part of the line), and a
+ * `matchText` containing a newline can therefore never match a line
+ * here -- it is a `match_not_found` for a line-less run, never a hit.
+ * An empty `matchText` counts as contained in every line, the plain
+ * `String.includes("")` sense the search is defined in.
+ */
+export function matchLineNumbers(content: string, matchText: string): number[] {
+  const hits: number[] = [];
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(matchText)) hits.push(i + 1);
+  }
+  return hits;
+}
+
+/**
  * The first line at which `a` and `b` differ: its 1-indexed number in
  * `a` plus that line's content on each side. This is what the `patch`
  * form reports as `mutant.line`/`before`/`after`, and the three come
