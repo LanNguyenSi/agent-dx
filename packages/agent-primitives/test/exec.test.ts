@@ -2,7 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
-import { execCommand, signalNumberFromExitCode } from "../src/exec.js";
+import {
+  execCommand,
+  signalNumberFromExitCode,
+  stdioWatchBoundMs,
+} from "../src/exec.js";
 import { execCommand as execCommandFromIndex } from "../src/index.js";
 
 const tmpDirs: string[] = [];
@@ -297,17 +301,31 @@ describe("execCommand", () => {
 
     // Same shape as the flush-grace test above (a detached, stdio:
     // 'inherit' grandchild the group-kill cannot reach), but this
-    // worker holds the pipes for exactly 600ms -- comfortably past the
-    // 250ms flush grace -- then exits on its own, so `onStdioClosed`
-    // firing at (and not before) that 600ms mark is proof this call
-    // waited for a genuine close rather than forcing one the moment it
-    // gave up on the flush grace.
+    // worker holds the pipes for 3000ms -- twelve times the 250ms
+    // flush grace -- and stamps the wall clock twice with its own
+    // `Date.now()`: once at the top of its script, once immediately
+    // before it exits. Every bound below is then an ordering against
+    // those two stamps, measured by the worker's own clock, never a
+    // budget counted from this test's `Date.now()` call, so a loaded
+    // machine spending an extra half-second on node start-ups cannot
+    // eat the margin.
+    // `onStdioClosed` firing only between the worker's own start and
+    // exit stamps (and after the settle) is still the proof this call
+    // waited for a genuine close rather than forcing one the moment
+    // it gave up on the flush grace.
+    const workerLifetimeMs = 3000;
+    const startedAtFile = path.join(dir, "worker-started-at.txt");
+    const exitedAtFile = path.join(dir, "worker-exited-at.txt");
     fs.writeFileSync(
       workerPath,
       [
         "const fs = require('node:fs');",
         `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
-        "setTimeout(() => { process.exit(0); }, 600);",
+        `fs.writeFileSync(${JSON.stringify(startedAtFile)}, String(Date.now()));`,
+        `setTimeout(() => {`,
+        `  fs.writeFileSync(${JSON.stringify(exitedAtFile)}, String(Date.now()));`,
+        "  process.exit(0);",
+        `}, ${workerLifetimeMs});`,
         "",
       ].join("\n"),
     );
@@ -325,30 +343,78 @@ describe("execCommand", () => {
       ].join("\n"),
     );
 
+    // The close notification is awaited by event rather than by a
+    // fixed sleep tuned to one machine's process start-ups, and the
+    // timing assertions below are orderings against the worker's own
+    // clock stamps rather than elapsed time from this test's start:
+    // under load, node start-ups can take half a second, while nothing
+    // about the worker's own start-to-settle-to-close ordering changes.
     let closedAt: number | undefined;
-    const started = Date.now();
+    let notifyClosed: () => void = () => {};
+    const closed = new Promise<void>((resolve) => {
+      notifyClosed = resolve;
+    });
     const result = await execCommand(`node ${JSON.stringify(spawnerPath)}`, {
       logDir,
       onStdioClosed: () => {
-        closedAt = Date.now() - started;
+        closedAt = Date.now();
+        notifyClosed();
       },
     });
-    const settledAt = Date.now() - started;
+    const settledAt = Date.now();
 
     try {
       expect(result.exitCode).toBe(7);
-      // Settled early, on the flush-grace shortcut, well before the
-      // worker's own 600ms lifetime.
-      expect(settledAt).toBeLessThan(500);
       expect(result.stdioClosed).toBe(false);
       expect(result.outputMayBeIncomplete).toBe(true);
       // onStdioClosed has NOT fired yet at settle time: proof the early
       // resolve did not also fabricate a close.
       expect(closedAt).toBeUndefined();
 
-      await new Promise((resolve) => setTimeout(resolve, 900));
-      expect(closedAt).toBeGreaterThanOrEqual(500);
-      expect(closedAt).toBeLessThan(1200);
+      // The genuine close must arrive while the watch is still held:
+      // the watch bound exec.ts keeps after settling on the shortcut
+      // is the last moment the notification can ever fire, so this
+      // race gives it that bound plus slack for a loaded machine's
+      // event-loop delays, and a notification that never arrives (or
+      // is suppressed as a give-up teardown's) stays undefined.
+      const watchSlackMs = 2000;
+      await Promise.race([
+        closed,
+        new Promise((resolve) =>
+          setTimeout(resolve, stdioWatchBoundMs() + watchSlackMs).unref(),
+        ),
+      ]);
+      expect(closedAt).toBeDefined();
+
+      const workerStartedAt = Number(fs.readFileSync(startedAtFile, "utf8"));
+      const workerExitedAt = Number(fs.readFileSync(exitedAtFile, "utf8"));
+      // The worker really started and really exited, so the orderings
+      // below are about a process that existed rather than one that
+      // never ran.
+      expect(Number.isFinite(workerStartedAt)).toBe(true);
+      expect(Number.isFinite(workerExitedAt)).toBe(true);
+      // Event ordering, no wall clock from this test's start: the
+      // settle happened while the worker was still alive and holding
+      // the pipes open. Nothing had closed at that point, so the only
+      // way this call could have settled at all is the flush-grace
+      // shortcut; if settling waited for the real `close` instead,
+      // this call would settle after the worker's exit stamp and this
+      // would fail.
+      expect(settledAt).toBeLessThan(workerExitedAt);
+      // The notification arrived only after the worker's own exit
+      // stamp: a genuine closure of the pipes it was holding, and no
+      // earlier than the worker's full lifetime measured from its own
+      // start stamp.
+      expect(closedAt!).toBeGreaterThanOrEqual(workerExitedAt);
+      expect(closedAt! - workerStartedAt).toBeGreaterThanOrEqual(
+        workerLifetimeMs,
+      );
+      // And it arrived while the watch was still held, not at the
+      // give-up bound: measured from the worker's own start, bounded
+      // by its lifetime plus the watch bound itself.
+      expect(closedAt! - workerStartedAt).toBeLessThan(
+        workerLifetimeMs + stdioWatchBoundMs(),
+      );
     } finally {
       try {
         const pid = Number(fs.readFileSync(pidFile, "utf8"));
@@ -357,7 +423,7 @@ describe("execCommand", () => {
         // Already gone, or never started.
       }
     }
-  }, 10000);
+  }, 30000);
 
   it("never reports a true closure for the close its own watch-bound give-up produces: onStdioClosed stays silent when the pipes are torn down at the bound", async () => {
     const logDir = makeTmpDir();
