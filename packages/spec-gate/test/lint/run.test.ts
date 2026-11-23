@@ -101,6 +101,12 @@ describe("an ackable rule must name its target", () => {
   });
 });
 
+/** Skips of rules other than the ones the registry itself gates at `draft`. */
+const otherSkips = (report: LintReport) =>
+  report.skipped.filter(
+    (s) => s.rule !== "binding-status" && s.rule !== "residual-open",
+  );
+
 describe("ack-unused only for a rule that was evaluated", () => {
   const unused = (report: LintReport) =>
     report.warnings.filter((f) => f.rule === "ack-unused");
@@ -114,7 +120,7 @@ describe("ack-unused only for a rule that was evaluated", () => {
       quiet,
     ]);
     expect(unused(report)).toHaveLength(1);
-    expect(report.skipped).toEqual([]);
+    expect(otherSkips(report)).toEqual([]);
   });
 
   it("a rule that fired is acknowledged and nothing is unused (control)", () => {
@@ -184,7 +190,7 @@ describe("ack-unused only for a rule that was evaluated", () => {
       [...RULES, uses],
     );
     expect(unused(report)).toHaveLength(1);
-    expect(report.skipped).toEqual([]);
+    expect(otherSkips(report)).toEqual([]);
   });
 
   it("no-git: a rule that needs a repository, evaluated once one is given", () => {
@@ -197,7 +203,7 @@ describe("ack-unused only for a rule that was evaluated", () => {
       git: { repo: "r", base: "b" },
     });
     expect(withGit.acked.map((f) => f.rule)).toEqual(["custom-rule"]);
-    expect(withGit.skipped).toEqual([]);
+    expect(otherSkips(withGit)).toEqual([]);
   });
 
   it("an engine rule whose input failed: profile-default with an unparsable triage.json", () => {
@@ -234,7 +240,39 @@ describe("ack-unused only for a rule that was evaluated", () => {
       { profile: "light" },
     );
     expect(unused(report)).toHaveLength(1);
-    expect(report.skipped).toEqual([]);
+    expect(skippedReason(report, "profile-default")).toBeUndefined();
+    expect(skippedReason(report, "triage-stale")).toBe("input-absent");
+    for (const s of report.skipped.filter((x) => x.rule !== "triage-stale")) {
+      expect(s.reason, s.rule).toBe("profile");
+    }
+  });
+
+  it("a light triage.json skips exactly the full-only rules, each for profile", () => {
+    const lightTriage = JSON.stringify({
+      single_goal: { value: "yes", evidence: "one goal" },
+      code_related: { value: "yes", evidence: "the module" },
+      core_is_decision: { value: "no", evidence: "behaviour stated" },
+      scope_within_request: { value: "yes", evidence: "the request" },
+      multiple_repos: { value: "no", evidence: "one repo" },
+      trivial: { value: "yes", evidence: "a copy change" },
+      blocking_unknowns: [],
+      class: "no-spec-needed",
+      rule_version: 1,
+    });
+    const report = lint(
+      specDir({
+        "triage.json": lightTriage,
+      }),
+      RULES,
+    );
+    expect(report.profile).toBe("light");
+    const fullOnly = RULES.filter((r) => !r.profiles.includes("light")).map(
+      (r) => r.id,
+    );
+    expect(report.skipped.every((s) => s.reason === "profile")).toBe(true);
+    expect(report.skipped.map((s) => s.rule).sort()).toEqual(
+      [...fullOnly].sort(),
+    );
   });
 
   it("an invalid ack is still reported when its rule was skipped", () => {
@@ -252,8 +290,11 @@ describe("ack-unused only for a rule that was evaluated", () => {
 });
 
 describe("the skipped list", () => {
-  it("is empty when every rule ran", () => {
-    expect(lint(specDir(), RULES).skipped).toEqual([]);
+  it("holds exactly the two status-gated rules when everything else ran", () => {
+    expect(lint(specDir(), RULES).skipped).toEqual([
+      { rule: "binding-status", reason: "gate" },
+      { rule: "residual-open", reason: "gate" },
+    ]);
   });
 
   it("names every skipped rule with its reason, sorted by rule id", () => {
@@ -274,13 +315,24 @@ describe("the skipped list", () => {
       rules,
       { profile: "light" },
     );
-    expect(report.skipped).toEqual([
+    const customIds = new Set(["custom-rule"]);
+    for (const id of ["z-profile", "a-gate", "m-git", "b-absent", "c-failed"]) {
+      customIds.add(id);
+    }
+    expect(report.skipped.filter((s) => customIds.has(s.rule))).toEqual([
       { rule: "a-gate", reason: "gate" },
       { rule: "b-absent", reason: "input-absent" },
       { rule: "c-failed", reason: "input-failed" },
       { rule: "m-git", reason: "no-git" },
       { rule: "z-profile", reason: "profile" },
     ]);
+    // Every full-profile rule of the registry is skipped for the profile.
+    const fullOnly = RULES.filter((r) => !r.profiles.includes("light")).map(
+      (r) => r.id,
+    );
+    for (const id of fullOnly) {
+      expect(report.skipped).toContainEqual({ rule: id, reason: "profile" });
+    }
   });
 
   it("the first reason wins: profile before gate before git before inputs; a failed input before an absent one", () => {
@@ -295,8 +347,9 @@ describe("the skipped list", () => {
       "questions.json": "{ not json",
     });
     const reason = (over: Partial<RuleDef>, profile: "light" | "full") =>
-      lint(dir, [...RULES, custom({ ...all, ...over })], { profile }).skipped[0]
-        ?.reason;
+      lint(dir, [...RULES, custom({ ...all, ...over })], {
+        profile,
+      }).skipped.find((s) => s.rule === "custom-rule")?.reason;
     expect(reason({ profiles: ["full"] }, "light")).toBe("profile");
     expect(reason({}, "full")).toBe("gate");
     expect(reason({ gated: false }, "full")).toBe("no-git");

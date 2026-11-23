@@ -10,6 +10,7 @@ import type {
   Bindings,
   Questions,
   Spec,
+  SpecGateConfig,
   SpecStatus,
   TestPlan,
   Triage,
@@ -118,6 +119,13 @@ export interface RuleContext {
   profile: Profile;
   mode: Mode;
   git?: GitInputs;
+  /**
+   * The parsed `.spec-gate/config.yaml` given to `--config`, or `undefined`
+   * when none was given or it did not parse or could not be read. It is not
+   * one of the spec directory inputs: a rule that reads it falls back to
+   * the format defaults when it is absent, it is never skipped for it.
+   */
+  config?: SpecGateConfig;
 }
 
 export interface RuleDef {

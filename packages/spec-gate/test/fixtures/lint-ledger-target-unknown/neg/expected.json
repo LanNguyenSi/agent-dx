@@ -1,0 +1,13 @@
+{
+  "errors": [
+    {
+      "rule": "ledger-target-unknown",
+      "file": "spec.md",
+      "path": "SL-1",
+      "id": "SL-1",
+      "line": 25
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

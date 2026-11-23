@@ -19,7 +19,12 @@ describe("spec-gate lint", () => {
     expect(run.stdout).toContain("lint-ack [options] <spec-dir> <rule> <id>");
     const help = await runCli(["lint", "--help"]);
     expect(help.code).toBe(0);
-    for (const flag of ["--strict", "--final", "--profile <profile>"]) {
+    for (const flag of [
+      "--strict",
+      "--final",
+      "--profile <profile>",
+      "--config <path>",
+    ]) {
       expect(help.stdout).toContain(flag);
     }
   });
@@ -39,7 +44,10 @@ describe("spec-gate lint", () => {
       errors: [],
       warnings: [],
       acked: [],
-      skipped: [],
+      skipped: [
+        { rule: "binding-status", reason: "gate" },
+        { rule: "residual-open", reason: "gate" },
+      ],
       counts: { errors: 0, warnings: 0, acked: 0 },
     });
   });
@@ -223,6 +231,138 @@ describe("spec-gate lint with an empty acks.yaml", () => {
       counts: { errors: 0, warnings: 0, acked: 1 },
     });
   });
+});
+
+describe("spec-gate lint --config", () => {
+  const questions = (n: number) =>
+    JSON.stringify({
+      questions: Array.from({ length: n }, (_, i) => ({
+        id: `QN-${i + 1}`,
+        target: "AC-1",
+        class: "blind-spot",
+        blocking: false,
+        question: `Open point number ${i + 1} about the token store?`,
+        options: [],
+      })),
+      answers: [],
+    });
+
+  const write = (text: string): string => {
+    const holder = scratch();
+    const config = path.join(holder, "config.yaml");
+    fs.writeFileSync(config, text);
+    return config;
+  };
+
+  it("with no --config the default budget of 7 lets three pass", async () => {
+    const run = await runCli([
+      "lint",
+      specDir({ "questions.json": questions(3) }),
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = report(run.stdout) as { warnings: { rule: string }[] };
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("a config budget below the unanswered questions warns", async () => {
+    const config = write("questions:\n  warn_above: 2\n");
+    const run = await runCli([
+      "lint",
+      specDir({ "questions.json": questions(3) }),
+      "--config",
+      config,
+    ]);
+    expect(run.code).toBe(0);
+    expect(report(run.stdout)).toMatchObject({
+      warnings: [
+        expect.objectContaining({
+          rule: "question-budget",
+          file: "questions.json",
+          id: "questions",
+        }),
+      ],
+    });
+  });
+
+  it("a bad config file is a format finding naming config:<basename>, and the default budget applies", async () => {
+    const config = write("questions:\n  warn_above: zero\n");
+    const run = await runCli([
+      "lint",
+      specDir({ "questions.json": questions(3) }),
+      "--config",
+      config,
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = report(run.stdout) as {
+      errors: { rule: string; file: string; code: string }[];
+      warnings: unknown[];
+    };
+    expect(parsed.errors).toEqual([
+      expect.objectContaining({
+        rule: "format",
+        file: "config:config.yaml",
+        code: expect.any(String),
+      }),
+    ]);
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("an absolute --config path to a bad file never reaches the report", async () => {
+    const config = write("questions:\n  warn_above: zero\n");
+    expect(path.isAbsolute(config)).toBe(true);
+    const run = await runCli([
+      "lint",
+      specDir({ "questions.json": questions(3) }),
+      "--config",
+      config,
+    ]);
+    expect(run.code).toBe(1);
+    expect(run.stdout).toContain("config:config.yaml");
+    expect(run.stdout).not.toContain(config);
+    expect(run.stdout).not.toContain(path.dirname(config));
+  });
+
+  it("a config file that is not there is a file finding naming config:<basename>", async () => {
+    const missing = path.join(scratch(), "gone.yaml");
+    const run = await runCli([
+      "lint",
+      specDir({ "questions.json": questions(3) }),
+      "--config",
+      missing,
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = report(run.stdout) as {
+      errors: { rule: string; file: string; code: string }[];
+      warnings: unknown[];
+    };
+    expect(parsed.errors).toEqual([
+      expect.objectContaining({
+        rule: "file",
+        file: "config:gone.yaml",
+        code: "input-missing",
+      }),
+    ]);
+    expect(run.stdout).not.toContain(missing);
+    expect(run.stdout).not.toContain(path.dirname(missing));
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("--config with an empty path is a usage error: exit 2, no report", async () => {
+    const run = await runCli(["lint", specDir(), "--config", ""]);
+    expect(run.code).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).not.toBe("");
+  });
+
+  it.each(["/", " "])(
+    "--config %j names no file: a usage error, exit 2, no report",
+    async (value) => {
+      const run = await runCli(["lint", specDir(), "--config", value]);
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("--config needs a path");
+    },
+  );
 });
 
 describe("spec-gate lint-ack: comments dropped", () => {

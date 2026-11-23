@@ -48,6 +48,7 @@ describe("docs/lint.md", () => {
       "--strict",
       "--final",
       "--profile",
+      "--config",
       "lint-ack",
       "acks.yaml",
       "source/meta.json",

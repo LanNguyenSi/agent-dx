@@ -1,0 +1,69 @@
+{
+  "questions": [
+    {
+      "id": "QN-1",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": false,
+      "question": "Open point number 1 about the token store?",
+      "options": []
+    },
+    {
+      "id": "QN-2",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": false,
+      "question": "Open point number 2 about the token store?",
+      "options": []
+    },
+    {
+      "id": "QN-3",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": false,
+      "question": "Open point number 3 about the token store?",
+      "options": []
+    },
+    {
+      "id": "QN-4",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": false,
+      "question": "Open point number 4 about the token store?",
+      "options": []
+    },
+    {
+      "id": "QN-5",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": false,
+      "question": "Open point number 5 about the token store?",
+      "options": []
+    },
+    {
+      "id": "QN-6",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": false,
+      "question": "Open point number 6 about the token store?",
+      "options": []
+    },
+    {
+      "id": "QN-7",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": false,
+      "question": "Open point number 7 about the token store?",
+      "options": []
+    },
+    {
+      "id": "QN-8",
+      "target": "AC-1",
+      "class": "blind-spot",
+      "blocking": false,
+      "question": "Open point number 8 about the token store?",
+      "options": []
+    }
+  ],
+  "answers": []
+}

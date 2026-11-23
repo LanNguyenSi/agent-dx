@@ -1,21 +1,23 @@
 /**
  * Which profile a run uses and why.
  *
- * `triage.json` decides: its stored `class`, or the class derived from its
- * fields in memory (the file is never written). `--profile` is only a
- * fallback for a run without a usable `triage.json`, and an error when it
- * disagrees with one.
+ * `triage.json` decides, through the class its fields derive in memory
+ * (the file is never written). The stored `class` is not read for the
+ * choice: a stale one is a `triage-stale` error and must not pick a light
+ * profile, and a current one repeats the derived class anyway.
+ * `--profile` is only a fallback for a run without a usable
+ * `triage.json`, and an error when it disagrees with one.
  *
- * | triage.json            | --profile | profile            | source  | findings          |
- * | ---------------------- | --------- | ------------------ | ------- | ----------------- |
- * | usable, light or full  | absent    | the triage profile | triage  | none              |
- * | usable, light or full  | equal     | the triage profile | triage  | none              |
- * | usable, light or full  | different | the triage profile | triage  | profile-mismatch  |
- * | usable, no profile     | any       | flag, else full    | flag or default | profile-no-spec |
- * | absent                 | given     | the flag           | flag    | none              |
- * | absent                 | absent    | full               | default | profile-default   |
- * | unparsable             | given     | the flag           | flag    | none (format)     |
- * | unparsable             | absent    | full               | default | none (format)     |
+ * | triage.json                       | --profile | profile            | source          | findings         |
+ * | --------------------------------- | --------- | ------------------ | --------------- | ---------------- |
+ * | usable, class gives light or full | absent    | the triage profile | triage          | none             |
+ * | usable, light or full             | equal     | the triage profile | triage          | none             |
+ * | usable, light or full             | different | the triage profile | triage          | profile-mismatch |
+ * | usable, no profile                | any       | flag, else full    | flag or default | profile-no-spec  |
+ * | absent                            | given     | the flag           | flag            | none             |
+ * | absent                            | absent    | full               | default         | profile-default  |
+ * | unparsable                        | given     | the flag           | flag            | none (format)    |
+ * | unparsable                        | absent    | full               | default         | none (format)    |
  *
  * A class that leads to no spec, or an unparsable file, already carries an
  * error of its own, so neither adds the default warning on top.
@@ -68,8 +70,13 @@ export function resolveProfile(
       ],
     };
   }
-  const cls = triage.value.class ?? deriveTriageClass(triage.value).class;
-  const fromTriage = profileForClass(cls);
+  const derived = deriveTriageClass(triage.value).class;
+  // The stored class is not trusted for the profile: a file whose class or
+  // rule version has gone stale is an error (`triage-stale`) and must not
+  // choose a light profile, so the profile always follows the class the
+  // fields give in memory. A current file stores that very class, so a
+  // clean run sees no difference.
+  const fromTriage = profileForClass(derived);
   if (fromTriage === null) {
     return {
       ...fallback(),
@@ -79,7 +86,7 @@ export function resolveProfile(
           finding: {
             file: TRIAGE_FILE,
             path: "class",
-            message: `triage class ${cls} leads to no spec, so there is nothing to lint`,
+            message: `triage class ${derived} leads to no spec, so there is nothing to lint`,
           },
         },
       ],
@@ -92,7 +99,7 @@ export function resolveProfile(
       finding: {
         file: TRIAGE_FILE,
         path: "class",
-        message: `--profile ${flag} disagrees with triage class ${cls}, which leads to the ${fromTriage} profile`,
+        message: `--profile ${flag} disagrees with triage class ${derived}, which leads to the ${fromTriage} profile`,
       },
     });
   }

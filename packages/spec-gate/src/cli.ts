@@ -180,6 +180,10 @@ program
       "profile to use when triage.json gives none; an error when it disagrees with triage.json",
     ).choices(["light", "full"]),
   )
+  .option(
+    "--config <path>",
+    "a .spec-gate/config.yaml-format file for the rules that read repo-wide settings",
+  )
   .exitOverride((err: CommanderError) => {
     throw err;
   })
@@ -190,9 +194,15 @@ program
         strict?: boolean;
         final?: boolean;
         profile?: "light" | "full";
+        config?: string;
       },
     ) => {
-      const result = lintSpecDir(specDir, options);
+      const result = lintSpecDir(specDir, {
+        strict: options.strict,
+        final: options.final,
+        profile: options.profile,
+        configPath: options.config,
+      });
       if (!result.ok) {
         process.stderr.write(`spec-gate: ${result.message}\n`);
         process.exitCode = 2;

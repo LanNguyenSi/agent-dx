@@ -1,0 +1,25 @@
+{
+  "questions": [
+    {
+      "id": "QN-1",
+      "target": "AC-1",
+      "class": "divergence",
+      "blocking": false,
+      "question": "Do sessions that started before the password change stay valid?",
+      "options": [
+        { "label": "revoke", "consequence": "all sessions end at once" }
+      ]
+    }
+  ],
+  "answers": [
+    {
+      "question": "QN-1",
+      "answer": "revoke",
+      "option": "revoke",
+      "channel": "comment",
+      "author": "alice",
+      "time": "2000-01-31T12:00:00Z",
+      "comment_url": "https://example.com/issues/1#comment-2"
+    }
+  ]
+}

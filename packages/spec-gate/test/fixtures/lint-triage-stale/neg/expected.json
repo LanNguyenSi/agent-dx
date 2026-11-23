@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "rule": "triage-stale",
+      "file": "triage.json",
+      "path": "rule_version",
+      "id": "triage"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

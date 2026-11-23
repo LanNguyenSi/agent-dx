@@ -3,8 +3,9 @@
  * rules that apply, apply the acknowledgements and build the report.
  */
 import fs from "node:fs";
+import path from "node:path";
 import { ackTextProblem, applyAcks } from "./acks.js";
-import { loadAcks, loadInputs, type FindingSink } from "./load.js";
+import { loadAcks, loadConfig, loadInputs, type FindingSink } from "./load.js";
 import { resolveProfile } from "./profile.js";
 import { RULES, findRule, planRules } from "./registry.js";
 import { buildReport } from "./report.js";
@@ -27,6 +28,14 @@ export interface LintOptions {
   profile?: Profile;
   /** The repository and base revision for rules that need them. */
   git?: GitInputs;
+  /**
+   * A `.spec-gate/config.yaml`-format file, read for the rules that take
+   * repo-wide settings. Absent: every rule uses its format default. A file
+   * that cannot be read or parsed is a `file` or `format` finding and the
+   * rules still run on their defaults. The empty string is a usage error:
+   * the run fails without a report.
+   */
+  configPath?: string;
 }
 
 export type LintRunResult =
@@ -60,7 +69,8 @@ function stamp(
 
 /**
  * Lints one spec directory. `rules` defaults to the registry; a test passes
- * its own list. Returns a failure only when `specDir` is not a directory;
+ * its own list. Returns a failure only when `specDir` is not a directory
+ * or `configPath` names no file (empty, or a path without a file name);
  * every problem inside the directory is a finding.
  */
 export function lintSpecDir(
@@ -77,6 +87,12 @@ export function lintSpecDir(
   if (!isDir) {
     return { ok: false, message: `${specDir} is not a directory` };
   }
+  if (
+    options.configPath !== undefined &&
+    path.basename(options.configPath).trim() === ""
+  ) {
+    return { ok: false, message: "--config needs a path" };
+  }
 
   const found: Finding[] = [];
   const sink: FindingSink = {
@@ -84,6 +100,10 @@ export function lintSpecDir(
   };
   const inputs = loadInputs(specDir, sink);
   const acks = loadAcks(specDir, sink);
+  const config =
+    options.configPath !== undefined
+      ? loadConfig(options.configPath, sink)
+      : undefined;
 
   const mode: Mode = options.final === true ? "final" : "lint";
   const choice = resolveProfile(inputs.triage, options.profile);
@@ -96,6 +116,7 @@ export function lintSpecDir(
     profile: choice.profile,
     mode,
     ...(options.git !== undefined ? { git: options.git } : {}),
+    ...(config?.state === "ok" ? { config: config.value } : {}),
   };
   const plan = planRules(rules, ctx);
   for (const rule of plan.evaluated) {

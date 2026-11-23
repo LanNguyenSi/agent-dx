@@ -153,6 +153,7 @@ describe("all three rules together", () => {
       "ac-coverage",
       "goal-count",
       "non-goals-empty",
+      "tp-covers-unknown",
     ]);
   });
 });

@@ -7,6 +7,7 @@
  * (`file`, `format`), the profile step and the acknowledgement step.
  */
 import { markdownCell } from "../formats/markdown.js";
+import { CONTENT_RULES } from "./rules/content.js";
 import { FORM_RULES } from "./rules/form.js";
 import type { RuleContext, RuleDef, SkipReason, SkippedRule } from "./types.js";
 
@@ -89,7 +90,11 @@ const ENGINE_RULES: readonly RuleDef[] = [
 ];
 
 /** Every rule of the engine, in the order they are listed in the docs. */
-export const RULES: readonly RuleDef[] = [...ENGINE_RULES, ...FORM_RULES];
+export const RULES: readonly RuleDef[] = [
+  ...ENGINE_RULES,
+  ...FORM_RULES,
+  ...CONTENT_RULES,
+];
 
 export function findRule(
   rules: readonly RuleDef[],

@@ -21,7 +21,9 @@ const TRIAGE = (cls: string | null, overrides: Record<string, string> = {}) => {
     scope_within_request: field(overrides["scope_within_request"] ?? "yes"),
     multiple_repos: field(overrides["multiple_repos"] ?? "no"),
     trivial: field(overrides["trivial"] ?? "no"),
-    blocking_unknowns: [],
+    blocking_unknowns: overrides["blocking_unknowns"]
+      ? [overrides["blocking_unknowns"]]
+      : [],
   };
   if (cls !== null) {
     doc["class"] = cls;
@@ -42,18 +44,35 @@ const rules = (report: ReturnType<typeof run>) => [
 ];
 
 describe("profile selection, which input wins", () => {
-  it("triage only: the triage profile, source triage, no finding", () => {
+  it("triage only: the derived class picks the profile, source triage, no finding", () => {
     const full = run({ "triage.json": TRIAGE("actionable") });
     expect([full.profile, full.profile_source, rules(full)]).toEqual([
       "full",
       "triage",
       [],
     ]);
-    const light = run({ "triage.json": TRIAGE("no-spec-needed") });
+    const light = run({
+      "triage.json": TRIAGE("no-spec-needed", { trivial: "yes" }),
+    });
     expect([light.profile, light.profile_source, rules(light)]).toEqual([
       "light",
       "triage",
       [],
+    ]);
+  });
+
+  it("a stale stored class does not choose the profile", () => {
+    // The file stores the light class `no-spec-needed` while its fields
+    // derive `actionable`: the run is full and the file is an error.
+    const report = run({ "triage.json": TRIAGE("no-spec-needed") });
+    expect([report.profile, report.profile_source]).toEqual(["full", "triage"]);
+    expect(report.errors).toEqual([
+      expect.objectContaining({
+        rule: "triage-stale",
+        file: "triage.json",
+        path: "class",
+        id: "triage",
+      }),
     ]);
   });
 
@@ -83,7 +102,10 @@ describe("profile selection, which input wins", () => {
   });
 
   it("both equal: source triage, no finding", () => {
-    const report = run({ "triage.json": TRIAGE("no-spec-needed") }, "light");
+    const report = run(
+      { "triage.json": TRIAGE("no-spec-needed", { trivial: "yes" }) },
+      "light",
+    );
     expect([report.profile, report.profile_source, rules(report)]).toEqual([
       "light",
       "triage",
@@ -102,7 +124,10 @@ describe("profile selection, which input wins", () => {
       }),
     ]);
     expect(report.ok).toBe(false);
-    const other = run({ "triage.json": TRIAGE("no-spec-needed") }, "full");
+    const other = run(
+      { "triage.json": TRIAGE("no-spec-needed", { trivial: "yes" }) },
+      "full",
+    );
     expect([other.profile, other.profile_source, rules(other)]).toEqual([
       "light",
       "triage",
@@ -128,15 +153,26 @@ describe("profile selection, which input wins", () => {
   });
 
   it("a class with no profile: profile-no-spec, the run falls back to the flag or full, no default warning", () => {
+    const fields: Record<string, Record<string, string>> = {
+      unsuitable: { code_related: "no" },
+      decision: { core_is_decision: "yes" },
+      split: { single_goal: "no" },
+      clarify: { blocking_unknowns: "the rate limit of the upstream API" },
+    };
     for (const cls of ["unsuitable", "decision", "split", "clarify"]) {
-      const report = run({ "triage.json": TRIAGE(cls) });
+      const report = run({
+        "triage.json": TRIAGE(cls, fields[cls] ?? {}),
+      });
       expect(
         [report.profile, report.profile_source, rules(report)],
         cls,
       ).toEqual(["full", "default", ["profile-no-spec"]]);
       expect(report.ok).toBe(false);
     }
-    const flagged = run({ "triage.json": TRIAGE("split") }, "light");
+    const flagged = run(
+      { "triage.json": TRIAGE("split", { single_goal: "no" }) },
+      "light",
+    );
     expect([flagged.profile, flagged.profile_source, rules(flagged)]).toEqual([
       "light",
       "flag",
