@@ -112,16 +112,28 @@ export function runTriage(specDir: string): TriageRunResult {
   doc["rule_version"] = derivation.rule_version;
   const written = `${JSON.stringify(doc, null, 2)}\n`;
   const temp = `${file}.tmp-${process.pid}`;
+  // Carry the original permission bits onto the rewritten file; the default
+  // mode of `writeFileSync` (0666 minus the umask) would widen a 0600 file.
+  let mode: number;
+  let created = false;
   try {
+    mode = fs.statSync(file).mode & 0o7777;
     fs.accessSync(file, fs.constants.W_OK);
     // `wx`: never follow or reuse an existing path at the temporary name.
-    fs.writeFileSync(temp, written, { flag: "wx" });
+    fs.writeFileSync(temp, written, { flag: "wx", mode });
+    created = true;
+    // The umask applies to the `mode` option, so set the bits explicitly.
+    fs.chmodSync(temp, mode);
     fs.renameSync(temp, file);
   } catch (err) {
-    try {
-      fs.rmSync(temp, { force: true });
-    } catch {
-      // the temporary file stays; the named failure below is what callers see.
+    // Only delete the temporary path this run created; something else may
+    // already sit at the temporary name (EEXIST) and must be left alone.
+    if (created) {
+      try {
+        fs.rmSync(temp, { force: true });
+      } catch {
+        // the temporary file stays; the named failure below is what callers see.
+      }
     }
     const code = (err as NodeJS.ErrnoException).code;
     return {
