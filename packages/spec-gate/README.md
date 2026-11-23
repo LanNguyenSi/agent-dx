@@ -6,6 +6,12 @@ scaffold: the CLI answers `--help` and `--version`, and later capabilities
 (spec drafting, test-plan checking, review gates) land as subcommands on
 top of this entry point.
 
+## Commands
+
+`spec-gate triage <spec-dir>` derives the triage class from
+`<spec-dir>/triage.json`, writes `class` and `rule_version` back, and prints
+the derivation; the rule is documented in [docs/triage.md](docs/triage.md).
+
 ## Formats
 
 The files `spec-gate` reads and writes, their grammars, the field-to-layer
