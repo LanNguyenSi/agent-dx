@@ -29,14 +29,25 @@ function writeAtomic(dir: string, name: string, data: Buffer | string): void {
   }
 }
 
+/** True when `dir` exists and is a symlink; a missing directory is not one. */
+function isSymlink(dir: string): boolean {
+  try {
+    return fs.lstatSync(dir).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Creates `<repoDir>/specs/<id>/source/` and writes its files. The parent
- * directories are created first; `source/` itself is created without
- * `recursive`, so an existing one (also one that appeared since an earlier
- * check, or a dangling symlink) is `source-exists` and never touched.
- * `ticket.md` is written first and `meta.json` last, each through a
- * temporary name and a rename. If anything fails, everything this call
- * created is removed again.
+ * Creates `<repoDir>/specs/<id>/source/` and writes its files. A `specs` or
+ * `specs/<id>` that already exists as a symlink (to anywhere) is refused as
+ * `source-not-in-repo` before anything is created, so nothing can be written
+ * outside the repository through it. The parent directories are created
+ * first; `source/` itself is created without `recursive`, so an existing one
+ * (also one that appeared since an earlier check, or a dangling symlink) is
+ * `source-exists` and never touched. `ticket.md` is written first and
+ * `meta.json` last, each through a temporary name and a rename. If anything
+ * fails, everything this call created is removed again.
  */
 export function writeSource(
   repoDir: string,
@@ -47,6 +58,17 @@ export function writeSource(
   const specsDir = path.join(repoDir, "specs");
   const idDir = path.join(specsDir, id);
   const sourceDir = path.join(idDir, "source");
+  const symlinked = isSymlink(specsDir)
+    ? "specs"
+    : isSymlink(idDir)
+      ? path.posix.join("specs", id)
+      : null;
+  if (symlinked !== null) {
+    throw new IntakeError(
+      "source-not-in-repo",
+      `${symlinked} is a symlink; refusing to write through it; nothing was written`,
+    );
+  }
   const createdParents: string[] = [];
   const makeParent = (dir: string): void => {
     if (fs.existsSync(dir)) return;

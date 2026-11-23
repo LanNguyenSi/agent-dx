@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import process from "node:process";
-import { Command } from "commander";
+import { Command, CommanderError } from "commander";
 import { intakeFile } from "./adapters/file.js";
 import { IntakeError } from "./intake/index.js";
 
@@ -35,6 +35,12 @@ const intake = program
   .command("intake")
   .description("create specs/<id>/source/ from a source");
 
+// Usage errors of this command (a missing --id or <path>, an unknown option)
+// and an unexpected exception in the action exit 2, like every other error:
+// exit 1 belongs to drift alone. exitOverride makes commander throw instead
+// of calling process.exit(1); the usage message is written to stderr before
+// the throw, and a help or version request arrives as a CommanderError whose
+// exitCode is 0 and stays 0.
 intake
   .command("file <path>")
   .description(
@@ -62,6 +68,9 @@ intake
     "--check",
     "compare the file with the recorded source: exit 0 when unchanged, 1 on drift, 2 on an error; writes nothing and does not fetch",
   )
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
   .action(
     async (
       filePath: string,
@@ -96,4 +105,20 @@ intake
     },
   );
 
-await program.parseAsync();
+try {
+  await program.parseAsync();
+} catch (err) {
+  // Only the `intake file` command has exitOverride, so every CommanderError
+  // comes from it: help and version keep their exit code 0, a usage error
+  // exits 2; anything else is an unexpected exception and also exits 2.
+  if (err instanceof CommanderError) {
+    // commander has already written the usage message to stderr.
+    process.exitCode = err.exitCode === 0 ? 0 : 2;
+  } else {
+    // An unexpected exception is never silent: name it, then exit 2.
+    const text =
+      err instanceof Error ? (err.stack ?? err.message) : String(err);
+    process.stderr.write(`spec-gate: unexpected error: ${text}\n`);
+    process.exitCode = 2;
+  }
+}

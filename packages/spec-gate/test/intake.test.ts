@@ -319,6 +319,36 @@ it("--id is required", async () => {
   expect(fs.existsSync(path.join(fx.repo, "specs"))).toBe(false);
 });
 
+it("a usage error of intake file exits 2 with the usage message on stderr", async () => {
+  const fx = await makeFixture();
+  const ticket = writeTicket(fx.repo);
+  const cases: [string, string[]][] = [
+    ["missing --id", ["intake", "file", ticket, "--check"]],
+    [
+      "unknown option",
+      ["intake", "file", ticket, "--id", "sg-usage", "--nope"],
+    ],
+    ["missing <path>", ["intake", "file", "--id", "sg-usage"]],
+  ];
+  for (const [label, args] of cases) {
+    const run = await runCli(args, fx.repo);
+    expect([label, run.code]).toEqual([label, 2]);
+    expect([label, run.stderr]).toEqual([
+      label,
+      expect.stringContaining("Usage: spec-gate intake file"),
+    ]);
+  }
+  expect(fs.existsSync(path.join(fx.repo, "specs"))).toBe(false);
+});
+
+it("intake file --help exits 0 and names its options", async () => {
+  const fx = await makeFixture();
+  const run = await runCli(["intake", "file", "--help"], fx.repo);
+  expect(run.code).toBe(0);
+  expect(run.stdout).toContain("--id <spec-id>");
+  expect(run.stderr).toBe("");
+});
+
 it("a symlink source is refused", async () => {
   const fx = await makeFixture();
   writeTicket(fx.repo);
@@ -736,6 +766,66 @@ it("--remote selects which remote sets base_commit and commands_ref", async () =
   expect(meta.base_commit).toBe(otherHead);
   expect(meta.commands_ref).toBe(otherHead);
   expect(meta.base_commit).not.toBe(fx.remoteHead);
+});
+
+// ---------------------------------------------------------------------------
+// The configured remote is trusted as configured
+// ---------------------------------------------------------------------------
+
+/** A non-bare repository on a local path, with one commit on main. */
+async function makeLocalRepo(fx: Fixture, name: string): Promise<string> {
+  const dir = path.join(fx.root, name);
+  fs.mkdirSync(dir);
+  await git(dir, "-c", "init.defaultBranch=main", "init", "-q");
+  await git(dir, "config", "user.email", "t@example.com");
+  await git(dir, "config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "l.txt"), `${name}\n`);
+  await git(dir, "add", "l.txt");
+  await git(dir, "commit", "-qm", name);
+  return (await git(dir, "rev-parse", "HEAD")).stdout.trim();
+}
+
+it("a configured remote whose URL is a local path gives that repository's default-branch head", async () => {
+  const fx = await makeFixture();
+  const ticket = writeTicket(fx.repo);
+  const localHead = await makeLocalRepo(fx, "local-upstream");
+  expect(localHead).not.toBe(fx.remoteHead);
+  await git(
+    fx.repo,
+    "remote",
+    "add",
+    "localpath",
+    path.join(fx.root, "local-upstream"),
+  );
+  const run = await runCli(
+    ["intake", "file", ticket, "--id", "sg-localurl", "--remote", "localpath"],
+    fx.repo,
+  );
+  expect([run.code, run.stderr]).toEqual([0, ""]);
+  const meta = readMeta(fx.repo, "sg-localurl");
+  expect(meta.base_commit).toBe(localHead);
+  expect(meta.commands_ref).toBe(localHead);
+});
+
+it("a url.<base>.insteadOf rewrite to a local path is honoured as configured", async () => {
+  const fx = await makeFixture();
+  const ticket = writeTicket(fx.repo);
+  const localHead = await makeLocalRepo(fx, "insteadof-upstream");
+  expect(localHead).not.toBe(fx.remoteHead);
+  const bogus = "https://upstream.invalid/rewritten.git";
+  await git(fx.repo, "remote", "add", "rewritten", bogus);
+  await git(
+    fx.repo,
+    "config",
+    `url.${path.join(fx.root, "insteadof-upstream")}.insteadOf`,
+    bogus,
+  );
+  const run = await runCli(
+    ["intake", "file", ticket, "--id", "sg-insteadof", "--remote", "rewritten"],
+    fx.repo,
+  );
+  expect([run.code, run.stderr]).toEqual([0, ""]);
+  expect(readMeta(fx.repo, "sg-insteadof").base_commit).toBe(localHead);
 });
 
 // ---------------------------------------------------------------------------
@@ -1170,6 +1260,42 @@ it("a source/ that appears as a dangling symlink is source-exists and is left al
   ]);
 });
 
+it("a symlinked specs directory is source-not-in-repo and the target stays empty", async () => {
+  const fx = await makeFixture();
+  const ticket = writeTicket(fx.repo);
+  const outside = path.join(fx.root, "outside-specs");
+  fs.mkdirSync(outside);
+  fs.symlinkSync(outside, path.join(fx.repo, "specs"));
+  const run = await runCli(
+    ["intake", "file", ticket, "--id", "sg-symspecs"],
+    fx.repo,
+  );
+  expect(run.code).toBe(2);
+  expect(run.stderr).toContain("source-not-in-repo");
+  expect(fs.readdirSync(outside)).toEqual([]);
+  expect(fs.lstatSync(path.join(fx.repo, "specs")).isSymbolicLink()).toBe(true);
+});
+
+it("a symlinked specs/<id> directory is source-not-in-repo and the target stays empty", async () => {
+  const fx = await makeFixture();
+  const ticket = writeTicket(fx.repo);
+  const outside = path.join(fx.root, "outside-id");
+  fs.mkdirSync(outside);
+  fs.mkdirSync(path.join(fx.repo, "specs"));
+  fs.symlinkSync(outside, path.join(fx.repo, "specs", "sg-symid"));
+  const run = await runCli(
+    ["intake", "file", ticket, "--id", "sg-symid"],
+    fx.repo,
+  );
+  expect(run.code).toBe(2);
+  expect(run.stderr).toContain("source-not-in-repo");
+  expect(fs.readdirSync(outside)).toEqual([]);
+  expect(fs.readdirSync(path.join(fx.repo, "specs"))).toEqual(["sg-symid"]);
+  expect(
+    fs.lstatSync(path.join(fx.repo, "specs", "sg-symid")).isSymbolicLink(),
+  ).toBe(true);
+});
+
 it("a specs path that is a file is a write-failed error, not a stack trace", async () => {
   const fx = await makeFixture();
   const ticket = writeTicket(fx.repo);
@@ -1416,6 +1542,29 @@ it("a stale FETCH_HEAD cannot stand in for a failed fetch", async () => {
   expect(run.code).toBe(2);
   expect(run.stderr).toContain("fetch-failed");
   expect(fs.existsSync(path.join(fx.repo, "specs"))).toBe(false);
+});
+
+it("a repo config fetch.writeFetchHEAD=false cannot leave a stale FETCH_HEAD", async () => {
+  const fx = await makeFixture();
+  const ticket = writeTicket(fx.repo);
+  const staleHead = fx.remoteHead;
+  const freshHead = await pushNewCommit(fx, "fresh.txt");
+  expect(freshHead).not.toBe(staleHead);
+  // A FETCH_HEAD from an older fetch of the same branch, and the config that
+  // would keep git from overwriting it.
+  fs.writeFileSync(
+    path.join(fx.repo, ".git", "FETCH_HEAD"),
+    `${staleHead}\t\tbranch 'main' of ${fx.remote}\n`,
+  );
+  await git(fx.repo, "config", "fetch.writeFetchHEAD", "false");
+  const run = await runCli(
+    ["intake", "file", ticket, "--id", "sg-wfh"],
+    fx.repo,
+  );
+  expect([run.code, run.stderr]).toEqual([0, ""]);
+  const meta = readMeta(fx.repo, "sg-wfh");
+  expect(meta.base_commit).toBe(freshHead);
+  expect(meta.base_commit).not.toBe(staleHead);
 });
 
 it("a directory named like the remote is not used as one", async () => {

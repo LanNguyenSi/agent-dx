@@ -303,7 +303,9 @@ export function parseFetchHead(content: string, branch: string): string {
  * The commit at the head of `refs/heads/<branch>` on `remote`. Only the full
  * ref name is fetched, so a tag of the same name cannot be picked; no local
  * ref is written, no tag is fetched, nothing is pruned; the sha is taken from
- * the one line FETCH_HEAD holds and peeled to a commit.
+ * the one line FETCH_HEAD holds and peeled to a commit. `--write-fetch-head`
+ * is passed explicitly so a repo-local `fetch.writeFetchHEAD=false` cannot
+ * leave a stale FETCH_HEAD standing in for this fetch.
  */
 export async function remoteHeadCommit(
   repoDir: string,
@@ -327,6 +329,7 @@ export async function remoteHeadCommit(
       "--no-recurse-submodules",
       "--no-prune",
       "--refmap=",
+      "--write-fetch-head",
       "--end-of-options",
       remote,
       `${HEADS}${branch}`,

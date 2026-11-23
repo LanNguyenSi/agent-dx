@@ -175,7 +175,15 @@ reads the commit id from the one line `FETCH_HEAD` holds and peels it to a
 commit. Every git call runs without a shell, without any `GIT_*` variable of
 the caller, without a terminal prompt and with a timeout that kills the whole
 process group; an error message never carries a command line, a URL or git's
-own output.
+own output. The fetch passes `--write-fetch-head` explicitly, so a repo-local
+`fetch.writeFetchHEAD=false` cannot leave a stale FETCH_HEAD standing in for
+the fetch.
+
+The remote is trusted as configured: its URL and the repository-local git
+config (a `url.<base>.insteadOf` rewrite, a remote whose URL is a local path)
+are used as given, so a configured remote whose URL is a local path yields
+that repository's default-branch head. Integrity against the shared upstream
+is checked later by lint, not by intake.
 
 Before anything is written the raw bytes are scanned for secret patterns: a
 private key header (also `PRIVATE KEY BLOCK`), an AWS access key id, a GitHub
@@ -192,12 +200,17 @@ NUL byte is refused with `source-encoding`, because the scan reads UTF-8 text.
 `intake file` writes `specs/<id>/source/` with `ticket.md` first and
 `meta.json` last, each through a temporary name and a rename. `source/` is
 created without overwriting anything: an existing one (also a dangling
-symlink) is `source-exists`. If a write fails, everything the command created
-is removed again. `meta.json` is written last, so a `source/` directory without
-a `meta.json` is the leftover of a run that was killed.
+symlink) is `source-exists`. A `specs` or `specs/<id>` that already exists as
+a symlink (to anywhere) is refused as `source-not-in-repo` before anything is
+created, so nothing is written outside the repository through it. If a write
+fails, everything the command created is removed again. `meta.json` is written
+last, so a `source/` directory without a `meta.json` is the leftover of a run
+that was killed.
 
 Exit codes of `intake file`: 0 on success, 2 on an error (a named code on
-stderr, nothing on stdout, nothing written). With `--check`: 0 when the file
+stderr, nothing on stdout, nothing written). A usage error of this command (a
+missing `--id` or `<path>`, an unknown option) and an unexpected exception
+also exit 2. `--help` and `--version` exit 0. With `--check`: 0 when the file
 is unchanged, 1 on drift, 2 on an error (no recorded `meta.json`, a
 `meta.json` that is not strict JSON, not an object, or without a `sha256`
 string and a `lines` array of `{ id, kind }`). `intake file --check` reads the
