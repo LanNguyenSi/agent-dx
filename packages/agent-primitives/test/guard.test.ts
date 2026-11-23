@@ -1335,14 +1335,15 @@ describe("guard: a process table that cannot be read", () => {
     // that start-up (about a second on a loaded host) and well below the age
     // (10 s) at which the last readable table stops being trusted for a kill
     // by pid. The check below makes the order an assertion: a timeout that
-    // beat the child would show as a missing or late `flag`.
+    // beat the child would show as a missing `flag` or one written after the
+    // timer fired.
     const { r, pids, flag, startedAt } = await runLeavingGroup(
       esc.arg,
       undefined,
       { timeoutMs: 6000 },
     );
     expect(r.reason).toBe("timeout");
-    expect(fs.statSync(flag).mtimeMs).toBeLessThan(startedAt + r.durationMs);
+    expect(fs.statSync(flag).mtimeMs).toBeLessThan(startedAt + 6000);
     expect(r.leftoverCheckFailed).toBe(true);
     expect(marked(esc.cmd)).toEqual([]);
     const byPid = pids.filter((pid) => pid > 0);
