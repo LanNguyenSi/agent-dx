@@ -91,10 +91,11 @@ export function escapeDescriptionMeta(html, _file, { description }) {
 //     layout) are kept; any other value is dropped, so the page is a doc.
 //   - prev and next: the footer link text, as a string or as { text, link },
 //     written with v-html.
-//   - hero name, text and tagline; features title, details and a string icon,
-//     all written with v-html. An icon that is neither a string nor an
-//     object (null, a number, a boolean, a list) is dropped; the theme would
-//     crash on null.
+//   - hero name, text and tagline; features title, details and an icon that is
+//     a string, a date or a finite number (as its decimal string), all written
+//     with v-html. An icon that is none of these and not an object (null, a
+//     non-finite number, a boolean, a list) is dropped; the theme would crash
+//     on null.
 //   - features: an array. Any other shape (a YAML mapping, which Vue also
 //     iterates) is dropped, so a field cannot skip the item checks.
 //   - hero.image and an icon given as an object: the theme spreads the whole
@@ -286,11 +287,20 @@ export function safeImage(image) {
   return safe
 }
 
-// A feature icon the theme can draw: text (a string, or a date as its ISO
-// text) or an image object. The theme tests typeof icon === 'object' and then
-// reads icon.wrap, so null crashes it; a number, a boolean and a list are no
-// icon either. Anything else is undefined, which the caller drops.
-const featureIcon = (icon) => (isRecord(icon) ? safeImage(icon) : typeof icon === 'string' || isDate(icon) ? asText(icon) : undefined)
+// A feature icon the theme can draw: text (a string, a date as its ISO text,
+// or a finite number as its decimal string, so `icon: 5` shows "5" and the
+// theme's truthiness test on the string renders it) or an image object. The
+// theme tests typeof icon === 'object' and then reads icon.wrap, so null
+// crashes it; a non-finite number, a boolean and a list are no icon either.
+// Anything else is undefined, which the caller drops.
+const featureIcon = (icon) =>
+  isRecord(icon)
+    ? safeImage(icon)
+    : typeof icon === 'string' || isDate(icon)
+      ? asText(icon)
+      : Number.isFinite(icon)
+        ? String(icon)
+        : undefined
 
 const sanitizeFeature = (feature) => {
   const item = withSafeLink(withText(feature, ['title', 'details']), { target: true })
