@@ -704,6 +704,28 @@
   ]
  },
  {
+  "name": "tp-input-inner-tab",
+  "effect": "changes",
+  "edits": [
+   {
+    "file": "testplan.yaml",
+    "find": "old token after",
+    "replace": "old\ttoken after"
+   }
+  ]
+ },
+ {
+  "name": "tp-steps-inner-space",
+  "effect": "changes",
+  "edits": [
+   {
+    "file": "testplan.yaml",
+    "find": "\"reload device A\"",
+    "replace": "\"reload  device A\""
+   }
+  ]
+ },
+ {
   "name": "commands-argv-at-ref",
   "effect": "changes",
   "edits": [],

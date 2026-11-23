@@ -247,11 +247,13 @@ describe("golden coverage", () => {
     }
   });
 
-  it("changes the digest for inner whitespace in every exact test-plan value", () => {
+  it("changes the digest for inner whitespace in the exact test-plan values that carry text", () => {
     for (const name of [
       "tp-fail-match-inner-space",
       "tp-evidence-location-inner-space",
       "tp-expected-inner-space",
+      "tp-input-inner-tab",
+      "tp-steps-inner-space",
     ]) {
       expect(changing.has(name), `no changing variant ${name}`).toBe(true);
     }

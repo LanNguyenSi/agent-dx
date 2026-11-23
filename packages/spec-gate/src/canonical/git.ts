@@ -124,6 +124,16 @@ export function assertCommit(repo: string, ref: string): void {
       `commands_ref ${ref} is not a commit available in ${repo}`,
     );
   }
+  // The type check alone accepts an abbreviation that git resolves, such as
+  // a 40-digit prefix in a SHA-256 repository: the id must be the full id of
+  // the repository's own object format.
+  const full = git(repo, ["rev-parse", "--verify", `${ref}^{commit}`]);
+  if (full.status !== 0 || full.stdout.toString("utf8").trim() !== ref) {
+    throw new DigestError(
+      "commands-ref-unresolvable",
+      `commands_ref ${ref} is not the full commit id in the object format of ${repo}`,
+    );
+  }
 }
 
 /** The modes of a regular file in a git tree. */
@@ -131,12 +141,20 @@ const FILE_MODES = new Set(["100644", "100755"]);
 
 /**
  * The object id of the blob that holds `.spec-gate/commands.yaml` in the
- * tree of the commit `ref`. The entry must be a regular file (mode 100644
+ * tree of the commit `ref`, looked up from the top of the repository however
+ * `repo` is spelled (`--full-tree`). The entry must be a regular file (mode 100644
  * or 100755): a link would bind the text of the link, not the file it
  * points at, and a submodule or a tree is not a file at all.
  */
 function commandsBlobId(repo: string, ref: string): string {
-  const run = git(repo, ["ls-tree", "-z", ref, "--", COMMANDS_PATH]);
+  const run = git(repo, [
+    "ls-tree",
+    "-z",
+    "--full-tree",
+    ref,
+    "--",
+    COMMANDS_PATH,
+  ]);
   if (run.status !== 0) {
     throw new DigestError(
       "git-failed",

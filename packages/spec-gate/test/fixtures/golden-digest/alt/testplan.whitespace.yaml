@@ -46,7 +46,7 @@
   steps:
     - "log in on device A"
     - "change the password on device B"
-    - "  reload   device A "
+    - "reload device A"
   expected: "device A is asked to log in"
   evidence_location: "review/runtime-tp6.md"
   control: negative

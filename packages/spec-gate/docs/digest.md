@@ -101,11 +101,10 @@ serialised and hashed.
    In the test plan the class of each normative field is data, in
    `PLAN_FIELD_CLASSES` (`src/canonical/digest.ts`):
 
-   - prose test-plan fields: `claim`, `input`, `oracle`, `level`, `seam`,
-     `red_reason`, `baseline`, `threshold`, `verifier`, `check`,
-     `environment`, `steps`, `probe_hint`;
+   - prose test-plan fields: `claim`, `oracle`, `level`, `seam`,
+     `red_reason`, `baseline`, `threshold`, `check`, `probe_hint`;
    - exact test-plan fields: `id`, `covers`, `kind`, `check_command_ref`,
-     `evidence_location`, `fail_match`, `expected`, `control`, `method`,
+     `input`, `steps`, `environment`, `verifier`, `evidence_location`, `fail_match`, `expected`, `control`, `method`,
      `runs`.
 
    A normative field that has no class is treated as exact, and a test fails
@@ -117,6 +116,7 @@ serialised and hashed.
    so there the digest is blind to more than the ASCII rule above: a trailing
    no-break space or em space on a line does not change it. A test-plan string
    reaches the digest as the YAML parser returns it, with its ends intact.
+
 4. **Keys.** The keys of every object are sorted as RFC 8785 says: by UTF-16
    code units. Files may list their keys in any order.
 5. **Numbers and strings.** Numbers (`baseline`, `threshold`, `runs`) keep
@@ -143,8 +143,8 @@ it the repository is the git top level of `<spec-dir>`. When both are
 possible, `--repo` wins. `commands_ref` must name a commit in that
 repository whether or not a row refers to a command. It must be a full
 commit ID (40 or 64 lower-case hex digits) naming a commit object itself: a
-branch name, `HEAD`, a tag name, a short ID and the ID of an annotated tag
-are refused, because each of them moves or names something else. The
+branch name, `HEAD`, a tag name, a short ID (also a 40-digit prefix in a
+SHA-256 repository) and the ID of an annotated tag are refused, because each of them moves or names something else. The
 read is local: an object a partial clone does not hold is reported, never
 fetched. The commands file is
 read only when at least one row refers to a command; a spec without static
@@ -158,23 +158,23 @@ or the commands file is reported with the format layer's own codes, one line
 each, behind a line that names the file. A usage error (a missing argument,
 an unknown option) is reported by the option parser and exits non-zero too.
 
-| Code | Meaning |
-|---|---|
-| `spec-dir-invalid` | `<spec-dir>` is not a directory |
-| `input-missing` | `spec.md` or `testplan.yaml` does not exist |
-| `input-not-regular` | one of them is a link, a directory or another non-file |
-| `input-too-large` | one of them is over 4 MiB |
-| `input-not-utf8` | one of them is not valid UTF-8 |
-| `input-unreadable` | one of them cannot be read |
-| `spec-invalid` | `spec.md` does not parse; the format errors follow |
-| `testplan-invalid` | `testplan.yaml` does not parse; the format errors follow |
-| `repo-not-found` | no `--repo`, and `<spec-dir>` is not inside a git work tree |
-| `repo-invalid` | `--repo` is not a git repository |
-| `git-failed` | `git` is missing, timed out, wrote more than 4 MiB, or could not read an object (in a partial clone, an object that is not available locally; nothing is fetched) |
-| `commands-ref-unresolvable` | `commands_ref` is not a full commit ID, or is not a commit object in the repository (the ID of an annotated tag is refused) |
-| `commands-file-missing` | a row refers to a command and `.spec-gate/commands.yaml` is not a regular file at `commands_ref` (absent, or a link, a submodule or a directory) |
-| `commands-file-invalid` | the commands file at `commands_ref` does not parse or is not UTF-8; the format errors follow |
-| `command-ref-unknown` | a row refers to a command the commands file at `commands_ref` does not define |
+| Code                        | Meaning                                                                                                                                                           |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spec-dir-invalid`          | `<spec-dir>` is not a directory                                                                                                                                   |
+| `input-missing`             | `spec.md` or `testplan.yaml` does not exist                                                                                                                       |
+| `input-not-regular`         | one of them is a link, a directory or another non-file                                                                                                            |
+| `input-too-large`           | one of them is over 4 MiB                                                                                                                                         |
+| `input-not-utf8`            | one of them is not valid UTF-8                                                                                                                                    |
+| `input-unreadable`          | one of them cannot be read                                                                                                                                        |
+| `spec-invalid`              | `spec.md` does not parse; the format errors follow                                                                                                                |
+| `testplan-invalid`          | `testplan.yaml` does not parse; the format errors follow                                                                                                          |
+| `repo-not-found`            | no `--repo`, and `<spec-dir>` is not inside a git work tree                                                                                                       |
+| `repo-invalid`              | `--repo` is not a git repository                                                                                                                                  |
+| `git-failed`                | `git` is missing, timed out, wrote more than 4 MiB, or could not read an object (in a partial clone, an object that is not available locally; nothing is fetched) |
+| `commands-ref-unresolvable` | `commands_ref` is not a full commit ID, or is not a commit object in the repository (the ID of an annotated tag is refused)                                       |
+| `commands-file-missing`     | a row refers to a command and `.spec-gate/commands.yaml` is not a regular file at `commands_ref` (absent, or a link, a submodule or a directory)                  |
+| `commands-file-invalid`     | the commands file at `commands_ref` does not parse or is not UTF-8; the format errors follow                                                                      |
+| `command-ref-unknown`       | a row refers to a command the commands file at `commands_ref` does not define                                                                                     |
 
 The environment of every `git` call has no `GIT_*` variable of the caller, and
 sets `GIT_NO_REPLACE_OBJECTS`, so that a replace ref cannot change what a

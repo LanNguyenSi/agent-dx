@@ -73,7 +73,11 @@ export const PLAN_FIELD_CLASSES: Readonly<Record<string, TextClass>> =
     covers: "exact",
     kind: "exact",
     check_command_ref: "exact",
-    // paths, locations and match text
+    // paths, locations, match text and run set-up
+    input: "exact",
+    steps: "exact",
+    environment: "exact",
+    verifier: "exact",
     evidence_location: "exact",
     fail_match: "exact",
     expected: "exact",
@@ -83,17 +87,13 @@ export const PLAN_FIELD_CLASSES: Readonly<Record<string, TextClass>> =
     runs: "exact",
     // prose
     claim: "prose",
-    input: "prose",
     oracle: "prose",
     level: "prose",
     seam: "prose",
     red_reason: "prose",
     baseline: "prose",
     threshold: "prose",
-    verifier: "prose",
     check: "prose",
-    environment: "prose",
-    steps: "prose",
     probe_hint: "prose",
   });
 
