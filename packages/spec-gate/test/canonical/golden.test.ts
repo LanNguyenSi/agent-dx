@@ -254,6 +254,8 @@ describe("golden coverage", () => {
       "tp-expected-inner-space",
       "tp-input-inner-tab",
       "tp-steps-inner-space",
+      "tp-environment-trailing-space",
+      "tp-verifier-inner-space",
     ]) {
       expect(changing.has(name), `no changing variant ${name}`).toBe(true);
     }

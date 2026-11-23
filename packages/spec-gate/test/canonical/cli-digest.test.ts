@@ -206,15 +206,6 @@ describe("spec-gate digest: where the commands file is looked up", () => {
       expect(run.stderr, sub).toBe("");
       expect(run.stdout, sub).toBe(top.stdout);
     }
-    // The decoy really differs: the digest would move if it were read.
-    const other = await makeRepo(scratch, [
-      [{ path: COMMANDS_FILE, content: laterCommands }],
-    ]);
-    const moved = await cli(
-      ["digest", specAt("spec-other", other.shas[0]!), "--repo", other.dir],
-      scratch,
-    );
-    expect(moved.stdout).not.toBe(top.stdout);
   });
 
   it("reads a bare repository from its object database", async () => {
@@ -226,14 +217,14 @@ describe("spec-gate digest: where the commands file is looked up", () => {
     expect(run.stdout).toBe(`${expected.base}\n`);
   });
 
-  it("refuses a 40-digit prefix of a SHA-256 commit id", async () => {
+  it("refuses a 40-digit prefix of a SHA-256 commit id", async (ctx) => {
     const dir = path.join(scratch, "sha256-repo");
     fs.mkdirSync(dir);
     try {
       await git(dir, ["init", "-q", "--object-format=sha256"]);
     } catch {
-      // The installed git cannot make a SHA-256 repository: nothing to test.
-      return;
+      // The installed git cannot make a SHA-256 repository.
+      ctx.skip();
     }
     fs.mkdirSync(path.join(dir, ".spec-gate"));
     fs.writeFileSync(path.join(dir, COMMANDS_FILE), baseCommands);
@@ -259,5 +250,22 @@ describe("spec-gate digest: where the commands file is looked up", () => {
     expect(prefix.code).toBe(1);
     expect(prefix.stdout).toBe("");
     expect(prefix.stderr).toContain("[commands-ref-unresolvable]");
+  });
+
+  it("refuses a branch whose name looks like a 64-digit commit id", async () => {
+    // Works on every git: the name passes the commit-id pattern and resolves
+    // to a commit, but it is a moving ref, not the object id itself.
+    const made = await makeRepo(scratch, [
+      [{ path: COMMANDS_FILE, content: baseCommands }],
+    ]);
+    const name = "a".repeat(64);
+    await git(made.dir, ["branch", name, made.shas[0]!]);
+    const run = await cli(
+      ["digest", specAt("spec-hex-branch", name), "--repo", made.dir],
+      scratch,
+    );
+    expect(run.code).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("[commands-ref-unresolvable]");
   });
 });

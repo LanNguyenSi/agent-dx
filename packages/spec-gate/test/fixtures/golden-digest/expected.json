@@ -66,6 +66,8 @@
   "tp-evidence-location-inner-space": "sha256:ff5ae0527933a30db2e03a4c0805e6711dc6e12cf8f0ce7cc7a49b4191b5bcf0",
   "tp-expected-inner-space": "sha256:e452bdd423f3286c21efaf3804c13b4c9e8d6a52d5e51c39a500d823d545581c",
   "tp-input-inner-tab": "sha256:ca1f03ed3fd4e0e894842ddd458422010a5bb6ac56301848ad8c5ce16966ea62",
+  "tp-environment-trailing-space": "sha256:aecb846219bdeef7a6341e8f32b35fb2a6493dd131a98f477af7613da7abcfc2",
+  "tp-verifier-inner-space": "sha256:2c1b918f3bae7c4b2f383648f407affaaf757fceabccfa7948f05d5fd7909b2d",
   "tp-steps-inner-space": "sha256:03c16e8233164e58908308b7eb567e15cdc3be64871555beffcb4187dbe85510",
   "commands-argv-at-ref": "sha256:4707e89416b54b378bb9e3b91ccb89123766c1ebf649454e932d48c79219d286",
   "commands-ref-only": "sha256:665aea06492930d2aaa62621395971c5b59530996e2ac389ebcbe2b95ccb1217",

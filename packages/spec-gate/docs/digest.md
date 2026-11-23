@@ -140,7 +140,7 @@ place is an error.
 
 `--repo <path>` is the git repository `commands_ref` is read from. Without
 it the repository is the git top level of `<spec-dir>`. When both are
-possible, `--repo` wins. `commands_ref` must name a commit in that
+possible, `--repo` wins. The commands file is always resolved from the repository root, also when `--repo` names a subdirectory, a `.git` directory or a bare repository. `commands_ref` must name a commit in that
 repository whether or not a row refers to a command. It must be a full
 commit ID (40 or 64 lower-case hex digits) naming a commit object itself: a
 branch name, `HEAD`, a tag name, a short ID (also a 40-digit prefix in a
