@@ -674,6 +674,22 @@ function sleepMs(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Script text for a node command: once the file `flag` exists, runs `then`
+ * after `afterMs`. The command's own steps are then ordered by the arming of
+ * the stand-in `ps`, not by the time since it started. */
+function endsAfterFlag(flag: string, then: string, afterMs: number): string {
+  return `const w=setInterval(()=>{if(require('fs').existsSync(${JSON.stringify(flag)})){clearInterval(w);setTimeout(()=>{${then}},${afterMs})}},20)`;
+}
+
+/** Arms the stand-in `ps` (creates `flag`) once the process whose command
+ * line is `marker` shows in the table and a poll (made every 100 ms) has
+ * surely seen it too, as `leaveAndExit` does. */
+async function armWhenSeen(marker: string, flag: string): Promise<void> {
+  expect(await waitFor(() => marked(marker).length > 0, 10_000)).toBe(true);
+  await sleepMs(250);
+  fs.writeFileSync(flag, "");
+}
+
 describe("guard: a process table that cannot be read", () => {
   beforeEach(skipWithoutPs);
   /** Runs a shell command that leaves a background `sleep` in its group and
@@ -1274,6 +1290,7 @@ describe("guard: a process table that cannot be read", () => {
       recheck: true,
     });
     const kill = vi.spyOn(process, "kill");
+    const startedAt = Date.now();
     try {
       const r = await run(
         process.execPath,
@@ -1283,6 +1300,8 @@ describe("guard: a process table that cannot be read", () => {
       // Signal 0 only asks whether a group exists; the kills are the rest.
       return {
         r,
+        flag,
+        startedAt,
         pids: kill.mock.calls
           .filter(([, signal]) => signal !== 0)
           .map(([pid]) => pid),
@@ -1311,10 +1330,19 @@ describe("guard: a process table that cannot be read", () => {
 
   it("the same at the timeout, and no pid is signalled twice by the two fallbacks", async () => {
     const esc = fx(7191);
-    const { r, pids } = await runLeavingGroup(esc.arg, undefined, {
-      timeoutMs: 3000,
-    });
+    // The timer starts at spawn, and the child needs its first table reads to
+    // arm `flag` before the timeout may end the run. The limit is well above
+    // that start-up (about a second on a loaded host) and well below the age
+    // (10 s) at which the last readable table stops being trusted for a kill
+    // by pid. The check below makes the order an assertion: a timeout that
+    // beat the child would show as a missing or late `flag`.
+    const { r, pids, flag, startedAt } = await runLeavingGroup(
+      esc.arg,
+      undefined,
+      { timeoutMs: 6000 },
+    );
     expect(r.reason).toBe("timeout");
+    expect(fs.statSync(flag).mtimeMs).toBeLessThan(startedAt + r.durationMs);
     expect(r.leftoverCheckFailed).toBe(true);
     expect(marked(esc.cmd)).toEqual([]);
     const byPid = pids.filter((pid) => pid > 0);
@@ -1382,14 +1410,18 @@ describe("guard: a process table that cannot be read", () => {
     const kid = fx(7199);
     const flag = path.join(tmp(), "flag");
     const ps = installFakePs({ flag, fails: 10_000 });
+    // The command ends 400 ms after the stand-in `ps` is armed, which the
+    // test does once the `sleep` shows in the table and a poll has surely
+    // seen it (see `armWhenSeen`).
     const script =
       "const {spawn}=require('child_process');" +
       `spawn('sh',['-c','sleep ${kid.arg} & wait'],{detached:true,stdio:'ignore'});` +
-      `setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(flag)},''),800);` +
-      "setTimeout(()=>process.exit(0),1200)";
+      endsAfterFlag(flag, "process.exit(0)", 400);
     let r;
     try {
-      r = await run(process.execPath, ["-e", script], { pollMs: 100 });
+      const pending = run(process.execPath, ["-e", script], { pollMs: 100 });
+      await armWhenSeen(kid.cmd, flag);
+      r = await pending;
     } finally {
       ps.restore();
     }
@@ -1405,17 +1437,22 @@ describe("guard: a process table that cannot be read", () => {
     const esc = fx(7197);
     const flag = path.join(tmp(), "flag");
     const ps = installFakePs({ flag, fails: 10_000 });
-    // The escapee is seen by the polls; the stand-in is armed at 0.8 s, and
-    // the command kills the escapee itself at 1.2 s, before it ends.
+    // The escapee is seen by the polls; the test arms the stand-in once it
+    // shows in the table, the command kills the escapee itself 400 ms after
+    // that, and ends 300 ms later.
     const script =
       "const {spawn}=require('child_process');" +
       `const e=spawn('sleep',['${esc.arg}'],{detached:true,stdio:'ignore'});` +
-      `setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(flag)},''),800);` +
-      "setTimeout(()=>process.kill(e.pid,'SIGKILL'),1200);" +
-      "setTimeout(()=>process.exit(0),1500)";
+      endsAfterFlag(
+        flag,
+        "process.kill(e.pid,'SIGKILL');setTimeout(()=>process.exit(0),300)",
+        400,
+      );
     let r;
     try {
-      r = await run(process.execPath, ["-e", script], { pollMs: 100 });
+      const pending = run(process.execPath, ["-e", script], { pollMs: 100 });
+      await armWhenSeen(esc.cmd, flag);
+      r = await pending;
     } finally {
       ps.restore();
     }
