@@ -11,3 +11,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial package scaffold: CLI with --help and --version.
 - Format schemas and pure parsers for `spec.md`, `testplan.yaml`, `bindings.yaml`, `triage.json`, `questions.json`, `.spec-gate/config.yaml`, `.spec-gate/commands.yaml` and evidence envelopes, with the field-to-layer table, the per-kind required fields, ID and source-line ID handling, the reference-state table and the evidence phase rules, documented in `docs/formats.md`.
+- `spec-gate digest <spec-dir> [--repo <path>]`: a deterministic `sha256:` digest of the normative layer of a spec (canonical JSON per RFC 8785, `commands_ref` and the referenced argv lists read from git at that commit), with golden fixtures and the rules in `docs/digest.md`.
