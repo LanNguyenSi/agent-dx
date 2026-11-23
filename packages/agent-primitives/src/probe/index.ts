@@ -565,6 +565,18 @@ export function patchUnusableReason(
  * The same 20 the plan-result truncation notice uses above. */
 const MATCH_LINE_LIST_CAP = 20;
 
+/** The size bound of the `-n` derivation's read of `--file` (see the
+ * derivation in `runProbePipeline`): the same 8 MiB `-p/--patch`'s
+ * `PATCH_MAX_BYTES` cap uses. The derivation exists to save the caller
+ * a `-n` on an ordinary source file, not to slurp whatever `--file`
+ * names, so a file over the bound is never read for it: the run refuses
+ * as a usage error and says to pass `-n`, which reads the file anyway
+ * (the mutation itself must). A writer-less FIFO, by contrast, is never
+ * read at all -- the derivation checks metadata (`statSync`,
+ * `isFile()`) before opening anything, exactly like `patchUnusableReason`
+ * does for `-p`. */
+const MATCH_DERIVATION_MAX_BYTES = 8 * 1024 * 1024;
+
 /**
  * Runs the full probe pipeline: containment -> lock -> stale-marker
  * recovery -> baseline -> mutate -> pre+test -> restore -> verify ->
@@ -758,24 +770,88 @@ async function runProbePipeline(
   // `MATCH_LINE_LIST_CAP`) and asking for `-n`. The read is of
   // `displayFile` itself -- the same resolution the mutation and every
   // later check use, before any isolation copy exists -- and it counts
-  // LINES (see `matchLineNumbers`). An unreadable file is NOT diagnosed
-  // here: the line stays underived and the `line_required` refusal
-  // below reports the missing `-n` exactly as it did before this
-  // derivation existed, leaving the file's own problem
-  // (`file_not_found`, a permissions refusal) to the checks that know
-  // how to name it once `-n` is supplied. Both refusals fire before the
+  // LINES (see `matchLineNumbers`). Both refusals fire before the
   // lock, the marker and any worktree exist, so neither leaves anything
   // behind.
+  //
+  // What the derivation reads is bounded the way `patchUnusableReason`
+  // bounds `-p`: metadata checks first, bytes only for a file the run
+  // could honestly mutate. `--file` is resolved exactly as the mutation
+  // resolves it (`resolveDeepestExisting`, judged against
+  // `resolveDeepestExisting(root)` by `isPathContained`, `--allow-outside`
+  // skipping the containment rule exactly as `setup.ts`'s own check
+  // does), then `statSync`ed, and the search runs only for a regular
+  // file of at most `MATCH_DERIVATION_MAX_BYTES`. Anything the
+  // derivation declines -- outside the containment root, not a regular
+  // file (a FIFO, a directory), not stat-able -- is never read (an
+  // unbounded read of a writer-less FIFO blocks forever, a `/dev/zero`
+  // read never ends, and answering the refusal below for a file the
+  // containment check would reject would disclose its line numbers
+  // before the refusal that should name the file instead): the run is
+  // deferred past `line_required` below so the existing checks answer
+  // it with their existing reasons -- `file_outside_root`, the
+  // not-a-regular-file refusal, `file_not_found` -- exactly as the same
+  // run with an explicit `-n` answers. Over the size cap the file IS
+  // stat-able and regular, so nothing downstream would refuse it for
+  // its size: the derivation refuses instead, a usage error naming the
+  // file and saying to pass `-n`. A file that passes every metadata
+  // check but fails only the READ (a permissions failure on a regular
+  // file) is NOT deferred -- the deferral exists for what the metadata
+  // checks could already see; here the line stays underived and the
+  // `line_required` refusal below reports the missing `-n` exactly as
+  // it did before this derivation existed. An empty `-M` text is never
+  // searched either: `String.includes("")` is true for every line, so
+  // the search would answer `match_ambiguous` for any multi-line file;
+  // instead `line` is set to 1 (every existing file has at least one
+  // line, and no mutant is ever computed for an empty `-M`: every line
+  // carries the same refusal). That is past `line_required` and into
+  // `computeMatch`'s existing "-M/--match text must not be empty"
+  // refusal -- the same one the same run with an explicit `-n` gets,
+  // and it names no line number itself.
+  let derivationDeferred = false;
   if (
     opts.form === "match" &&
     line === undefined &&
     opts.matchText !== undefined
   ) {
     let derivationContent: string | undefined;
-    try {
-      derivationContent = fs.readFileSync(displayFile, "utf8");
-    } catch {
-      derivationContent = undefined;
+    if (opts.matchText === "") {
+      line = 1;
+    } else {
+      const derivationFile = resolveDeepestExisting(displayFile);
+      let derivationStat: fs.Stats | undefined;
+      if (
+        opts.allowOutside ||
+        isPathContained(resolveDeepestExisting(root), derivationFile)
+      ) {
+        try {
+          derivationStat = fs.statSync(displayFile);
+        } catch {
+          derivationStat = undefined;
+        }
+      }
+      if (derivationStat === undefined) {
+        derivationDeferred = true;
+      } else if (!derivationStat.isFile()) {
+        derivationDeferred = true;
+      } else if (derivationStat.size > MATCH_DERIVATION_MAX_BYTES) {
+        return {
+          status: "usage_error",
+          reason: "line_required",
+          warnings: [
+            ...warnings,
+            `--file ${displayFile} is ${String(derivationStat.size)} bytes, over the ${String(MATCH_DERIVATION_MAX_BYTES)}-byte cap for the -n derivation: pass -n/--line to name the line to mutate`,
+          ],
+          isolation: isolationField,
+          dryRunLogPaths: derivationLogPaths,
+        };
+      } else {
+        try {
+          derivationContent = fs.readFileSync(displayFile, "utf8");
+        } catch {
+          derivationContent = undefined;
+        }
+      }
     }
     if (derivationContent !== undefined) {
       const hits = matchLineNumbers(derivationContent, opts.matchText);
@@ -816,8 +892,14 @@ async function runProbePipeline(
   // `patch` is exempt: its line comes from the applied diff, so there is
   // nothing for the caller to be required to supply; a `match` run
   // reached here without one only when the derivation above could not
-  // read the file, or got no `-M` text to derive from.
-  if (line === undefined && opts.form !== "patch") {
+  // read the file, or got no `-M` text to derive from. A run the
+  // derivation DECLINED to read (`derivationDeferred`) is exempt too:
+  // it must reach the containment, existence and regular-file checks
+  // that an explicit `-n` run reaches, so that the file's own problem
+  // -- `file_outside_root`, the not-a-regular-file refusal,
+  // `file_not_found` -- is what answers, not a message about the
+  // missing `-n`.
+  if (line === undefined && opts.form !== "patch" && !derivationDeferred) {
     return {
       status: "usage_error",
       reason: "line_required",

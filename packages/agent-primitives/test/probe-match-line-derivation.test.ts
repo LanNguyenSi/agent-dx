@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,7 +6,7 @@ import { describe, expect, it, afterEach } from "vitest";
 import { probe, type ProbeOptions } from "../src/probe/index.js";
 import { matchLineNumbers } from "../src/probe/mutant.js";
 import { expectNoIsolationLeftovers } from "./helpers/no-leftovers.js";
-import { spawnCli } from "./helpers/spawn-cli.js";
+import { CLI_PATH, spawnCli } from "./helpers/spawn-cli.js";
 
 /**
  * The `-n/--line` a `-M/--match` run derives from its own `-M` text:
@@ -19,6 +19,18 @@ import { spawnCli } from "./helpers/spawn-cli.js";
  * `test/helpers/no-leftovers.ts`). Explicit `-n` (and `-r`'s untouched
  * requirement of it) is pinned too, because "unchanged" is only proven
  * by asserting the old behavior is still the observed one.
+ *
+ * The derivation's own read guard is pinned by the same method: the
+ * search runs only for a regular file within the containment root and
+ * at most `MATCH_DERIVATION_MAX_BYTES` bytes, and every file shape it
+ * declines (outside the root, a FIFO, a directory, missing) must answer
+ * exactly what the same run with an explicit `-n` answers, never a
+ * derivation refusal that read the file to get there -- a FIFO without
+ * `-n` must hit the not-a-regular-file refusal instead of hanging, an
+ * outside-root file must hit `file_outside_root` without its line
+ * numbers being disclosed, and over the cap the refusal must name the
+ * file and say to pass `-n`. An empty `-M` is never searched: the
+ * existing "must not be empty" refusal answers.
  */
 
 const tmpDirs: string[] = [];
@@ -209,6 +221,13 @@ describe("probe(): -M without -n refuses match_not_found and match_ambiguous", (
     expect(warning).toContain(": 2, 5");
     expect(warning).toContain("-n/--line");
     expect(warning).toContain(path.join(repo, "fixture.js"));
+    // The full count is under the list cap, so there is no "and N more"
+    // tail to append: a `more >= 0` mutant would print ", and 0 more".
+    expect(warning).not.toContain("more");
+    // The refusal quotes the `-M` text itself, JSON-quoted: a mutant
+    // that drops it from the message leaves the caller's own text
+    // unquoted and unnamed.
+    expect(warning).toContain(JSON.stringify("return"));
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
       FIXTURE_JS,
     );
@@ -241,7 +260,7 @@ describe("probe(): -M without -n refuses match_not_found and match_ambiguous", (
     expectNoIsolationLeftovers(repo, lockDir);
   });
 
-  it("an unreadable --file is NOT diagnosed by the derivation: the old line_required refusal stays the answer", async () => {
+  it("a missing --file is NOT answered by the derivation: file_not_found, the same answer explicit -n gives", async () => {
     useLockDir();
     const repo = initRepo();
     const lockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR as string;
@@ -249,8 +268,128 @@ describe("probe(): -M without -n refuses match_not_found and match_ambiguous", (
       matchOptions(repo, { file: "missing.js", matchText: "anything" }),
     );
     expect(result.status).toBe("usage_error");
-    expect(result.reason).toBe("line_required");
+    expect(result.reason).toBe("file_not_found");
+    expect(result.warnings.join("\n")).toContain(
+      `--file not found: ${path.join(repo, "missing.js")}`,
+    );
     expectNoIsolationLeftovers(repo, lockDir);
+  });
+});
+
+describe("probe(): the -M-without--n read guard matches the explicit -n answers", () => {
+  it("a FIFO --file without -n hits the non-regular-file refusal instead of hanging on the read", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const lockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR as string;
+    // `mkfifo` under the repo (itself an `mkdtemp` directory inside
+    // `os.tmpdir()`, never the worktree): in-root, so what answers is
+    // the regular-file check, not containment. A derivation that read
+    // the FIFO before checking would block `readFileSync` forever (no
+    // writer), so the probe runs as a child with its own hard kill
+    // (`SIGKILL` on timeout -- a synchronously blocked process ignores
+    // nothing); the run must finish well inside this test's own bound
+    // and report the not-a-regular-file refusal, never the FIFO's
+    // content.
+    const fifo = path.join(repo, "fifo.pipe");
+    execFileSync("mkfifo", [fifo]);
+    const run = spawnSync(
+      process.execPath,
+      [
+        CLI_PATH,
+        "-C",
+        repo,
+        "probe",
+        "--file",
+        "fifo.pipe",
+        "-M",
+        "anything",
+        "-w",
+        "true",
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "inplace",
+      ],
+      { encoding: "utf8", timeout: 8000, killSignal: "SIGKILL" },
+    );
+    expect(run.error).toBeUndefined();
+    expect(run.stdout).toContain("not a regular file");
+    expect(run.stdout).toContain(fifo);
+    expectNoIsolationLeftovers(repo, lockDir);
+  }, 10000);
+
+  it("a directory --file without -n hits the non-regular-file refusal, the same throw explicit -n gives", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const lockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR as string;
+    fs.mkdirSync(path.join(repo, "adir"));
+    const result = probe(
+      matchOptions(repo, { file: "adir", matchText: "anything" }),
+    );
+    await expect(result).rejects.toThrow(/not a regular file/);
+    await expect(result).rejects.toThrow(path.join(repo, "adir"));
+    expectNoIsolationLeftovers(repo, lockDir);
+  });
+
+  it("a --file outside the root without -n answers file_outside_root, never a derivation refusal naming its lines", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const lockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR as string;
+    // Two lines carry the text: had the derivation read the file, the
+    // answer would be `match_ambiguous` with those line numbers, a
+    // disclosure the same call with `-n` never makes.
+    const outside = path.join(makeTmpDir(), "outside.js");
+    fs.writeFileSync(outside, "n > 0 a\nn > 0 b\n");
+    const result = await probe(
+      matchOptions(repo, { file: outside, matchText: "n > 0" }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    const warning = result.warnings.join("\n");
+    expect(warning).toContain(outside);
+    expect(warning).not.toContain("occurs on");
+    expect(warning).not.toContain(": 1, 2");
+    expectNoIsolationLeftovers(repo, lockDir);
+  });
+
+  it("a --file over the derivation size cap without -n refuses as a usage error naming the file and -n", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const lockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR as string;
+    // One byte over the 8 MiB `MATCH_DERIVATION_MAX_BYTES`: a unique
+    // `n > 0` inside it, so a missing cap check would derive line 1 and
+    // run the probe instead of refusing.
+    const buf = Buffer.alloc(8 * 1024 * 1024 + 1, 0x20);
+    buf.write("n > 0", 100);
+    fs.writeFileSync(path.join(repo, "big.js"), buf);
+    const result = await probe(
+      matchOptions(repo, { file: "big.js", matchText: "n > 0" }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("line_required");
+    const warning = result.warnings.join("\n");
+    expect(warning).toContain(path.join(repo, "big.js"));
+    expect(warning).toContain("8388609");
+    expect(warning).toContain("cap");
+    expect(warning).toContain("-n/--line");
+    expectNoIsolationLeftovers(repo, lockDir);
+  });
+
+  it("an empty -M without -n is never searched: the existing must-not-be-empty refusal answers", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const result = await probe(matchOptions(repo, { matchText: "" }));
+    // Every line of any file contains the empty text, so a search would
+    // answer `match_ambiguous` listing them all (plus a phantom line
+    // after the trailing newline); the refusal is content-free.
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("mutant_not_applicable");
+    expect(result.warnings.join("\n")).toContain(
+      "-M/--match text must not be empty",
+    );
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+      FIXTURE_JS,
+    );
   });
 });
 
