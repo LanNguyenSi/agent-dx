@@ -10,11 +10,7 @@ import { DEFAULT_QUESTIONS_WARN_ABOVE } from "../../formats/config.js";
 import { KIND_SPECS } from "../../formats/layers.js";
 import { OWNER_NONE } from "../../formats/spec.js";
 import { deriveTriageClass, TRIAGE_RULE_VERSION } from "../../triage/index.js";
-import type {
-  Questions,
-  SpecGateConfig,
-  TestPlan,
-} from "../../formats/index.js";
+import type { Questions, TestPlan } from "../../formats/index.js";
 import { valueOf } from "../inputs.js";
 import { TRIAGE_FILE } from "../profile.js";
 import { findProseWords } from "../prose.js";
@@ -75,7 +71,7 @@ export function checkTpCoversUnknown(ctx: RuleContext): RuleFinding[] {
 export function checkBindingUnknown(ctx: RuleContext): RuleFinding[] {
   const plan = valueOf(ctx.inputs.testplan);
   const bindings = used(ctx.inputs.bindings) ?? {};
-  const rows = new Set(plan.map((row: { id: string }) => row.id));
+  const rows = new Set(plan.map((row) => row.id));
   return Object.keys(bindings)
     .filter((tpId) => !rows.has(tpId))
     .map((tpId) => ({
@@ -133,11 +129,24 @@ export function checkBindingStatus(ctx: RuleContext): RuleFinding[] {
 /**
  * The ledger maps exactly the source lines of `source/meta.json`: one
  * finding per meta line with no ledger entry, one per ledger entry whose
- * source line the meta does not list.
+ * source line the meta does not list. Without `source/meta.json` the ledger
+ * cannot be checked, so the rule reports that rather than passing: an absent
+ * file is one error, not a skip. A file that failed to parse is skipped
+ * (`input-failed`), whose `format` error already fails the run.
  */
 export function checkLedgerComplete(ctx: RuleContext): RuleFinding[] {
   const spec = valueOf(ctx.inputs.spec);
-  const meta = valueOf(ctx.inputs.meta);
+  const meta = used(ctx.inputs.meta);
+  if (meta === undefined) {
+    return [
+      {
+        file: META,
+        path: "$",
+        code: "input-missing",
+        message: `${META} is absent: the ledger cannot be checked, the source lines it must match are unknown`,
+      },
+    ];
+  }
   const findings: RuleFinding[] = [];
   const mapped = new Set(spec.ledger.map((entry) => entry.sourceLine));
   meta.lines.forEach((line, i) => {
@@ -203,25 +212,30 @@ export function checkAcSourceUnknown(ctx: RuleContext): RuleFinding[] {
   return findings;
 }
 
-/** `owner: none` records that nobody stands behind the line: a divergence, not a requirement. */
+/**
+ * `owner: none` records that nobody stands behind the line: a divergence,
+ * not a requirement. The reserved word is matched trimmed and lower-cased,
+ * so `None` and `NONE` are the same error; the message says it must be
+ * written `none`.
+ */
 export function checkOwnerNone(ctx: RuleContext): RuleFinding[] {
   const spec = valueOf(ctx.inputs.spec);
   return spec.acceptance
-    .filter((ac) => ac.owner === OWNER_NONE)
+    .filter((ac) => ac.owner.trim().toLowerCase() === OWNER_NONE)
     .map((ac) => ({
       file: SPEC,
       path: `${ac.id}.owner`,
       id: ac.id,
       line: ac.line,
-      message: `${ac.id} has owner ${OWNER_NONE}: nobody stands behind the line, so it is a divergence and needs a question, not an AC`,
+      message: `${ac.id} has owner "${ac.owner}": the reserved word is written ${OWNER_NONE}, and nobody stands behind the line, so it is a divergence and needs a question, not an AC`,
     }));
 }
 
 /**
  * At `proposed` nothing may be left open: no residual with status `open`
  * (a residual class is always one of `divergence`, `blind-spot` and
- * `untestable`), and no `blocking` `divergence` or `blind-spot` question
- * of questions.json without an answer.
+ * `untestable`), and no `blocking` question of questions.json of any of
+ * the three open-point classes without an answer.
  */
 export function checkResidualOpen(ctx: RuleContext): RuleFinding[] {
   const spec = valueOf(ctx.inputs.spec);
@@ -237,11 +251,10 @@ export function checkResidualOpen(ctx: RuleContext): RuleFinding[] {
   const questions = used(ctx.inputs.questions);
   if (questions === undefined) return findings;
   const answered = new Set(questions.answers.map((a) => a.question));
+  const openPointClasses: string[] = ["divergence", "blind-spot", "untestable"];
   for (const question of questions.questions) {
     if (!question.blocking) continue;
-    if (question.class !== "divergence" && question.class !== "blind-spot") {
-      continue;
-    }
+    if (!openPointClasses.includes(question.class)) continue;
     if (answered.has(question.id)) continue;
     findings.push({
       file: QUESTIONS,
@@ -253,11 +266,16 @@ export function checkResidualOpen(ctx: RuleContext): RuleFinding[] {
   return findings;
 }
 
-/** Every DC rests on a question of questions.json that has an answer. */
+/**
+ * Every DC rests on a question of questions.json that has an answer. With no
+ * `questions.json` there is no answer anywhere, so every DC is an error; a
+ * file that failed to parse is skipped by the engine (`input-failed`), whose
+ * `format` error already fails the run.
+ */
 export function checkDcUnanswered(ctx: RuleContext): RuleFinding[] {
   const spec = valueOf(ctx.inputs.spec);
-  const questions = valueOf(ctx.inputs.questions);
-  const answered = new Set(questions.answers.map((a) => a.question));
+  const questions = used(ctx.inputs.questions);
+  const answered = new Set((questions?.answers ?? []).map((a) => a.question));
   return spec.decisions
     .filter((dc) => !answered.has(dc.question))
     .map((dc) => ({
@@ -357,16 +375,14 @@ export function checkProse(ctx: RuleContext): RuleFinding[] {
 }
 
 /** The unanswered questions of questions.json stay at or below the budget. */
-export function checkQuestionBudget(
-  ctx: RuleContext,
-  config?: SpecGateConfig,
-): RuleFinding[] {
+export function checkQuestionBudget(ctx: RuleContext): RuleFinding[] {
   const questions = valueOf(ctx.inputs.questions);
   const answered = new Set(questions.answers.map((a) => a.question));
   const unanswered = questions.questions.filter(
     (q) => !answered.has(q.id),
   ).length;
-  const budget = config?.questions.warn_above ?? DEFAULT_QUESTIONS_WARN_ABOVE;
+  const budget =
+    ctx.config?.questions.warn_above ?? DEFAULT_QUESTIONS_WARN_ABOVE;
   if (unanswered <= budget) return [];
   return [
     {
@@ -408,6 +424,7 @@ export function checkTriageStale(ctx: RuleContext): RuleFinding[] {
 }
 
 const FULL: RuleDef["profiles"] = ["full"];
+const BOTH: RuleDef["profiles"] = ["light", "full"];
 
 /** The content rules: the full profile only, in the order of `docs/lint.md`. */
 export const CONTENT_RULES: readonly RuleDef[] = [
@@ -464,8 +481,9 @@ export const CONTENT_RULES: readonly RuleDef[] = [
     gated: false,
     ackable: false,
     summary:
-      "The ledger's source line IDs are exactly the IDs in the lines of source/meta.json.",
-    needs: ["spec", "meta"],
+      "The ledger's source line IDs are exactly the IDs in the lines of source/meta.json; a missing source/meta.json is one error, not a skip.",
+    needs: ["spec"],
+    uses: ["meta"],
     check: checkLedgerComplete,
   },
   {
@@ -508,7 +526,7 @@ export const CONTENT_RULES: readonly RuleDef[] = [
     gated: true,
     ackable: false,
     summary:
-      "At proposed no residual has status open and no blocking divergence or blind-spot question of questions.json is without an answer.",
+      "At proposed no residual has status open and no blocking divergence, blind-spot or untestable question of questions.json is without an answer.",
     needs: ["spec"],
     uses: ["questions"],
     check: checkResidualOpen,
@@ -520,8 +538,9 @@ export const CONTENT_RULES: readonly RuleDef[] = [
     gated: false,
     ackable: false,
     summary:
-      "Every DC's question has an answer in questions.json; an unknown question ID is the same error.",
-    needs: ["spec", "questions"],
+      "Every DC's question has an answer in questions.json; an unknown question ID or no questions.json at all is the same error.",
+    needs: ["spec"],
+    uses: ["questions"],
     check: checkDcUnanswered,
   },
   {
@@ -564,19 +583,18 @@ export const CONTENT_RULES: readonly RuleDef[] = [
     profiles: FULL,
     gated: false,
     ackable: true,
-    summary:
-      "The number of unanswered questions is at most questions.warn_above (default 7, set with --config). Acknowledge with id questions.",
+    summary: `The number of unanswered questions is at most questions.warn_above (default ${String(DEFAULT_QUESTIONS_WARN_ABOVE)}, set with --config). Acknowledge with id questions.`,
     needs: ["questions"],
-    check: (ctx) => checkQuestionBudget(ctx, ctx.config),
+    check: checkQuestionBudget,
   },
   {
     id: "triage-stale",
     level: "error",
-    profiles: FULL,
+    profiles: BOTH,
     gated: false,
     ackable: false,
     summary:
-      "triage.json stores the class its own fields derive and the current rule version.",
+      "triage.json stores the class its own fields derive and the current rule version; it runs in both profiles.",
     needs: ["triage"],
     check: checkTriageStale,
   },

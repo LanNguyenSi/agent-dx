@@ -230,10 +230,21 @@ describe("ack-unused only for a rule that was evaluated", () => {
     }
   });
 
-  it("profile-default acknowledged while --profile is given is unused: the rule ran", () => {
+  it("profile-default acknowledged while --profile is given is unused: the rule ran, and the light profile skips exactly the full-only rules", () => {
+    const lightTriage = JSON.stringify({
+      single_goal: { value: "yes", evidence: "one goal" },
+      code_related: { value: "yes", evidence: "the module" },
+      core_is_decision: { value: "no", evidence: "behaviour stated" },
+      scope_within_request: { value: "yes", evidence: "the request" },
+      multiple_repos: { value: "no", evidence: "one repo" },
+      trivial: { value: "yes", evidence: "a copy change" },
+      blocking_unknowns: [],
+      class: "no-spec-needed",
+      rule_version: 1,
+    });
     const report = lint(
       specDir({
-        ...NO_TRIAGE,
+        "triage.json": lightTriage,
         "acks.yaml": `- rule: "profile-default"\n  id: "triage"\n  reason: "r"\n`,
       }),
       RULES,
@@ -241,6 +252,13 @@ describe("ack-unused only for a rule that was evaluated", () => {
     );
     expect(unused(report)).toHaveLength(1);
     expect(skippedReason(report, "profile-default")).toBeUndefined();
+    const fullOnly = RULES.filter((r) => !r.profiles.includes("light")).map(
+      (r) => r.id,
+    );
+    expect(report.skipped.every((s) => s.reason === "profile")).toBe(true);
+    expect(report.skipped.map((s) => s.rule).sort()).toEqual(
+      [...fullOnly].sort(),
+    );
   });
 
   it("an invalid ack is still reported when its rule was skipped", () => {

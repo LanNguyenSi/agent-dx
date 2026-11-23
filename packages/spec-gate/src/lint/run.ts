@@ -31,7 +31,8 @@ export interface LintOptions {
    * A `.spec-gate/config.yaml`-format file, read for the rules that take
    * repo-wide settings. Absent: every rule uses its format default. A file
    * that cannot be read or parsed is a `file` or `format` finding and the
-   * rules still run on their defaults.
+   * rules still run on their defaults. The empty string is a usage error:
+   * the run fails without a report.
    */
   configPath?: string;
 }
@@ -83,6 +84,9 @@ export function lintSpecDir(
   }
   if (!isDir) {
     return { ok: false, message: `${specDir} is not a directory` };
+  }
+  if (options.configPath === "") {
+    return { ok: false, message: "--config needs a path" };
   }
 
   const found: Finding[] = [];

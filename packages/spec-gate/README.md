@@ -21,10 +21,11 @@ temporary file renamed into place, and prints the derivation; a
 written, is refused with a named error. The rule is documented in
 [docs/triage.md](docs/triage.md).
 
-`spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>]`
+`spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>] [--config <path>]`
 checks a spec directory and prints one JSON report line (`spec-gate-lint/1`);
 it exits 0 without errors, 1 with findings (with `--strict`, also for
-unacknowledged warnings) and 2 on a usage error. `spec-gate lint-ack <spec-dir>
+unacknowledged warnings) and 2 on a usage error (including `--config` with an
+empty path). `spec-gate lint-ack <spec-dir>
 <rule> <id> --reason <text>` acknowledges one warning in `acks.yaml`. The
 rules, the report, profiles and exit codes are described in
 [docs/lint.md](docs/lint.md); the code lives in `src/lint/`.

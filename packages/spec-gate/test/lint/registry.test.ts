@@ -47,11 +47,11 @@ describe("rule registry", () => {
     ]);
   });
 
-  it("the engine and form rules run in both profiles; the content rules are full only", () => {
+  it("the engine and form rules run in both profiles; so does triage-stale, the rest of the content rules is full only", () => {
     for (const rule of RULES) {
-      const content = RULES.indexOf(rule) >= 10;
+      const fullOnly = RULES.indexOf(rule) >= 10 && rule.id !== "triage-stale";
       expect(rule.profiles, rule.id).toEqual(
-        content ? ["full"] : ["light", "full"],
+        fullOnly ? ["full"] : ["light", "full"],
       );
     }
     expect(RULES.filter((r) => r.gated).map((r) => r.id)).toEqual([

@@ -128,7 +128,7 @@ describe("loader findings", () => {
     }
   });
 
-  it("a missing optional file is no finding", () => {
+  it("a missing optional file is no finding of the loader", () => {
     const report = lint(
       specDir({
         "bindings.yaml": null,
@@ -137,7 +137,10 @@ describe("loader findings", () => {
         "acks.yaml": null,
       }),
     );
-    expect(report.errors).toEqual([]);
+    expect(report.errors.filter((f) => f.rule === "file")).toEqual([]);
+    // The one error is the content rule that needs the meta file:
+    // ledger-complete reports an absent source/meta.json itself.
+    expect(report.errors.map((f) => f.rule)).toEqual(["ledger-complete"]);
   });
 
   it("an unsafe optional file is a file error", () => {

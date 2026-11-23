@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_QUESTIONS_WARN_ABOVE } from "../../src/formats/config.js";
-import { lintSpecDir, type LintReport } from "../../src/lint/index.js";
+import { RULES, lintSpecDir, type LintReport } from "../../src/lint/index.js";
 import { edited, scratch, specDir } from "./helpers.js";
 
 function lint(
@@ -214,6 +214,41 @@ describe("binding-status: the binding matches the kind at proposed", () => {
     ]);
   });
 
+  it("kind stays-green wants the existing binding: new is an error, existing passes", () => {
+    const greenRow =
+      '- id: TP-2\n  covers: [NG-1]\n  kind: stays-green\n  claim: "the login flow keeps working"\n  probe_hint: "the login smoke test"\n';
+    const plan = edited(
+      "testplan.yaml",
+      'red_reason: "the endpoint does not invalidate tokens today"',
+      'red_reason: "the endpoint does not invalidate tokens today"\n' +
+        greenRow,
+    );
+    const wrong = lint(
+      {
+        "testplan.yaml": plan,
+        "bindings.yaml": "TP-1:\n  status: new\nTP-2:\n  status: new\n",
+      },
+      { final: true },
+    );
+    expect(findingsOf(wrong, "binding-status")).toEqual([
+      expect.objectContaining({
+        level: "error",
+        file: "bindings.yaml",
+        path: "TP-2.status",
+        id: "TP-2",
+        message: expect.stringContaining("existing"),
+      }),
+    ]);
+    const right = lint(
+      {
+        "testplan.yaml": plan,
+        "bindings.yaml": "TP-1:\n  status: new\nTP-2:\n  status: existing\n",
+      },
+      { final: true },
+    );
+    expect(findingsOf(right, "binding-status")).toEqual([]);
+  });
+
   it("kind any accepts either status and even no binding", () => {
     for (const bindings of [
       null,
@@ -304,9 +339,25 @@ describe("ledger-complete: ledger lines equal meta lines", () => {
     expect(findingsOf(report, "ledger-complete")).toEqual([]);
   });
 
-  it("absent meta.json skips the rule with input-absent", () => {
+  it("absent source/meta.json is one error on the file, not a skip", () => {
     const report = lint({ "source/meta.json": null });
-    expect(skippedReason(report, "ledger-complete")).toBe("input-absent");
+    expect(findingsOf(report, "ledger-complete")).toEqual([
+      expect.objectContaining({
+        level: "error",
+        file: "source/meta.json",
+        path: "$",
+        code: "input-missing",
+        message: expect.stringContaining("cannot"),
+      }),
+    ]);
+    expect(
+      report.skipped.find((s) => s.rule === "ledger-complete"),
+    ).toBeUndefined();
+  });
+
+  it("a source/meta.json that failed to parse keeps the skip with input-failed", () => {
+    const report = lint({ "source/meta.json": "{ nope" });
+    expect(skippedReason(report, "ledger-complete")).toBe("input-failed");
     expect(findingsOf(report, "ledger-complete")).toEqual([]);
   });
 });
@@ -385,6 +436,24 @@ describe("owner-none: nobody stands behind an AC", () => {
       }),
     ]);
   });
+
+  it("owner None and owner NONE are the same error", () => {
+    for (const owner of ["None", "NONE"]) {
+      const report = lint({
+        "spec.md": edited("spec.md", "owner: alice", `owner: ${owner}`),
+      });
+      expect(findingsOf(report, "owner-none"), owner).toEqual([
+        expect.objectContaining({
+          level: "error",
+          file: "spec.md",
+          path: "AC-1.owner",
+          id: "AC-1",
+          line: 15,
+          message: expect.stringContaining("written none"),
+        }),
+      ]);
+    }
+  });
 });
 
 describe("residual-open: nothing open at proposed", () => {
@@ -416,8 +485,8 @@ describe("residual-open: nothing open at proposed", () => {
     expect(findingsOf(report, "residual-open")).toEqual([]);
   });
 
-  it("a blocking divergence or blind-spot question without an answer is an error", () => {
-    for (const cls of ["divergence", "blind-spot"]) {
+  it("an unanswered blocking question of any open-point class is an error", () => {
+    for (const cls of ["divergence", "blind-spot", "untestable"]) {
       const report = lint(
         {
           "questions.json": questionsFile(
@@ -432,17 +501,18 @@ describe("residual-open: nothing open at proposed", () => {
           file: "questions.json",
           path: "QN-1",
           id: "QN-1",
+          message: expect.stringContaining(cls),
         }),
       ]);
     }
   });
 
-  it("an untestable, an unanswered but not blocking, and an answered question pass", () => {
+  it("an unanswered but not blocking, and an answered question pass", () => {
     const report = lint(
       {
         "questions.json": questionsFile(
           [
-            question("QN-1", { class: "untestable", blocking: true }),
+            question("QN-1", { class: "untestable", blocking: false }),
             question("QN-2", { class: "divergence", blocking: false }),
             question("QN-3", { class: "blind-spot", blocking: true }),
           ],
@@ -493,9 +563,25 @@ describe("dc-unanswered: every DC rests on an answered question", () => {
     }
   });
 
-  it("absent questions.json skips the rule with input-absent", () => {
+  it("absent questions.json makes every DC an error, not a skip", () => {
     const report = lint({ ...spec, "questions.json": null });
-    expect(skippedReason(report, "dc-unanswered")).toBe("input-absent");
+    expect(findingsOf(report, "dc-unanswered")).toEqual([
+      expect.objectContaining({
+        level: "error",
+        file: "spec.md",
+        path: "DC-1.question",
+        id: "DC-1",
+        line: 25,
+      }),
+    ]);
+    expect(
+      report.skipped.find((s) => s.rule === "dc-unanswered"),
+    ).toBeUndefined();
+  });
+
+  it("a failed questions.json keeps the skip with input-failed", () => {
+    const report = lint({ ...spec, "questions.json": "{ nope" });
+    expect(skippedReason(report, "dc-unanswered")).toBe("input-failed");
   });
 });
 
@@ -578,6 +664,24 @@ describe("retired-id-live: a retired ID has no use again", () => {
         id: "QN-1",
       }),
     ]);
+  });
+
+  it("a retired TP ID is still flagged when questions.json is absent, and the rule is not skipped", () => {
+    const report = lint({
+      "spec.md": retire('"TP-1"'),
+      "questions.json": null,
+    });
+    expect(findingsOf(report, "retired-id-live")).toEqual([
+      expect.objectContaining({
+        level: "error",
+        file: "testplan.yaml",
+        path: "TP-1",
+        id: "TP-1",
+      }),
+    ]);
+    expect(
+      report.skipped.find((s) => s.rule === "retired-id-live"),
+    ).toBeUndefined();
   });
 });
 
@@ -684,6 +788,54 @@ describe("prose: the fixed word list", () => {
     expect(findingsOf(report, "prose")).toEqual([]);
   });
 
+  it("a listed word as the tail of a longer word is no hit", () => {
+    const report = lint({
+      "spec.md": edited(
+        "spec.md",
+        "is rejected with HTTP 401.",
+        "is rejected with HTTP 401 after breakfast and dismay.",
+      ),
+    });
+    expect(findingsOf(report, "prose")).toEqual([]);
+  });
+
+  it("a listed word followed by a digit or an underscore is no hit", () => {
+    const report = lint({
+      "spec.md": edited(
+        "spec.md",
+        "is rejected with HTTP 401.",
+        "is rejected with HTTP 401, deadline may1 and should_not apply.",
+      ),
+    });
+    expect(findingsOf(report, "prose")).toEqual([]);
+  });
+
+  it("a decomposed word hits after NFC normalisation", () => {
+    const report = lint({
+      "spec.md": edited(
+        "spec.md",
+        "is rejected with HTTP 401.",
+        "is rejected with HTTP 401, m\u006F\u0308glichst bald.",
+      ),
+    });
+    expect(findingsOf(report, "prose").map((f) => f.message)).toEqual([
+      expect.stringContaining('"möglichst"'),
+    ]);
+  });
+
+  it("a phrase split by a run of spaces and a no-break space hits after collapsing", () => {
+    const report = lint({
+      "spec.md": edited(
+        "spec.md",
+        "is rejected with HTTP 401.",
+        "is rejected with HTTP 401, bei \u00A0 Bedarf.",
+      ),
+    });
+    expect(findingsOf(report, "prose").map((f) => f.message)).toEqual([
+      expect.stringContaining('"bei Bedarf"'),
+    ]);
+  });
+
   it("two listed words in one text give two findings", () => {
     const report = lint({
       "spec.md": edited(
@@ -786,6 +938,13 @@ describe("question-budget: the unanswered questions fit the budget", () => {
     expect(findingsOf(report, "question-budget")).toEqual([]);
   });
 
+  it("the summary names the default from the format layer, not a literal", () => {
+    const def = RULES.find((r) => r.id === "question-budget");
+    expect(def?.summary).toContain(
+      `default ${String(DEFAULT_QUESTIONS_WARN_ABOVE)}`,
+    );
+  });
+
   it("the warning is ackable", () => {
     const report = lint({
       "questions.json": N_QUESTION(8),
@@ -839,6 +998,40 @@ describe("triage-stale: the stored class still matches its fields", () => {
 
   it("a stored rule_version that is not the current one is an error", () => {
     const report = lint({ "triage.json": triage({ rule_version: 2 }) });
+    expect(findingsOf(report, "triage-stale")).toEqual([
+      expect.objectContaining({
+        file: "triage.json",
+        path: "rule_version",
+        id: "triage",
+      }),
+    ]);
+  });
+
+  /** The same file, but with fields that derive `no-spec-needed`, i.e. light. */
+  const light = (over: Record<string, unknown> = {}) =>
+    triage({
+      trivial: { value: "yes", evidence: "a one-line copy change" },
+      class: "no-spec-needed",
+      ...over,
+    });
+
+  it("in the light profile, a stored class that differs from the derivation is an error", () => {
+    const report = lint({ "triage.json": light({ class: "actionable" }) });
+    expect(report.profile).toBe("light");
+    expect(skippedReason(report, "triage-stale")).toBeUndefined();
+    expect(findingsOf(report, "triage-stale")).toEqual([
+      expect.objectContaining({
+        level: "error",
+        file: "triage.json",
+        path: "class",
+        id: "triage",
+      }),
+    ]);
+  });
+
+  it("in the light profile, a stored rule_version that is not current is an error", () => {
+    const report = lint({ "triage.json": light({ rule_version: 2 }) });
+    expect(report.profile).toBe("light");
     expect(findingsOf(report, "triage-stale")).toEqual([
       expect.objectContaining({
         file: "triage.json",

@@ -6,8 +6,11 @@
  *
  * Matching is whole-word and case-insensitive. A word hits only between
  * non-word neighbours (or the ends of the text), so `fast` never hits
- * `fastest` and `ggf` never hits `ggfx`. Entries with a space are
- * phrases and match the space between their words literally.
+ * `fastest` and `may` never hits `dismay` or `may1`. Before matching, the
+ * text is normalised to NFC and every run of whitespace (including a
+ * no-break space) collapses to one space, so a decomposed `möglichst` and
+ * `bei  Bedarf` hit. Entries with a space are phrases and match their
+ * words one collapsed space apart.
  */
 
 /** The words and phrases, lower case, as they are reported. */
@@ -54,14 +57,21 @@ const PROSE_MATCHERS = PROSE_WORDS.map(
     new RegExp(`(?<![\\p{L}\\p{N}_])${literal(word)}(?![\\p{L}\\p{N}_])`, "iu"),
 );
 
+/** NFC, with every run of whitespace (no-break spaces included) as one space. */
+function canonical(text: string): string {
+  return text.normalize("NFC").replace(/\s+/gu, " ");
+}
+
 /**
  * The listed words `text` contains, each once, in list order. The finding
- * names the word, so the caller reports one per entry of this list.
+ * names the word, so the caller reports one per entry of this list. The
+ * text is matched in `canonical` form.
  */
 export function findProseWords(text: string): string[] {
+  const haystack = canonical(text);
   const hit: string[] = [];
   PROSE_WORDS.forEach((word, i) => {
-    if (PROSE_MATCHERS[i]!.test(text)) hit.push(word);
+    if (PROSE_MATCHERS[i]!.test(haystack)) hit.push(word);
   });
   return hit;
 }

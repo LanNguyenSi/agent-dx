@@ -8,16 +8,16 @@
  * `--profile` is only a fallback for a run without a usable
  * `triage.json`, and an error when it disagrees with one.
  *
- * | triage.json            | --profile | profile            | source  | findings          |
- * | ---------------------- | --------- | ------------------ | ------- | ----------------- |
- * | usable, class gives light or full | absent    | the triage profile | triage  | none         |
- * | usable, light or full  | equal     | the triage profile | triage  | none              |
- * | usable, light or full  | different | the triage profile | triage  | profile-mismatch  |
- * | usable, no profile     | any       | flag, else full    | flag or default | profile-no-spec |
- * | absent                 | given     | the flag           | flag    | none              |
- * | absent                 | absent    | full               | default | profile-default   |
- * | unparsable             | given     | the flag           | flag    | none (format)     |
- * | unparsable             | absent    | full               | default | none (format)     |
+ * | triage.json                       | --profile | profile            | source          | findings         |
+ * | --------------------------------- | --------- | ------------------ | --------------- | ---------------- |
+ * | usable, class gives light or full | absent    | the triage profile | triage          | none             |
+ * | usable, light or full             | equal     | the triage profile | triage          | none             |
+ * | usable, light or full             | different | the triage profile | triage          | profile-mismatch |
+ * | usable, no profile                | any       | flag, else full    | flag or default | profile-no-spec  |
+ * | absent                            | given     | the flag           | flag            | none             |
+ * | absent                            | absent    | full               | default         | profile-default  |
+ * | unparsable                        | given     | the flag           | flag            | none (format)    |
+ * | unparsable                        | absent    | full               | default         | none (format)    |
  *
  * A class that leads to no spec, or an unparsable file, already carries an
  * error of its own, so neither adds the default warning on top.
@@ -76,8 +76,7 @@ export function resolveProfile(
   // choose a light profile, so the profile always follows the class the
   // fields give in memory. A current file stores that very class, so a
   // clean run sees no difference.
-  const cls = derived;
-  const fromTriage = profileForClass(cls);
+  const fromTriage = profileForClass(derived);
   if (fromTriage === null) {
     return {
       ...fallback(),
@@ -87,7 +86,7 @@ export function resolveProfile(
           finding: {
             file: TRIAGE_FILE,
             path: "class",
-            message: `triage class ${cls} leads to no spec, so there is nothing to lint`,
+            message: `triage class ${derived} leads to no spec, so there is nothing to lint`,
           },
         },
       ],
@@ -100,7 +99,7 @@ export function resolveProfile(
       finding: {
         file: TRIAGE_FILE,
         path: "class",
-        message: `--profile ${flag} disagrees with triage class ${cls}, which leads to the ${fromTriage} profile`,
+        message: `--profile ${flag} disagrees with triage class ${derived}, which leads to the ${fromTriage} profile`,
       },
     });
   }
