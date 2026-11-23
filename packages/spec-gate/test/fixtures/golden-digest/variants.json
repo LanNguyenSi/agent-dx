@@ -1,0 +1,1058 @@
+[
+  {
+    "name": "goal-text",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "every existing session of that user ends",
+        "replace": "every existing session of that user is revoked"
+      }
+    ]
+  },
+  {
+    "name": "base-commit",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "base_commit: 0123456789abcdef0123456789abcdef01234567",
+        "replace": "base_commit: 0123456789abcdef0123456789abcdef01234568"
+      }
+    ]
+  },
+  {
+    "name": "retired-ids-added",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "retired_ids: [AC-9, NG-4]",
+        "replace": "retired_ids: [AC-9, NG-4, DC-9]"
+      }
+    ]
+  },
+  {
+    "name": "retired-ids-removed",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "retired_ids: [AC-9, NG-4]",
+        "replace": "retired_ids: [AC-9]"
+      }
+    ]
+  },
+  {
+    "name": "retired-ids-changed",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "retired_ids: [AC-9, NG-4]",
+        "replace": "retired_ids: [AC-9, NG-5]"
+      }
+    ]
+  },
+  {
+    "name": "retired-ids-emptied",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "retired_ids: [AC-9, NG-4]",
+        "replace": "retired_ids: []"
+      }
+    ]
+  },
+  {
+    "name": "ac-text",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "is rejected with HTTP 401.",
+        "replace": "is rejected with HTTP 403."
+      }
+    ]
+  },
+  {
+    "name": "ac-source",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "  - source: SL-1, SL-2",
+        "replace": "  - source: SL-1, SL-3"
+      }
+    ]
+  },
+  {
+    "name": "ac-owner",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "  - owner: alice",
+        "replace": "  - owner: carol"
+      }
+    ]
+  },
+  {
+    "name": "ac-owner-none",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "  - owner: none",
+        "replace": "  - owner: bob"
+      }
+    ]
+  },
+  {
+    "name": "ac-added",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "## Non-goals",
+        "replace": "- AC-3: Logout is idempotent.\n  - source: SL-5\n  - owner: bob\n\n## Non-goals"
+      }
+    ]
+  },
+  {
+    "name": "ng-text",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "The token format does not change.",
+        "replace": "The token format and lifetime do not change."
+      }
+    ]
+  },
+  {
+    "name": "ng-paths",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "  - paths: src/auth/token.ts, src/auth/user files/**",
+        "replace": "  - paths: src/auth/token.ts, src/session/**"
+      }
+    ]
+  },
+  {
+    "name": "ng-paths-added",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "- NG-2: Login latency stays within its current range.",
+        "replace": "- NG-2: Login latency stays within its current range.\n  - paths: src/auth/login.ts"
+      }
+    ]
+  },
+  {
+    "name": "df-text",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "deleted after 30 days.",
+        "replace": "deleted after 90 days."
+      }
+    ]
+  },
+  {
+    "name": "df-reason",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "Matches the retention of the existing audit log.",
+        "replace": "Matches the retention of the access log."
+      }
+    ]
+  },
+  {
+    "name": "df-affects-behavior",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "  - affects_behavior: false",
+        "replace": "  - affects_behavior: true"
+      }
+    ]
+  },
+  {
+    "name": "dc-text",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "Sessions of other devices end as well.",
+        "replace": "Sessions of other devices stay open."
+      }
+    ]
+  },
+  {
+    "name": "dc-question",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "  - question: QN-1",
+        "replace": "  - question: QN-4"
+      }
+    ]
+  },
+  {
+    "name": "dc-channel",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "    - channel: chat",
+        "replace": "    - channel: file"
+      }
+    ]
+  },
+  {
+    "name": "dc-author",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "    - author: alice",
+        "replace": "    - author: carol"
+      }
+    ]
+  },
+  {
+    "name": "dc-time",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "    - time: 2000-01-31T12:00:00Z",
+        "replace": "    - time: 2000-01-31T12:00:01Z"
+      }
+    ]
+  },
+  {
+    "name": "dc-comment-url",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "comment-2",
+        "replace": "comment-3"
+      }
+    ]
+  },
+  {
+    "name": "dc-comment-url-removed",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "\n    - comment_url: https://example.com/issues/1#comment-2",
+        "replace": ""
+      }
+    ]
+  },
+  {
+    "name": "rs-text",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "Behaviour for service accounts is undecided.",
+        "replace": "Behaviour for service accounts is decided."
+      }
+    ]
+  },
+  {
+    "name": "rs-class",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "  - class: blind-spot",
+        "replace": "  - class: divergence"
+      }
+    ]
+  },
+  {
+    "name": "rs-status",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "  - status: open",
+        "replace": "  - status: resolved"
+      }
+    ]
+  },
+  {
+    "name": "rs-question",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "  - question: QN-2",
+        "replace": "  - question: QN-5"
+      }
+    ]
+  },
+  {
+    "name": "rs-question-removed",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "\n  - question: QN-2",
+        "replace": ""
+      }
+    ]
+  },
+  {
+    "name": "sl-source-line",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "- SL-1: L1-0123456789ab -> AC-1",
+        "replace": "- SL-1: L1-0123456789ac -> AC-1"
+      }
+    ]
+  },
+  {
+    "name": "sl-targets",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "-> AC-10, DC-1",
+        "replace": "-> AC-10, DC-2"
+      }
+    ]
+  },
+  {
+    "name": "sl-out-to-target",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "-> out\n  - reason: Greeting, carries no requirement.",
+        "replace": "-> AC-2"
+      }
+    ]
+  },
+  {
+    "name": "sl-out-reason",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "Greeting, carries no requirement.",
+        "replace": "Greeting, carries a requirement."
+      }
+    ]
+  },
+  {
+    "name": "tp-id",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "- id: TP-10",
+        "replace": "- id: TP-11"
+      }
+    ]
+  },
+  {
+    "name": "tp-covers",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  covers: [AC-1, AC-10]",
+        "replace": "  covers: [AC-1]"
+      }
+    ]
+  },
+  {
+    "name": "tp-kind",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  kind: red-first\n  claim: \"the log line is in English\"\n  expected: \"message text\"\n  oracle: \"DF-2\"\n  red_reason: \"no log line exists today\"",
+        "replace": "  kind: runtime\n  claim: \"the log line is in English\"\n  expected: \"message text\"\n  environment: \"staging\"\n  steps: [\"trigger a log line\"]\n  evidence_location: \"review/log.md\""
+      }
+    ]
+  },
+  {
+    "name": "tp-claim",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "login returns 401 after a password change",
+        "replace": "login returns 403 after a password change"
+      }
+    ]
+  },
+  {
+    "name": "tp-input",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "old token after POST /password",
+        "replace": "new token after POST /password"
+      }
+    ]
+  },
+  {
+    "name": "tp-expected",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  expected: \"HTTP 401\"",
+        "replace": "  expected: \"HTTP 403\""
+      }
+    ]
+  },
+  {
+    "name": "tp-oracle",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "AC-1 (source SL-4)",
+        "replace": "AC-1 (source SL-3)"
+      }
+    ]
+  },
+  {
+    "name": "tp-level",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  level: integration",
+        "replace": "  level: unit"
+      }
+    ]
+  },
+  {
+    "name": "tp-seam",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "HTTP API /auth",
+        "replace": "HTTP API /session"
+      }
+    ]
+  },
+  {
+    "name": "tp-red-reason",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "the endpoint does not invalidate tokens today",
+        "replace": "the endpoint invalidates tokens late"
+      }
+    ]
+  },
+  {
+    "name": "tp-fail-match",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "expected 401",
+        "replace": "expected 403"
+      }
+    ]
+  },
+  {
+    "name": "tp-baseline",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  baseline: 120",
+        "replace": "  baseline: 121"
+      }
+    ]
+  },
+  {
+    "name": "tp-baseline-type",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  baseline: 120",
+        "replace": "  baseline: \"120\""
+      }
+    ]
+  },
+  {
+    "name": "tp-threshold",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "p95 <= 150ms",
+        "replace": "p95 <= 200ms"
+      }
+    ]
+  },
+  {
+    "name": "tp-runs",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  runs: 5",
+        "replace": "  runs: 6"
+      }
+    ]
+  },
+  {
+    "name": "tp-check-command-ref",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  check_command_ref: typecheck",
+        "replace": "  check_command_ref: lint"
+      }
+    ]
+  },
+  {
+    "name": "tp-verifier",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "support lead",
+        "replace": "product owner"
+      }
+    ]
+  },
+  {
+    "name": "tp-evidence-location",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "review/reset mail.png",
+        "replace": "review/reset-mail-v2.png"
+      }
+    ]
+  },
+  {
+    "name": "tp-check",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "error rate of /auth for 30 minutes",
+        "replace": "error rate of /auth for 60 minutes"
+      }
+    ]
+  },
+  {
+    "name": "tp-environment",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  environment: \"production\"",
+        "replace": "  environment: \"canary\""
+      }
+    ]
+  },
+  {
+    "name": "tp-steps",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "    - \"reload device A\"",
+        "replace": "    - \"reload device B\""
+      }
+    ]
+  },
+  {
+    "name": "tp-steps-order",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "    - \"log in on device A\"\n    - \"change the password on device B\"",
+        "replace": "    - \"change the password on device B\"\n    - \"log in on device A\""
+      }
+    ]
+  },
+  {
+    "name": "tp-control",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  control: negative",
+        "replace": "  control: base"
+      }
+    ]
+  },
+  {
+    "name": "tp-method",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  method: browser",
+        "replace": "  method: script"
+      }
+    ]
+  },
+  {
+    "name": "tp-probe-hint",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "make the token check always reject",
+        "replace": "make the token check always accept"
+      }
+    ]
+  },
+  {
+    "name": "tp-added",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "- id: TP-10",
+        "replace": "- id: TP-8\n  covers: [AC-2]\n  kind: stays-green\n  claim: \"a second stays-green row\"\n  probe_hint: \"any\"\n- id: TP-10"
+      }
+    ]
+  },
+  {
+    "name": "tp-removed",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "\n- id: TP-7\n  covers: [AC-1]\n  kind: post-deploy\n  claim: \"no 5xx on /auth after deploy\"\n  check: \"error rate of /auth for 30 minutes\"\n  environment: \"production\"",
+        "replace": ""
+      }
+    ]
+  },
+  {
+    "name": "ng-paths-inner-space",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "src/auth/user files/**",
+        "replace": "src/auth/user  files/**"
+      }
+    ]
+  },
+  {
+    "name": "tp-fail-match-inner-space",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "expected 401",
+        "replace": "expected  401"
+      }
+    ]
+  },
+  {
+    "name": "tp-evidence-location-inner-space",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "review/reset mail.png",
+        "replace": "review/reset  mail.png"
+      }
+    ]
+  },
+  {
+    "name": "tp-expected-inner-space",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "\"HTTP 401\"",
+        "replace": "\"HTTP  401\""
+      }
+    ]
+  },
+  {
+    "name": "tp-input-inner-tab",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "old token after",
+        "replace": "old\ttoken after"
+      }
+    ]
+  },
+  {
+    "name": "tp-environment-trailing-space",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "environment: \"staging\"",
+        "replace": "environment: \"staging \""
+      }
+    ]
+  },
+  {
+    "name": "tp-verifier-inner-space",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "verifier: \"support lead\"",
+        "replace": "verifier: \"support  lead\""
+      }
+    ]
+  },
+  {
+    "name": "tp-steps-inner-space",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "\"reload device A\"",
+        "replace": "\"reload  device A\""
+      }
+    ]
+  },
+  {
+    "name": "commands-argv-at-ref",
+    "effect": "changes",
+    "edits": [],
+    "repo": {
+      "commands": "alt/commands.changed.yaml"
+    }
+  },
+  {
+    "name": "commands-ref-only",
+    "effect": "changes",
+    "edits": [],
+    "repo": {
+      "commands": "alt/commands.unreferenced-changed.yaml"
+    }
+  },
+  {
+    "name": "commands-changed-at-later-commit",
+    "effect": "same",
+    "edits": [],
+    "repo": {
+      "later": "alt/commands.later.yaml"
+    }
+  },
+  {
+    "name": "status-proposed",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "status: draft",
+        "replace": "status: proposed"
+      }
+    ]
+  },
+  {
+    "name": "status-superseded",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "status: draft",
+        "replace": "status: superseded\nsuperseded_by: other-spec"
+      }
+    ]
+  },
+  {
+    "name": "frontmatter-id",
+    "effect": "changes",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "id: golden-sample",
+        "replace": "id: renamed-sample"
+      }
+    ]
+  },
+  {
+    "name": "title-line",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "# Golden sample",
+        "replace": "# Another title"
+      }
+    ]
+  },
+  {
+    "name": "context-text",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "spec.md",
+        "find": "Free prose. Nobody checks it, whatever it says.",
+        "replace": "Other prose.\n\n### A deeper heading\n\nMore prose about the password change."
+      }
+    ]
+  },
+  {
+    "name": "notes-changed",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "notes: \"free note\"",
+        "replace": "notes: \"another note\""
+      }
+    ]
+  },
+  {
+    "name": "notes-removed",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "\n  notes: \"free note\"",
+        "replace": ""
+      }
+    ]
+  },
+  {
+    "name": "notes-added",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "find": "  probe_hint: \"make the token check always reject\"",
+        "replace": "  probe_hint: \"make the token check always reject\"\n  notes: \"added\""
+      }
+    ]
+  },
+  {
+    "name": "bindings-status",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "bindings.yaml",
+        "find": "status: new",
+        "replace": "status: existing"
+      }
+    ]
+  },
+  {
+    "name": "bindings-selector",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "bindings.yaml",
+        "find": "invalidates tokens on password change",
+        "replace": "a renamed test"
+      }
+    ]
+  },
+  {
+    "name": "bindings-removed",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "bindings.yaml",
+        "delete": true
+      }
+    ]
+  },
+  {
+    "name": "bindings-unparsable",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "bindings.yaml",
+        "write": "{ this is: [not valid"
+      }
+    ]
+  },
+  {
+    "name": "bindings-log",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "bindings.log",
+        "write": "a different log\nwith two lines\n"
+      }
+    ]
+  },
+  {
+    "name": "acks",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "acks.yaml",
+        "write": "acks:\n  - rule: x\n"
+      }
+    ]
+  },
+  {
+    "name": "source-meta",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "source/meta.json",
+        "write": "{\"changed\":true}\n"
+      }
+    ]
+  },
+  {
+    "name": "source-extra-file",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "source/issue.md",
+        "write": "the issue text\n"
+      }
+    ]
+  },
+  {
+    "name": "questions",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "questions.json",
+        "write": "[{\"id\":\"QN-1\"}]\n"
+      }
+    ]
+  },
+  {
+    "name": "triage",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "triage.json",
+        "write": "{\"changed\":true}\n"
+      }
+    ]
+  },
+  {
+    "name": "evidence",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "evidence/baseline.json",
+        "write": "{\"changed\":true}\n"
+      }
+    ]
+  },
+  {
+    "name": "coldread",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "coldread.md",
+        "write": "other cold read\n"
+      }
+    ]
+  },
+  {
+    "name": "spec-rows-shuffled",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "spec.md",
+        "copyFrom": "alt/spec.rows-shuffled.md"
+      }
+    ]
+  },
+  {
+    "name": "spec-keys-shuffled",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "spec.md",
+        "copyFrom": "alt/spec.attrs-shuffled.md"
+      }
+    ]
+  },
+  {
+    "name": "spec-whitespace",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "spec.md",
+        "copyFrom": "alt/spec.whitespace.md"
+      }
+    ]
+  },
+  {
+    "name": "testplan-rows-shuffled",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "copyFrom": "alt/testplan.rows-shuffled.yaml"
+      }
+    ]
+  },
+  {
+    "name": "testplan-keys-shuffled",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "copyFrom": "alt/testplan.keys-shuffled.yaml"
+      }
+    ]
+  },
+  {
+    "name": "testplan-whitespace",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "testplan.yaml",
+        "copyFrom": "alt/testplan.whitespace.yaml"
+      }
+    ]
+  },
+  {
+    "name": "all-reordered",
+    "effect": "same",
+    "edits": [
+      {
+        "file": "spec.md",
+        "copyFrom": "alt/spec.rows-shuffled.md"
+      },
+      {
+        "file": "testplan.yaml",
+        "copyFrom": "alt/testplan.rows-shuffled.yaml"
+      }
+    ]
+  }
+]

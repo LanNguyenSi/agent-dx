@@ -80,6 +80,7 @@ describe("spec-gate CLI", () => {
         path.join(fileURLToPath(new URL("..", import.meta.url)), ".tmp-cli-"),
       );
       tmpRoots.push(root);
+      // The whole build output: cli.js imports the modules next to it.
       fs.cpSync(path.dirname(cliPath), path.join(root, "dist"), {
         recursive: true,
       });

@@ -1,0 +1,9 @@
+discovery:
+  argv: ["npx", "vitest", "list"]
+commands:
+  unit:
+    argv: ["npx", "vitest", "run", "-t", "{selector}"]
+  typecheck:
+    argv: ["npm", "run", "typecheck"]
+  lint:
+    argv: ["npm", "run", "lint"]

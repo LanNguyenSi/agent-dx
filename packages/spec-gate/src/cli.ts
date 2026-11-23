@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { Command } from "commander";
+import {
+  DigestError,
+  computeSpecDigest,
+  describeDigestError,
+} from "./canonical/index.js";
 import { runTriage } from "./triage/index.js";
 
 function readVersion(): string {
@@ -24,6 +29,29 @@ program
   .helpOption("-h, --help", "display help for spec-gate")
   .showHelpAfterError()
   .allowExcessArguments(false);
+
+program
+  .command("digest")
+  .description(
+    "print the digest of the normative layer of a spec directory " +
+      "(sha256:<hex>); prints nothing and exits non-zero on any error",
+  )
+  .argument("<spec-dir>", "directory with spec.md and testplan.yaml")
+  .option(
+    "--repo <path>",
+    "git repository to read .spec-gate/commands.yaml from at commands_ref " +
+      "(default: the git top level of <spec-dir>)",
+  )
+  .action((specDir: string, options: { repo?: string }) => {
+    try {
+      const digest = computeSpecDigest(specDir, options);
+      process.stdout.write(`${digest}\n`);
+    } catch (err) {
+      if (!(err instanceof DigestError)) throw err;
+      process.stderr.write(describeDigestError(err));
+      process.exitCode = 1;
+    }
+  });
 
 program
   .command("triage")
