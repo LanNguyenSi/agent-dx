@@ -380,7 +380,8 @@ The discoverer's reading of the request. Each of `single_goal`,
 `class` (`unsuitable`, `decision`, `split`, `clarify`, `no-spec-needed`,
 `actionable`) and `rule_version` (a positive integer) are written together
 by the triage step: a file has both or neither. The rule that maps the fields
-to a class is not part of the format.
+to a class is not part of the format: it is a versioned truth table held in
+[docs/triage.md](triage.md) and in `src/triage/`.
 
 ## questions.json
 

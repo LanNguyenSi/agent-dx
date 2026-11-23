@@ -6,6 +6,7 @@ import {
   computeSpecDigest,
   describeDigestError,
 } from "./canonical/index.js";
+import { runTriage } from "./triage/index.js";
 
 function readVersion(): string {
   const url = new URL("../package.json", import.meta.url);
@@ -50,6 +51,28 @@ program
       process.stderr.write(describeDigestError(err));
       process.exitCode = 1;
     }
+  });
+
+program
+  .command("triage")
+  .description(
+    "Derive the triage class from <spec-dir>/triage.json and write it back.",
+  )
+  .argument("<spec-dir>", "directory that holds triage.json")
+  .action((specDir: string) => {
+    const result = runTriage(specDir);
+    if (result.ok) {
+      process.stdout.write(`${JSON.stringify(result.report)}\n`);
+      return;
+    }
+    process.stderr.write(`${result.message}\n`);
+    for (const error of result.errors ?? []) {
+      const at = error.line === undefined ? "" : ` (line ${error.line})`;
+      process.stderr.write(
+        `  ${error.code} at ${error.path}: ${error.message}${at}\n`,
+      );
+    }
+    process.exitCode = 1;
   });
 
 program.parse();
