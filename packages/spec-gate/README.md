@@ -1,16 +1,19 @@
 # spec-gate
 
 `spec-gate` turns a ticket or intent into a checked, reviewable spec and
-test plan before implementation starts. The package is currently a
-scaffold: the CLI answers `--help` and `--version`, and later capabilities
-(spec drafting, test-plan checking, review gates) land as subcommands on
-top of this entry point.
+test plan before implementation starts. The package is young: the CLI
+answers `--help` and `--version` and runs the `triage` verb described
+below, and further capabilities land as subcommands on top of this entry
+point as they are built.
 
 ## Commands
 
 `spec-gate triage <spec-dir>` derives the triage class from
-`<spec-dir>/triage.json`, writes `class` and `rule_version` back, and prints
-the derivation; the rule is documented in [docs/triage.md](docs/triage.md).
+`<spec-dir>/triage.json`, writes `class` and `rule_version` back through a
+temporary file renamed into place, and prints the derivation; a
+`triage.json` that is a symlink, or a file or directory that cannot be
+written, is refused with a named error. The rule is documented in
+[docs/triage.md](docs/triage.md).
 
 ## Formats
 

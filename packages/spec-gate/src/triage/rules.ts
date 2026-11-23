@@ -10,8 +10,10 @@
  * condition is true with the known values. A row that does not fire but
  * would fire for some value of a field it reads (that field is `unknown`)
  * forces `clarify`: an unknown in rows 1 to 3 never leads to `actionable`
- * and never lets a later row decide. `trivial` = `unknown` counts as not
- * trivial, so row 5 does not fire on it.
+ * and never lets a later row decide. The deciding row stays the one with
+ * the unknown, but `unknown_fields` lists every `unknown` field of rows 1
+ * to 3, not only those of the deciding row. `trivial` = `unknown` counts
+ * as not trivial, so row 5 does not fire on it.
  */
 import type {
   Triage,
@@ -113,7 +115,10 @@ export interface TriageDerivation {
   rule_version: number;
   /** The order number of the row that decided. */
   row: number;
-  /** The unknown fields that forced `clarify`; empty otherwise. */
+  /**
+   * When an unknown in rows 1 to 3 forced `clarify`, every `unknown` field
+   * those rows read, in table order; empty for every other result.
+   */
   unknown_fields: TriageFieldName[];
 }
 
@@ -134,14 +139,32 @@ function rowFires(row: TriageRuleRow, triage: Triage): boolean {
   }
 }
 
-function unknownFieldsForcingClarify(
-  row: TriageRuleRow,
+function rowHasUnknownField(row: TriageRuleRow, triage: Triage): boolean {
+  if (!row.unknownPrecedence || row.condition.type !== "field") return false;
+  return row.condition.anyOf.some(
+    (test) => triage.fields[test.field].value === "unknown",
+  );
+}
+
+/**
+ * Every `unknown` field among the fields of the given rows, in row order
+ * and condition order. When an unknown forces `clarify` the derivation
+ * reports all of them, not only those of the deciding row.
+ */
+function unknownFieldsAcrossPrecedenceRows(
+  rows: readonly TriageRuleRow[],
   triage: Triage,
 ): TriageFieldName[] {
-  if (!row.unknownPrecedence || row.condition.type !== "field") return [];
-  return row.condition.anyOf
-    .filter((test) => triage.fields[test.field].value === "unknown")
-    .map((test) => test.field);
+  const unknownFields: TriageFieldName[] = [];
+  for (const row of rows) {
+    if (!row.unknownPrecedence || row.condition.type !== "field") continue;
+    for (const test of row.condition.anyOf) {
+      if (triage.fields[test.field].value === "unknown") {
+        unknownFields.push(test.field);
+      }
+    }
+  }
+  return unknownFields;
 }
 
 /**
@@ -158,13 +181,15 @@ export function deriveTriageClass(triage: Triage): TriageDerivation {
         unknown_fields: [],
       };
     }
-    const unknownFields = unknownFieldsForcingClarify(row, triage);
-    if (unknownFields.length > 0) {
+    if (rowHasUnknownField(row, triage)) {
       return {
         class: "clarify",
         rule_version: TRIAGE_RULE_VERSION,
         row: row.order,
-        unknown_fields: unknownFields,
+        unknown_fields: unknownFieldsAcrossPrecedenceRows(
+          TRIAGE_RULE_TABLE,
+          triage,
+        ),
       };
     }
   }

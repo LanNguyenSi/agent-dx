@@ -5,6 +5,7 @@ import {
   TRIAGE_VALUES,
   validateTriage,
   type Triage,
+  type TriageClass,
   type TriageFieldName,
   type TriageValue,
 } from "../../src/formats/index.js";
@@ -159,16 +160,65 @@ describe("deriveTriageClass: unknown precedence in rows 1 to 3", () => {
     },
   );
 
-  it("lists both unknown fields of a row in condition order", () => {
+  it("lists every unknown field of rows 1 to 3 in table order when one row forces clarify", () => {
     expect(
       deriveTriageClass(
-        triage({ code_related: "unknown", scope_within_request: "unknown" }),
+        triage({
+          code_related: "unknown",
+          core_is_decision: "unknown",
+          multiple_repos: "unknown",
+        }),
       ),
     ).toEqual({
       class: "clarify",
       rule_version: 1,
       row: 1,
-      unknown_fields: ["code_related", "scope_within_request"],
+      unknown_fields: ["code_related", "core_is_decision", "multiple_repos"],
+    });
+    expect(
+      deriveTriageClass(
+        triage({ scope_within_request: "unknown", single_goal: "unknown" }),
+      ),
+    ).toEqual({
+      class: "clarify",
+      rule_version: 1,
+      row: 1,
+      unknown_fields: ["scope_within_request", "single_goal"],
+    });
+  });
+
+  it("cross-row: core_is_decision unknown with single_goal no is clarify at row 2", () => {
+    expect(
+      deriveTriageClass(
+        triage({ core_is_decision: "unknown", single_goal: "no" }),
+      ),
+    ).toEqual({
+      class: "clarify",
+      rule_version: 1,
+      row: 2,
+      unknown_fields: ["core_is_decision"],
+    });
+  });
+
+  it("cross-row: code_related unknown with trivial yes is clarify at row 1, never no-spec-needed", () => {
+    expect(
+      deriveTriageClass(triage({ code_related: "unknown", trivial: "yes" })),
+    ).toEqual({
+      class: "clarify",
+      rule_version: 1,
+      row: 1,
+      unknown_fields: ["code_related"],
+    });
+  });
+
+  it("cross-row: core_is_decision unknown with blocking_unknowns is clarify at row 2, not row 4", () => {
+    expect(
+      deriveTriageClass(triage({ core_is_decision: "unknown" }, ["x"])),
+    ).toEqual({
+      class: "clarify",
+      rule_version: 1,
+      row: 2,
+      unknown_fields: ["core_is_decision"],
     });
   });
 
@@ -192,7 +242,7 @@ describe("deriveTriageClass: unknown precedence in rows 1 to 3", () => {
     });
   });
 
-  it("an unknown never lets a later row decide over an earlier row's unknown", () => {
+  it("a row's own known condition fires even when another of its fields is unknown", () => {
     expect(
       deriveTriageClass(
         triage({ single_goal: "unknown", multiple_repos: "yes" }),
@@ -219,14 +269,59 @@ describe("deriveTriageClass: trivial unknown", () => {
 });
 
 describe("deriveTriageClass: exhaustive over all inputs", () => {
-  it("holds every invariant over 3^6 field values times blocking empty/non-empty", () => {
-    const five: TriageFieldName[] = [
-      "code_related",
-      "scope_within_request",
-      "core_is_decision",
-      "single_goal",
-      "multiple_repos",
-    ];
+  const bundleOrder: TriageFieldName[] = [
+    "code_related",
+    "scope_within_request",
+    "core_is_decision",
+    "single_goal",
+    "multiple_repos",
+  ];
+
+  // The expected derivation, restated from the documented rule independently
+  // of `deriveTriageClass`: walk rows 1 to 3; the first row whose condition
+  // is true on known values decides; otherwise the first row that has an
+  // unknown field forces `clarify` and reports every unknown field of those
+  // rows; after row 3 a non-empty blocking list gives `clarify` at row 4,
+  // `trivial` yes gives `no-spec-needed` at row 5, otherwise row 6.
+  function expectedDerivation(
+    values: Record<TriageFieldName, TriageValue>,
+    blocking: string[],
+  ): { class: TriageClass; row: number; unknown_fields: TriageFieldName[] } {
+    const bundled = bundleOrder.filter((name) => values[name] === "unknown");
+    if (values.code_related === "no" || values.scope_within_request === "no") {
+      return { class: "unsuitable", row: 1, unknown_fields: [] };
+    }
+    if (
+      values.code_related === "unknown" ||
+      values.scope_within_request === "unknown"
+    ) {
+      return { class: "clarify", row: 1, unknown_fields: bundled };
+    }
+    if (values.core_is_decision === "yes") {
+      return { class: "decision", row: 2, unknown_fields: [] };
+    }
+    if (values.core_is_decision === "unknown") {
+      return { class: "clarify", row: 2, unknown_fields: bundled };
+    }
+    if (values.single_goal === "no" || values.multiple_repos === "yes") {
+      return { class: "split", row: 3, unknown_fields: [] };
+    }
+    if (
+      values.single_goal === "unknown" ||
+      values.multiple_repos === "unknown"
+    ) {
+      return { class: "clarify", row: 3, unknown_fields: bundled };
+    }
+    if (blocking.length > 0) {
+      return { class: "clarify", row: 4, unknown_fields: [] };
+    }
+    if (values.trivial === "yes") {
+      return { class: "no-spec-needed", row: 5, unknown_fields: [] };
+    }
+    return { class: "actionable", row: 6, unknown_fields: [] };
+  }
+
+  it("matches the independent oracle on class, row and unknown_fields over 3^6 field values times blocking empty/non-empty", () => {
     let checked = 0;
     for (let code = 0; code < 729; code++) {
       const values = {} as Record<TriageFieldName, TriageValue>;
@@ -236,63 +331,15 @@ describe("deriveTriageClass: exhaustive over all inputs", () => {
         rest = Math.floor(rest / 3);
       }
       for (const blocking of [[], ["x"]]) {
-        const t = triage(values, blocking);
-        const d = deriveTriageClass(t);
+        const d = deriveTriageClass(triage(values, blocking));
+        const want = expectedDerivation(values, blocking);
         checked++;
 
-        expect(TRIAGE_CLASSES).toContain(d.class);
+        expect(
+          { class: d.class, row: d.row, unknown_fields: d.unknown_fields },
+          `${JSON.stringify(values)} blocking=${blocking.length}`,
+        ).toEqual(want);
         expect(d.rule_version).toBe(1);
-        expect(d.row).toBeGreaterThanOrEqual(1);
-        expect(d.row).toBeLessThanOrEqual(6);
-
-        // never actionable while one of the precedence fields is unknown
-        if (five.some((name) => values[name] === "unknown")) {
-          expect(d.class, JSON.stringify(values)).not.toBe("actionable");
-        }
-
-        // the row number is consistent with the class
-        if (d.class === "unsuitable") {
-          expect(d.row).toBe(1);
-          expect(
-            values.code_related === "no" ||
-              values.scope_within_request === "no",
-          ).toBe(true);
-        }
-        if (d.class === "decision") {
-          expect(d.row).toBe(2);
-          expect(values.core_is_decision).toBe("yes");
-        }
-        if (d.class === "split") {
-          expect(d.row).toBe(3);
-          expect(
-            values.single_goal === "no" || values.multiple_repos === "yes",
-          ).toBe(true);
-        }
-        if (d.class === "actionable") {
-          expect(d.row).toBe(6);
-          expect(blocking).toEqual([]);
-          expect(values.trivial).not.toBe("yes");
-        }
-        if (d.class === "no-spec-needed") {
-          expect(d.row).toBe(5);
-          expect(values.trivial).toBe("yes");
-        }
-
-        // unknown_fields exactly tracks the precedence row that forced clarify
-        if (d.class === "clarify") {
-          expect(d.row).toBeLessThanOrEqual(4);
-          if (d.row <= 3) {
-            expect(d.unknown_fields.length).toBeGreaterThan(0);
-            for (const name of d.unknown_fields) {
-              expect(values[name], name).toBe("unknown");
-            }
-          } else {
-            expect(d.unknown_fields).toEqual([]);
-            expect(blocking.length).toBeGreaterThan(0);
-          }
-        } else {
-          expect(d.unknown_fields).toEqual([]);
-        }
 
         // the derived class is always a legal class the format accepts
         const doc = docOf(values, blocking);
