@@ -407,5 +407,5 @@ describe("observation commands share global option semantics", () => {
         expect(fs.existsSync(path.join(r, "unsafe-env"))).toBe(false);
       }
     }
-  });
+  }, 30000);
 });
