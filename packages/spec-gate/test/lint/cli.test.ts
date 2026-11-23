@@ -353,6 +353,16 @@ describe("spec-gate lint --config", () => {
     expect(run.stdout).toBe("");
     expect(run.stderr).not.toBe("");
   });
+
+  it.each(["/", " "])(
+    "--config %j names no file: a usage error, exit 2, no report",
+    async (value) => {
+      const run = await runCli(["lint", specDir(), "--config", value]);
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("--config needs a path");
+    },
+  );
 });
 
 describe("spec-gate lint-ack: comments dropped", () => {

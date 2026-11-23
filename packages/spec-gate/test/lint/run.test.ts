@@ -230,7 +230,24 @@ describe("ack-unused only for a rule that was evaluated", () => {
     }
   });
 
-  it("profile-default acknowledged while --profile is given is unused: the rule ran, and the light profile skips exactly the full-only rules", () => {
+  it("profile-default acknowledged while --profile is given is unused: the rule ran", () => {
+    const report = lint(
+      specDir({
+        ...NO_TRIAGE,
+        "acks.yaml": `- rule: "profile-default"\n  id: "triage"\n  reason: "r"\n`,
+      }),
+      RULES,
+      { profile: "light" },
+    );
+    expect(unused(report)).toHaveLength(1);
+    expect(skippedReason(report, "profile-default")).toBeUndefined();
+    expect(skippedReason(report, "triage-stale")).toBe("input-absent");
+    for (const s of report.skipped.filter((x) => x.rule !== "triage-stale")) {
+      expect(s.reason, s.rule).toBe("profile");
+    }
+  });
+
+  it("a light triage.json skips exactly the full-only rules, each for profile", () => {
     const lightTriage = JSON.stringify({
       single_goal: { value: "yes", evidence: "one goal" },
       code_related: { value: "yes", evidence: "the module" },
@@ -245,13 +262,10 @@ describe("ack-unused only for a rule that was evaluated", () => {
     const report = lint(
       specDir({
         "triage.json": lightTriage,
-        "acks.yaml": `- rule: "profile-default"\n  id: "triage"\n  reason: "r"\n`,
       }),
       RULES,
-      { profile: "light" },
     );
-    expect(unused(report)).toHaveLength(1);
-    expect(skippedReason(report, "profile-default")).toBeUndefined();
+    expect(report.profile).toBe("light");
     const fullOnly = RULES.filter((r) => !r.profiles.includes("light")).map(
       (r) => r.id,
     );

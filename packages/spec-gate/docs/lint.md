@@ -19,7 +19,7 @@ spec-gate lint-ack <spec-dir> <rule> <id> --reason <text>
 | `bindings.yaml` | no | the bindings format |
 | `questions.json` | no | the questions format |
 | `triage.json` | no | the triage format; decides the profile |
-| `source/meta.json` | no | the source line list (`lines[]`, each `{ id, kind }`) |
+| `source/meta.json` | no (the full profile reports its absence through `ledger-complete`) | the source line list (`lines[]`, each `{ id, kind }`) |
 | `acks.yaml` | no | acknowledged warnings, see below |
 | the file given to `--config` | no | repo-wide settings in `.spec-gate/config.yaml` format; it sits outside the spec directory and is only read for `--config` |
 
@@ -92,7 +92,7 @@ unit. Usage errors go to stderr as text, never into the report.
 |---|---|
 | 0 | no error finding, and with `--strict` no unacknowledged warning |
 | 1 | the report has an error, or with `--strict` an unacknowledged warning |
-| 2 | a usage error (unknown option, missing argument, a bad `--profile` value), a spec directory that is missing or not a directory, or an unexpected exception |
+| 2 | a usage error (unknown option, missing argument, a bad `--profile` value, a `--config` value with no file name), a spec directory that is missing or not a directory, or an unexpected exception |
 
 Help and version exit 0. `lint-ack` exits 0 when it wrote an entry and 2 on any
 refusal.

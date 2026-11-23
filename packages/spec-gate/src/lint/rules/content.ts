@@ -251,10 +251,10 @@ export function checkResidualOpen(ctx: RuleContext): RuleFinding[] {
   const questions = used(ctx.inputs.questions);
   if (questions === undefined) return findings;
   const answered = new Set(questions.answers.map((a) => a.question));
-  const openPointClasses: string[] = ["divergence", "blind-spot", "untestable"];
+  // Every question class is an open-point class, so a blocking question
+  // without an answer is open whatever its class.
   for (const question of questions.questions) {
     if (!question.blocking) continue;
-    if (!openPointClasses.includes(question.class)) continue;
     if (answered.has(question.id)) continue;
     findings.push({
       file: QUESTIONS,
@@ -426,7 +426,10 @@ export function checkTriageStale(ctx: RuleContext): RuleFinding[] {
 const FULL: RuleDef["profiles"] = ["full"];
 const BOTH: RuleDef["profiles"] = ["light", "full"];
 
-/** The content rules: the full profile only, in the order of `docs/lint.md`. */
+/**
+ * The content rules, in the order of `docs/lint.md`. Every one runs in the
+ * full profile only, except `triage-stale`, which runs in both.
+ */
 export const CONTENT_RULES: readonly RuleDef[] = [
   {
     id: "df-coverage",

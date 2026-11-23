@@ -452,6 +452,9 @@ describe("owner-none: nobody stands behind an AC", () => {
           message: expect.stringContaining("written none"),
         }),
       ]);
+      expect(findingsOf(report, "owner-none")[0]!.message, owner).toContain(
+        `has owner "${owner}"`,
+      );
     }
   });
 });

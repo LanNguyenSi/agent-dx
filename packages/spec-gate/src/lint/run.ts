@@ -3,6 +3,7 @@
  * rules that apply, apply the acknowledgements and build the report.
  */
 import fs from "node:fs";
+import path from "node:path";
 import { ackTextProblem, applyAcks } from "./acks.js";
 import { loadAcks, loadConfig, loadInputs, type FindingSink } from "./load.js";
 import { resolveProfile } from "./profile.js";
@@ -68,7 +69,8 @@ function stamp(
 
 /**
  * Lints one spec directory. `rules` defaults to the registry; a test passes
- * its own list. Returns a failure only when `specDir` is not a directory;
+ * its own list. Returns a failure only when `specDir` is not a directory
+ * or `configPath` names no file (empty, or a path without a file name);
  * every problem inside the directory is a finding.
  */
 export function lintSpecDir(
@@ -85,7 +87,10 @@ export function lintSpecDir(
   if (!isDir) {
     return { ok: false, message: `${specDir} is not a directory` };
   }
-  if (options.configPath === "") {
+  if (
+    options.configPath !== undefined &&
+    path.basename(options.configPath).trim() === ""
+  ) {
     return { ok: false, message: "--config needs a path" };
   }
 
