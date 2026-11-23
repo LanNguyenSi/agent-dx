@@ -59,7 +59,7 @@ describe("spec-gate CLI", () => {
   it("an unknown command exits non-zero with a usage message on stderr", async () => {
     const run = await runCli(["frobnicate"]);
     expect(run.code).not.toBe(0);
-    expect(run.stderr).toContain("too many arguments");
+    expect(run.stderr).toContain("unknown command");
     expect(run.stderr).toContain("Usage: spec-gate");
   });
 
@@ -72,14 +72,16 @@ describe("spec-gate CLI", () => {
     });
 
     // The copy lives inside the package so that `commander` still resolves
-    // from the package's node_modules.
+    // from the package's node_modules. The whole `dist` tree is copied: the
+    // CLI imports its sibling modules.
     function copyCli(pkgJson: string): string {
       const root = fs.mkdtempSync(
         path.join(fileURLToPath(new URL("..", import.meta.url)), ".tmp-cli-"),
       );
       tmpRoots.push(root);
-      fs.mkdirSync(path.join(root, "dist"));
-      fs.copyFileSync(cliPath, path.join(root, "dist", "cli.js"));
+      fs.cpSync(path.dirname(cliPath), path.join(root, "dist"), {
+        recursive: true,
+      });
       fs.writeFileSync(path.join(root, "package.json"), pkgJson);
       return path.join(root, "dist", "cli.js");
     }

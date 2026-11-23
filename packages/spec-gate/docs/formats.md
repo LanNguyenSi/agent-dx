@@ -126,6 +126,57 @@ request by `L<position>-<hash>`.
 A line keeps its ID while its text does not change, wherever the formatting
 changes; inserting a line above it changes the position part only.
 
+## source/meta.json
+
+Written by `intake`. A file adapter records a local ticket file:
+
+```json
+{
+  "adapter": "file",
+  "origin": "ticket.txt",
+  "fetched_at": "2000-01-31T12:00:00.000Z",
+  "sha256": "<sha256 of the raw bytes>",
+  "trust": "untrusted",
+  "sections": [{ "name": "body", "author": null, "sha256": "<same hash>" }],
+  "attachments": [],
+  "raw": true,
+  "lines": [{ "id": "L1-64ec88ca00b2", "kind": "text" }],
+  "base_commit": "<40 hex>",
+  "commands_ref": "<40 hex>"
+}
+```
+
+The keys appear in exactly this order, the file is 2-space JSON with a
+trailing newline. `origin` is the source path as given on the command line,
+informative only. `fetched_at` is the wall-clock time of the intake in ISO
+8601 UTC. `sha256` is the hash of the raw bytes of the file. `trust` is
+always `untrusted`: intake never vouches for content. `sections` for the
+file adapter is exactly one entry, `{ "name": "body", "author": <--author
+or null>, "sha256": <hash of the raw bytes> }`. `attachments` holds one
+entry per `--attach` in command-line order: `{ "name": <basename>,
+"sha256": <hash>, "size": <bytes>, "type": <type from the extension> }`;
+the extension table is small and fixed, an extension outside it becomes
+`application/octet-stream`, and the attachment file itself is never copied
+into the repository. `raw` is `false` with `--no-raw`, when
+`source/ticket.md` is not written. `lines` is always present, with and
+without raw: `{ "id", "kind" }` per non-empty unit of `splitSourceLines`,
+with the ID from `formatSourceLineId`, so the ledger works either way.
+`base_commit` and `commands_ref` are the same commit, the head of the
+remote default branch after a fetch, and nothing else: no option and no
+input file sets or overrides them. Before anything is written the raw
+bytes are scanned for secret patterns (a private key header, an AWS access
+key id, a GitHub token, a Slack token, a generic password, secret, token
+or api_key assignment with a quoted value of 12 characters or more); a
+match is an error that names the pattern and the line and never prints the
+value, and nothing is written. `intake file --check` reads the existing
+`meta.json` and the file again, fetches nothing and writes nothing: same
+hash exits 0 with `{ "status": "ok" }`, a different hash exits 1 with
+`{ "status": "source-drift", "changed_lines": [...], "added": [...],
+"removed": [...] }`, where the diff aligns the recorded `lines` with the
+current ones by position and `changed_lines` lists `{ "old", "new" }` IDs
+of positions whose ID changed, `removed` old IDs of positions no longer
+present and `added` new IDs of new positions, each in position order.
+
 ## spec.md
 
 Markdown with YAML frontmatter, read by a line grammar. A model can write it,

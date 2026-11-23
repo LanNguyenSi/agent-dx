@@ -11,3 +11,9 @@ top of this entry point.
 The files `spec-gate` reads and writes, their grammars, the field-to-layer
 table and the revision each step reads each input at are described in
 [docs/formats.md](docs/formats.md). The parsers live in `src/formats/`.
+
+## Commands
+
+- `spec-gate intake file <path> --id <spec-id>` creates `specs/<id>/source/`
+  in the target repository from a local file, with `base_commit` and
+  `commands_ref` set to the head of the remote default branch.
