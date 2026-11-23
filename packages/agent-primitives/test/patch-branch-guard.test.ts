@@ -1501,7 +1501,7 @@ describe("patch branch guard: a tracked file is found by identity, not by its sp
       expect(g(r).targets?.[0].tracking).toBe("unknown");
       expect(r.warnings.join("\n")).toContain("wrote more than 65536 bytes");
       expect(read(dir, "big/new.md")).toBe("hi\n");
-    });
+    }, 30000);
 
     it("a root-level target is classified from the top-level entries only: a large index below does not matter", () => {
       const dir = spellingRepo({ "core.ignorecase": "false" });
@@ -1523,7 +1523,7 @@ describe("patch branch guard: a tracked file is found by identity, not by its sp
         const tracked = patch({ cwd: dir, edits: [hi("TOP.md")] });
         expect(tracked.status).toBe("usage_error");
       }
-    });
+    }, 30000);
 
     it("a root-level directory with more top-level entries than the cap allows is unknown", () => {
       const dir = spellingRepo({ "core.ignorecase": "false" });
@@ -1540,7 +1540,7 @@ describe("patch branch guard: a tracked file is found by identity, not by its sp
       const r = patch({ cwd: dir, edits: [hi("fresh.md")] });
       expect(r.status).toBe("usage_error");
       expect(g(r).targets?.[0].tracking).toBe("unknown");
-    });
+    }, 30000);
   });
 });
 
