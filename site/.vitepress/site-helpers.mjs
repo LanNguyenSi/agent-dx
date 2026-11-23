@@ -150,15 +150,20 @@ function isLink(p) {
 // (holding, say, a dynamic route) would only fail later inside refuseIncludes
 // with a bare EISDIR that names nothing. The test is an lstat, so a symbolic
 // link is refused whatever it points at, like every other entry here (see
-// refuseBuildTimeCode).
+// refuseBuildTimeCode). An lstat error is read as missing only for ENOENT and
+// ENOTDIR (the path or a parent is absent or not a directory); every other
+// error (ELOOP from a directory link that loops, EACCES from an unsearchable
+// parent, ...) is reported as unreadable with its code, so a file that exists
+// but cannot be examined is not called missing. The label falls back to '?'
+// when the error carries no code.
 function refuseNonRegularHomePage(repoRoot) {
   const p = path.join(repoRoot, 'site', 'index.md')
   let found
   try {
     const stat = fs.lstatSync(p)
     found = stat.isFile() ? null : stat.isDirectory() ? 'a directory' : stat.isSymbolicLink() ? 'a symbolic link' : 'another entry type'
-  } catch {
-    found = 'missing'
+  } catch (err) {
+    found = err.code === 'ENOENT' || err.code === 'ENOTDIR' ? 'missing' : `unreadable (${err.code || '?'})`
   }
   if (found) throw new Error(`site/index.md must be a regular file: ${found}`)
 }

@@ -190,6 +190,57 @@ test('createSite refuses a missing site/index.md, naming it as missing', () => {
   assert.throws(() => createSite(tree, () => ''), /site\/index\.md must be a regular file: missing/)
 })
 
+test('createSite names an ENOTDIR lstat error (site is a regular file) as missing too', () => {
+  const tree = fs.mkdtempSync(path.join(work, 'home-notdir-'))
+  fs.writeFileSync(path.join(tree, 'site'), 'not a directory\n')
+  assert.throws(() => createSite(tree, () => ''), /site\/index\.md must be a regular file: missing/)
+})
+
+test('createSite refuses an unreadable site/index.md: an ELOOP from a site directory that links to itself', () => {
+  const tree = fs.mkdtempSync(path.join(work, 'home-eloop-'))
+  fs.symlinkSync('site', path.join(tree, 'site'))
+  assert.throws(
+    () => createSite(tree, () => ''),
+    /site\/index\.md must be a regular file: unreadable \(ELOOP\)/
+  )
+})
+
+// Only ENOENT and ENOTDIR read as missing; a path that exists but cannot be
+// lstat'ed is unreadable, with its code (or '?' when the error carries none).
+test('createSite refuses an unreadable site/index.md: an EACCES from an unsearchable site directory', (t) => {
+  if (process.getuid?.() === 0) t.skip('running as root: chmod 000 does not deny access')
+  const tree = fs.mkdtempSync(path.join(work, 'home-eacces-'))
+  const dir = path.join(tree, 'site')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.chmodSync(dir, 0o000)
+  try {
+    assert.throws(
+      () => createSite(tree, () => ''),
+      /site\/index\.md must be a regular file: unreadable \(EACCES\)/
+    )
+  } finally {
+    fs.chmodSync(dir, 0o755)
+  }
+})
+
+test('createSite reports an lstat error without a code as unreadable (?)', () => {
+  const tree = fs.mkdtempSync(path.join(work, 'home-nocode-'))
+  fs.mkdirSync(path.join(tree, 'site'), { recursive: true })
+  const target = path.join(tree, 'site', 'index.md')
+  const lstatSync = fs.lstatSync
+  fs.lstatSync = (p, ...rest) => {
+    if (p === target) {
+      throw Object.assign(new Error('no code here'), { code: undefined })
+    }
+    return lstatSync.call(fs, p, ...rest)
+  }
+  try {
+    assert.throws(() => createSite(tree, () => ''), /site\/index\.md must be a regular file: unreadable \(\?\)/)
+  } finally {
+    fs.lstatSync = lstatSync
+  }
+})
+
 test('createSite refuses a site/index.md that is neither file nor directory nor link', () => {
   // A device or socket file cannot be created portably at a deep temp path,
   // so the entry type is stubbed at the fs boundary (as the readdirSync test
