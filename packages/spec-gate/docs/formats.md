@@ -141,8 +141,8 @@ Written by `intake`. A file adapter records a local ticket file:
   "attachments": [],
   "raw": true,
   "lines": [{ "id": "L1-64ec88ca00b2", "kind": "text" }],
-  "base_commit": "<40 hex>",
-  "commands_ref": "<40 hex>"
+  "base_commit": "<40 or 64 hex>",
+  "commands_ref": "<40 or 64 hex>"
 }
 ```
 
@@ -161,21 +161,56 @@ into the repository. `raw` is `false` with `--no-raw`, when
 `source/ticket.md` is not written. `lines` is always present, with and
 without raw: `{ "id", "kind" }` per non-empty unit of `splitSourceLines`,
 with the ID from `formatSourceLineId`, so the ledger works either way.
-`base_commit` and `commands_ref` are the same commit, the head of the
-remote default branch after a fetch, and nothing else: no option and no
-input file sets or overrides them. Before anything is written the raw
-bytes are scanned for secret patterns (a private key header, an AWS access
-key id, a GitHub token, a Slack token, a generic password, secret, token
-or api_key assignment with a quoted value of 12 characters or more); a
-match is an error that names the pattern and the line and never prints the
-value, and nothing is written. `intake file --check` reads the existing
-`meta.json` and the file again, fetches nothing and writes nothing: same
-hash exits 0 with `{ "status": "ok" }`, a different hash exits 1 with
+`base_commit` and `commands_ref` are the same commit: the head of
+`refs/heads/<default branch>` on the remote, 40 hex characters (SHA-1) or 64
+(SHA-256), and nothing else. Only code sets them; no option and no input file
+sets or overrides them. The default branch is read from the remote's own HEAD
+symref and must be a valid branch name under `refs/heads/` that does not start
+with `-`; otherwise intake stops with `bad-default-branch`. The remote is named
+by `--remote` and must be a configured remote (a plain name; a URL, a path or
+`.` is refused with `bad-remote`, an unknown name with `no-remote`). Intake
+fetches the full ref `refs/heads/<default branch>` only, so a tag of the same
+name is never picked; it writes no local ref, fetches no tag, prunes nothing,
+reads the commit id from the one line `FETCH_HEAD` holds and peels it to a
+commit. Every git call runs without a shell, without any `GIT_*` variable of
+the caller, without a terminal prompt and with a timeout that kills the whole
+process group; an error message never carries a command line, a URL or git's
+own output.
+
+Before anything is written the raw bytes are scanned for secret patterns: a
+private key header (also `PRIVATE KEY BLOCK`), an AWS access key id, a GitHub
+token (`ghp_`, `gho_`, `ghs_`, `ghu_`, `ghr_`, `github_pat_`), a Slack token,
+and a generic assignment whose key contains `password`, `secret`, `token`,
+`api_key`, `api-key` or `apikey` anywhere (`DB_PASSWORD`,
+`AWS_SECRET_ACCESS_KEY`, `access_token`, `apiKey`) with an optional closing
+quote after the key (`"password": "..."`) and a quoted value of 12 characters
+or more. A value without quotes is not caught by the generic pattern. A match
+is an error that names the pattern and the line and never prints the value,
+and nothing is written. Input that is UTF-16 (a byte order mark) or holds a
+NUL byte is refused with `source-encoding`, because the scan reads UTF-8 text.
+
+`intake file` writes `specs/<id>/source/` with `ticket.md` first and
+`meta.json` last, each through a temporary name and a rename. `source/` is
+created without overwriting anything: an existing one (also a dangling
+symlink) is `source-exists`. If a write fails, everything the command created
+is removed again. `meta.json` is written last, so a `source/` directory without
+a `meta.json` is the leftover of a run that was killed.
+
+Exit codes of `intake file`: 0 on success, 2 on an error (a named code on
+stderr, nothing on stdout, nothing written). With `--check`: 0 when the file
+is unchanged, 1 on drift, 2 on an error (no recorded `meta.json`, a
+`meta.json` that is not strict JSON, not an object, or without a `sha256`
+string and a `lines` array of `{ id, kind }`). `intake file --check` reads the
+existing `meta.json` and the file again, fetches nothing and writes nothing:
+same hash exits 0 with `{ "status": "ok" }`, a different hash exits 1 with
 `{ "status": "source-drift", "changed_lines": [...], "added": [...],
 "removed": [...] }`, where the diff aligns the recorded `lines` with the
 current ones by position and `changed_lines` lists `{ "old", "new" }` IDs
 of positions whose ID changed, `removed` old IDs of positions no longer
-present and `added` new IDs of new positions, each in position order.
+present and `added` new IDs of new positions, each in position order. A
+different hash can come with three empty lists: a change that the line
+normalisation does not see (extra blank lines, for example) still exits 1,
+because the bytes changed.
 
 ## spec.md
 

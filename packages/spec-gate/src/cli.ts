@@ -2,7 +2,8 @@
 import fs from "node:fs";
 import process from "node:process";
 import { Command } from "commander";
-import { IntakeError, intakeFile } from "./intake.js";
+import { intakeFile } from "./adapters/file.js";
+import { IntakeError } from "./intake/index.js";
 
 function readVersion(): string {
   const url = new URL("../package.json", import.meta.url);
@@ -59,7 +60,7 @@ intake
   .option("--no-raw", "do not write ticket.md and record raw: false")
   .option(
     "--check",
-    "compare the file with the recorded source and exit 1 on drift; writes nothing and does not fetch",
+    "compare the file with the recorded source: exit 0 when unchanged, 1 on drift, 2 on an error; writes nothing and does not fetch",
   )
   .action(
     async (
@@ -90,7 +91,7 @@ intake
       } catch (err) {
         if (!(err instanceof IntakeError)) throw err;
         process.stderr.write(`spec-gate: ${err.message}\n`);
-        process.exitCode = 1;
+        process.exitCode = 2;
       }
     },
   );
