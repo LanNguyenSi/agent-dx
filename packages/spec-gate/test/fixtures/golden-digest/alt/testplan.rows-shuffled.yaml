@@ -1,0 +1,71 @@
+- id: TP-10
+  covers:
+  - DF-2
+  kind: red-first
+  claim: the log line is in English
+  expected: message text
+  oracle: DF-2
+  red_reason: no log line exists today
+- id: TP-7
+  covers:
+  - AC-1
+  kind: post-deploy
+  claim: no 5xx on /auth after deploy
+  check: error rate of /auth for 30 minutes
+  environment: production
+- id: TP-6
+  covers:
+  - AC-2
+  kind: runtime
+  claim: a user can log in again after the change
+  environment: staging
+  steps:
+  - log in on device A
+  - change the password on device B
+  - reload device A
+  expected: device A is asked to log in
+  evidence_location: review/runtime-tp6.md
+  control: negative
+  method: browser
+- id: TP-5
+  covers:
+  - AC-1
+  kind: manual
+  claim: the reset mail reads well
+  verifier: support lead
+  evidence_location: review/reset mail.png
+- id: TP-4
+  covers:
+  - NG-1
+  kind: static
+  claim: the type check passes
+  check_command_ref: typecheck
+- id: TP-3
+  covers:
+  - NG-2
+  kind: measurement
+  claim: login latency stays within range
+  baseline: 120
+  threshold: p95 <= 150ms
+  runs: 5
+- id: TP-2
+  covers:
+  - AC-2
+  - DF-1
+  kind: stays-green
+  claim: login with a fresh token keeps working
+  probe_hint: make the token check always reject
+- id: TP-1
+  covers:
+  - AC-1
+  - AC-10
+  kind: red-first
+  claim: login returns 401 after a password change
+  input: old token after POST /password
+  expected: HTTP 401
+  oracle: AC-1 (source SL-4)
+  level: integration
+  seam: HTTP API /auth
+  red_reason: the endpoint does not invalidate tokens today
+  fail_match: expected 401
+  notes: free note
