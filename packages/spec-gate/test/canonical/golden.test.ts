@@ -212,6 +212,7 @@ describe("golden coverage", () => {
   it("changes the digest through every normative field of the spec", () => {
     const required = [
       "goal-text",
+      "frontmatter-id",
       "base-commit",
       "commands-ref-only",
       "commands-argv-at-ref",
@@ -223,6 +224,7 @@ describe("golden coverage", () => {
       "ac-owner",
       "ng-text",
       "ng-paths",
+      "ng-paths-inner-space",
       "df-text",
       "df-reason",
       "df-affects-behavior",
@@ -241,6 +243,16 @@ describe("golden coverage", () => {
       "sl-out-reason",
     ];
     for (const name of required) {
+      expect(changing.has(name), `no changing variant ${name}`).toBe(true);
+    }
+  });
+
+  it("changes the digest for inner whitespace in every exact test-plan value", () => {
+    for (const name of [
+      "tp-fail-match-inner-space",
+      "tp-evidence-location-inner-space",
+      "tp-expected-inner-space",
+    ]) {
       expect(changing.has(name), `no changing variant ${name}`).toBe(true);
     }
   });

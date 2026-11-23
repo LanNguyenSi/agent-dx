@@ -48,6 +48,17 @@ describe("compareIds", () => {
     expect(compareIds("AC-1", "GOAL")).toBeLessThan(0);
     expect(compareIds("GOAL", "NG-1")).toBeLessThan(0);
   });
+
+  it("puts an ID without a number before a numbered ID of the same prefix", () => {
+    expect(compareIds("GOAL", "GOAL-1")).toBeLessThan(0);
+    expect(compareIds("GOAL-1", "GOAL")).toBeGreaterThan(0);
+    expect(["AC-1", "GOAL-2", "GOAL", "GOAL-1"].sort(compareIds)).toEqual([
+      "AC-1",
+      "GOAL",
+      "GOAL-1",
+      "GOAL-2",
+    ]);
+  });
 });
 
 describe("sortById and compareText", () => {

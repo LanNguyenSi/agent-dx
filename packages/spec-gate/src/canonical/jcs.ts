@@ -11,6 +11,7 @@
  *   rule: only `"`, `\` and the control characters below U+0020 are
  *   escaped, everything else is written as is. A string with a lone
  *   surrogate is refused, because it has no UTF-8 form.
+ * - An array with a hole is refused: JSON has no form for it.
  * - No whitespace between tokens.
  */
 import { createHash } from "node:crypto";
@@ -50,7 +51,14 @@ function serialize(value: unknown, depth: number): string {
       return serializeString(value);
     case "object": {
       if (Array.isArray(value)) {
-        return `[${value.map((item) => serialize(item, depth + 1)).join(",")}]`;
+        const items: string[] = [];
+        for (let i = 0; i < value.length; i++) {
+          if (!(i in value)) {
+            throw new TypeError("canonical JSON: array has a hole");
+          }
+          items.push(serialize(value[i], depth + 1));
+        }
+        return `[${items.join(",")}]`;
       }
       const proto = Object.getPrototypeOf(value) as unknown;
       if (proto !== Object.prototype && proto !== null) {

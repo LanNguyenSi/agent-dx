@@ -33,7 +33,7 @@
   kind: manual
   claim: the reset mail reads well
   verifier: support lead
-  evidence_location: review/reset-mail.png
+  evidence_location: review/reset mail.png
 - id: TP-4
   covers:
   - NG-1

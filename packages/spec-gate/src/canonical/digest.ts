@@ -6,20 +6,22 @@
  * plan refers to, read at the revision `commands_ref` names.
  *
  * What goes in (see `docs/digest.md` for the full statement):
- * - the frontmatter's `base_commit`, `commands_ref` and `retired_ids`,
+ * - the frontmatter's `id`, `base_commit`, `commands_ref` and `retired_ids`,
  * - GOAL, AC (with source and owner), NG, DF, DC (with provenance), RS and
  *   the source-ledger assignment,
- * - every test-plan field whose layer is `normative`,
+ * - every test-plan field whose layer is `normative`, whitespace-normalised
+ *   only where `PLAN_FIELD_CLASSES` says the field is prose,
  * - the argv list of each command a normative test-plan field refers to.
  *
- * What stays out: `status`, `superseded_by`, the frontmatter `id` and
- * `source`, Context (the parser does not expose it), line numbers, every
+ * What stays out: `status`, `superseded_by`, the frontmatter `source`,
+ * Context (the parser does not expose it), line numbers, every
  * binding and informative field, and every file other than `spec.md` and
  * `testplan.yaml`.
  */
 import type { Spec, TestPlan, TestPlanRow } from "../formats/index.js";
 import { layerOf } from "../formats/index.js";
 import { DigestError } from "./errors.js";
+import { COMMANDS_PATH } from "./git.js";
 import type { Json } from "./jcs.js";
 import { canonicalJson, sha256Digest } from "./jcs.js";
 import {
@@ -48,8 +50,61 @@ export function referencedCommandNames(plan: TestPlan): string[] {
   return [...names].sort(compareText);
 }
 
+/**
+ * How the digest treats the text of each normative test-plan field.
+ *
+ * - `prose`: a sentence or label; runs of ASCII whitespace collapse and the
+ *   ends are trimmed (see `normalizeText`).
+ * - `exact`: the value is used as the parser returns it. Whitespace inside
+ *   an ID, a path, a match string, a command or location name is part of
+ *   the value: two such values that differ only there name different
+ *   things.
+ *
+ * A normative field that is missing here is treated as `exact`, and a test
+ * fails until the field is classified. Numbers and booleans are always
+ * written as they are; the class only matters for strings.
+ */
+export type TextClass = "prose" | "exact";
+
+export const PLAN_FIELD_CLASSES: Readonly<Record<string, TextClass>> =
+  Object.freeze({
+    // identity and references
+    id: "exact",
+    covers: "exact",
+    kind: "exact",
+    check_command_ref: "exact",
+    // paths, locations and match text
+    evidence_location: "exact",
+    fail_match: "exact",
+    expected: "exact",
+    // enumerations and counts
+    control: "exact",
+    method: "exact",
+    runs: "exact",
+    // prose
+    claim: "prose",
+    input: "prose",
+    oracle: "prose",
+    level: "prose",
+    seam: "prose",
+    red_reason: "prose",
+    baseline: "prose",
+    threshold: "prose",
+    verifier: "prose",
+    check: "prose",
+    environment: "prose",
+    steps: "prose",
+    probe_hint: "prose",
+  });
+
+function textClassOf(field: string): TextClass {
+  return Object.hasOwn(PLAN_FIELD_CLASSES, field)
+    ? PLAN_FIELD_CLASSES[field]!
+    : "exact";
+}
+
 const sortedIds = (ids: readonly string[]): string[] =>
-  [...ids].sort(compareIds).map(normalizeText);
+  [...ids].sort(compareIds);
 
 function specRows(spec: Spec): Record<string, Json> {
   const goal: Json = spec.goal
@@ -61,12 +116,12 @@ function specRows(spec: Spec): Record<string, Json> {
       id: l.id,
       text: normalizeText(l.text),
       source: sortedIds(l.source),
-      owner: normalizeText(l.owner),
+      owner: l.owner,
     })),
     non_goals: sortById(spec.nonGoals).map((l) => ({
       id: l.id,
       text: normalizeText(l.text),
-      paths: l.paths.map(normalizeText).sort(compareText),
+      paths: [...l.paths].sort(compareText),
     })),
     defaults: sortById(spec.defaults).map((l) => ({
       id: l.id,
@@ -77,11 +132,11 @@ function specRows(spec: Spec): Record<string, Json> {
     decisions: sortById(spec.decisions).map((l) => {
       const provenance: Record<string, Json> = {
         channel: l.provenance.channel,
-        author: normalizeText(l.provenance.author),
-        time: normalizeText(l.provenance.time),
+        author: l.provenance.author,
+        time: l.provenance.time,
       };
       if (l.provenance.comment_url !== undefined) {
-        provenance["comment_url"] = normalizeText(l.provenance.comment_url);
+        provenance["comment_url"] = l.provenance.comment_url;
       }
       return {
         id: l.id,
@@ -113,11 +168,11 @@ function specRows(spec: Spec): Record<string, Json> {
   };
 }
 
-function planValue(field: string, value: unknown): Json {
-  if (typeof value === "string") return normalizeText(value);
+function planValue(field: string, value: unknown, prose: boolean): Json {
+  if (typeof value === "string") return prose ? normalizeText(value) : value;
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
-    const items = value.map((v) => planValue(field, v));
+    const items = value.map((v) => planValue(field, v, prose));
     // `covers` is a set of IDs; `steps` is an ordered list and keeps its order.
     return field === "covers" ? (items as string[]).sort(compareIds) : items;
   }
@@ -128,7 +183,7 @@ function planRow(row: TestPlanRow): Record<string, Json> {
   const out: Record<string, Json> = {};
   for (const [field, value] of Object.entries(row)) {
     if (value === undefined || layerOf(field) !== "normative") continue;
-    out[field] = planValue(field, value);
+    out[field] = planValue(field, value, textClassOf(field) === "prose");
   }
   return out;
 }
@@ -138,11 +193,11 @@ export function buildDigestInput(parts: DigestParts): Json {
   const { spec, testPlan, commands } = parts;
   const argv: Record<string, Json> = {};
   for (const name of referencedCommandNames(testPlan)) {
-    const list = commands[name];
+    const list = Object.hasOwn(commands, name) ? commands[name] : undefined;
     if (list === undefined) {
       throw new DigestError(
         "command-ref-unknown",
-        `a test-plan row refers to command ${JSON.stringify(name)}, which is not in the commands file at commands_ref`,
+        `a test-plan row refers to command ${JSON.stringify(name)}, which is not in ${COMMANDS_PATH} at commands_ref ${spec.frontmatter.commands_ref}`,
       );
     }
     // argv elements are exact strings: no whitespace normalisation.
@@ -150,6 +205,7 @@ export function buildDigestInput(parts: DigestParts): Json {
   }
   return {
     format: DIGEST_FORMAT,
+    id: spec.frontmatter.id,
     base_commit: spec.frontmatter.base_commit,
     commands_ref: spec.frontmatter.commands_ref,
     retired_ids: sortedIds(spec.frontmatter.retired_ids),

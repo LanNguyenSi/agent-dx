@@ -59,7 +59,7 @@ retired_ids: [AC-9, NG-4]
 
 - NG-2: Login latency stays within its current range.
 - NG-1: The token format does not change.
-  - paths: src/auth/token.ts, src/auth/**
+  - paths: src/auth/token.ts, src/auth/user files/**
 
 ## Acceptance
 

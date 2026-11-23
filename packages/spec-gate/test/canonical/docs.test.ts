@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   DIGEST_ERROR_CODES,
   DIGEST_FORMAT,
+  PLAN_FIELD_CLASSES,
 } from "../../src/canonical/index.js";
 import { FIELD_LAYERS } from "../../src/formats/index.js";
 
@@ -42,6 +43,30 @@ describe("docs/digest.md", () => {
     ]) {
       expect(doc, word).toContain(word);
     }
+  });
+
+  it("lists every normative test-plan field under its class", () => {
+    const section = (label: string): string[] => {
+      const m = new RegExp(`- ${label} test-plan fields: ([^;.]*[;.])`).exec(
+        doc.replace(/\n\s+/g, " "),
+      );
+      expect(m, label).not.toBeNull();
+      return [...m![1]!.matchAll(/`([a-z_]+)`/g)].map((x) => x[1]!);
+    };
+    const prose = section("prose");
+    const exact = section("exact");
+    const byClass = (cls: string) =>
+      Object.entries(PLAN_FIELD_CLASSES)
+        .filter(([, c]) => c === cls)
+        .map(([f]) => f)
+        .sort();
+    expect([...prose].sort()).toEqual(byClass("prose"));
+    expect([...exact].sort()).toEqual(byClass("exact"));
+  });
+
+  it("states that the frontmatter id is part of the digest", () => {
+    expect(doc).toMatch(/frontmatter's `id`, `base_commit`/);
+    expect(doc).not.toMatch(/stays out[\s\S]*frontmatter `id`/);
   });
 
   it("names the normative reference to a command", () => {

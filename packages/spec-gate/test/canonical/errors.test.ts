@@ -4,10 +4,18 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   DigestError,
+  assertCommit,
   computeSpecDigest,
   describeDigestError,
+  readCommandsFile,
 } from "../../src/canonical/index.js";
-import { COMMANDS_FILE, git, makeRepo, tempDir } from "./helpers.js";
+import {
+  COMMANDS_FILE,
+  git,
+  makeRepo,
+  runBounded,
+  tempDir,
+} from "./helpers.js";
 
 const fixtures = fileURLToPath(
   new URL("../fixtures/golden-digest/", import.meta.url),
@@ -200,7 +208,6 @@ describe("the repository and commands_ref", () => {
     const made = await makeRepo(scratch, [
       [{ path: COMMANDS_FILE, content: baseCommands }],
     ]);
-    const { runBounded } = await import("./helpers.js");
     const blob = (
       await runBounded("git", ["rev-parse", `HEAD:${COMMANDS_FILE}`], {
         cwd: made.dir,
@@ -234,6 +241,171 @@ describe("the repository and commands_ref", () => {
     expect(failure(() => computeSpecDigest(dir, { repo: made.dir })).code).toBe(
       "commands-file-missing",
     );
+  });
+
+  it("refuses a link in place of the commands file, whatever it points at", async () => {
+    const made = await makeRepo(scratch, [
+      [
+        { path: "real/commands.yaml", content: baseCommands },
+        { path: COMMANDS_FILE, linkTo: "../real/commands.yaml" },
+      ],
+    ]);
+    const dir = specDir({
+      "spec.md": baseSpec.replace(baseRef, made.shas[0]!),
+    });
+    const err = failure(() => computeSpecDigest(dir, { repo: made.dir }));
+    expect(err.code).toBe("commands-file-missing");
+    expect(err.message).toContain("120000");
+  });
+
+  it("refuses a link in place of the .spec-gate directory", async () => {
+    const made = await makeRepo(scratch, [
+      [
+        { path: "elsewhere/commands.yaml", content: baseCommands },
+        { path: ".spec-gate", linkTo: "elsewhere" },
+      ],
+    ]);
+    const dir = specDir({
+      "spec.md": baseSpec.replace(baseRef, made.shas[0]!),
+    });
+    expect(failure(() => computeSpecDigest(dir, { repo: made.dir })).code).toBe(
+      "commands-file-missing",
+    );
+  });
+
+  it("refuses a submodule entry in place of the commands file", async () => {
+    const made = await makeRepo(scratch, [
+      [{ path: "README.md", content: "x\n" }],
+    ]);
+    await git(made.dir, [
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `160000,${made.shas[0]},${COMMANDS_FILE}`,
+    ]);
+    await git(made.dir, ["commit", "-q", "-m", "gitlink"], 5);
+    const sha = await git(made.dir, ["rev-parse", "HEAD"]);
+    const dir = specDir({ "spec.md": baseSpec.replace(baseRef, sha) });
+    const err = failure(() => computeSpecDigest(dir, { repo: made.dir }));
+    expect(err.code).toBe("commands-file-missing");
+    expect(err.message).toContain("160000");
+  });
+
+  it("accepts an executable commands file as a regular file", async () => {
+    const made = await makeRepo(scratch, [
+      [{ path: COMMANDS_FILE, content: baseCommands }],
+    ]);
+    await git(made.dir, ["update-index", "--chmod=+x", COMMANDS_FILE]);
+    await git(made.dir, ["commit", "-q", "-m", "mode"], 5);
+    const sha = await git(made.dir, ["rev-parse", "HEAD"]);
+    expect(await git(made.dir, ["ls-tree", sha, "--", COMMANDS_FILE])).toMatch(
+      /^100755 blob /,
+    );
+    const dir = specDir({ "spec.md": baseSpec.replace(baseRef, sha) });
+    expect(computeSpecDigest(dir, { repo: made.dir })).toMatch(/^sha256:/);
+  });
+
+  it("refuses the id of an annotated tag as commands_ref", async () => {
+    const made = await makeRepo(scratch, [
+      [{ path: COMMANDS_FILE, content: baseCommands }],
+    ]);
+    await git(made.dir, ["tag", "-a", "-m", "tag", "v1", made.shas[0]!]);
+    const tagId = await git(made.dir, ["rev-parse", "v1"]);
+    expect(tagId).not.toBe(made.shas[0]);
+    const dir = specDir({ "spec.md": baseSpec.replace(baseRef, tagId) });
+    const err = failure(() => computeSpecDigest(dir, { repo: made.dir }));
+    expect(err.code).toBe("commands-ref-unresolvable");
+    expect(failure(() => assertCommit(made.dir, tagId)).code).toBe(
+      "commands-ref-unresolvable",
+    );
+    expect(failure(() => readCommandsFile(made.dir, tagId)).code).toBe(
+      "commands-ref-unresolvable",
+    );
+  });
+
+  it("refuses HEAD, a branch name and a short id in the exported helpers", async () => {
+    const made = await makeRepo(scratch, [
+      [{ path: COMMANDS_FILE, content: baseCommands }],
+    ]);
+    const branch = await git(made.dir, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const full = made.shas[0]!;
+    for (const ref of ["HEAD", branch, full.slice(0, 12), full.toUpperCase()]) {
+      expect(failure(() => assertCommit(made.dir, ref)).code, ref).toBe(
+        "commands-ref-unresolvable",
+      );
+      expect(failure(() => readCommandsFile(made.dir, ref)).code, ref).toBe(
+        "commands-ref-unresolvable",
+      );
+    }
+    expect(() => assertCommit(made.dir, full)).not.toThrow();
+    expect(readCommandsFile(made.dir, full)).toBe(baseCommands);
+  });
+
+  it("says the object is not available locally in a partial clone, and does not fetch", async () => {
+    const src = await makeRepo(scratch, [
+      [{ path: COMMANDS_FILE, content: baseCommands }],
+    ]);
+    await git(src.dir, ["config", "uploadpack.allowFilter", "true"]);
+    await git(src.dir, ["config", "uploadpack.allowAnySHA1InWant", "true"]);
+    const clone = path.join(scratch, `partial-${counter++}`);
+    await git(scratch, [
+      "clone",
+      "-q",
+      "--no-checkout",
+      "--filter=blob:none",
+      `file://${src.dir}`,
+      clone,
+    ]);
+    const blob = await git(src.dir, ["rev-parse", `HEAD:${COMMANDS_FILE}`]);
+    const probe = () =>
+      runBounded("git", ["cat-file", "-e", blob], {
+        cwd: clone,
+        env: { ...process.env, GIT_NO_LAZY_FETCH: "1" },
+      });
+    expect((await probe()).code).not.toBe(0);
+    const dir = specDir({
+      "spec.md": baseSpec.replace(baseRef, src.shas[0]!),
+    });
+    const err = failure(() => computeSpecDigest(dir, { repo: clone }));
+    expect(err.code).toBe("git-failed");
+    expect(err.message).toContain("not be available locally");
+    expect(err.message).not.toContain("does not exist");
+    // The read did not fetch the blob.
+    expect((await probe()).code).not.toBe(0);
+  });
+
+  it("reports a commit whose tree object is gone as git-failed, not as a missing file", async () => {
+    const made = await makeRepo(scratch, [
+      [{ path: COMMANDS_FILE, content: baseCommands }],
+    ]);
+    const tree = await git(made.dir, ["rev-parse", `${made.shas[0]}^{tree}`]);
+    const loose = path.join(
+      made.dir,
+      ".git",
+      "objects",
+      tree.slice(0, 2),
+      tree.slice(2),
+    );
+    expect(fs.existsSync(loose)).toBe(true);
+    fs.rmSync(loose, { force: true });
+    const dir = specDir({
+      "spec.md": baseSpec.replace(baseRef, made.shas[0]!),
+    });
+    const err = failure(() => computeSpecDigest(dir, { repo: made.dir }));
+    expect(err.code).toBe("git-failed");
+    expect(err.message).toContain("could not read the tree");
+  });
+
+  it("names the size when git writes more than the digest reads", async () => {
+    const made = await makeRepo(scratch, [
+      [{ path: COMMANDS_FILE, content: Buffer.alloc(5 * 1024 * 1024, 0x61) }],
+    ]);
+    const dir = specDir({
+      "spec.md": baseSpec.replace(baseRef, made.shas[0]!),
+    });
+    const err = failure(() => computeSpecDigest(dir, { repo: made.dir }));
+    expect(err.code).toBe("git-failed");
+    expect(err.message).toContain("more than 4194304 bytes");
   });
 
   it("does not need the commands file when no row refers to a command", async () => {
@@ -284,16 +456,29 @@ describe("the repository and commands_ref", () => {
     expect(describeDigestError(err)).toContain("[shell-string]");
   });
 
-  it("refuses a commands file that is not UTF-8", async () => {
+  it("refuses a commands file that is not UTF-8, even one that would otherwise parse", async () => {
+    // The invalid byte sits inside an argv string of an otherwise valid
+    // file: decoded with replacement characters it would parse and give a
+    // digest.
     const made = await makeRepo(scratch, [
-      [{ path: COMMANDS_FILE, content: Buffer.from([0xff, 0xfe, 0x0a]) }],
+      [
+        {
+          path: COMMANDS_FILE,
+          content: Buffer.concat([
+            Buffer.from('commands:\n  typecheck:\n    argv: ["npm", "'),
+            Buffer.from([0xff]),
+            Buffer.from('"]\n'),
+          ]),
+        },
+      ],
     ]);
     const dir = specDir({
       "spec.md": baseSpec.replace(baseRef, made.shas[0]!),
     });
-    expect(failure(() => computeSpecDigest(dir, { repo: made.dir })).code).toBe(
-      "commands-file-invalid",
-    );
+    const err = failure(() => computeSpecDigest(dir, { repo: made.dir }));
+    expect(err.code).toBe("commands-file-invalid");
+    expect(err.message).toContain("not valid UTF-8");
+    expect(err.formatErrors).toBeUndefined();
   });
 
   it("refuses a command name the commands file at commands_ref does not define", async () => {
@@ -311,6 +496,22 @@ describe("the repository and commands_ref", () => {
     const err = failure(() => computeSpecDigest(dir, { repo: made.dir }));
     expect(err.code).toBe("command-ref-unknown");
     expect(err.message).toContain("typecheck");
+  });
+
+  it("treats a command name such as constructor as unknown, not as an inherited property", async () => {
+    const made = await makeRepo(scratch, [
+      [{ path: COMMANDS_FILE, content: baseCommands }],
+    ]);
+    const dir = specDir({
+      "spec.md": baseSpec.replace(baseRef, made.shas[0]!),
+      "testplan.yaml": basePlan.replace(
+        "check_command_ref: typecheck",
+        "check_command_ref: constructor",
+      ),
+    });
+    const err = failure(() => computeSpecDigest(dir, { repo: made.dir }));
+    expect(err.code).toBe("command-ref-unknown");
+    expect(err.message).toContain("constructor");
   });
 
   it("reads the commit, not the work tree or the branch head", async () => {

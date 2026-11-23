@@ -37,7 +37,7 @@
   kind: manual
   claim: "the reset mail reads well"
   verifier: "support lead"
-  evidence_location: "review/reset-mail.png"
+  evidence_location: "review/reset mail.png"
 - id: TP-6
   covers: [AC-2]
   kind: runtime

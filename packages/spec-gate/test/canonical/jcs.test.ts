@@ -38,6 +38,12 @@ describe("canonicalJson (RFC 8785)", () => {
     expect(text.indexOf("😀")).toBeLessThan(text.indexOf("דּ"));
   });
 
+  it("sorts mixed-case keys by code unit, upper case before lower case", () => {
+    expect(canonicalJson({ b: 1, a: 2, B: 3, A: 4, "a-b": 5, aB: 6 })).toBe(
+      '{"A":4,"B":3,"a":2,"a-b":5,"aB":6,"b":1}',
+    );
+  });
+
   it("sorts nested objects, and keeps array order", () => {
     expect(canonicalJson({ b: [3, 1, 2], a: { d: 1, c: 2 } })).toBe(
       '{"a":{"c":2,"d":1},"b":[3,1,2]}',
@@ -70,6 +76,16 @@ describe("canonicalJson (RFC 8785)", () => {
     expect(() => canonicalJson(new Date(0) as never)).toThrow(/plain object/);
     expect(() => canonicalJson((() => 1) as never)).toThrow(TypeError);
     expect(() => canonicalJson(1n as never)).toThrow(TypeError);
+  });
+
+  it("refuses an array with a hole, which has no JSON form", () => {
+    // eslint-disable-next-line no-sparse-arrays
+    const holey = [1, , 3];
+    expect(() => canonicalJson(holey as never)).toThrow(/hole/);
+    const trailing = new Array<number>(2);
+    trailing[0] = 1;
+    expect(() => canonicalJson(trailing as never)).toThrow(/hole/);
+    expect(canonicalJson([1, null, 3])).toBe("[1,null,3]");
   });
 
   it("refuses a value nested too deeply instead of overflowing the stack", () => {

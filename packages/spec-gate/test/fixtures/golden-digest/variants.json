@@ -137,7 +137,7 @@
   "edits": [
    {
     "file": "spec.md",
-    "find": "  - paths: src/auth/token.ts, src/auth/**",
+    "find": "  - paths: src/auth/token.ts, src/auth/user files/**",
     "replace": "  - paths: src/auth/token.ts, src/session/**"
    }
   ]
@@ -555,7 +555,7 @@
   "edits": [
    {
     "file": "testplan.yaml",
-    "find": "review/reset-mail.png",
+    "find": "review/reset mail.png",
     "replace": "review/reset-mail-v2.png"
    }
   ]
@@ -660,6 +660,50 @@
   ]
  },
  {
+  "name": "ng-paths-inner-space",
+  "effect": "changes",
+  "edits": [
+   {
+    "file": "spec.md",
+    "find": "src/auth/user files/**",
+    "replace": "src/auth/user  files/**"
+   }
+  ]
+ },
+ {
+  "name": "tp-fail-match-inner-space",
+  "effect": "changes",
+  "edits": [
+   {
+    "file": "testplan.yaml",
+    "find": "expected 401",
+    "replace": "expected  401"
+   }
+  ]
+ },
+ {
+  "name": "tp-evidence-location-inner-space",
+  "effect": "changes",
+  "edits": [
+   {
+    "file": "testplan.yaml",
+    "find": "review/reset mail.png",
+    "replace": "review/reset  mail.png"
+   }
+  ]
+ },
+ {
+  "name": "tp-expected-inner-space",
+  "effect": "changes",
+  "edits": [
+   {
+    "file": "testplan.yaml",
+    "find": "\"HTTP 401\"",
+    "replace": "\"HTTP  401\""
+   }
+  ]
+ },
+ {
   "name": "commands-argv-at-ref",
   "effect": "changes",
   "edits": [],
@@ -707,7 +751,7 @@
  },
  {
   "name": "frontmatter-id",
-  "effect": "same",
+  "effect": "changes",
   "edits": [
    {
     "file": "spec.md",

@@ -102,11 +102,12 @@ export async function git(
   return run.stdout.trim();
 }
 
-/** One file to commit: a path in the repository and its bytes. */
-export interface RepoFile {
-  path: string;
-  content: string | Buffer;
-}
+/**
+ * One entry to commit: a path in the repository and its bytes, or a
+ * symbolic link to `linkTo`.
+ */
+export type RepoFile =
+  { path: string; content: string | Buffer } | { path: string; linkTo: string };
 
 /**
  * Creates a repository with one commit per entry of `commits`; each commit
@@ -125,7 +126,8 @@ export async function makeRepo(
     for (const f of files) {
       const target = path.join(dir, f.path);
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, f.content);
+      if ("linkTo" in f) fs.symlinkSync(f.linkTo, target);
+      else fs.writeFileSync(target, f.content);
     }
     await git(dir, ["add", "-A"], day);
     await git(dir, ["commit", "-q", "--allow-empty", "-m", "commands"], day);

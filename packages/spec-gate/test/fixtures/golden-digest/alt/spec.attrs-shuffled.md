@@ -32,7 +32,7 @@ Free prose. Nobody checks it, whatever it says.
 ## Non-goals
 
 - NG-1: The token format does not change.
-  - paths: src/auth/**, src/auth/token.ts
+  - paths: src/auth/user files/**, src/auth/token.ts
 - NG-2: Login latency stays within its current range.
 
 ## Defaults

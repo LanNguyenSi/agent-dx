@@ -138,13 +138,10 @@ export function loadDigestParts(
   if (names.length > 0) {
     const set = readCommandSet(repo, ref);
     for (const name of names) {
+      // A name the file does not define is left out; `buildDigestInput`
+      // refuses the missing argv, so there is one `command-ref-unknown` check.
       const entry = set.commands.find((c) => c.name === name);
-      if (entry === undefined) {
-        throw new DigestError(
-          "command-ref-unknown",
-          `a test-plan row refers to command ${JSON.stringify(name)}, which is not in ${".spec-gate/commands.yaml"} at commands_ref ${ref}`,
-        );
-      }
+      if (entry === undefined) continue;
       commands[name] = entry.argv;
     }
   }

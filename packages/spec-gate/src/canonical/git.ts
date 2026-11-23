@@ -1,11 +1,12 @@
 /**
- * Reads from a git repository, and nothing else: `rev-parse` and
- * `cat-file`. The program is `git`, started with an argument list and no
+ * Reads from a git repository, and nothing else: `rev-parse`, `cat-file`
+ * and `ls-tree`. The program is `git`, started with an argument list and no
  * shell. The package never runs anything the repository holds.
  */
 import { spawnSync } from "node:child_process";
 import type { CommandSet, FormatError } from "../formats/index.js";
 import { parseCommandSet } from "../formats/index.js";
+import { COMMIT_RE } from "../formats/validate.js";
 import { DigestError } from "./errors.js";
 
 /** The one path in the repository the digest reads, at `commands_ref`. */
@@ -54,7 +55,9 @@ function git(cwd: string, args: string[]): GitRun {
         ? "git is not installed or not on PATH"
         : code === "ETIMEDOUT"
           ? `git did not finish within ${GIT_TIMEOUT_MS / 1000} seconds`
-          : run.error.message;
+          : code === "ENOBUFS"
+            ? `git wrote more than ${MAX_OUTPUT_BYTES} bytes, which is more than the digest reads`
+            : run.error.message;
     throw new DigestError("git-failed", why);
   }
   return {
@@ -92,20 +95,82 @@ export function assertRepo(repo: string): void {
   }
 }
 
-/** Throws `commands-ref-unresolvable` unless `ref` names a commit in `repo`. */
-export function assertCommit(repo: string, ref: string): void {
-  const run = git(repo, [
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    `${ref}^{commit}`,
-  ]);
-  if (run.status !== 0) {
+/**
+ * Throws `commands-ref-unresolvable` unless `ref` is a full commit id:
+ * 40 or 64 lower-case hex digits. A branch name, `HEAD` or a tag name moves
+ * and would give the digest an input that is not fixed.
+ */
+function requireCommitId(ref: string): void {
+  if (!COMMIT_RE.test(ref)) {
     throw new DigestError(
       "commands-ref-unresolvable",
-      `commands_ref ${ref} is not a commit in ${repo}`,
+      `commands_ref ${JSON.stringify(ref)} is not a full commit id (40 or 64 lower-case hex digits)`,
     );
   }
+}
+
+/**
+ * Throws `commands-ref-unresolvable` unless `ref` is the id of a commit
+ * object in `repo`. The id of an annotated tag is refused: it names the tag
+ * object, not the commit.
+ */
+export function assertCommit(repo: string, ref: string): void {
+  requireCommitId(ref);
+  // A failed `cat-file` writes nothing to stdout, so the type test covers it.
+  const run = git(repo, ["cat-file", "-t", ref]);
+  if (run.stdout.toString("utf8").trim() !== "commit") {
+    throw new DigestError(
+      "commands-ref-unresolvable",
+      `commands_ref ${ref} is not a commit available in ${repo}`,
+    );
+  }
+}
+
+/** The modes of a regular file in a git tree. */
+const FILE_MODES = new Set(["100644", "100755"]);
+
+/**
+ * The object id of the blob that holds `.spec-gate/commands.yaml` in the
+ * tree of the commit `ref`. The entry must be a regular file (mode 100644
+ * or 100755): a link would bind the text of the link, not the file it
+ * points at, and a submodule or a tree is not a file at all.
+ */
+function commandsBlobId(repo: string, ref: string): string {
+  const run = git(repo, ["ls-tree", "-z", ref, "--", COMMANDS_PATH]);
+  if (run.status !== 0) {
+    throw new DigestError(
+      "git-failed",
+      `could not read the tree of ${ref} (${firstLine(run.stderr) || "git refused it"}); the object may not be available locally, and the digest never fetches`,
+    );
+  }
+  const entries = run.stdout
+    .toString("utf8")
+    .split("\0")
+    .filter((e) => e !== "");
+  const missing = () =>
+    new DigestError(
+      "commands-file-missing",
+      `${COMMANDS_PATH} does not exist as a file at commands_ref ${ref}`,
+      { file: COMMANDS_PATH },
+    );
+  if (entries.length !== 1) throw missing();
+  const m = /^([0-7]{6}) ([a-z]+) ([0-9a-f]+)\t/.exec(entries[0]!);
+  if (!m) {
+    throw new DigestError(
+      "git-failed",
+      `git ls-tree wrote an entry the digest does not understand for ${COMMANDS_PATH} at ${ref}`,
+    );
+  }
+  // Mode 100644 and 100755 are always blobs; a link, a submodule and a tree
+  // have other modes.
+  if (!FILE_MODES.has(m[1]!)) {
+    throw new DigestError(
+      "commands-file-missing",
+      `${COMMANDS_PATH} at commands_ref ${ref} is not a regular file (git mode ${m[1]}, type ${m[2]}); a link, a submodule and a directory are refused`,
+      { file: COMMANDS_PATH },
+    );
+  }
+  return m[3]!;
 }
 
 /**
@@ -113,20 +178,13 @@ export function assertCommit(repo: string, ref: string): void {
  * object database. The working tree and the branch heads are never read.
  */
 export function readCommandsFile(repo: string, ref: string): string {
-  const spec = `${ref}:${COMMANDS_PATH}`;
-  const type = git(repo, ["cat-file", "-t", spec]);
-  if (type.status !== 0 || type.stdout.toString("utf8").trim() !== "blob") {
-    throw new DigestError(
-      "commands-file-missing",
-      `${COMMANDS_PATH} does not exist as a file at commands_ref ${ref}`,
-      { file: COMMANDS_PATH },
-    );
-  }
-  const blob = git(repo, ["cat-file", "blob", spec]);
+  assertCommit(repo, ref);
+  const blobId = commandsBlobId(repo, ref);
+  const blob = git(repo, ["cat-file", "blob", blobId]);
   if (blob.status !== 0) {
     throw new DigestError(
       "git-failed",
-      `could not read ${spec}: ${firstLine(blob.stderr)}`,
+      `could not read ${COMMANDS_PATH} at ${ref} (${firstLine(blob.stderr) || "git refused it"}); the object may not be available locally, and the digest never fetches`,
     );
   }
   try {
