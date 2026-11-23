@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -292,7 +292,11 @@ describe("probe(): the -M-without--n read guard matches the explicit -n answers"
     // content.
     const fifo = path.join(repo, "fifo.pipe");
     execFileSync("mkfifo", [fifo]);
-    const run = spawnSync(
+    // The child spawns nothing itself (it blocks inside one
+    // `readFileSync` under the regression this guards), but it runs in
+    // its own process group and the whole group is killed on timeout, so
+    // a regression can never leave anything behind.
+    const child = spawn(
       process.execPath,
       [
         CLI_PATH,
@@ -310,8 +314,30 @@ describe("probe(): the -M-without--n read guard matches the explicit -n answers"
         "-i",
         "inplace",
       ],
-      { encoding: "utf8", timeout: 8000, killSignal: "SIGKILL" },
+      { detached: true, stdio: ["ignore", "pipe", "pipe"] },
     );
+    let stdout = "";
+    child.stdout.on("data", (d: Buffer) => {
+      stdout += d.toString("utf8");
+    });
+    const timedOut = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        try {
+          process.kill(-(child.pid as number), "SIGKILL");
+        } catch {
+          // already gone
+        }
+        resolve(true);
+      }, 8000);
+      child.on("close", () => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+    });
+    const run = {
+      error: timedOut ? new Error("timed out") : undefined,
+      stdout,
+    };
     expect(run.error).toBeUndefined();
     expect(run.stdout).toContain("not a regular file");
     expect(run.stdout).toContain(fifo);
@@ -390,6 +416,204 @@ describe("probe(): the -M-without--n read guard matches the explicit -n answers"
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
       FIXTURE_JS,
     );
+  });
+});
+
+describe("probe(): the derivation guard's decision table, each row against the same call with -n", () => {
+  const CAP = 8 * 1024 * 1024;
+
+  /** A file of exactly `size` bytes with `n > 0` once, on line 1. */
+  function sizedFile(dir: string, name: string, size: number): string {
+    const buf = Buffer.alloc(size, 0x20);
+    buf.write("n > 0", 0);
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, buf);
+    return file;
+  }
+
+  /** What a probe call answers, throw or result, reduced to what the
+   * guard decides: the outcome, the reason, and the refusal text. */
+  async function answer(
+    options: ProbeOptions,
+  ): Promise<{ status: string; reason?: string; text: string }> {
+    try {
+      const r = await probe(options);
+      return {
+        status: r.status,
+        reason: r.reason,
+        text: r.warnings.join("\n"),
+      };
+    } catch (e) {
+      return { status: "threw", text: (e as Error).message };
+    }
+  }
+
+  it("an outside regular file with --allow-outside (inplace) derives its unique line and mutates it", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const outside = path.join(makeTmpDir(), "outside.js");
+    fs.writeFileSync(outside, "a\nn > 0\nc\n");
+    const result = await probe(
+      matchOptions(repo, {
+        file: outside,
+        allowOutside: true,
+        testCommand: "true",
+      }),
+    );
+    // Neutralised `--allow-outside` handling would defer and surface
+    // "line 0 is out of range"; a derived line 2 is the feature.
+    expect(result.mutant?.line).toBe(2);
+    expect(result.warnings.join("\n")).toContain(`line 2 of ${outside}`);
+    expect(result.warnings.join("\n")).not.toContain("line 0");
+    expect(fs.readFileSync(outside, "utf8")).toBe("a\nn > 0\nc\n");
+  });
+
+  it("the same outside file WITHOUT --allow-outside is file_outside_root and never derives", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const outside = path.join(makeTmpDir(), "outside.js");
+    fs.writeFileSync(outside, "a\nn > 0\nc\n");
+    const without = await answer(matchOptions(repo, { file: outside }));
+    const withN = await answer(matchOptions(repo, { file: outside, line: 2 }));
+    expect(without.reason).toBe("file_outside_root");
+    expect(without.reason).toBe(withN.reason);
+    expect(without.status).toBe(withN.status);
+    expect(without.text).not.toContain("derived");
+  });
+
+  it("--allow-outside with an outside file of several matches refuses match_ambiguous (the search ran), count rows 0 and 2 included", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const dir = makeTmpDir();
+    const two = path.join(dir, "two.js");
+    fs.writeFileSync(two, "n > 0 a\nn > 0 b\n");
+    const r2 = await probe(
+      matchOptions(repo, { file: two, allowOutside: true }),
+    );
+    expect(r2.reason).toBe("match_ambiguous");
+    expect(r2.warnings.join("\n")).toContain(": 1, 2");
+    const none = path.join(dir, "none.js");
+    fs.writeFileSync(none, "nothing here\n");
+    const r0 = await probe(
+      matchOptions(repo, { file: none, allowOutside: true }),
+    );
+    expect(r0.reason).toBe("match_not_found");
+  });
+
+  it("--allow-outside with an outside directory or missing file answers exactly what -n answers", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const dir = makeTmpDir();
+    fs.mkdirSync(path.join(dir, "adir"));
+    for (const target of [path.join(dir, "adir"), path.join(dir, "gone.js")]) {
+      const without = await answer(
+        matchOptions(repo, { file: target, allowOutside: true }),
+      );
+      const withN = await answer(
+        matchOptions(repo, { file: target, allowOutside: true, line: 1 }),
+      );
+      expect(without).toEqual(withN);
+    }
+  });
+
+  it("-i worktree with --allow-outside defers to worktree_allow_outside_unsupported without reading, same as -n", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const lockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR as string;
+    const outside = path.join(makeTmpDir(), "outside.js");
+    // Two matching lines: a derivation that read the file would answer
+    // match_ambiguous and disclose "1, 2".
+    fs.writeFileSync(outside, "n > 0 a\nn > 0 b\n");
+    const base = {
+      file: outside,
+      allowOutside: true,
+      isolation: "worktree" as const,
+    };
+    const without = await answer(matchOptions(repo, base));
+    const withN = await answer(matchOptions(repo, { ...base, line: 1 }));
+    expect(without.reason).toBe("worktree_allow_outside_unsupported");
+    expect(without).toEqual(withN);
+    expect(without.text).not.toContain("occurs on");
+    // A CONTAINED file under the same flag pair is refused the same way.
+    const contained = await answer(
+      matchOptions(repo, {
+        allowOutside: true,
+        isolation: "worktree",
+        matchText: "return",
+      }),
+    );
+    expect(contained.reason).toBe("worktree_allow_outside_unsupported");
+    expectNoIsolationLeftovers(repo, lockDir);
+  });
+
+  it("-i worktree with --allow-outside outside a git work tree falls back to inplace, so the derivation runs", async () => {
+    useLockDir();
+    const plain = makeTmpDir();
+    fs.writeFileSync(path.join(plain, "t.js"), "x\n");
+    const outside = path.join(makeTmpDir(), "outside.js");
+    fs.writeFileSync(outside, "a\nn > 0\nc\n");
+    const result = await probe(
+      matchOptions(plain, {
+        file: outside,
+        allowOutside: true,
+        isolation: "worktree",
+        testCommand: "true",
+      }),
+    );
+    expect(result.reason).not.toBe("worktree_allow_outside_unsupported");
+    expect(result.mutant?.line).toBe(2);
+  });
+
+  it("a file of exactly the cap derives; one byte more refuses (the boundary is `>`)", async () => {
+    useLockDir();
+    const repo = initRepo();
+    sizedFile(repo, "exact.js", CAP);
+    const exact = await probe(
+      matchOptions(repo, {
+        file: "exact.js",
+        matchText: "n > 0",
+        testCommand: "true",
+      }),
+    );
+    expect(exact.mutant?.line).toBe(1);
+    expect(exact.reason).not.toBe("line_required");
+    sizedFile(repo, "over.js", CAP + 1);
+    const over = await probe(
+      matchOptions(repo, { file: "over.js", matchText: "n > 0" }),
+    );
+    expect(over.reason).toBe("line_required");
+    expect(over.warnings.join("\n")).toContain(String(CAP + 1));
+  }, 30000);
+
+  it("the over-cap refusal needs a stat-able regular file: an outside over-cap file without --allow-outside is file_outside_root, with it refuses line_required", async () => {
+    useLockDir();
+    const repo = initRepo();
+    const big = sizedFile(makeTmpDir(), "big.js", CAP + 1);
+    const without = await answer(matchOptions(repo, { file: big }));
+    expect(without.reason).toBe("file_outside_root");
+    const withFlag = await answer(
+      matchOptions(repo, { file: big, allowOutside: true }),
+    );
+    expect(withFlag.reason).toBe("line_required");
+  }, 30000);
+
+  it("an unreadable regular file (mode 000) keeps the line_required refusal, with nothing derived", async () => {
+    if (process.getuid?.() === 0) return;
+    useLockDir();
+    const repo = initRepo();
+    const secret = path.join(repo, "secret.js");
+    fs.writeFileSync(secret, "n > 0\n");
+    fs.chmodSync(secret, 0o000);
+    try {
+      const result = await probe(
+        matchOptions(repo, { file: "secret.js", matchText: "n > 0" }),
+      );
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("line_required");
+      expect(result.warnings.join("\n")).toContain("-n/--line is required");
+    } finally {
+      fs.chmodSync(secret, 0o644);
+    }
   });
 });
 

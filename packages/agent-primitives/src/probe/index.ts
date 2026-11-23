@@ -820,7 +820,18 @@ async function runProbePipeline(
     } else {
       const derivationFile = resolveDeepestExisting(displayFile);
       let derivationStat: fs.Stats | undefined;
-      if (
+      // `--allow-outside` combined with an effective `worktree`
+      // isolation is refused by `setup.ts`
+      // (`worktree_allow_outside_unsupported`) before any containment
+      // check, so the derivation must not read anything for that run:
+      // it defers and that refusal answers, as with an explicit `-n`.
+      const derivationWorktreeRefusal =
+        opts.allowOutside === true &&
+        opts.isolation === "worktree" &&
+        gitRoot !== undefined;
+      if (derivationWorktreeRefusal) {
+        derivationStat = undefined;
+      } else if (
         opts.allowOutside ||
         isPathContained(resolveDeepestExisting(root), derivationFile)
       ) {

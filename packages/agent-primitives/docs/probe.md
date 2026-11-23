@@ -217,9 +217,11 @@ would mutate (before any isolation copy), counts LINES not occurrences
 newline therefore matches no line at all. It reads only a file the run
 could honestly mutate, checked by metadata before anything is opened:
 the path is resolved exactly as the mutation resolves it, and the
-search runs only when it lies within the containment root (unless
-`--allow-outside`, honored exactly as the containment check honors it)
-and `statSync` reports a regular file of at most the 8&nbsp;MiB
+search runs only when it lies within the containment root (or
+`--allow-outside` is given and the run's effective isolation accepts it:
+with `-i worktree` in a git work tree that flag pair is refused by
+`worktree_allow_outside_unsupported`, so the derivation reads nothing and
+that refusal answers, as with an explicit `-n`) and `statSync` reports a regular file of at most the 8&nbsp;MiB
 `MATCH_DERIVATION_MAX_BYTES` cap (the same bound as `-p`'s
 `PATCH_MAX_BYTES`). A resolved `--file` outside the root, a not-a-regular
 file (a FIFO, a directory) and a missing file are never read -- the run
