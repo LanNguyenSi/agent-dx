@@ -2,16 +2,13 @@
  * Test helpers for the lint suites: a complete valid spec directory that
  * tests copy and then break one file of, and the built CLI runner.
  */
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { afterEach } from "vitest";
-
-const execFileAsync = promisify(execFile);
+import { runBounded } from "../canonical/helpers.js";
 
 export const FIXTURES = fileURLToPath(new URL("../fixtures", import.meta.url));
 export const VALID_SPEC_DIR = path.join(FIXTURES, "lint-valid", "pos", "spec");
@@ -23,21 +20,23 @@ export interface CliRun {
   stderr: string;
 }
 
-export async function runCli(args: string[]): Promise<CliRun> {
-  try {
-    const { stdout, stderr } = await execFileAsync(process.execPath, [
-      cliPath,
-      ...args,
-    ]);
-    return { code: 0, stdout, stderr };
-  } catch (err) {
-    const e = err as { code?: number; stdout?: string; stderr?: string };
-    return {
-      code: e.code ?? 1,
-      stdout: e.stdout ?? "",
-      stderr: e.stderr ?? "",
-    };
+/**
+ * Runs the built CLI in its own process group with a time limit; a run that
+ * does not end in time fails the test instead of hanging it.
+ */
+export async function runCli(
+  args: string[],
+  timeoutMs = 20_000,
+): Promise<CliRun> {
+  const run = await runBounded(process.execPath, [cliPath, ...args], {
+    timeoutMs,
+  });
+  if (run.timedOut) {
+    throw new Error(
+      `spec-gate ${args.join(" ")} did not end in ${timeoutMs} ms`,
+    );
   }
+  return { code: run.code ?? 1, stdout: run.stdout, stderr: run.stderr };
 }
 
 function walk(dir: string, prefix = ""): Record<string, string> {

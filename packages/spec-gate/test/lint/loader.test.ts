@@ -8,7 +8,8 @@ import {
   readSpecFile,
   type LintReport,
 } from "../../src/lint/index.js";
-import { edited, scratch, specDir } from "./helpers.js";
+import { execFileSync } from "node:child_process";
+import { edited, runCli, scratch, specDir } from "./helpers.js";
 
 function lint(dir: string, options = {}): LintReport {
   const result = lintSpecDir(dir, options);
@@ -269,5 +270,43 @@ describe("parseSourceMeta", () => {
     ]);
     expect(codes([{ kind: "text" }])).toEqual(["invalid-id lines[0].id"]);
     expect(codes([line, line])).toEqual(["duplicate-value lines[1].id"]);
+  });
+});
+
+describe("a named pipe in place of an input", () => {
+  // Run through the bounded CLI: a reader that opens a pipe waits for a
+  // writer, and the run is cut off instead of hanging the suite.
+  function fifoIn(dir: string, name: string): void {
+    fs.rmSync(path.join(dir, name), { force: true });
+    execFileSync("mkfifo", [path.join(dir, name)]);
+  }
+
+  it.each(["spec.md", "acks.yaml"])(
+    "lint reports %s as a file error and does not block",
+    async (name) => {
+      const dir = specDir();
+      fifoIn(dir, name);
+      const run = await runCli(["lint", dir], 10_000);
+      expect(run.code).toBe(1);
+      const parsed = JSON.parse(run.stdout) as LintReport;
+      expect(parsed.errors).toContainEqual(
+        expect.objectContaining({
+          rule: "file",
+          file: name,
+          code: "input-not-regular",
+        }),
+      );
+    },
+  );
+
+  it("lint-ack refuses an acks.yaml that is a pipe and does not block", async () => {
+    const dir = specDir({ "triage.json": null });
+    fifoIn(dir, "acks.yaml");
+    const run = await runCli(
+      ["lint-ack", dir, "profile-default", "triage", "--reason", "r"],
+      10_000,
+    );
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain("lint-ack:");
   });
 });

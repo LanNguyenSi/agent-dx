@@ -389,6 +389,116 @@ describe("lint-ack writer: atomic write", () => {
   });
 });
 
+describe("lint-ack writer: refusals the review pinned", () => {
+  it.skipIf(process.getuid?.() === 0)(
+    "a read-only acks.yaml in a writable directory is refused and kept",
+    () => {
+      const existing = ENTRY.replace("triage", "other");
+      const d = specDir({ ...NO_TRIAGE, "acks.yaml": existing });
+      fs.chmodSync(acksPath(d), 0o444);
+      expect(refused(writeAck(d, "profile-default", "triage", "r"))).toContain(
+        "cannot write acks.yaml",
+      );
+      expect(read(d)).toBe(existing);
+      expect(fs.readdirSync(d).filter((n) => n.includes(".tmp-"))).toEqual([]);
+    },
+  );
+
+  it("a symlinked spec directory named with a trailing slash is refused", () => {
+    const real = specDir(NO_TRIAGE);
+    const link = path.join(scratch(), "link");
+    fs.symlinkSync(real, link);
+    expect(
+      refused(writeAck(`${link}/`, "profile-default", "triage", "r")),
+    ).toContain("is a symlink");
+    expect(fs.existsSync(acksPath(real))).toBe(false);
+  });
+});
+
+describe("lint-ack writer: temporary file", () => {
+  it("a failed write after the exclusive create removes the temporary file and keeps the original", () => {
+    const existing = ENTRY.replace("triage", "other");
+    const d = specDir({ ...NO_TRIAGE, "acks.yaml": existing });
+    const spy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {
+      throw Object.assign(new Error("full"), { code: "ENOSPC" });
+    });
+    try {
+      expect(refused(writeAck(d, "profile-default", "triage", "r"))).toContain(
+        "cannot write acks.yaml: ENOSPC",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(read(d)).toBe(existing);
+    expect(fs.readdirSync(d).filter((n) => n.includes(".tmp-"))).toEqual([]);
+  });
+
+  /** The mode argument of the `openSync` call that creates the temporary file. */
+  function createMode(run: () => void): number | undefined {
+    const spy = vi.spyOn(fs, "openSync");
+    try {
+      run();
+      const call = spy.mock.calls.find(
+        ([target]) => typeof target === "string" && target.includes(".tmp-"),
+      );
+      return call?.[2] as number | undefined;
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it("is created with the mode of the existing file", () => {
+    const d = specDir({
+      ...NO_TRIAGE,
+      "acks.yaml": ENTRY.replace("triage", "other"),
+    });
+    fs.chmodSync(acksPath(d), 0o664);
+    const mode = createMode(() => {
+      expect(writeAck(d, "profile-default", "triage", "r").ok).toBe(true);
+    });
+    expect(mode).toBe(0o664);
+    expect(fs.statSync(acksPath(d)).mode & 0o777).toBe(0o664);
+  });
+
+  it("is created with the default mode when the file is new, and the umask applies", () => {
+    const d = specDir(NO_TRIAGE);
+    const mode = createMode(() => {
+      expect(writeAck(d, "profile-default", "triage", "r").ok).toBe(true);
+    });
+    expect(mode).toBe(0o666);
+    expect(fs.statSync(acksPath(d)).mode & 0o777).toBe(
+      0o666 & ~process.umask(),
+    );
+  });
+});
+
+describe("lint-ack writer: an empty or comment-only file", () => {
+  it.each([
+    ["empty", ""],
+    ["comment-only", "# acknowledged warnings\n"],
+    ["comment-only without a final line feed", "# acknowledged warnings"],
+  ])("%s: the entry is appended and nothing else is normalised", (_n, text) => {
+    const d = specDir({ ...NO_TRIAGE, "acks.yaml": text });
+    const result = writeAck(d, "profile-default", "triage", "r");
+    expect(result).toMatchObject({ ok: true, entries: 1, normalised: false });
+    const glue = text === "" || text.endsWith("\n") ? "" : "\n";
+    expect(read(d)).toBe(
+      text +
+        glue +
+        '- rule: "profile-default"\n  id: "triage"\n  reason: "r"\n',
+    );
+    const linted = lintSpecDir(d, { strict: true });
+    if (!linted.ok) throw new Error(linted.message);
+    expect(linted.report.acked).toHaveLength(1);
+  });
+
+  it("parseAcks reads such a file as zero acks", () => {
+    for (const text of ["", "\n\n", "# only a comment\n"]) {
+      expect(parseAcks(text)).toEqual({ ok: true, value: [] });
+    }
+  });
+});
+
 describe("lint-ack writer: rules come from the registry", () => {
   it("acknowledges any registered ackable warning", () => {
     const extra: RuleDef = {

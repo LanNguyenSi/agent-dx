@@ -10,6 +10,7 @@ import {
   type Mode,
   type Profile,
   type ProfileSource,
+  type SkippedRule,
 } from "./types.js";
 import type { SpecStatus } from "../formats/index.js";
 
@@ -61,6 +62,7 @@ export interface ReportInput {
   errors: readonly Finding[];
   warnings: readonly Finding[];
   acked: readonly AckedFinding[];
+  skipped: readonly SkippedRule[];
 }
 
 export function buildReport(input: ReportInput): LintReport {
@@ -78,6 +80,9 @@ export function buildReport(input: ReportInput): LintReport {
     errors,
     warnings,
     acked,
+    skipped: [...input.skipped]
+      .sort((a, b) => compareText(a.rule, b.rule))
+      .map(({ rule, reason }) => ({ rule, reason })),
     counts: {
       errors: errors.length,
       warnings: warnings.length,

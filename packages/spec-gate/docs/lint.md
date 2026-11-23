@@ -41,7 +41,7 @@ A file that did not parse is skipped by every rule that needs it. A broken
 One line on stdout, format `spec-gate-lint/1`:
 
 ```json
-{"format":"spec-gate-lint/1","spec":"<frontmatter id or null>","mode":"lint","profile":"full","profile_source":"triage","status":"draft","ok":true,"errors":[],"warnings":[],"acked":[],"counts":{"errors":0,"warnings":0,"acked":0}}
+{"format":"spec-gate-lint/1","spec":"<frontmatter id or null>","mode":"lint","profile":"full","profile_source":"triage","status":"draft","ok":true,"errors":[],"warnings":[],"acked":[],"skipped":[],"counts":{"errors":0,"warnings":0,"acked":0}}
 ```
 
 | Field | Meaning |
@@ -54,11 +54,13 @@ One line on stdout, format `spec-gate-lint/1`:
 | `ok` | no error, and with `--strict` no unacknowledged warning |
 | `errors`, `warnings` | findings |
 | `acked` | acknowledged warnings, each a finding plus `reason` |
-| `counts` | the length of the three lists |
+| `skipped` | the rules not evaluated in this run, each `{ rule, reason }`, sorted by rule id |
+| `counts` | the length of `errors`, `warnings` and `acked` |
 
 A finding is `{ rule, level, file, path, id?, line?, code?, message }`:
 
-- `file` is relative to the spec directory.
+- `file` is relative to the spec directory. A finding about a repository file
+  outside it names `repo:<path relative to the repository root>` instead.
 - `path` is dotted like the format layer: `$`, `AC-2`, `TP-1.kind`, `[0].rule`.
 - `id` is the spec or test-plan ID the finding is about, or a target the rule
   defines (`triage` for `profile-default`).
@@ -66,6 +68,14 @@ A finding is `{ rule, level, file, path, id?, line?, code?, message }`:
 - `code` is the stable code of the underlying problem for `file` and `format`
   findings.
 - `level` comes from the rule registry, never from the rule.
+
+`skipped` names every rule that was not evaluated, with one reason: `profile`
+(the rule does not run in the active profile), `gate` (a gated rule while the
+status gate is closed), `input-absent` (an input the rule needs is not there),
+`input-failed` (an input the rule needs or uses did not parse or could not be
+read) and `no-git` (the rule needs a repository and none was given). A rule
+that was evaluated and found nothing is not listed. Reasons are checked in that
+order, except that a failed input is named before an absent one.
 
 Every list is sorted by `file`, `line` (a finding without a line first),
 `path`, `rule`, `id` (none first) and `message`; strings compare by UTF-16 code
@@ -124,7 +134,7 @@ under `test/fixtures/lint-<rule>/`, and a test checks that they exist.
 | `profile-mismatch` | error | light, full | no | no | `--profile` disagrees with the profile the triage class gives. |
 | `profile-default` | warning | light, full | no | yes | No `triage.json` and no `--profile`: the full profile is used. Acknowledge with id `triage`. |
 | `ack-invalid` | error | light, full | no | no | An ack names an unknown rule, an error rule or a rule that cannot be acknowledged, or repeats an earlier ack. |
-| `ack-unused` | warning | light, full | no | no | A valid ack matches no current warning. |
+| `ack-unused` | warning | light, full | no | no | A valid ack for a rule that ran in this run matches no current warning. |
 | `goal-count` | error | light, full | no | no | Exactly one GOAL line (form rule 1). |
 | `ac-coverage` | error | light, full | no | no | Every AC is covered by at least one test-plan row; required fields per kind are checked by the format layer (form rule 2). |
 | `non-goals-empty` | error | light, full | no | no | The Non-goals section is not empty; a non-goal needs no test-plan row (form rule 3). |
@@ -158,21 +168,29 @@ warning does not fail `--strict`.
 - An ack for an error rule, an unknown rule, a warning that cannot be
   acknowledged (`ack-unused`), or a repeat of an earlier `(rule, id)` is an
   `ack-invalid` error. It acknowledges nothing.
-- A valid ack that matches no current warning is an `ack-unused` warning.
+- A valid ack that matches no current warning is an `ack-unused` warning, but
+  only when its rule was evaluated in this run. An ack for a rule listed in
+  `skipped` (inactive profile, closed gate, a missing or failed input, no
+  repository) is kept silently, because the warning could not have been
+  raised. A rule that ran and did not fire still gives `ack-unused`: a
+  `profile-default` ack while `--profile` is given is unused.
 - An `acks.yaml` that does not parse is a `format` error; the other rules still
-  run, without acks.
+  run, without acks. An empty or comment-only file holds zero acks and is not
+  an error.
 
 `spec-gate lint-ack <spec-dir> <rule> <id> --reason <text>` appends one entry,
 and creates the file when it is absent. It accepts only a registered warning
 that can be acknowledged, refuses a duplicate `(rule, id)`, and refuses a
 reason or id that is empty, has a line break or has a control character. It
 does not need the warning to be present now. The existing text is kept byte for
-byte and the entry is added after it, with a line feed first when the file did
+byte (a leading byte-order mark is the one exception: the reader decodes it
+away, so it is dropped) and the entry is added after it, with a line feed first when the file did
 not end in one. The result is parsed again. A file that cannot take an item
 that way, such as a list written in flow style (`[]`) or a document closed by
-an end marker, is rewritten as a block list, which drops its comments; that
-result is parsed again too, and nothing is written when it does not hold
-exactly the old entries plus the new one.
+an end marker, is rewritten as a block list, which drops its comments, and
+the verb then prints one line on stderr saying so; that result is parsed again
+too, and nothing is written when it does not hold exactly the old entries plus
+the new one. An empty or comment-only file takes the entry after its text.
 
 The write is atomic: a temporary file next to `acks.yaml`, created exclusively
 and renamed over it, so a reader sees the old or the new file whole. The
@@ -180,3 +198,26 @@ permission bits of an existing file carry over, never a setuid, setgid or
 sticky bit. A symlink at `acks.yaml`, or at the spec directory itself, is
 refused; so is an existing `acks.yaml` that is not valid. Any refusal is a
 message on stderr and exit 2, and nothing is written.
+
+`lint-ack` does not lock the file: do not run it in parallel on one spec
+directory, or one of two concurrent entries can be lost.
+
+## Writing a rule
+
+A rule is a registry entry with a `check` that returns `RuleFinding`s; the
+engine adds `rule` and `level` from the registry, last, so a rule cannot
+change either. A finding of an ackable rule must carry an `id`, because an ack
+matches on it; the engine throws an internal error (exit 2) when it is missing.
+
+Declare the inputs the check reads:
+
+- `needs`: inputs that must have parsed. The rule is skipped when one is
+  absent (`input-absent`) or failed (`input-failed`), so a broken file gives
+  its own `file` or `format` errors and no follow-up findings.
+- `uses`: inputs the check reads when they are there. The rule runs when one
+  is absent and is skipped only when one failed.
+
+A skip is not a pass and not a finding: the rule did not look. It shows in
+`skipped` with its reason, and acks for it stay quiet. A rule that reads the
+repository sets `needsGit` and is skipped with `no-git` when the run has no
+repository.

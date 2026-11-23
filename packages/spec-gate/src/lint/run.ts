@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { applyAcks } from "./acks.js";
 import { loadAcks, loadInputs, type FindingSink } from "./load.js";
 import { resolveProfile } from "./profile.js";
-import { RULES, activeRules, findRule } from "./registry.js";
+import { RULES, findRule, planRules } from "./registry.js";
 import { buildReport } from "./report.js";
 import type {
   Finding,
@@ -32,7 +32,12 @@ export interface LintOptions {
 export type LintRunResult =
   { ok: true; report: LintReport } | { ok: false; message: string };
 
-/** Turns a rule id and a rule's finding into a `Finding` with the registered level. */
+/**
+ * Turns a rule id and a rule's finding into a `Finding` with the registered
+ * level. The registry fields come last, so a rule cannot change its own id
+ * or level. A finding of an ackable rule must name its target `id`: that is
+ * what an ack matches on, and a rule without one breaks its contract.
+ */
 function stamp(
   rules: readonly RuleDef[],
   rule: string,
@@ -42,7 +47,12 @@ function stamp(
   if (def === undefined) {
     throw new Error(`rule ${rule} is not in the registry`);
   }
-  return { rule, level: def.level, ...finding };
+  if (def.ackable && finding.id === undefined) {
+    throw new Error(
+      `rule ${rule} is ackable and returned a finding without id`,
+    );
+  }
+  return { ...finding, rule, level: def.level };
 }
 
 /**
@@ -84,8 +94,10 @@ export function lintSpecDir(
     mode,
     ...(options.git !== undefined ? { git: options.git } : {}),
   };
-  for (const rule of activeRules(rules, ctx)) {
-    for (const finding of rule.check!(ctx)) sink.add(rule.id, finding);
+  const plan = planRules(rules, ctx);
+  for (const rule of plan.evaluated) {
+    if (rule.check === undefined) continue;
+    for (const finding of rule.check(ctx)) sink.add(rule.id, finding);
   }
 
   const errors = found.filter((f) => f.level === "error");
@@ -93,6 +105,7 @@ export function lintSpecDir(
     acks,
     found.filter((f) => f.level === "warning"),
     rules,
+    new Set(plan.evaluated.map((rule) => rule.id)),
   );
   const ackFindings = outcome.findings.map(({ rule, finding }) =>
     stamp(rules, rule, finding),
@@ -111,6 +124,7 @@ export function lintSpecDir(
       ...ackFindings.filter((f) => f.level === "warning"),
     ],
     acked: outcome.acked,
+    skipped: plan.skipped,
   });
   return { ok: true, report };
 }

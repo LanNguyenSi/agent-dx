@@ -8,8 +8,9 @@
  * and the permission bits of an existing file carry over (never setuid,
  * setgid or sticky).
  *
- * The existing text is kept byte for byte and the entry is appended after it
- * (with a line feed first when the file does not end in one). The result is
+ * The existing text is kept byte for byte, except that a leading byte-order
+ * mark is dropped (the reader decodes it away), and the entry is appended
+ * after it (with a line feed first when the file does not end in one). The result is
  * parsed again. A file that cannot take another item that way, such as a list
  * written in flow style (`[]`) or a document closed by an end marker, is
  * rewritten as a block list of its entries, which drops its comments. The
@@ -32,6 +33,9 @@ import type { RuleDef } from "./types.js";
 export type AckWriteResult =
   | { ok: true; file: string; entries: number; normalised: boolean }
   | { ok: false; message: string };
+
+/** The mode of a new file, before the umask. */
+const DEFAULT_MODE = 0o666;
 
 function refuse(message: string): AckWriteResult {
   return { ok: false, message: `lint-ack: ${message}` };
@@ -127,14 +131,27 @@ export function writeAck(
 
   const temp = `${file}.tmp-${process.pid}`;
   let created = false;
+  let fd: number | undefined;
   try {
     if (existingMode !== undefined) fs.accessSync(file, fs.constants.W_OK);
     // `wx`: never follow or reuse an existing path at the temporary name.
-    fs.writeFileSync(temp, text, { flag: "wx" });
+    // The mode is set at the create so the file is never wider than the
+    // original; the chmod below overrides the umask.
+    fd = fs.openSync(temp, "wx", existingMode ?? DEFAULT_MODE);
     created = true;
+    fs.writeFileSync(fd, text);
+    fs.closeSync(fd);
+    fd = undefined;
     if (existingMode !== undefined) fs.chmodSync(temp, existingMode);
     fs.renameSync(temp, file);
   } catch (err) {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // already closed
+      }
+    }
     // Only delete the temporary path this run created; something else may
     // already sit at that name and must be left alone.
     if (created) {

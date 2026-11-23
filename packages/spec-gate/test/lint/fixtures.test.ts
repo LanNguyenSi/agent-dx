@@ -85,6 +85,8 @@ describe("lint fixtures", () => {
       );
       for (const f of all.filter((x) => x.rule === rule.id)) {
         expect(f.level).toBe(rule.level);
+        // an ack matches on the id, so an ackable rule must always name one
+        if (rule.ackable) expect(f.id, `${rule.id} finding id`).toBeDefined();
       }
     });
   }

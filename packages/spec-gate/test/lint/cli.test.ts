@@ -39,6 +39,7 @@ describe("spec-gate lint", () => {
       errors: [],
       warnings: [],
       acked: [],
+      skipped: [],
       counts: { errors: 0, warnings: 0, acked: 0 },
     });
   });
@@ -181,5 +182,84 @@ describe("spec-gate lint", () => {
     fs.symlinkSync(real, link);
     const run = await runCli(["lint", link]);
     expect(run.code).toBe(0);
+  });
+});
+
+describe("spec-gate lint with an empty acks.yaml", () => {
+  it.each([
+    ["empty", ""],
+    ["comment-only", "# nothing acknowledged yet\n"],
+  ])("lint: a %s acks.yaml means zero acks", async (_n, text) => {
+    const run = await runCli([
+      "lint",
+      specDir({ ...NO_TRIAGE, "acks.yaml": text }),
+    ]);
+    expect(run.code).toBe(0);
+    expect(report(run.stdout)).toMatchObject({
+      errors: [],
+      acked: [],
+      warnings: [expect.objectContaining({ rule: "profile-default" })],
+    });
+  });
+
+  it.each([
+    ["empty", ""],
+    ["comment-only", "# nothing acknowledged yet\n"],
+  ])("lint-ack: appends to a %s acks.yaml", async (_n, text) => {
+    const dir = specDir({ ...NO_TRIAGE, "acks.yaml": text });
+    const run = await runCli([
+      "lint-ack",
+      dir,
+      "profile-default",
+      "triage",
+      "--reason",
+      "later",
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.stderr).toBe("");
+    const linted = await runCli(["lint", dir, "--strict"]);
+    expect(linted.code).toBe(0);
+    expect(report(linted.stdout)).toMatchObject({
+      counts: { errors: 0, warnings: 0, acked: 1 },
+    });
+  });
+});
+
+describe("spec-gate lint-ack: comments dropped", () => {
+  const args = (dir: string) => [
+    "lint-ack",
+    dir,
+    "profile-default",
+    "triage",
+    "--reason",
+    "later",
+  ];
+
+  it("says on stderr that the comments were dropped when it had to rewrite the file", async () => {
+    const dir = specDir({
+      ...NO_TRIAGE,
+      "acks.yaml": "# why\n[]\n",
+    });
+    const run = await runCli(args(dir));
+    expect(run.code).toBe(0);
+    expect(run.stdout).toBe("acknowledged profile-default triage\n");
+    expect(run.stderr).toBe(
+      "spec-gate: lint-ack: acks.yaml was rewritten as a block list; its comments were dropped\n",
+    );
+    expect(fs.readFileSync(path.join(dir, "acks.yaml"), "utf8")).not.toContain(
+      "# why",
+    );
+  });
+
+  it("is silent when the entry was appended and the comments are kept", async () => {
+    const dir = specDir({ ...NO_TRIAGE, "acks.yaml": "# why\n" });
+    const run = await runCli(args(dir));
+    expect(run.code).toBe(0);
+    expect(run.stderr).toBe("");
+    expect(
+      fs
+        .readFileSync(path.join(dir, "acks.yaml"), "utf8")
+        .startsWith("# why\n"),
+    ).toBe(true);
   });
 });

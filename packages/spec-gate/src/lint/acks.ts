@@ -2,7 +2,7 @@
  * `acks.yaml`: acknowledged warnings.
  *
  * A YAML list of `{ rule, id, reason }`, all strings, each one a single
- * line and not empty. The file sits next to `spec.md` and stays out of the
+ * line and not empty. An empty or comment-only file holds no acks. The file sits next to `spec.md` and stays out of the
  * digest. An entry acknowledges the warnings of one rule that are about one
  * ID: it matches a warning by `(rule, id)`.
  */
@@ -64,6 +64,14 @@ export function ackTextProblem(value: unknown): AckTextProblem | null {
 /** Parses the text of an `acks.yaml`. */
 export function parseAcks(text: string): ParseResult<Ack[]> {
   const decoded = parseYamlText(text);
+  // An empty or comment-only file holds no acks.
+  if (
+    !decoded.ok &&
+    decoded.errors.length === 1 &&
+    decoded.errors[0]!.code === "empty-document"
+  ) {
+    return { ok: true, value: [] };
+  }
   if (!decoded.ok) return decoded;
   const doc = decoded.value;
   const sink = new ErrorSink();
@@ -145,12 +153,15 @@ export interface AckOutcome {
  * An ack is invalid when its rule is unknown, when the rule is an error, or
  * is a warning that cannot be acknowledged, and when an earlier entry has
  * the same `(rule, id)`; an invalid ack acknowledges nothing and is not
- * reported as unused. A valid ack that matches no warning is `ack-unused`.
+ * reported as unused. A valid ack that matches no warning is `ack-unused`,
+ * unless its rule was not evaluated in this run (`evaluated` holds the ids
+ * of the rules that were): the warning could not have been raised.
  */
 export function applyAcks(
   acks: readonly Ack[],
   warnings: readonly Finding[],
   rules: readonly RuleDef[],
+  evaluated: ReadonlySet<string>,
 ): AckOutcome {
   const findings: AckOutcome["findings"] = [];
   const byId = new Map(rules.map((r) => [r.id, r]));
@@ -199,7 +210,7 @@ export function applyAcks(
     acked.push({ ...warning, reason: hit.ack.reason });
   }
   for (const { ack, index } of valid) {
-    if (used.has(index)) continue;
+    if (used.has(index) || !evaluated.has(ack.rule)) continue;
     findings.push({
       rule: "ack-unused",
       finding: {

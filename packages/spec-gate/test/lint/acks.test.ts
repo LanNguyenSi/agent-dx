@@ -44,7 +44,7 @@ describe("parseAcks", () => {
   it("rejects what is not a list of objects", () => {
     expect(codes("rule: a")).toEqual(["wrong-type $"]);
     expect(codes("- a")).toEqual(["wrong-type [0]"]);
-    expect(codes("")).toEqual(["empty-document $"]);
+    expect(parseAcks("")).toEqual({ ok: true, value: [] });
   });
 
   it("rejects an unknown key and a missing key", () => {
@@ -255,6 +255,8 @@ describe("acknowledging a warning", () => {
   });
 });
 
+const ids = (rules: readonly RuleDef[]) => new Set(rules.map((r) => r.id));
+
 describe("applyAcks", () => {
   const warn = (rule: string, id?: string): Finding => ({
     rule,
@@ -274,6 +276,7 @@ describe("applyAcks", () => {
         warn("profile-default", "x"),
       ],
       RULES,
+      ids(RULES),
     );
     expect(out.acked).toHaveLength(2);
     expect(out.warnings).toHaveLength(1);
@@ -285,6 +288,7 @@ describe("applyAcks", () => {
       [{ rule: "profile-default", id: "triage", reason: "r" }],
       [warn("profile-default")],
       RULES,
+      ids(RULES),
     );
     expect(out.acked).toEqual([]);
     expect(out.warnings).toHaveLength(1);
@@ -313,9 +317,12 @@ describe("applyAcks", () => {
       rule("a-fixed-warning", "warning", false),
     ];
     const messages = (id: string) =>
-      applyAcks([{ rule: id, id: "x", reason: "r" }], [], rules).findings.map(
-        (f) => f.finding.message,
-      );
+      applyAcks(
+        [{ rule: id, id: "x", reason: "r" }],
+        [],
+        rules,
+        ids(rules),
+      ).findings.map((f) => f.finding.message);
     expect(messages("nope")).toEqual([
       expect.stringContaining("not a known rule"),
     ]);
@@ -339,6 +346,7 @@ describe("applyAcks", () => {
       ],
       [],
       rules,
+      ids(rules),
     );
     expect(repeat.findings.map((f) => f.finding.message)).toEqual([
       expect.stringContaining("acknowledged twice"),
@@ -355,6 +363,7 @@ describe("applyAcks", () => {
       [{ rule: "w-one", id: "AC-1", reason: "r" }],
       [warn("w-two", "AC-1")],
       rules,
+      ids(rules),
     );
     expect(out.acked).toEqual([]);
     expect(out.warnings).toHaveLength(1);
@@ -365,6 +374,7 @@ describe("applyAcks", () => {
       ],
       [warn("w-one", "AC-1"), warn("w-two", "AC-1")],
       rules,
+      ids(rules),
     );
     expect(both.findings).toEqual([]);
     expect(both.acked.map((f) => f.rule)).toEqual(["w-one", "w-two"]);

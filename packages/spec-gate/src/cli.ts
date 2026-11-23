@@ -9,7 +9,7 @@ import {
   describeDigestError,
 } from "./canonical/index.js";
 import { IntakeError } from "./intake/index.js";
-import { lintSpecDir, writeAck } from "./lint/index.js";
+import { ACKS_FILE, lintSpecDir, writeAck } from "./lint/index.js";
 import { runTriage } from "./triage/index.js";
 
 function readVersion(): string {
@@ -228,6 +228,11 @@ program
         process.stderr.write(`spec-gate: ${result.message}\n`);
         process.exitCode = 2;
         return;
+      }
+      if (result.normalised) {
+        process.stderr.write(
+          `spec-gate: lint-ack: ${ACKS_FILE} was rewritten as a block list; its comments were dropped\n`,
+        );
       }
       process.stdout.write(`acknowledged ${rule} ${id}\n`);
     },

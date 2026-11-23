@@ -8,7 +8,7 @@
  */
 import { markdownCell } from "../formats/markdown.js";
 import { FORM_RULES } from "./rules/form.js";
-import type { RuleContext, RuleDef } from "./types.js";
+import type { RuleContext, RuleDef, SkipReason, SkippedRule } from "./types.js";
 
 export const RULE_ID_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
@@ -62,6 +62,7 @@ const ENGINE_RULES: readonly RuleDef[] = [
     summary:
       "No `triage.json` and no `--profile`: the full profile is used. Acknowledge with id `triage`.",
     needs: [],
+    uses: ["triage"],
   },
   {
     id: "ack-invalid",
@@ -79,7 +80,8 @@ const ENGINE_RULES: readonly RuleDef[] = [
     profiles: BOTH,
     gated: false,
     ackable: false,
-    summary: "A valid ack matches no current warning.",
+    summary:
+      "A valid ack for a rule that ran in this run matches no current warning.",
     needs: [],
   },
 ];
@@ -99,24 +101,50 @@ export function gateOpen(ctx: Pick<RuleContext, "status" | "mode">): boolean {
   return ctx.status === "proposed" || ctx.mode === "final";
 }
 
+/**
+ * Why `rule` is not evaluated in this run, or `null` when it is. The first
+ * matching reason wins, in this order: the profile, the status gate, a
+ * missing repository, then the inputs (a failed one before an absent one).
+ */
+export function skipReason(rule: RuleDef, ctx: RuleContext): SkipReason | null {
+  if (!rule.profiles.includes(ctx.profile)) return "profile";
+  if (rule.gated && !gateOpen(ctx)) return "gate";
+  if (rule.needsGit === true && ctx.git === undefined) return "no-git";
+  const needed = rule.needs.map((name) => ctx.inputs[name].state);
+  const used = (rule.uses ?? []).map((name) => ctx.inputs[name].state);
+  if ([...needed, ...used].includes("failed")) return "input-failed";
+  if (needed.includes("absent")) return "input-absent";
+  return null;
+}
+
+/**
+ * Splits the registry for one run: the rules that were evaluated and the
+ * rules that were skipped with their reason (the report sorts them). A rule
+ * without a `check` is evaluated by the engine itself, so it counts as
+ * evaluated unless one of the reasons above applies to it.
+ */
+export function planRules(
+  rules: readonly RuleDef[],
+  ctx: RuleContext,
+): { evaluated: RuleDef[]; skipped: SkippedRule[] } {
+  const evaluated: RuleDef[] = [];
+  const skipped: SkippedRule[] = [];
+  for (const rule of rules) {
+    const reason = skipReason(rule, ctx);
+    if (reason === null) evaluated.push(rule);
+    else skipped.push({ rule: rule.id, reason });
+  }
+  return { evaluated, skipped };
+}
+
 /** The rules with a check that apply to this run, in registry order. */
 export function activeRules(
   rules: readonly RuleDef[],
   ctx: RuleContext,
 ): RuleDef[] {
-  return rules.filter((rule) => {
-    if (rule.check === undefined) return false;
-    if (!rule.profiles.includes(ctx.profile)) return false;
-    if (rule.gated && !gateOpen(ctx)) return false;
-    if (rule.needsGit === true && ctx.git === undefined) return false;
-    for (const name of rule.needs) {
-      if (ctx.inputs[name].state !== "ok") return false;
-    }
-    for (const name of rule.uses ?? []) {
-      if (ctx.inputs[name].state === "failed") return false;
-    }
-    return true;
-  });
+  return planRules(rules, ctx).evaluated.filter(
+    (rule) => rule.check !== undefined,
+  );
 }
 
 /** The rule table embedded in `docs/lint.md`. */

@@ -21,6 +21,21 @@ export type Profile = "light" | "full";
 export type ProfileSource = "triage" | "flag" | "default";
 export type Mode = "lint" | "final";
 
+/** Why a rule was not evaluated in a run. */
+export const SKIP_REASONS = [
+  "profile",
+  "gate",
+  "input-absent",
+  "input-failed",
+  "no-git",
+] as const;
+export type SkipReason = (typeof SKIP_REASONS)[number];
+
+export interface SkippedRule {
+  rule: string;
+  reason: SkipReason;
+}
+
 export const REPORT_FORMAT = "spec-gate-lint/1";
 
 /** What a rule returns; the engine adds `rule` and `level`. */
@@ -58,6 +73,8 @@ export interface LintReport {
   errors: Finding[];
   warnings: Finding[];
   acked: AckedFinding[];
+  /** The rules not evaluated in this run, by rule id. */
+  skipped: SkippedRule[];
   counts: { errors: number; warnings: number; acked: number };
 }
 

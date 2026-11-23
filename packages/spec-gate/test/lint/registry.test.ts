@@ -184,7 +184,12 @@ describe("the engine applies the registry", () => {
   });
 
   it("the level of a finding is the registered level, not the rule's choice", () => {
-    const warn = rule({ id: "warn-test", level: "warning", ackable: true });
+    const warn = rule({
+      id: "warn-test",
+      level: "warning",
+      ackable: true,
+      check: () => [{ file: "spec.md", path: "$", id: "x", message: "x" }],
+    });
     const result = lintSpecDir(specDir(), {}, [...RULES, warn]);
     if (!result.ok) throw new Error(result.message);
     expect(result.report.warnings).toEqual([

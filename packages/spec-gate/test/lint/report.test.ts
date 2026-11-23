@@ -24,6 +24,7 @@ const base = {
   errors: [],
   warnings: [],
   acked: [],
+  skipped: [],
 };
 
 describe("finding order", () => {
@@ -118,6 +119,7 @@ describe("report shape", () => {
       "errors",
       "warnings",
       "acked",
+      "skipped",
       "counts",
     ]);
     expect(Object.keys(report.errors[0]!)).toEqual([
@@ -141,6 +143,21 @@ describe("report shape", () => {
     expect(
       Object.keys(buildReport({ ...base, errors: [f({})] }).errors[0]!),
     ).toEqual(["rule", "level", "file", "path", "message"]);
+  });
+
+  it("sorts skipped by rule id and keeps only rule and reason", () => {
+    const report = buildReport({
+      ...base,
+      skipped: [
+        { rule: "b-rule", reason: "gate" },
+        { rule: "a-rule", reason: "no-git" },
+      ],
+    });
+    expect(report.skipped).toEqual([
+      { rule: "a-rule", reason: "no-git" },
+      { rule: "b-rule", reason: "gate" },
+    ]);
+    expect(Object.keys(report.skipped[0]!)).toEqual(["rule", "reason"]);
   });
 
   it("counts the three lists", () => {
