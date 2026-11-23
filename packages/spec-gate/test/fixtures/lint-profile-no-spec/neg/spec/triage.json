@@ -1,7 +1,7 @@
 {
   "single_goal": { "value": "yes", "evidence": "one goal in the ticket" },
   "code_related": {
-    "value": "yes",
+    "value": "no",
     "evidence": "the ticket names the auth module"
   },
   "core_is_decision": {

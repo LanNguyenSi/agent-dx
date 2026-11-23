@@ -4,7 +4,7 @@
  */
 import fs from "node:fs";
 import { ackTextProblem, applyAcks } from "./acks.js";
-import { loadAcks, loadInputs, type FindingSink } from "./load.js";
+import { loadAcks, loadConfig, loadInputs, type FindingSink } from "./load.js";
 import { resolveProfile } from "./profile.js";
 import { RULES, findRule, planRules } from "./registry.js";
 import { buildReport } from "./report.js";
@@ -27,6 +27,13 @@ export interface LintOptions {
   profile?: Profile;
   /** The repository and base revision for rules that need them. */
   git?: GitInputs;
+  /**
+   * A `.spec-gate/config.yaml`-format file, read for the rules that take
+   * repo-wide settings. Absent: every rule uses its format default. A file
+   * that cannot be read or parsed is a `file` or `format` finding and the
+   * rules still run on their defaults.
+   */
+  configPath?: string;
 }
 
 export type LintRunResult =
@@ -84,6 +91,10 @@ export function lintSpecDir(
   };
   const inputs = loadInputs(specDir, sink);
   const acks = loadAcks(specDir, sink);
+  const config =
+    options.configPath !== undefined
+      ? loadConfig(options.configPath, sink)
+      : undefined;
 
   const mode: Mode = options.final === true ? "final" : "lint";
   const choice = resolveProfile(inputs.triage, options.profile);
@@ -96,6 +107,7 @@ export function lintSpecDir(
     profile: choice.profile,
     mode,
     ...(options.git !== undefined ? { git: options.git } : {}),
+    ...(config?.state === "ok" ? { config: config.value } : {}),
   };
   const plan = planRules(rules, ctx);
   for (const rule of plan.evaluated) {

@@ -6,7 +6,7 @@ for byte, and the report holds no absolute path and no time. The engine
 reads files only; it never runs a command and never reads the repository.
 
 ```
-spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>]
+spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>] [--config <path>]
 spec-gate lint-ack <spec-dir> <rule> <id> --reason <text>
 ```
 
@@ -92,12 +92,14 @@ unit. Usage errors go to stderr as text, never into the report.
 
 Help and version exit 0. `lint-ack` exits 0 when it wrote an entry and 2 on any
 refusal.
-
 ## Profiles
 
-The profile comes from `triage.json`: its stored `class`, or, when there is
-none, the class derived from the fields in memory (the file is never written).
-`--profile` only fills in when `triage.json` gives no usable profile.
+The profile comes from `triage.json`: the class its fields give when
+derived in memory (the file is never written). The stored `class` does not
+pick the profile: a stored class or `rule_version` that no longer matches
+the fields is a `triage-stale` error, and a light profile is never taken
+from a file that failed that check. `--profile` only fills in when
+`triage.json` gives no usable profile.
 
 | `triage.json` | `--profile` | Profile | `profile_source` | Finding |
 |---|---|---|---|---|
@@ -117,7 +119,9 @@ profile runs every rule.
 
 A rule marked gated applies only when the frontmatter `status` is `proposed`
 or the run is `--final`; `--final` rates a spec as if it were proposed. Every
-other rule always applies. No rule gated on status is registered yet.
+other rule always applies. The gated rules are `binding-status` and
+`residual-open`: they state what must hold at approval, not while a spec is a
+draft.
 
 ## Rules
 
@@ -139,6 +143,21 @@ under `test/fixtures/lint-<rule>/`, and a test checks that they exist.
 | `goal-count` | error | light, full | no | no | Exactly one GOAL line (form rule 1). |
 | `ac-coverage` | error | light, full | no | no | Every AC is covered by at least one test-plan row; required fields per kind are checked by the format layer (form rule 2). |
 | `non-goals-empty` | error | light, full | no | no | The Non-goals section is not empty; a non-goal needs no test-plan row (form rule 3). |
+| `df-coverage` | error | full | no | no | Every DF with affects_behavior true is covered by at least one test-plan row. |
+| `tp-covers-unknown` | error | full | no | no | Every ID in a test-plan row's covers is an AC, DF or NG ID of spec.md. |
+| `binding-unknown` | error | full | no | no | Every key of bindings.yaml is a test-plan row ID; the file may be absent. |
+| `binding-status` | error | full | yes | no | At proposed every binding has the status its row's kind requires, a kind needing one has one, and kind manual has none. |
+| `ledger-complete` | error | full | no | no | The ledger's source line IDs are exactly the IDs in the lines of source/meta.json. |
+| `ledger-target-unknown` | error | full | no | no | Every target ID of a source-ledger entry is a live ID of spec.md. |
+| `ac-source-unknown` | error | full | no | no | Every SL ID in an AC's source is the ID of a source-ledger entry. |
+| `owner-none` | error | full | no | no | No AC has owner none: such a line is a divergence, not a requirement. |
+| `residual-open` | error | full | yes | no | At proposed no residual has status open and no blocking divergence or blind-spot question of questions.json is without an answer. |
+| `dc-unanswered` | error | full | no | no | Every DC's question has an answer in questions.json; an unknown question ID is the same error. |
+| `dc-self-reported` | warning | full | no | yes | A DC whose answer has no comment_url has no checkable source. Acknowledge with the DC ID. |
+| `retired-id-live` | error | full | no | no | No ID of retired_ids is a live test-plan row ID or question ID; live spec IDs are already a format error. |
+| `prose` | warning | full | no | yes | No AC text, test-plan claim or expected contains a whole word of the fixed vague-word list in src/lint/prose.ts. Acknowledge with the AC or row ID. |
+| `question-budget` | warning | full | no | yes | The number of unanswered questions is at most questions.warn_above (default 7, set with --config). Acknowledge with id questions. |
+| `triage-stale` | error | full | no | no | triage.json stores the class its own fields derive and the current rule version. |
 <!-- END generated: rules -->
 
 The form rules:
@@ -149,6 +168,70 @@ The form rules:
   required fields of each kind are checked by the format layer. A row may also
   cover a non-goal, but a non-goal needs no row.
 - the Non-goals section is not empty.
+
+The content rules run in the full profile only. Their families:
+
+Coverage. `df-coverage`: every DF whose parsed `affects_behavior` is `true`
+is named by at least one test-plan row's `covers`; a DF with `false` may
+stay uncovered. `tp-covers-unknown`: every entry of a row's `covers` is an
+AC, DF or NG ID that spec.md has.
+
+References. `binding-unknown`: every key of `bindings.yaml` is a TP ID of
+`testplan.yaml`; the rule runs when `bindings.yaml` is absent and finds
+nothing then. `binding-status` (gated): for each row, the
+`bindingStatusAtProposed` of its kind says what the binding must look like:
+`new` and `existing` demand a `bindings.yaml` entry with exactly that
+status (a missing entry is an error of its own), `none` (kind manual)
+allows no entry at all, and `any` is unchecked.
+
+Ledger. `ledger-complete`: the `sourceLine` IDs of the ledger equal the IDs
+of `lines[]` in `source/meta.json`, one error per meta line that no ledger
+entry maps and one error per ledger entry whose source line the meta does
+not list; `source/meta.json` is required here and the rule is skipped
+`input-absent` without it. `ledger-target-unknown`: every target ID of a
+ledger entry is a live ID of spec.md. `ac-source-unknown`: every SL ID in
+an AC's `source` is the ID of a ledger entry. `owner-none`: an AC whose
+`owner` is the reserved word `none` is an error: nobody stands behind the
+line, so it records a divergence rather than a requirement.
+
+Residuals and decisions. `residual-open` (gated): no residual has status
+`open` (a residual class is always `divergence`, `blind-spot` or
+`untestable`), and every `questions.json` question with `blocking: true`
+and class `divergence` or `blind-spot` has an answer; the rule runs without
+a `questions.json` and checks only the residuals then. `dc-unanswered`:
+every DC's `question` ID has an entry in `answers[]`; a question ID the
+file does not hold is the same error; the rule needs `questions.json`.
+`dc-self-reported`: a DC with an answer that has no `comment_url` is an
+ackable warning about that DC.
+
+IDs. `retired-id-live`: no ID of `retired_ids` is a TP ID of
+`testplan.yaml` or a QN ID of `questions.json`; a retired ID that is live
+in spec.md is already a `format` error.
+
+Prose. `prose`: an AC text, a row `claim` or a row `expected` containing a
+whole word of the fixed list is an ackable warning naming the word. The
+match is case-insensitive and whole-word in the sense that the word may
+only stand next to characters that are neither letters, digits nor `_`;
+phrases with a space match that space literally. One finding per pair of
+line and word. The list, in `src/lint/prose.ts`: should, may, might,
+could, appropriate, reasonable, fast, quickly, user-friendly, easy, robust,
+as needed, if possible, etc, sollte, sollten, koennte, könnte, eventuell,
+ggf, moeglichst, möglichst, schnell, benutzerfreundlich, einfach,
+angemessen, bei Bedarf, usw.
+
+Budget. `question-budget`: a question is unanswered when no entry of
+`answers[]` names its ID; the number of unanswered questions must not
+exceed `questions.warn_above`. `spec-gate lint --config <path>` reads that
+number from a `.spec-gate/config.yaml`-format file parsed by the format
+layer's config parser. A file that does not parse is a `format` finding and
+one that cannot be read is a `file` finding, both naming `file` as the path
+given to `--config`; in both cases the budget falls back to the default of
+7 and the rule still runs. The finding is ackable with id `questions`.
+
+Triage. `triage-stale`: a `triage.json` that stores a `class` must store
+the very class its own fields derive and the current `rule_version`; one
+error per mismatch. Because the profile step also derives from the fields,
+a stale file never chooses the light profile.
 
 ## Acknowledgements
 

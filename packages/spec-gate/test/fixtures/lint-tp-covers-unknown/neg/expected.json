@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "rule": "tp-covers-unknown",
+      "file": "testplan.yaml",
+      "path": "TP-1.covers",
+      "id": "TP-1"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

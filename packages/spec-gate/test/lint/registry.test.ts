@@ -17,7 +17,7 @@ describe("rule registry", () => {
     for (const id of ids) expect(id, id).toMatch(RULE_ID_RE);
   });
 
-  it("registers file, format, the form rules, the profile rules and the ack rules", () => {
+  it("registers the engine, form and content rules in the order of the docs", () => {
     expect(RULES.map((r) => r.id)).toEqual([
       "file",
       "format",
@@ -29,14 +29,35 @@ describe("rule registry", () => {
       "goal-count",
       "ac-coverage",
       "non-goals-empty",
+      "df-coverage",
+      "tp-covers-unknown",
+      "binding-unknown",
+      "binding-status",
+      "ledger-complete",
+      "ledger-target-unknown",
+      "ac-source-unknown",
+      "owner-none",
+      "residual-open",
+      "dc-unanswered",
+      "dc-self-reported",
+      "retired-id-live",
+      "prose",
+      "question-budget",
+      "triage-stale",
     ]);
   });
 
-  it("every rule runs in the profiles light and full, and none is gated yet", () => {
+  it("the engine and form rules run in both profiles; the content rules are full only", () => {
     for (const rule of RULES) {
-      expect(rule.profiles, rule.id).toEqual(["light", "full"]);
-      expect(rule.gated, rule.id).toBe(false);
+      const content = RULES.indexOf(rule) >= 10;
+      expect(rule.profiles, rule.id).toEqual(
+        content ? ["full"] : ["light", "full"],
+      );
     }
+    expect(RULES.filter((r) => r.gated).map((r) => r.id)).toEqual([
+      "binding-status",
+      "residual-open",
+    ]);
   });
 
   it("only warnings can be acknowledged, and ack-unused cannot", () => {
@@ -51,7 +72,26 @@ describe("rule registry", () => {
     const withCheck = RULES.filter((r) => r.check !== undefined).map(
       (r) => r.id,
     );
-    expect(withCheck).toEqual(["goal-count", "ac-coverage", "non-goals-empty"]);
+    expect(withCheck).toEqual([
+      "goal-count",
+      "ac-coverage",
+      "non-goals-empty",
+      "df-coverage",
+      "tp-covers-unknown",
+      "binding-unknown",
+      "binding-status",
+      "ledger-complete",
+      "ledger-target-unknown",
+      "ac-source-unknown",
+      "owner-none",
+      "residual-open",
+      "dc-unanswered",
+      "dc-self-reported",
+      "retired-id-live",
+      "prose",
+      "question-budget",
+      "triage-stale",
+    ]);
   });
 });
 

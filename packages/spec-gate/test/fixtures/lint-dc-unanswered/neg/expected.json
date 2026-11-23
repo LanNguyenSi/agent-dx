@@ -1,0 +1,13 @@
+{
+  "errors": [
+    {
+      "rule": "dc-unanswered",
+      "file": "spec.md",
+      "path": "DC-1.question",
+      "id": "DC-1",
+      "line": 25
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

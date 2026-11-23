@@ -1,0 +1,12 @@
+{
+  "errors": [],
+  "warnings": [
+    {
+      "rule": "question-budget",
+      "file": "questions.json",
+      "path": "questions",
+      "id": "questions"
+    }
+  ],
+  "acked": []
+}

@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "rule": "ledger-complete",
+      "file": "source/meta.json",
+      "path": "lines[1]",
+      "id": "L2-000000000000"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

@@ -1,0 +1,13 @@
+{
+  "errors": [
+    {
+      "rule": "residual-open",
+      "file": "spec.md",
+      "path": "RS-1",
+      "id": "RS-1",
+      "line": 25
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

@@ -1,14 +1,16 @@
 /**
  * Which profile a run uses and why.
  *
- * `triage.json` decides: its stored `class`, or the class derived from its
- * fields in memory (the file is never written). `--profile` is only a
- * fallback for a run without a usable `triage.json`, and an error when it
- * disagrees with one.
+ * `triage.json` decides, through the class its fields derive in memory
+ * (the file is never written). The stored `class` is not read for the
+ * choice: a stale one is a `triage-stale` error and must not pick a light
+ * profile, and a current one repeats the derived class anyway.
+ * `--profile` is only a fallback for a run without a usable
+ * `triage.json`, and an error when it disagrees with one.
  *
  * | triage.json            | --profile | profile            | source  | findings          |
  * | ---------------------- | --------- | ------------------ | ------- | ----------------- |
- * | usable, light or full  | absent    | the triage profile | triage  | none              |
+ * | usable, class gives light or full | absent    | the triage profile | triage  | none         |
  * | usable, light or full  | equal     | the triage profile | triage  | none              |
  * | usable, light or full  | different | the triage profile | triage  | profile-mismatch  |
  * | usable, no profile     | any       | flag, else full    | flag or default | profile-no-spec |
@@ -68,7 +70,13 @@ export function resolveProfile(
       ],
     };
   }
-  const cls = triage.value.class ?? deriveTriageClass(triage.value).class;
+  const derived = deriveTriageClass(triage.value).class;
+  // The stored class is not trusted for the profile: a file whose class or
+  // rule version has gone stale is an error (`triage-stale`) and must not
+  // choose a light profile, so the profile always follows the class the
+  // fields give in memory. A current file stores that very class, so a
+  // clean run sees no difference.
+  const cls = derived;
   const fromTriage = profileForClass(cls);
   if (fromTriage === null) {
     return {

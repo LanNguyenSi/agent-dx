@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "rule": "binding-status",
+      "file": "bindings.yaml",
+      "path": "TP-1.status",
+      "id": "TP-1"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

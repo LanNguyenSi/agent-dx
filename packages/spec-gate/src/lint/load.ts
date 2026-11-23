@@ -3,15 +3,18 @@
  * involved. Every problem becomes a finding (`file` for a file that cannot
  * be read, `format` for text that does not parse); nothing here throws.
  */
+import path from "node:path";
 import {
   isId,
   parseBindings,
+  parseConfig,
   parseQuestions,
   parseSpec,
   parseTestPlan,
   parseTriage,
   type FormatError,
   type ParseResult,
+  type SpecGateConfig,
 } from "../formats/index.js";
 import { ACKS_FILE, parseAcks, type Ack } from "./acks.js";
 import { readSpecFile } from "./files.js";
@@ -99,4 +102,37 @@ export function loadInputs(dir: string, sink: FindingSink): LintInputs {
 export function loadAcks(dir: string, sink: FindingSink): Ack[] {
   const loaded = load(dir, sink, ACKS_FILE, false, parseAcks);
   return loaded.state === "ok" ? loaded.value : [];
+}
+
+/**
+ * The `.spec-gate/config.yaml` given to `--config`. It is not part of the
+ * spec directory, so the findings about it name `configPath`, the path as
+ * it was given: there is no directory the path is relative to. A file that
+ * cannot be read is a `file` finding and one that does not parse is a
+ * `format` finding; in both cases the rules fall back to the format
+ * defaults instead of skipping.
+ */
+export function loadConfig(
+  configPath: string,
+  sink: FindingSink,
+): Loaded<SpecGateConfig> {
+  const read = readSpecFile(
+    path.dirname(configPath),
+    path.basename(configPath),
+  );
+  if (!read.ok) {
+    sink.add("file", {
+      file: configPath,
+      path: "$",
+      code: read.code,
+      message: read.message,
+    });
+    return { state: "failed" };
+  }
+  const parsed = parseConfig(read.text);
+  if (!parsed.ok) {
+    formatFindings(sink, configPath, parsed.errors);
+    return { state: "failed" };
+  }
+  return { state: "ok", value: parsed.value };
 }

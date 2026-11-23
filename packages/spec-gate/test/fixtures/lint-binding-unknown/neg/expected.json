@@ -1,0 +1,12 @@
+{
+  "errors": [
+    {
+      "rule": "binding-unknown",
+      "file": "bindings.yaml",
+      "path": "TP-2",
+      "id": "TP-2"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

@@ -1,0 +1,18 @@
+{
+  "errors": [
+    {
+      "rule": "retired-id-live",
+      "file": "questions.json",
+      "path": "QN-1",
+      "id": "QN-1"
+    },
+    {
+      "rule": "retired-id-live",
+      "file": "testplan.yaml",
+      "path": "TP-1",
+      "id": "TP-1"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

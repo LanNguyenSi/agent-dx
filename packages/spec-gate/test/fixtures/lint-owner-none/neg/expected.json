@@ -1,0 +1,13 @@
+{
+  "errors": [
+    {
+      "rule": "owner-none",
+      "file": "spec.md",
+      "path": "AC-1.owner",
+      "id": "AC-1",
+      "line": 15
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

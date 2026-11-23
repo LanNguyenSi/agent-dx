@@ -1,0 +1,13 @@
+{
+  "errors": [],
+  "warnings": [
+    {
+      "rule": "prose",
+      "file": "spec.md",
+      "path": "AC-1.text",
+      "id": "AC-1",
+      "line": 15
+    }
+  ],
+  "acked": []
+}
