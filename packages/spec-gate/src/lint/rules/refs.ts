@@ -125,17 +125,39 @@ function printable(p: string): string {
   return p.replace(/[\u0000-\u001f\u007f]/g, "?");
 }
 
+/**
+ * A path name as a case- and normalisation-insensitive file system sees it:
+ * Unicode NFC, then upper case, so that a letter with a special lower-case
+ * form (the long s) folds like its capital. Only equality of two folded
+ * names is meaningful.
+ */
+function folded(name: string): string {
+  return name.normalize("NFC").toUpperCase();
+}
+
+/**
+ * Whether `p` is `.spec-gate` or below it. The first path component is
+ * compared folded: a pull request that adds `.Spec-Gate/commands.yaml` shows
+ * up as `.spec-gate/commands.yaml` once checked out on a case-insensitive
+ * file system, where it would replace the file the runner reads.
+ */
+function underSpecGate(p: string): boolean {
+  return folded(p.split("/")[0]!) === folded(SPEC_GATE_DIR);
+}
+
 /** No file under `.spec-gate/` differs between the diff base and the head. */
 export const checkSpecChangesConfig = guarded(
   `repo:${SPEC_GATE_DIR}`,
   "$",
   (_ctx, git) =>
-    changedPaths(git.repo, git.diffBase, git.head, SPEC_GATE_DIR).map((p) => ({
-      file: `repo:${printable(p)}`,
-      path: "$",
-      code: "spec-changes-config",
-      message: `the spec change touches ${SPEC_GATE_DIR}/; a change there is a pull request of its own and a spec pull request that makes one is never approved`,
-    })),
+    changedPaths(git.repo, git.diffBase, git.head)
+      .filter(underSpecGate)
+      .map((p) => ({
+        file: `repo:${printable(p)}`,
+        path: "$",
+        code: "spec-changes-config",
+        message: `the spec change touches ${SPEC_GATE_DIR}/; a change there is a pull request of its own and a spec pull request that makes one is never approved`,
+      })),
 );
 
 /** Every `static` row's `check_command_ref` names a command of the set at `commands_ref`. */
@@ -254,7 +276,7 @@ export const REF_RULES: readonly RuleDef[] = [
     ackable: false,
     needsGit: true,
     summary:
-      "No path under .spec-gate/ differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count.",
+      "No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count.",
     needs: [],
     check: checkSpecChangesConfig,
   },

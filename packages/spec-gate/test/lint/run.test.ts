@@ -230,7 +230,7 @@ describe("ack-unused only for a rule that was evaluated", () => {
     expect(unused(without)).toEqual([]);
     expect(skippedReason(without, "custom-rule")).toBe("no-git");
     const withGit = lint(repo.spec, [...RULES, git], {
-      git: { defaultRef: REMOTE_MAIN },
+      git: { repo: repo.dir, defaultRef: REMOTE_MAIN },
     });
     expect(withGit.acked.map((f) => f.rule)).toEqual(["custom-rule"]);
     expect(otherSkips(withGit)).toEqual([]);
@@ -429,7 +429,7 @@ describe("the engine hands the repository to a rule that needs it", () => {
     const { repo, c1 } = await plainHistory();
     const head = await repo.commit(specFiles({ base: c1, ref: c1 }), "spec");
     const report = lint(repo.spec, [...RULES, git], {
-      git: { defaultRef: REMOTE_MAIN },
+      git: { repo: repo.dir, defaultRef: REMOTE_MAIN },
     });
     expect(
       report.errors.filter((f) => f.rule === "git-test").map((f) => f.message),

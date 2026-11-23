@@ -121,8 +121,9 @@ program
   .argument("<spec-dir>", "directory with spec.md and testplan.yaml")
   .option(
     "--repo <path>",
-    "git repository to read .spec-gate/commands.yaml from at commands_ref " +
-      "(default: the git top level of <spec-dir>)",
+    "git work tree to read .spec-gate/commands.yaml from at commands_ref " +
+      "(default: the git top level of <spec-dir>); its git directory must be <top level>/.git " +
+      "or lie outside the work tree",
   )
   .action((specDir: string, options: { repo?: string }) => {
     try {
@@ -187,19 +188,21 @@ program
   )
   .option(
     "--repo <dir>",
-    "git work tree for the reference-state rules (default: the git top level of <spec-dir>); " +
-      "<spec-dir> must lie inside it",
+    "the trusted checkout root for the reference-state rules; required with --default-ref and --base, " +
+      "never discovered from <spec-dir>, which must lie inside it",
   )
   .option(
     "--default-ref <ref>",
     "full ref name under refs/ (for example refs/remotes/origin/main) of the fetched default branch, " +
       "the reference commit for the ancestry checks; resolved offline, never fetched. " +
-      "Without --default-ref and --base the git rules are skipped (no-git)",
+      "Must be a remote-tracking ref (or the event's base) the spec author cannot move, never a local branch " +
+      "or the pull request head. Needs --repo. Without --default-ref and --base the git rules are skipped (no-git)",
   )
   .option(
     "--base <commit>",
-    "full commit id of the pull request base: the reference commit for the ancestry checks " +
-      "and, with HEAD, the merge base the diff of .spec-gate/ starts at; wins over --default-ref",
+    "full commit id of the pull request base from the host event: the reference commit for the ancestry checks " +
+      "and, with HEAD, the merge base the diff of .spec-gate/ starts at; wins over --default-ref, " +
+      "but with both it must be an ancestor of (or equal to) the --default-ref commit. Needs --repo",
   )
   .exitOverride((err: CommanderError) => {
     throw err;

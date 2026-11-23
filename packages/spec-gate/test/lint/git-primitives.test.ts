@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -31,6 +32,18 @@ function codeOf(fn: () => unknown): LintGitCode | "no error" {
 }
 
 const SHA1 = "0123456789abcdef0123456789abcdef01234567";
+
+/** What goes between `-C <dir>` and the subcommand of every git call. */
+const OVERRIDES = [
+  "-c",
+  "safe.bareRepository=explicit",
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  `core.hooksPath=${os.devNull}`,
+  "-c",
+  "protocol.allow=never",
+];
 
 describe("isCommit and assertCommit", () => {
   it("accepts the full id of a commit and nothing else", async () => {
@@ -225,7 +238,7 @@ describe("isAncestor and mergeBase", () => {
 });
 
 describe("changedPaths", () => {
-  it("lists the paths under a directory that differ, from the first commit to the second", async () => {
+  it("lists every path that differs, from the first commit to the second", async () => {
     const { repo, c1 } = await plainHistory();
     const c2 = await repo.commit(
       {
@@ -235,17 +248,15 @@ describe("changedPaths", () => {
       },
       "change",
     );
-    expect(changedPaths(repo.dir, c1, c2, ".spec-gate").sort()).toEqual([
+    const all = [
       ".spec-gate/commands.yaml",
       ".spec-gate/config.yaml",
-    ]);
+      "src/x.ts",
+    ];
+    expect(changedPaths(repo.dir, c1, c2).sort()).toEqual(all);
     // the other way round, the same paths differ
-    expect(changedPaths(repo.dir, c2, c1, ".spec-gate").sort()).toEqual([
-      ".spec-gate/commands.yaml",
-      ".spec-gate/config.yaml",
-    ]);
-    expect(changedPaths(repo.dir, c1, c1, ".spec-gate")).toEqual([]);
-    expect(changedPaths(repo.dir, c1, c2, "src")).toEqual(["src/x.ts"]);
+    expect(changedPaths(repo.dir, c2, c1).sort()).toEqual(all);
+    expect(changedPaths(repo.dir, c1, c1)).toEqual([]);
   });
 
   it("is relative to the repository root, whatever the directory the call starts in", async () => {
@@ -253,9 +264,7 @@ describe("changedPaths", () => {
     const c2 = await repo.commit({ ".spec-gate/new.yaml": "a: 1\n" }, "add");
     const inner = path.join(repo.dir, "specs");
     fs.mkdirSync(inner, { recursive: true });
-    expect(changedPaths(inner, c1, c2, ".spec-gate")).toEqual([
-      ".spec-gate/new.yaml",
-    ]);
+    expect(changedPaths(inner, c1, c2)).toEqual([".spec-gate/new.yaml"]);
   });
 
   it("shows a deleted and an added path, with renames never merged into one", async () => {
@@ -263,44 +272,35 @@ describe("changedPaths", () => {
     await repo.sh("config", "diff.renames", "true");
     await repo.sh("mv", ".spec-gate/commands.yaml", ".spec-gate/moved.yaml");
     const c2 = await repo.commit({}, "rename");
-    expect(changedPaths(repo.dir, c1, c2, ".spec-gate").sort()).toEqual([
+    expect(changedPaths(repo.dir, c1, c2).sort()).toEqual([
       ".spec-gate/commands.yaml",
       ".spec-gate/moved.yaml",
     ]);
   });
 
-  it("matches the directory literally, and a directory name only as a whole", async () => {
+  it("is not narrowed by a pathspec: names with glob characters and other case variants are all listed", async () => {
     const { repo, c1 } = await plainHistory();
-    const c2 = await repo.commit(
-      { ".spec-gate-other/x": "x\n", ".spec-gate/y": "y\n" },
-      "two dirs",
+    const c2 = await repo.commitRaw(
+      {
+        "a*b": "x\n",
+        ".Spec-Gate/y": "y\n",
+        ".spec-gate-other/z": "z\n",
+      },
+      "names",
     );
-    expect(changedPaths(repo.dir, c1, c2, ".spec-gate")).toEqual([
-      ".spec-gate/y",
+    expect(changedPaths(repo.dir, c1, c2).sort()).toEqual([
+      ".Spec-Gate/y",
+      ".spec-gate-other/z",
+      "a*b",
     ]);
-    for (const bad of [
-      "*",
-      ".spec-gate/*",
-      "",
-      "-x",
-      "../x",
-      "a/../b",
-      ":(top)x",
-      "a b",
-    ]) {
-      expect(
-        codeOf(() => changedPaths(repo.dir, c1, c2, bad)),
-        bad,
-      ).toBe("path-invalid");
-    }
   });
 
   it("takes full commit ids only", async () => {
     const { repo, c1 } = await plainHistory();
-    expect(codeOf(() => changedPaths(repo.dir, "HEAD", c1, "x"))).toBe(
+    expect(codeOf(() => changedPaths(repo.dir, "HEAD", c1))).toBe(
       "not-a-commit",
     );
-    expect(codeOf(() => changedPaths(repo.dir, c1, "main", "x"))).toBe(
+    expect(codeOf(() => changedPaths(repo.dir, c1, "main"))).toBe(
       "not-a-commit",
     );
   });
@@ -469,6 +469,8 @@ describe("git runs scrubbed, bounded and silent", () => {
         "#!/bin/sh",
         'if [ -n "$SHIM_SLEEP" ]; then exec sleep "$SHIM_SLEEP"; fi',
         'if [ -n "$SHIM_FLOOD" ]; then exec head -c "$SHIM_FLOOD" /dev/zero; fi',
+        // a call that holds the argument $SHIM_KILL is killed by a signal
+        'if [ -n "$SHIM_KILL" ]; then for a in "$@"; do if [ "$a" = "$SHIM_KILL" ]; then kill -KILL $$; fi; done; fi',
         `printf '%s\\t' "$@" >> "${log}"`,
         `printf '\\n' >> "${log}"`,
         `env | grep '^GIT_' | sort | tr '\\n' ' ' >> "${log}.env"`,
@@ -491,7 +493,7 @@ describe("git runs scrubbed, bounded and silent", () => {
           .filter((l) => l !== "")
           .map((l) => l.split("\t").slice(0, -1));
 
-  it("drops every GIT_ variable of the caller and sets the four switches", async () => {
+  it("drops every GIT_ variable of the caller and sets the five switches, the graft file among them", async () => {
     const { repo, c1 } = await plainHistory();
     const { log } = shim();
     process.env["GIT_DIR"] = "/nonexistent";
@@ -507,7 +509,7 @@ describe("git runs scrubbed, bounded and silent", () => {
     expect(envs.length).toBeGreaterThan(0);
     for (const line of envs) {
       expect(line.trim()).toBe(
-        "GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0",
+        `GIT_GRAFT_FILE=${os.devNull} GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0`,
       );
     }
     const env = gitEnv();
@@ -516,11 +518,55 @@ describe("git runs scrubbed, bounded and silent", () => {
         .filter((k) => k.startsWith("GIT_"))
         .sort(),
     ).toEqual([
+      "GIT_GRAFT_FILE",
       "GIT_NO_LAZY_FETCH",
       "GIT_NO_REPLACE_OBJECTS",
       "GIT_OPTIONAL_LOCKS",
       "GIT_TERMINAL_PROMPT",
     ]);
+    expect(env["GIT_GRAFT_FILE"]).toBe(os.devNull);
+  });
+
+  it("every call carries the same four overrides right after -C <dir>, before the subcommand", async () => {
+    const { repo, c0, c1 } = await plainHistory();
+    const { log } = shim();
+    const R = repo.dir;
+    resolveRef(R, "refs/heads/main");
+    resolveHead(R);
+    isCommit(R, c1);
+    isAncestor(R, c0, c1);
+    mergeBase(R, c0, c1);
+    changedPaths(R, c0, c1);
+    readBlobAtCommit(R, c1, ".spec-gate/commands.yaml");
+    const recorded = calls(log);
+    expect(recorded.length).toBeGreaterThan(8);
+    for (const call of recorded) {
+      expect(call.slice(0, 2)).toEqual(["-C", R]);
+      expect(call.slice(2, 2 + OVERRIDES.length), call.join(" ")).toEqual(
+        OVERRIDES,
+      );
+    }
+  });
+
+  it("a git stopped by a signal is git-failed, never a refusal: not false, not 'no merge base'", async () => {
+    const { repo, c0, c1 } = await plainHistory();
+    shim();
+    process.env["SHIM_KILL"] = "--is-ancestor";
+    expect(codeOf(() => isAncestor(repo.dir, c0, c1))).toBe("git-failed");
+    process.env["SHIM_KILL"] = "merge-base";
+    expect(codeOf(() => mergeBase(repo.dir, c0, c1))).toBe("git-failed");
+    process.env["SHIM_KILL"] = "rev-parse";
+    expect(codeOf(() => isCommit(repo.dir, c1))).toBe("git-failed");
+    expect(codeOf(() => runGit(repo.dir, ["rev-parse", "HEAD"]))).toBe(
+      "git-failed",
+    );
+    process.env["SHIM_KILL"] = "ls-tree";
+    expect(
+      codeOf(() => readBlobAtCommit(repo.dir, c1, ".spec-gate/commands.yaml")),
+    ).toBe("git-failed");
+    // the same git, not killed, answers
+    delete process.env["SHIM_KILL"];
+    expect(isAncestor(repo.dir, c0, c1)).toBe(true);
   });
 
   it("every primitive passes --end-of-options before the values it was given", async () => {
@@ -530,7 +576,7 @@ describe("git runs scrubbed, bounded and silent", () => {
     const run = (fn: () => unknown): string[][] => {
       fs.rmSync(log, { force: true });
       fn();
-      return calls(log).map((c) => c.slice(2)); // without -C <dir>
+      return calls(log).map((c) => c.slice(2 + OVERRIDES.length)); // without -C <dir> and the overrides
     };
     expect(run(() => isCommit(R, c1))).toEqual([
       ["rev-parse", "--verify", "--end-of-options", `${c1}^{commit}`],
@@ -544,7 +590,7 @@ describe("git runs scrubbed, bounded and silent", () => {
     expect(run(() => mergeBase(R, c0, c1))).toEqual([
       ["merge-base", "--end-of-options", c0, c1],
     ]);
-    expect(run(() => changedPaths(R, c0, c1, ".spec-gate"))).toEqual([
+    expect(run(() => changedPaths(R, c0, c1))).toEqual([
       [
         "diff-tree",
         "-r",
@@ -556,8 +602,6 @@ describe("git runs scrubbed, bounded and silent", () => {
         "--end-of-options",
         c0,
         c1,
-        "--",
-        ":(top,literal).spec-gate",
       ],
     ]);
     const blobCalls = run(() =>

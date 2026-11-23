@@ -175,20 +175,17 @@ export function mergeBase(repo: string, a: string, b: string): string | null {
 }
 
 /**
- * The paths at or below `under` that differ between the trees of two
- * commits, relative to the repository root. Rename detection is off (a
- * rename is a delete and an add, so both paths show), and no textconv or
- * external diff program runs: `diff-tree` is plumbing and the flags say so.
+ * The paths that differ between the trees of two commits, relative to the
+ * repository root. Rename detection is off (a rename is a delete and an add,
+ * so both paths show), and no textconv or external diff program runs:
+ * `diff-tree` is plumbing and the flags say so. The list is not narrowed by
+ * a pathspec: git matches a pathspec byte for byte or with ASCII case
+ * folding, and a caller that must match a directory the way a case- and
+ * normalisation-insensitive file system does filters the list itself.
  */
-export function changedPaths(
-  repo: string,
-  from: string,
-  to: string,
-  under: string,
-): string[] {
+export function changedPaths(repo: string, from: string, to: string): string[] {
   requireId(from);
   requireId(to);
-  requirePath(under);
   const run = runGit(repo, [
     "diff-tree",
     "-r",
@@ -200,8 +197,6 @@ export function changedPaths(
     "--end-of-options",
     from,
     to,
-    "--",
-    `:(top,literal)${under}`,
   ]);
   if (run.status !== 0) {
     throw new LintGitError("git-failed", "git could not compare two trees");

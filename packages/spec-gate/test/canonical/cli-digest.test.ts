@@ -208,13 +208,15 @@ describe("spec-gate digest: where the commands file is looked up", () => {
     }
   });
 
-  it("reads a bare repository from its object database", async () => {
+  it("refuses a bare repository and a git directory: only a work tree is read", async () => {
     const bare = path.join(scratch, "bare.git");
     await git(scratch, ["clone", "-q", "--bare", repo, bare]);
-    const run = await cli(["digest", outside, "--repo", bare], scratch);
-    expect(run.stderr).toBe("");
-    expect(run.code).toBe(0);
-    expect(run.stdout).toBe(`${expected.base}\n`);
+    for (const target of [bare, path.join(repo, ".git")]) {
+      const run = await cli(["digest", outside, "--repo", target], scratch);
+      expect(run.code, target).toBe(1);
+      expect(run.stdout, target).toBe("");
+      expect(run.stderr, target).toContain("[repo-invalid]");
+    }
   });
 
   it("refuses a 40-digit prefix of a SHA-256 commit id", async (ctx) => {

@@ -88,6 +88,38 @@ export class Repo {
     return git(this.dir, ["rev-parse", "HEAD"], this.day);
   }
 
+  /**
+   * Commits the files straight into the index, bypassing the work tree: a
+   * path that differs from another only in case or normalisation form
+   * (`.Spec-Gate` next to `.spec-gate`) is a second entry here, where a file
+   * system that folds names would make it the first. The work tree is not
+   * updated; commit nothing else on top of it with `commit`.
+   */
+  async commitRaw(
+    files: Record<string, string>,
+    message: string,
+  ): Promise<string> {
+    this.day += 1;
+    await this.sh("config", "core.ignorecase", "false");
+    for (const [rel, text] of Object.entries(files)) {
+      const blob = path.join(scratch(), `blob-${this.day}-${rel.length}`);
+      fs.writeFileSync(blob, text);
+      const id = await this.sh("hash-object", "-w", blob);
+      await this.sh(
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        `100644,${id},${rel}`,
+      );
+    }
+    await git(
+      this.dir,
+      ["commit", "-q", "--allow-empty", "-m", message],
+      this.day,
+    );
+    return git(this.dir, ["rev-parse", "HEAD"], this.day);
+  }
+
   async checkout(branch: string, from?: string): Promise<void> {
     await this.sh(
       "checkout",
@@ -162,13 +194,30 @@ export async function plainHistory(): Promise<{
   return { repo, c0, c1 };
 }
 
+/**
+ * The git flags of a run in `repo`: `--repo` is required with a git input,
+ * so a request that does not mention `repo` gets the repository's own
+ * directory; a request that sets `repo` (even to `undefined`) is kept as it
+ * is.
+ */
+export function withRepo(
+  repo: Repo,
+  request: GitRequest | undefined,
+): GitRequest | undefined {
+  if (request === undefined || "repo" in request) return request;
+  return { ...request, repo: repo.dir };
+}
+
 /** Lints the spec directory of `repo` with the given git flags. */
 export function lintIn(
   repo: Repo,
   request: GitRequest | undefined,
   options: LintOptions = {},
 ): LintReport {
-  const result = lintSpecDir(repo.spec, { ...options, git: request });
+  const result = lintSpecDir(repo.spec, {
+    ...options,
+    git: withRepo(repo, request),
+  });
   if (!result.ok) throw new Error(`usage error: ${result.message}`);
   return result.report;
 }
@@ -179,7 +228,10 @@ export function usageError(
   request: GitRequest | undefined,
   options: LintOptions = {},
 ): string {
-  const result = lintSpecDir(repo.spec, { ...options, git: request });
+  const result = lintSpecDir(repo.spec, {
+    ...options,
+    git: withRepo(repo, request),
+  });
   if (result.ok) throw new Error("the run was expected to be a usage error");
   return result.message;
 }

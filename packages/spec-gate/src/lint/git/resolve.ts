@@ -6,16 +6,31 @@
  * Offline and read-only: a ref the caller names is looked up, never
  * fetched. Without `--default-ref` and `--base` there are no git inputs and
  * every rule that needs git is skipped.
+ *
+ * The repository is the one `--repo` names and nothing else: it is never
+ * discovered from the spec directory, which the spec author writes. A git
+ * directory the author could have committed into the work tree is refused.
  */
 import fs from "node:fs";
-import path from "node:path";
+import {
+  REPO_LAYOUT_ARGS,
+  gitDirProblem,
+  isInside,
+  parseRepoLayout,
+} from "../../canonical/git-hardening.js";
 import { LintGitError, runGit } from "./exec.js";
-import { assertCommit, mergeBase, resolveHead, resolveRef } from "./index.js";
+import {
+  assertCommit,
+  isAncestor,
+  mergeBase,
+  resolveHead,
+  resolveRef,
+} from "./index.js";
 import type { GitInputs } from "../types.js";
 
 /** The git flags as the caller gave them. */
 export interface GitRequest {
-  /** `--repo`: a directory inside the work tree; default the spec directory. */
+  /** `--repo`: the trusted checkout root; required with `--default-ref` and `--base`. */
   repo?: string;
   /** `--default-ref`: a full ref name under `refs/`. */
   defaultRef?: string;
@@ -46,16 +61,6 @@ function realpath(dir: string): string | null {
   }
 }
 
-/** Whether `inner` is `outer` or below it; both are real paths. */
-function isInside(outer: string, inner: string): boolean {
-  const rel = path.relative(outer, inner);
-  return !(
-    rel === ".." ||
-    rel.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(rel)
-  );
-}
-
 /**
  * Resolves the git inputs for `specDir`. A failure is a usage error: the
  * message names the flag, never git's output, an argument or a path.
@@ -67,35 +72,56 @@ export function resolveGitInputs(
   if (request === undefined || !hasGitInputs(request)) {
     return { ok: true, git: undefined };
   }
-  if (request.repo !== undefined && request.repo.trim() === "") {
+  if (request.repo === undefined) {
+    return fail(
+      "--repo <dir> is required with --default-ref and --base: name the trusted checkout root; the repository is never discovered from the spec directory",
+    );
+  }
+  if (request.repo.trim() === "") {
     return fail("--repo needs a path");
   }
   try {
-    const where = request.repo ?? specDir;
-    // A failed `rev-parse` prints nothing, so the empty check covers it.
-    const top = runGit(where, ["rev-parse", "--show-toplevel"]);
-    const toplevel = top.stdout.toString("utf8").trim();
-    if (toplevel === "") {
-      return fail(
-        request.repo === undefined
-          ? "the spec directory is not inside a git work tree; pass --repo <dir>"
-          : "--repo is not inside a git work tree",
-      );
+    // A failed `rev-parse` prints nothing, so the layout check covers it.
+    const found = runGit(request.repo, [...REPO_LAYOUT_ARGS]);
+    const layout = parseRepoLayout(found.stdout.toString("utf8"));
+    if (layout === null) {
+      return fail("--repo is not inside a git work tree");
     }
+    const problem = gitDirProblem(
+      layout.toplevel,
+      layout.gitDir,
+      layout.commonDir,
+    );
+    if (problem !== null) {
+      return fail(`--repo is not a plain git checkout: ${problem}`);
+    }
+    const toplevel = layout.toplevel;
     const spec = realpath(specDir);
     const root = realpath(toplevel);
     if (spec === null || root === null || !isInside(root, spec)) {
       return fail("the spec directory is not inside the repository");
     }
 
-    if (request.defaultRef !== undefined) {
-      // Validated even when --base wins, so a bad value never goes unseen.
-      resolveRefFlag(toplevel, request.defaultRef);
-    }
-    const reference =
+    // Both are validated even when --base wins, so a bad value never goes
+    // unseen.
+    const defaultCommit =
+      request.defaultRef !== undefined
+        ? resolveRefFlag(toplevel, request.defaultRef)
+        : undefined;
+    const baseCommit =
       request.base !== undefined
         ? resolveBaseFlag(toplevel, request.base)
-        : resolveRefFlag(toplevel, request.defaultRef!);
+        : undefined;
+    if (
+      defaultCommit !== undefined &&
+      baseCommit !== undefined &&
+      !isAncestor(toplevel, baseCommit, defaultCommit)
+    ) {
+      // A base the author could pick on a branch of their own would make
+      // every ancestry check pass against history the author wrote.
+      return fail("--base is not on the default branch (--default-ref)");
+    }
+    const reference = baseCommit ?? defaultCommit!;
 
     const head = resolveHead(toplevel);
     const diffBase = mergeBase(toplevel, head, reference);

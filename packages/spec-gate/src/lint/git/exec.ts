@@ -5,6 +5,10 @@
  * this file, so no message built from a failure can leak them.
  */
 import { spawnSync } from "node:child_process";
+import {
+  applyGitSwitches,
+  gitConfigOverrides,
+} from "../../canonical/git-hardening.js";
 
 export const GIT_TIMEOUT_MS = 30_000;
 export const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -39,19 +43,15 @@ export class LintGitError extends Error {
 /**
  * The environment of a git call: the caller's, without any `GIT_*`
  * variable (a leaked `GIT_DIR` would point the call at another
- * repository), plus switches that keep the read local and exact.
+ * repository), plus switches that keep the read local and exact (no replace
+ * refs, no lazy fetch, no grafts).
  */
 export function gitEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith("GIT_")) env[key] = value;
   }
-  env["GIT_TERMINAL_PROMPT"] = "0";
-  // A replace ref must not swap the content of the object an id names.
-  env["GIT_NO_REPLACE_OBJECTS"] = "1";
-  // A partial clone must not fetch from the network during a read.
-  env["GIT_NO_LAZY_FETCH"] = "1";
-  env["GIT_OPTIONAL_LOCKS"] = "0";
+  applyGitSwitches(env);
   return env;
 }
 
@@ -61,17 +61,19 @@ export interface GitRun {
 }
 
 /**
- * Runs `git -C <cwd> <args>`; `timeoutMs` is the default except in a test
- * that proves the time limit. A git that cannot start, does not finish in
- * time or writes more than the cap is a `LintGitError`; a non-zero exit is
- * not: the caller decides what an exit status means for its question.
+ * Runs `git -C <cwd> <config overrides> <args>`; `timeoutMs` is the default
+ * except in a test that proves the time limit. A git that cannot start, does
+ * not finish in time, is stopped by a signal or writes more than the cap is
+ * a `LintGitError`; a non-zero exit is not: the caller decides what an exit
+ * status means for its question. A signal never becomes an exit status: a
+ * killed `merge-base --is-ancestor` must not read as "not an ancestor".
  */
 export function runGit(
   cwd: string,
   args: readonly string[],
   timeoutMs: number = GIT_TIMEOUT_MS,
 ): GitRun {
-  const run = spawnSync("git", ["-C", cwd, ...args], {
+  const run = spawnSync("git", ["-C", cwd, ...gitConfigOverrides(), ...args], {
     env: gitEnv(),
     timeout: timeoutMs,
     killSignal: "SIGKILL",
@@ -91,5 +93,8 @@ export function runGit(
       "git could not be run or did not finish in time",
     );
   }
-  return { status: run.status ?? 1, stdout: run.stdout };
+  if (run.status === null) {
+    throw new LintGitError("git-failed", "git was stopped before it finished");
+  }
+  return { status: run.status, stdout: run.stdout };
 }

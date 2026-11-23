@@ -111,7 +111,7 @@ unit. Usage errors go to stderr as text, never into the report.
 |---|---|
 | 0 | no error finding, and with `--strict` no unacknowledged warning |
 | 1 | the report has an error, or with `--strict` an unacknowledged warning |
-| 2 | a usage error (unknown option, missing argument, a bad `--profile` value, a `--config` value with no file name or together with git inputs, a git input that is refused, see "Git inputs"), a spec directory that is missing or not a directory, or an unexpected exception |
+| 2 | a usage error (unknown option, missing argument, a bad `--profile` value, a `--config` value with no file name or together with git inputs, a git input without `--repo` or that is refused, see "Git inputs"), a spec directory that is missing or not a directory, or an unexpected exception |
 
 Help and version exit 0. `lint-ack` exits 0 when it wrote an entry and 2 on any
 refusal.
@@ -126,9 +126,14 @@ never reads a remote, so the same repository gives the same report.
 |---|---|
 | `--default-ref <ref>` | a full ref name under `refs/` (for example `refs/remotes/origin/main`), the fetched default branch; resolved to a commit once, offline. An annotated tag peels to its commit |
 | `--base <commit>` | the full id of the pull request base commit (a commit object; an abbreviation and the id of a tag object are refused) |
-| `--repo <dir>` | a directory inside the git work tree; default the git top level of `<spec-dir>`; `<spec-dir>` must lie inside that work tree |
+| `--repo <dir>` | the trusted checkout root: a directory inside the git work tree to read; required with `--default-ref` and `--base`, never discovered from `<spec-dir>`; `<spec-dir>` must lie inside that work tree |
 
-Git inputs are given when `--default-ref` or `--base` is. `--repo` alone is
+Git inputs are given when `--default-ref` or `--base` is, and they need
+`--repo`: without it the run is a usage error. The repository is never found
+by walking up from `<spec-dir>`, because the spec author writes that
+directory, and a spec pull request can commit files that look like a git
+directory (`HEAD`, `objects/`, `refs/`, `config`, `info/grafts`) and so
+present a repository of its own choosing as the one to read. `--repo` alone is
 not a git input: the git rules are skipped with `no-git` (and fail a `--final`
 run, see above). Everything git needs is resolved once, before any rule runs,
 into full commit ids:
@@ -136,7 +141,10 @@ into full commit ids:
 - the reference commit: the `--base` commit when given, else the commit
   `--default-ref` names. It is the commit the ancestry checks compare
   against. With both flags `--base` wins, and `--default-ref` is still
-  validated, so a bad value is never ignored.
+  validated, so a bad value is never ignored; `--base` must then be an
+  ancestor of the `--default-ref` commit, or equal to it (a usage error
+  otherwise: a base that is not on the default branch is a commit the author
+  could have put on a branch of their own).
 - the head: `HEAD` of the repository. The rules read committed state; the
   working tree is not diffed (the spec files themselves are read from the
   working tree as always).
@@ -149,17 +157,28 @@ A value that cannot be used is a usage error (exit 2, one line on stderr, no
 report), never a finding: a `--default-ref` that is not a valid full ref name
 under `refs/` (a short name, a leading dash, a name `git check-ref-format`
 refuses), that names no ref, or that does not lead to a commit; a `--base`
-that is not the full id of a commit in the repository; a `--repo` with no
-path or outside a git work tree; a spec directory outside the repository; a
+that is not the full id of a commit in the repository, or not an ancestor of
+(or equal to) the `--default-ref` commit when both are given; a git input
+without `--repo`; a `--repo` with no path or outside a git work tree, or whose
+git directory lies inside the work tree anywhere but at `<top level>/.git` (or
+whose common git directory, for a linked worktree, lies inside it); a spec
+directory outside the repository; a
 repository without a commit at `HEAD`; a `HEAD` that shares no history with
 the reference commit; and `--config` together with git inputs. The message
 names the flag, never git's output, an argument or a path.
 
 Every git call is an argument list (no shell) with a scrubbed environment (no
 `GIT_*` variable of the caller; `GIT_NO_REPLACE_OBJECTS`, `GIT_NO_LAZY_FETCH`,
-`GIT_OPTIONAL_LOCKS=0` and `GIT_TERMINAL_PROMPT=0` set, so a replace ref cannot
-change what an id means and a partial clone cannot fetch), a time limit of 30
-seconds and an output cap of 4 MiB. A value from outside goes behind
+`GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0` and `GIT_GRAFT_FILE` set to the
+null device, so a replace ref or a graft file cannot change what an id means
+and a partial clone cannot fetch), four configuration overrides before the
+subcommand (`safe.bareRepository=explicit`, `core.fsmonitor=false`,
+`core.hooksPath` set to the null device and `protocol.allow=never`, so that the
+repository's own configuration starts no program and a bare repository is
+never found by walking up), a time limit of 30 seconds and an output cap of
+4 MiB. A git that is stopped by a signal is never an exit status: it is a git
+call that could not run (`git-failed`), so a killed ancestry check never reads
+as "not an ancestor". A value from outside goes behind
 `--end-of-options`, and only full commit ids are passed on after they were
 resolved. A file is read at a commit by `ls-tree` first: the entry must be a
 regular file (a symbolic link, a submodule and a directory are refused, and a
@@ -167,6 +186,35 @@ path below a link is not found), and only then is the blob read. Git's own
 messages never reach the report. A git call that cannot run or does not
 finish is an error finding of the rule that needed it (code `git-failed`), not
 a pass.
+
+What the caller must guarantee. The lint can only be as strict as the
+repository state it is given.
+
+- `--repo` is the trusted checkout root: the directory the job's checkout step
+  made, not a path taken from the spec or the pull request.
+- `--default-ref` is a remote-tracking ref of the default branch (for example
+  `refs/remotes/origin/main`, after a fetch the job made), or the base the host
+  event names, that the spec author cannot move. It is never a local branch
+  and never the head of the pull request, and a ref the author can push to is
+  the author's own input.
+- `--base` is the pull request base id from the host event (for example the
+  base sha of a `pull_request` event), a full commit id.
+- The full history is fetched. A shallow clone does not hold the commits the
+  ancestry checks compare, so `base_commit` and `commands_ref` report as not
+  being commits, and the diff base may not be found.
+- The checkout is the one the job trusts: the lint refuses a git directory that
+  lies inside the work tree anywhere but at `.git`, but it does not vouch for
+  a checkout whose `.git` the pull request could have replaced.
+
+A pull-request job, after checking out the merge or head commit with full
+history and fetching the default branch:
+
+```
+spec-gate lint specs/<id> --final \
+  --repo "$GITHUB_WORKSPACE" \
+  --default-ref refs/remotes/origin/main \
+  --base "$PR_BASE_SHA"
+```
 
 The config. With git inputs `.spec-gate/config.yaml` is read at the reference
 commit, never from the working tree and never from the head of the spec pull
@@ -251,7 +299,7 @@ that they exist; the rules that need git are covered as described under
 | `meta-frontmatter-mismatch` | error | light, full | no | no | base_commit and commands_ref in source/meta.json equal those in the spec.md frontmatter; it needs no repository and runs in both profiles. |
 | `base-commit-not-ancestor` | error | light, full | no | no | The frontmatter base_commit is the full id of a commit in the repository and an ancestor of the reference commit (the --base commit, else the --default-ref commit); a commit that exists only on the pull request head or a fork is an error. |
 | `commands-ref-not-ancestor` | error | light, full | no | no | The frontmatter commands_ref is the full id of a commit in the repository and an ancestor of the reference commit, checked like base_commit. |
-| `spec-changes-config` | error | light, full | no | no | No path under .spec-gate/ differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count. |
+| `spec-changes-config` | error | light, full | no | no | No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count. |
 | `static-command-unknown` | error | light, full | no | no | Every static test-plan row's check_command_ref names a command of .spec-gate/commands.yaml at commands_ref; a missing or invalid command set there is an error, and the set is not read at a commands_ref that failed its ancestry check. |
 <!-- END generated: rules -->
 
@@ -364,7 +412,11 @@ without them.
   an ancestor of the new tip, so it is an error.
 - `spec-changes-config`: no path at or below `.spec-gate/` differs between the
   diff base and `HEAD`; one error per changed path, named `repo:<path>`
-  (control characters in a path print as `?`). Renames are not detected, so a
+  (control characters in a path print as `?`). The first path component is
+  compared without regard to case, after Unicode normalisation (NFC), so
+  `.Spec-Gate/commands.yaml` counts: on a case-insensitive file system it is
+  the same directory. The changed paths of the whole tree are listed and
+  matched in code, not by a pathspec. Renames are not detected, so a
   moved file shows both paths, and no textconv or external diff program runs.
 - `static-command-unknown`: every test-plan row of kind `static` has a
   `check_command_ref` that names a command of `.spec-gate/commands.yaml` at

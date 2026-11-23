@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { lintSpecDir, RULES, type LintReport } from "../../src/lint/index.js";
+import {
+  lintSpecDir,
+  RULES,
+  type GitRequest,
+  type LintReport,
+} from "../../src/lint/index.js";
 import {
   REMOTE_MAIN,
   Repo,
@@ -47,7 +52,7 @@ describe("resolving the git inputs", () => {
     };
     const result = lintSpecDir(
       repo.spec,
-      { git: { defaultRef: REMOTE_MAIN } },
+      { git: { repo: repo.dir, defaultRef: REMOTE_MAIN } },
       [...RULES, probe],
     );
     expect(result.ok).toBe(true);
@@ -83,11 +88,12 @@ describe("resolving the git inputs", () => {
     // base alone
     expect(base(lintIn(repo, { base: c1 }))).toBe(0);
     expect(base(lintIn(repo, { base: c0 }))).toBe(1);
-    // both: --base wins, whichever default-ref says
+    // both: --base wins as the reference; it must lie on the default branch
     expect(base(lintIn(repo, { ...DEFAULT, base: c0 }))).toBe(1);
+    expect(base(lintIn(repo, { ...DEFAULT, base: c1 }))).toBe(0);
     expect(
-      base(lintIn(repo, { defaultRef: "refs/remotes/origin/old", base: c1 })),
-    ).toBe(0);
+      base(lintIn(repo, { defaultRef: "refs/remotes/origin/old", base: c0 })),
+    ).toBe(1);
     // none: nothing is checked, nothing is wrong
     expect(base(lintIn(repo, undefined))).toBe(0);
     expect(base(lintIn(repo, {}))).toBe(0);
@@ -236,19 +242,37 @@ describe("usage errors", () => {
     });
   });
 
-  it("a spec directory with no repository and no --repo", async () => {
-    expect(lintSpecDir(specDir(), { git: DEFAULT })).toEqual({
-      ok: false,
-      message:
-        "the spec directory is not inside a git work tree; pass --repo <dir>",
-    });
+  it("a git input without --repo: the repository is never discovered from the spec directory", async () => {
+    const { repo, c1 } = await committed();
+    const absent = (request: GitRequest) =>
+      lintSpecDir(repo.spec, { git: request });
+    for (const request of [
+      { defaultRef: REMOTE_MAIN },
+      { base: c1 },
+      { defaultRef: REMOTE_MAIN, base: c1 },
+      { defaultRef: REMOTE_MAIN, repo: undefined },
+    ]) {
+      // the spec directory sits inside a perfectly good repository
+      const result = absent(request);
+      expect(result.ok, JSON.stringify(request)).toBe(false);
+      expect(result.ok ? "" : result.message).toContain(
+        "--repo <dir> is required",
+      );
+    }
+    // and outside any repository the answer is the same
+    expect(lintSpecDir(specDir(), { git: DEFAULT }).ok).toBe(false);
+    // a run without a git input needs no --repo
+    expect(lintSpecDir(repo.spec, { git: {} }).ok).toBe(true);
+    expect(lintSpecDir(repo.spec, {}).ok).toBe(true);
   });
 
   it("a repository with no commit at HEAD", async () => {
     const repo = await Repo.create();
     const dir = path.join(repo.dir, SPEC_REL);
     fs.mkdirSync(dir, { recursive: true });
-    expect(lintSpecDir(dir, { git: { base: "a".repeat(40) } })).toEqual({
+    expect(
+      lintSpecDir(dir, { git: { repo: repo.dir, base: "a".repeat(40) } }),
+    ).toEqual({
       ok: false,
       message: "--base is not the full id of a commit in the repository",
     });
@@ -314,9 +338,15 @@ describe("the built CLI", () => {
     for (const args of [
       ["--default-ref", REMOTE_MAIN],
       ["--base", c1],
-      ["--default-ref", REMOTE_MAIN, "--base", c1, "--repo", repo.dir],
+      ["--default-ref", REMOTE_MAIN, "--base", c1],
     ]) {
-      const run = await runCli(["lint", repo.spec, ...args]);
+      const run = await runCli([
+        "lint",
+        repo.spec,
+        "--repo",
+        repo.dir,
+        ...args,
+      ]);
       expect(run.code, args.join(" ")).toBe(0);
       expect(run.stderr).toBe("");
       const parsed = JSON.parse(run.stdout) as LintReport;
@@ -332,7 +362,14 @@ describe("the built CLI", () => {
     const { repo, c1 } = await plainHistory();
     const fork = await repo.commit({ "fork.txt": "f\n" }, "fork");
     await repo.commit(specFiles({ base: fork, ref: c1 }), "spec");
-    const bad = await runCli(["lint", repo.spec, "--default-ref", REMOTE_MAIN]);
+    const bad = await runCli([
+      "lint",
+      repo.spec,
+      "--repo",
+      repo.dir,
+      "--default-ref",
+      REMOTE_MAIN,
+    ]);
     expect(bad.code).toBe(1);
     expect(
       (JSON.parse(bad.stdout) as LintReport).errors.map((f) => f.rule),
@@ -348,6 +385,8 @@ describe("the built CLI", () => {
     const withGit = await runCli([
       "lint",
       good.repo.spec,
+      "--repo",
+      good.repo.dir,
       "--final",
       "--default-ref",
       REMOTE_MAIN,
@@ -369,9 +408,25 @@ describe("the built CLI", () => {
       ["--base", c1, "--config", config],
       ["--default-ref", REMOTE_MAIN, "--config", config],
     ]) {
+      // every case names the repository, so each one fails for its own reason
+      const named = args.includes("--repo")
+        ? args
+        : ["--repo", repo.dir, ...args];
+      const run = await runCli(["lint", repo.spec, ...named]);
+      expect(run.code, args.join(" ")).toBe(2);
+      expect(run.stdout, args.join(" ")).toBe("");
+      expect(run.stderr.trim().split("\n"), args.join(" ")).toHaveLength(1);
+    }
+    // a git input without --repo names the missing flag
+    for (const args of [
+      ["--default-ref", REMOTE_MAIN],
+      ["--base", c1],
+      ["--default-ref", REMOTE_MAIN, "--base", c1],
+    ]) {
       const run = await runCli(["lint", repo.spec, ...args]);
       expect(run.code, args.join(" ")).toBe(2);
       expect(run.stdout, args.join(" ")).toBe("");
+      expect(run.stderr, args.join(" ")).toContain("--repo <dir> is required");
       expect(run.stderr.trim().split("\n"), args.join(" ")).toHaveLength(1);
     }
     // a flag without its value is commander's own usage error
@@ -640,8 +695,12 @@ describe("a git rule that cannot read the repository", () => {
     process.env["PATH"] = saved;
   });
 
-  /** A `git` first on PATH that fails every call whose arguments hold `needle`. */
-  function failingGit(needle: string): void {
+  /**
+   * A `git` first on PATH that fails every call whose arguments hold
+   * `needle`: with exit status 128, or, with `how` set to `kill`, by a
+   * signal (no exit status at all).
+   */
+  function failingGit(needle: string, how: "exit" | "kill" = "exit"): void {
     const dir = fs.mkdtempSync(path.join(scratch(), "failing-git-"));
     const real = [
       "/usr/bin/git",
@@ -653,7 +712,9 @@ describe("a git rule that cannot read the repository", () => {
       [
         "#!/bin/sh",
         'for a in "$@"; do',
-        `  if [ "$a" = "${needle}" ]; then echo "fatal: boom in $PWD" >&2; exit 128; fi`,
+        how === "kill"
+          ? `  if [ "$a" = "${needle}" ]; then kill -KILL $$; fi`
+          : `  if [ "$a" = "${needle}" ]; then echo "fatal: boom in $PWD" >&2; exit 128; fi`,
         "done",
         `exec "${real}" "$@"`,
         "",
@@ -685,6 +746,56 @@ describe("a git rule that cannot read the repository", () => {
     expect(report.ok).toBe(false);
     expect(JSON.stringify(report)).not.toContain("boom");
     expect(JSON.stringify(report)).not.toContain(repo.dir);
+  });
+
+  it("a git stopped by a signal is git-failed in every rule, never a refusal and never a pass", async () => {
+    const { repo } = await committed();
+    // a killed ancestry check must not read as "not an ancestor"
+    failingGit("--is-ancestor", "kill");
+    const ancestry = lintIn(repo, DEFAULT);
+    for (const rule of [
+      "base-commit-not-ancestor",
+      "commands-ref-not-ancestor",
+      "static-command-unknown",
+    ]) {
+      expect(ofRule(ancestry, rule), rule).toEqual([
+        expect.objectContaining({ level: "error", code: "git-failed" }),
+      ]);
+    }
+    expect(ancestry.ok).toBe(false);
+    // a killed tree diff
+    failingGit("diff-tree", "kill");
+    expect(ofRule(lintIn(repo, DEFAULT), "spec-changes-config")).toEqual([
+      expect.objectContaining({ code: "git-failed", file: "repo:.spec-gate" }),
+    ]);
+    // a git that dies while the command set is read keeps the code git-failed,
+    // in the rule that reads it, whichever of the two reads it was
+    for (const needle of ["ls-tree", "cat-file"]) {
+      failingGit(needle, "kill");
+      const report = lintIn(repo, DEFAULT);
+      expect(ofRule(report, "static-command-unknown"), needle).toEqual([
+        expect.objectContaining({
+          code: "git-failed",
+          file: "repo:.spec-gate/commands.yaml",
+        }),
+      ]);
+    }
+  });
+
+  it("a git stopped by a signal while the inputs are resolved is a usage error, not a wrong answer", async () => {
+    const { repo } = await committed();
+    // a killed merge-base is not "no shared history"
+    failingGit("merge-base", "kill");
+    expect(usageError(repo, DEFAULT)).toBe("git could not be read");
+    // a killed `--is-ancestor` between --base and --default-ref is not "not on the default branch"
+    const base = await repo.head();
+    failingGit("--is-ancestor", "kill");
+    expect(usageError(repo, { ...DEFAULT, base })).toBe(
+      "git could not be read",
+    );
+    // a killed repository check is not "not inside a work tree"
+    failingGit("--absolute-git-dir", "kill");
+    expect(usageError(repo, DEFAULT)).toBe("git could not be read");
   });
 
   it("the tree diff and the file read fail closed too", async () => {

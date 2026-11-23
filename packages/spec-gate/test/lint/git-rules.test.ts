@@ -384,6 +384,58 @@ describe("spec-changes-config", () => {
     },
   );
 
+  gitCase(
+    "spec-changes-config",
+    "fail",
+    "a directory that differs from .spec-gate only in case, or by a letter that folds to one, is the same directory on a case-insensitive file system",
+    async () => {
+      const { repo, c1 } = await plainHistory();
+      await repo.commit(specFiles({ base: c1, ref: c1 }), "spec");
+      // straight into the index: this file system would fold the names
+      await repo.commitRaw(
+        {
+          ".Spec-Gate/commands.yaml": "commands: {}\n",
+          ".SPEC-GATE/other.yaml": "a: 1\n",
+          ".\u017fpec-gate/long-s.yaml": "a: 1\n",
+        },
+        "case variants",
+      );
+      const report = lintIn(repo, DEFAULT);
+      expect(
+        ofRule(report, "spec-changes-config")
+          .map((f) => f.file)
+          .sort(),
+      ).toEqual(
+        [
+          "repo:.SPEC-GATE/other.yaml",
+          "repo:.Spec-Gate/commands.yaml",
+          "repo:.\u017fpec-gate/long-s.yaml",
+        ].sort(),
+      );
+      return report;
+    },
+  );
+
+  gitCase(
+    "spec-changes-config",
+    "pass",
+    "names that only look like .spec-gate: another name, a longer name, a nested directory",
+    async () => {
+      const { repo, c1 } = await plainHistory();
+      await repo.commit(
+        {
+          ".spec-gate-other/x.yaml": "a: 1\n",
+          ".spec-gates/x.yaml": "a: 1\n",
+          "spec-gate/x.yaml": "a: 1\n",
+          "docs/.spec-gate/x.yaml": "a: 1\n",
+          ...specFiles({ base: c1, ref: c1 }),
+        },
+        "look-alikes",
+      );
+      return lintIn(repo, DEFAULT);
+    },
+  );
+
   describe("the diff starts at the merge base, not at the reference commit", () => {
     gitCase(
       "spec-changes-config",
