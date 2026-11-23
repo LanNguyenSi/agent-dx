@@ -107,6 +107,40 @@ describe("runTriage write path", () => {
     expect(fs.readFileSync(file)).toEqual(before);
   });
 
+  it("drops setuid and sticky bits and keeps the permission bits", () => {
+    for (const [given, expected] of [
+      [0o4644, 0o644],
+      [0o1644, 0o644],
+    ] as const) {
+      const { dir, file } = makeSpecDir();
+      fs.chmodSync(file, given);
+      // The fixture must really carry the bit, or the case proves nothing.
+      expect(fs.statSync(file).mode & 0o7777).toBe(given);
+      const result = runTriage(dir);
+      expect(result.ok).toBe(true);
+      expect(fs.statSync(file).mode & 0o7777).toBe(expected);
+    }
+  });
+
+  it("leaves no temporary file behind when setting the mode fails", () => {
+    const { dir, file, before } = makeSpecDir();
+    const temp = `${file}.tmp-${process.pid}`;
+    const spy = vi.spyOn(fs, "chmodSync").mockImplementation(() => {
+      throw Object.assign(new Error("not permitted"), { code: "EPERM" });
+    });
+    try {
+      const result = runTriage(dir);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected a write error");
+      expect(result.kind).toBe("write-error");
+      expect(result.message).toContain("EPERM");
+      expect(fs.existsSync(temp)).toBe(false);
+      expect(fs.readFileSync(file)).toEqual(before);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("leaves no temporary file behind when the rename fails", () => {
     const { dir, file, before } = makeSpecDir();
     const temp = `${file}.tmp-${process.pid}`;

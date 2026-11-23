@@ -117,7 +117,9 @@ export function runTriage(specDir: string): TriageRunResult {
   let mode: number;
   let created = false;
   try {
-    mode = fs.statSync(file).mode & 0o7777;
+    // Only the permission bits: setuid, setgid and sticky are never carried
+    // onto a data file.
+    mode = fs.statSync(file).mode & 0o777;
     fs.accessSync(file, fs.constants.W_OK);
     // `wx`: never follow or reuse an existing path at the temporary name.
     fs.writeFileSync(temp, written, { flag: "wx", mode });

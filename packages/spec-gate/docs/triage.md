@@ -16,14 +16,14 @@ change to the table below bumps this number.
 
 The first matching row wins, in this order.
 
-| Order | Class | Condition |
-|---|---|---|
-| 1 | `unsuitable` | `code_related` is `no`, or `scope_within_request` is `no` |
-| 2 | `decision` | `core_is_decision` is `yes` |
-| 3 | `split` | `single_goal` is `no`, or `multiple_repos` is `yes` |
-| 4 | `clarify` | `blocking_unknowns` is not empty |
-| 5 | `no-spec-needed` | `trivial` is `yes` |
-| 6 | `actionable` | otherwise |
+| Order | Class            | Condition                                                 |
+| ----- | ---------------- | --------------------------------------------------------- |
+| 1     | `unsuitable`     | `code_related` is `no`, or `scope_within_request` is `no` |
+| 2     | `decision`       | `core_is_decision` is `yes`                               |
+| 3     | `split`          | `single_goal` is `no`, or `multiple_repos` is `yes`       |
+| 4     | `clarify`        | `blocking_unknowns` is not empty                          |
+| 5     | `no-spec-needed` | `trivial` is `yes`                                        |
+| 6     | `actionable`     | otherwise                                                 |
 
 `row` in the report is the order number of the row that decided.
 
@@ -60,8 +60,18 @@ row applies.
 `profileForClass` maps a class to the spec profile it leads to. The classes
 that end with no spec have no profile.
 
-| Class | Profile |
-|---|---|
-| `no-spec-needed` | `light` |
-| `actionable` | `full` |
-| `unsuitable`, `decision`, `split`, `clarify` | none |
+| Class                                        | Profile |
+| -------------------------------------------- | ------- |
+| `no-spec-needed`                             | `light` |
+| `actionable`                                 | `full`  |
+| `unsuitable`, `decision`, `split`, `clarify` | none    |
+
+## Writing triage.json
+
+The verb never edits `triage.json` in place. It writes the new content to a
+temporary file next to it, created exclusively, gives it the permission bits
+of the original (setuid, setgid and sticky are dropped), and renames it over
+`triage.json`. The rename replaces the file, so a hard link to the old
+`triage.json` keeps the old content. A symlinked `triage.json` is refused. On
+any failure the original stays unchanged, and the temporary file is removed
+only if this run created it.
