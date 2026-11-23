@@ -308,7 +308,7 @@ describe("execCommand", () => {
     // those two stamps, measured by the worker's own clock, never a
     // budget counted from this test's `Date.now()` call, so a loaded
     // machine spending an extra half-second on node start-ups cannot
-    // eat the margin the way a fixed 500ms-from-here bound used to.
+    // eat the margin.
     // `onStdioClosed` firing only between the worker's own start and
     // exit stamps (and after the settle) is still the proof this call
     // waited for a genuine close rather than forcing one the moment
@@ -347,9 +347,8 @@ describe("execCommand", () => {
     // fixed sleep tuned to one machine's process start-ups, and the
     // timing assertions below are orderings against the worker's own
     // clock stamps rather than elapsed time from this test's start:
-    // under load, node start-ups can take half a second and used to
-    // eat a fixed 500ms budget, while nothing about the worker's own
-    // start-to-settle-to-close ordering changes.
+    // under load, node start-ups can take half a second, while nothing
+    // about the worker's own start-to-settle-to-close ordering changes.
     let closedAt: number | undefined;
     let notifyClosed: () => void = () => {};
     const closed = new Promise<void>((resolve) => {
