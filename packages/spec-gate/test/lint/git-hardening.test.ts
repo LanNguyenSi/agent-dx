@@ -6,9 +6,10 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { gitConfigOverrides } from "../../src/canonical/git-hardening.js";
 import { lintSpecDir } from "../../src/lint/index.js";
-import { git, runBounded } from "../canonical/helpers.js";
+import { git, runBounded, shimGit } from "../canonical/helpers.js";
 import {
   REMOTE_MAIN,
   Repo,
@@ -35,9 +36,11 @@ const EVIL_PLAN = STATIC_PLAN.replace(
  * Walking up from the spec directory finds that layout before the real
  * `.git`. The author's repository has a commit `x` with a command set of
  * their choosing, and either calls it the default branch or, with `graft`,
- * grafts it under the real default tip.
+ * grafts it under the real default tip. `worktree` is the `core.worktree` of
+ * the layout: `.` makes `specs/` its own work tree, `s1` puts the work tree
+ * (the spec directory) below the git directory.
  */
-async function embeddedLayout(graft: boolean) {
+async function embeddedLayout(graft: boolean, worktree = ".") {
   const { repo, c1 } = await plainHistory();
   const attacker = path.join(scratch(), "attacker");
   await git(scratch(), ["clone", "-q", repo.dir, attacker]);
@@ -72,7 +75,7 @@ async function embeddedLayout(graft: boolean) {
   }
   fs.writeFileSync(
     path.join(layout, "config"),
-    "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = .\n",
+    `[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = ${worktree}\n`,
   );
   await repo.sh("add", "-A", "-f");
   await repo.commit(
@@ -158,6 +161,105 @@ describe("a git directory committed into the work tree", () => {
   });
 });
 
+describe("on a git that ignores safe.bareRepository", () => {
+  const saved = process.env["PATH"];
+  afterEach(() => {
+    process.env["PATH"] = saved;
+  });
+
+  for (const [worktree, where, why] of [
+    [
+      ".",
+      "specs",
+      "its git directory lies inside the work tree and is not its .git",
+    ],
+    ["s1", "specs/s1", "its work tree lies inside its git directory"],
+  ] as const) {
+    it(`the layout check refuses a committed git directory named as --repo (core.worktree = ${worktree})`, async () => {
+      const { repo } = await embeddedLayout(false, worktree);
+      const dir = path.join(repo.dir, where);
+      const shim = shimGit(scratch(), {
+        drop: ["safe.bareRepository=explicit"],
+      });
+      // control: through this git the layout is found from the directory
+      const raw = await runBounded(
+        "git",
+        ["-C", dir, "rev-parse", "--show-toplevel"],
+        {
+          env: {
+            ...Object.fromEntries(
+              Object.entries(process.env).filter(
+                ([k]) => !k.startsWith("GIT_"),
+              ),
+            ),
+            PATH: shim.path,
+          },
+        },
+      );
+      expect(raw.code).toBe(0);
+      expect(raw.stdout.trim()).toBe(
+        fs.realpathSync(path.join(repo.dir, "specs", worktree)),
+      );
+      process.env["PATH"] = shim.path;
+      expect(usageError(repo, { defaultRef: REMOTE_MAIN, repo: dir })).toBe(
+        `--repo is not a plain git checkout: ${why}`,
+      );
+    });
+  }
+
+  it("a repository's protocol.<name>.allow does not start a transport for a lazy fetch", async () => {
+    const { repo, c1 } = await plainHistory();
+    const missing = "abcdefabcdefabcdefabcdefabcdefabcdefabcd";
+    await repo.commit(
+      specFiles({ base: missing, ref: c1, plan: STATIC_PLAN }),
+      "spec naming an object the repository does not hold",
+    );
+    const markers = fs.mkdtempSync(path.join(scratch(), "ext-markers-"));
+    const marker = path.join(markers, "ext-transport");
+    // a promisor remote over ext:: that the repository itself allows
+    await repo.sh("config", "core.repositoryformatversion", "1");
+    await repo.sh("config", "extensions.partialClone", "evil");
+    await repo.sh("config", "remote.evil.url", `ext::sh -c touch% ${marker}`);
+    await repo.sh("config", "remote.evil.promisor", "true");
+    await repo.sh("config", "remote.evil.partialclonefilter", "blob:none");
+    await repo.sh("config", "protocol.ext.allow", "always");
+    const probe = (extra: string[]) =>
+      runBounded(
+        "git",
+        [
+          "-C",
+          repo.dir,
+          ...extra,
+          "cat-file",
+          "-t",
+          "--end-of-options",
+          missing,
+        ],
+        {
+          env: Object.fromEntries(
+            Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")),
+          ),
+        },
+      );
+    // control: plain git asks the promisor remote for the missing object, and
+    // with only the four overrides of the package it still does
+    await probe([]);
+    expect(fs.existsSync(marker)).toBe(true);
+    fs.rmSync(marker);
+    await probe(gitConfigOverrides());
+    expect(fs.existsSync(marker)).toBe(true);
+    fs.rmSync(marker);
+
+    // a git that does not know GIT_NO_LAZY_FETCH
+    process.env["PATH"] = shimGit(scratch(), {
+      unset: ["GIT_NO_LAZY_FETCH"],
+    }).path;
+    const report = lintIn(repo, { defaultRef: REMOTE_MAIN }, { final: true });
+    expect(ofRule(report, "base-commit-not-ancestor")).toHaveLength(1);
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+});
+
 describe("the git directory of the repository in use", () => {
   it("a plain checkout, a subdirectory of it and a linked worktree are accepted", async () => {
     const { repo } = await plainHistory();
@@ -230,48 +332,28 @@ describe("the git directory of the repository in use", () => {
 });
 
 describe("the repository's own configuration", () => {
-  /** Hostile settings, each of which would run a program that touches a marker. */
+  /**
+   * The setting of the checkout's own configuration that a read of the lint
+   * can trigger: `core.fsmonitor` runs when git reads the index, as
+   * `diff-tree` does. Measured against plain git, none of the lint's other
+   * commands (`rev-parse`, `cat-file`, `ls-tree`, `show-ref`, `merge-base`,
+   * `check-ref-format`) starts a program named by a diff driver, pager, hook,
+   * ssh command or alternate-refs command, and `diff-tree` with the flags
+   * the lint passes starts only the file system monitor, so those settings
+   * are not part of the fixture: a marker for one of them could never appear
+   * and its absence would prove nothing.
+   */
   async function hostile(repo: Repo): Promise<string> {
     const markers = fs.mkdtempSync(path.join(scratch(), "markers-"));
-    const hooks = path.join(markers, "hooks-dir");
-    fs.mkdirSync(hooks);
-    for (const hook of [
-      "reference-transaction",
-      "post-index-change",
-      "post-checkout",
-      "pre-auto-gc",
-    ]) {
-      fs.writeFileSync(
-        path.join(hooks, hook),
-        `#!/bin/sh\ntouch "${markers}/hook-${hook}"\n`,
-        { mode: 0o755 },
-      );
-    }
-    const touch = (name: string, tail = "") =>
-      `touch ${markers}/${name}${tail}`;
-    const settings: [string, string][] = [
-      ["core.fsmonitor", touch("fsmonitor", "; false")],
-      ["diff.external", touch("diffext")],
-      ["diff.foo.textconv", touch("textconv", "; cat")],
-      ["core.pager", touch("pager", "; cat")],
-      ["pager.diff-tree", touch("pager-diff-tree", "; cat")],
-      ["pager.cat-file", touch("pager-cat-file", "; cat")],
-      ["core.hooksPath", hooks],
-      ["core.sshCommand", touch("ssh")],
-      ["core.alternateRefsCommand", touch("altrefs")],
-      ["core.editor", touch("editor")],
-      ["gpg.program", touch("gpg")],
-      ["uploadpack.packObjectsHook", touch("pohook")],
-    ];
-    for (const [key, value] of settings) await repo.sh("config", key, value);
-    fs.writeFileSync(
-      path.join(repo.dir, ".git/info/attributes"),
-      "* diff=foo\n",
+    await repo.sh(
+      "config",
+      "core.fsmonitor",
+      `touch ${markers}/fsmonitor; false`,
     );
     return markers;
   }
 
-  /** Whether plain git, run the way the lint used to run it, starts the program. */
+  /** The fixture is live: plain git, run the way the lint used to run it, starts the program. */
   async function control(repo: Repo, markers: string): Promise<void> {
     const env: NodeJS.ProcessEnv = {};
     for (const [k, v] of Object.entries(process.env)) {
@@ -285,11 +367,11 @@ describe("the repository's own configuration", () => {
     expect(run.code).toBe(0);
     expect(fs.readdirSync(markers)).toContain("fsmonitor");
     for (const name of fs.readdirSync(markers)) {
-      if (name !== "hooks-dir") fs.rmSync(path.join(markers, name));
+      fs.rmSync(path.join(markers, name));
     }
   }
 
-  it("starts no program during a full run: no fsmonitor, diff driver, textconv, pager, hook or helper", async () => {
+  it("does not run the file system monitor program the repository's configuration names, during a full run", async () => {
     const { repo, c1 } = await plainHistory();
     await repo.commit(
       specFiles({ base: c1, ref: c1, plan: STATIC_PLAN }),
@@ -304,9 +386,7 @@ describe("the repository's own configuration", () => {
     ]) {
       const report = lintIn(repo, request, { final: true });
       expect(report.errors, JSON.stringify(request)).toEqual([]);
-      expect(fs.readdirSync(markers).filter((n) => n !== "hooks-dir")).toEqual(
-        [],
-      );
+      expect(fs.readdirSync(markers)).toEqual([]);
     }
   });
 });
@@ -361,7 +441,7 @@ describe("--base and --default-ref together", () => {
     const side = await repo.commit({ "side.txt": "s\n" }, "side");
     await repo.checkout("pr3", c1);
     await repo.commit(specFiles({ base: c1, ref: c1 }), "spec again");
-    const message = "--base is not on the default branch (--default-ref)";
+    const message = "--base is not on --default-ref";
     expect(usageError(repo, { defaultRef: REMOTE_MAIN, base: side })).toBe(
       message,
     );

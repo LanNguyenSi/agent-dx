@@ -22,7 +22,9 @@ import path from "node:path";
  * - `core.fsmonitor=false`: no file system monitor program runs.
  * - `core.hooksPath=<null device>`: no hook runs, whatever the repository
  *   configures.
- * - `protocol.allow=never`: no transport is started. Left out for a call
+ * - `protocol.allow=never`: no transport is started unless the repository
+ *   names one in a `protocol.<name>.allow` of its own, which is why
+ *   `applyGitSwitches` sets `GIT_ALLOW_PROTOCOL` as well. Left out for a call
  *   that talks to a remote (`network: true`), which is the intake step only.
  */
 export function gitConfigOverrides(
@@ -41,16 +43,28 @@ export function gitConfigOverrides(
  * Sets the switches every git call carries on top of a scrubbed
  * environment: no terminal prompt, no replace refs (a replace ref must not
  * swap the content of the object an id names), no lazy fetch in a partial
- * clone, no optional locks, and no graft file (`info/grafts` would make a
- * commit appear to have other parents than it has, so an ancestry answer
- * would not be the one the object database gives).
+ * clone (git 2.44 and later; defence in depth, the transport switch below
+ * is the one that holds on older versions), no optional locks, and no graft
+ * file (`info/grafts` would make a commit appear to have other parents than
+ * it has, so an ancestry answer would not be the one the object database
+ * gives).
+ *
+ * A call that never talks to a remote (`offline: true`: lint and digest) also
+ * sets `GIT_ALLOW_PROTOCOL` to the empty string: no transport is allowed, and
+ * a repository's own `protocol.<name>.allow` cannot widen that, which it can
+ * with the `protocol.allow=never` override alone. Intake, which fetches,
+ * leaves the transports to the configuration.
  */
-export function applyGitSwitches(env: NodeJS.ProcessEnv): void {
+export function applyGitSwitches(
+  env: NodeJS.ProcessEnv,
+  options: { offline?: boolean } = {},
+): void {
   env["GIT_TERMINAL_PROMPT"] = "0";
   env["GIT_NO_REPLACE_OBJECTS"] = "1";
   env["GIT_NO_LAZY_FETCH"] = "1";
   env["GIT_OPTIONAL_LOCKS"] = "0";
   env["GIT_GRAFT_FILE"] = os.devNull;
+  if (options.offline === true) env["GIT_ALLOW_PROTOCOL"] = "";
 }
 
 function real(p: string): string | null {
@@ -80,7 +94,10 @@ export function isInside(outer: string, inner: string): boolean {
  * else there (a bare layout committed into the tree, with `core.worktree`
  * pointing back) is content the author wrote. A git directory outside the
  * work tree (a linked worktree, a separate git directory, a submodule) must
- * have its common directory outside the work tree too.
+ * have its common directory outside the work tree too. The reverse layout is
+ * refused as well: a work tree that lies inside the git directory or the
+ * common directory (a committed layout whose `core.worktree` names a
+ * subdirectory of it).
  */
 export function gitDirProblem(
   toplevel: string,
@@ -93,11 +110,14 @@ export function gitDirProblem(
   if (top === null || dir === null || common === null) {
     return "its git directory cannot be resolved";
   }
-  if (isInside(top, dir)) {
-    return dir === path.join(top, ".git")
-      ? null
-      : "its git directory lies inside the work tree and is not its .git";
+  const dotGit = isInside(top, dir) && dir === path.join(top, ".git");
+  if (isInside(top, dir) && !dotGit) {
+    return "its git directory lies inside the work tree and is not its .git";
   }
+  if (isInside(dir, top) || isInside(common, top)) {
+    return "its work tree lies inside its git directory";
+  }
+  if (dotGit) return null;
   return isInside(top, common)
     ? "its common git directory lies inside the work tree"
     : null;

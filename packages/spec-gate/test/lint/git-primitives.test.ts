@@ -493,7 +493,7 @@ describe("git runs scrubbed, bounded and silent", () => {
           .filter((l) => l !== "")
           .map((l) => l.split("\t").slice(0, -1));
 
-  it("drops every GIT_ variable of the caller and sets the five switches, the graft file among them", async () => {
+  it("drops every GIT_ variable of the caller and sets the six switches, the graft file and the empty transport list among them", async () => {
     const { repo, c1 } = await plainHistory();
     const { log } = shim();
     process.env["GIT_DIR"] = "/nonexistent";
@@ -509,7 +509,7 @@ describe("git runs scrubbed, bounded and silent", () => {
     expect(envs.length).toBeGreaterThan(0);
     for (const line of envs) {
       expect(line.trim()).toBe(
-        `GIT_GRAFT_FILE=${os.devNull} GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0`,
+        `GIT_ALLOW_PROTOCOL= GIT_GRAFT_FILE=${os.devNull} GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0`,
       );
     }
     const env = gitEnv();
@@ -518,6 +518,7 @@ describe("git runs scrubbed, bounded and silent", () => {
         .filter((k) => k.startsWith("GIT_"))
         .sort(),
     ).toEqual([
+      "GIT_ALLOW_PROTOCOL",
       "GIT_GRAFT_FILE",
       "GIT_NO_LAZY_FETCH",
       "GIT_NO_REPLACE_OBJECTS",
@@ -525,6 +526,7 @@ describe("git runs scrubbed, bounded and silent", () => {
       "GIT_TERMINAL_PROMPT",
     ]);
     expect(env["GIT_GRAFT_FILE"]).toBe(os.devNull);
+    expect(env["GIT_ALLOW_PROTOCOL"]).toBe("");
   });
 
   it("every call carries the same four overrides right after -C <dir>, before the subcommand", async () => {

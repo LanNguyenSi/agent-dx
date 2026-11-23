@@ -142,3 +142,61 @@ export function tempDir(prefix: string): string {
 }
 
 export const COMMANDS_FILE = ".spec-gate/commands.yaml";
+
+/**
+ * A directory with a `git` that runs the real one after it dropped the
+ * `-c <pair>` of each entry of `drop` and removed each variable of `unset`
+ * from the environment: a git that does not know a switch the package sets
+ * (an older git ignores `safe.bareRepository` and `GIT_NO_LAZY_FETCH`). The
+ * file `<dir>/calls.log` gets one tab-separated line per call, with the
+ * arguments git was given after the drop. Returns the directory and the
+ * `PATH` value that puts it first.
+ */
+export function shimGit(
+  parent: string,
+  options: { drop?: string[]; unset?: string[] } = {},
+): { dir: string; log: string; path: string } {
+  const dir = fs.mkdtempSync(path.join(parent, "git-shim-"));
+  const log = path.join(dir, "calls.log");
+  const real = fs.realpathSync(
+    ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"].find((p) =>
+      fs.existsSync(p),
+    )!,
+  );
+  const drops = (options.drop ?? []).map(
+    (pair) =>
+      `  if [ "$1" = "-c" ] && [ "$2" = ${JSON.stringify(pair)} ]; then shift 2; continue; fi`,
+  );
+  fs.writeFileSync(
+    path.join(dir, "git"),
+    [
+      "#!/bin/bash",
+      "args=()",
+      "while [ $# -gt 0 ]; do",
+      ...drops,
+      '  args+=("$1"); shift',
+      "done",
+      ...(options.unset ?? []).map((name) => `unset ${name}`),
+      `printf '%s\\t' "\${args[@]}" >> "${log}"`,
+      `printf '\\n' >> "${log}"`,
+      `exec "${real}" "\${args[@]}"`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return {
+    dir,
+    log,
+    path: `${dir}${path.delimiter}${process.env["PATH"] ?? ""}`,
+  };
+}
+
+/** The calls a `shimGit` logged, each as its argument list. */
+export function shimCalls(log: string): string[][] {
+  if (!fs.existsSync(log)) return [];
+  return fs
+    .readFileSync(log, "utf8")
+    .split("\n")
+    .filter((l) => l !== "")
+    .map((l) => l.split("\t").slice(0, -1));
+}

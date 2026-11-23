@@ -119,7 +119,7 @@ export function resolveGitInputs(
     ) {
       // A base the author could pick on a branch of their own would make
       // every ancestry check pass against history the author wrote.
-      return fail("--base is not on the default branch (--default-ref)");
+      return fail("--base is not on --default-ref");
     }
     const reference = baseCommit ?? defaultCommit!;
 

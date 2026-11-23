@@ -181,12 +181,15 @@ an unknown option) is reported by the option parser and exits non-zero too.
 The environment of every `git` call has no `GIT_*` variable of the caller, and
 sets `GIT_NO_REPLACE_OBJECTS`, so that a replace ref cannot change what a
 commit ID names, `GIT_GRAFT_FILE` (the null device), so that `info/grafts`
-cannot either, and `GIT_NO_LAZY_FETCH`, so that a read never goes to the
-network. Every call also carries four configuration overrides before the
-subcommand (`safe.bareRepository=explicit`, `core.fsmonitor=false`,
-`core.hooksPath` set to the null device and `protocol.allow=never`), so that
-the repository's own configuration starts no program and a bare repository is
-never found by walking up from the spec directory. A git call that is stopped
+cannot either, `GIT_ALLOW_PROTOCOL` (the empty string), so that no transport
+is started whatever `protocol.<name>.allow` the repository sets, and
+`GIT_NO_LAZY_FETCH`, so that a read of a partial clone does not ask the
+promisor remote for an object. Every call also carries four configuration
+overrides before the subcommand (`safe.bareRepository=explicit`,
+`core.fsmonitor=false`, `core.hooksPath` set to the null device and
+`protocol.allow=never`), so that the repository's own configuration starts no
+program and, with git 2.38 or newer, a bare repository is never found by
+walking up from the spec directory. A git call that is stopped
 by a signal is a `git-failed` error, never an exit status.
 
 The repository check. The repository, whether found from `<spec-dir>` or given
@@ -194,10 +197,17 @@ with `--repo`, must have the git directory a checkout has: `<top level>/.git`,
 or a directory outside the work tree (a linked worktree, a separate git
 directory) whose common directory is outside the work tree too. A git
 directory the work tree holds anywhere else is content a spec author can
-commit, so it is `repo-invalid`; this closes the case where a pull request
+commit, so it is `repo-invalid`, and so is a work tree that lies inside its git
+directory or its common directory; this closes the case where a pull request
 carries a git directory of its own that the default lookup from `<spec-dir>`
 would otherwise find first. A caller that cannot trust `<spec-dir>` names the
 checkout root with `--repo`.
+
+The protections rely on git 2.38 or newer: `safe.bareRepository=explicit`,
+which keeps a bare repository from being found by walking up, is known since
+that version, and an older git ignores it, so that only the layout check above
+stands. `GIT_NO_LAZY_FETCH` (git 2.44 and newer) is defence in depth next to
+`GIT_ALLOW_PROTOCOL`. The digest does not check the version.
 
 ## Golden fixtures
 

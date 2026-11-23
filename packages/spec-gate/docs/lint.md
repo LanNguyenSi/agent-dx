@@ -124,7 +124,7 @@ never reads a remote, so the same repository gives the same report.
 
 | Flag | Meaning |
 |---|---|
-| `--default-ref <ref>` | a full ref name under `refs/` (for example `refs/remotes/origin/main`), the fetched default branch; resolved to a commit once, offline. An annotated tag peels to its commit |
+| `--default-ref <ref>` | a full ref name under `refs/` (for example `refs/remotes/origin/main`): the remote-tracking ref of the pull request's target branch, fetched by the job; resolved to a commit once, offline. An annotated tag peels to its commit |
 | `--base <commit>` | the full id of the pull request base commit (a commit object; an abbreviation and the id of a tag object are refused) |
 | `--repo <dir>` | the trusted checkout root: a directory inside the git work tree to read; required with `--default-ref` and `--base`, never discovered from `<spec-dir>`; `<spec-dir>` must lie inside that work tree |
 
@@ -143,7 +143,7 @@ into full commit ids:
   against. With both flags `--base` wins, and `--default-ref` is still
   validated, so a bad value is never ignored; `--base` must then be an
   ancestor of the `--default-ref` commit, or equal to it (a usage error
-  otherwise: a base that is not on the default branch is a commit the author
+  otherwise: a base that is not on `--default-ref` is a commit the author
   could have put on a branch of their own).
 - the head: `HEAD` of the repository. The rules read committed state; the
   working tree is not diffed (the spec files themselves are read from the
@@ -161,7 +161,8 @@ that is not the full id of a commit in the repository, or not an ancestor of
 (or equal to) the `--default-ref` commit when both are given; a git input
 without `--repo`; a `--repo` with no path or outside a git work tree, or whose
 git directory lies inside the work tree anywhere but at `<top level>/.git` (or
-whose common git directory, for a linked worktree, lies inside it); a spec
+whose common git directory, for a linked worktree, lies inside it, or whose
+work tree lies inside its git directory or its common directory); a spec
 directory outside the repository; a
 repository without a commit at `HEAD`; a `HEAD` that shares no history with
 the reference commit; and `--config` together with git inputs. The message
@@ -169,13 +170,15 @@ names the flag, never git's output, an argument or a path.
 
 Every git call is an argument list (no shell) with a scrubbed environment (no
 `GIT_*` variable of the caller; `GIT_NO_REPLACE_OBJECTS`, `GIT_NO_LAZY_FETCH`,
-`GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0` and `GIT_GRAFT_FILE` set to the
-null device, so a replace ref or a graft file cannot change what an id means
-and a partial clone cannot fetch), four configuration overrides before the
-subcommand (`safe.bareRepository=explicit`, `core.fsmonitor=false`,
-`core.hooksPath` set to the null device and `protocol.allow=never`, so that the
-repository's own configuration starts no program and a bare repository is
-never found by walking up), a time limit of 30 seconds and an output cap of
+`GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0`, `GIT_GRAFT_FILE` set to the
+null device and `GIT_ALLOW_PROTOCOL` set to the empty string, so a replace ref
+or a graft file cannot change what an id means and no transport is started,
+whatever `protocol.<name>.allow` the repository sets), four configuration
+overrides before the subcommand (`safe.bareRepository=explicit`,
+`core.fsmonitor=false`, `core.hooksPath` set to the null device and
+`protocol.allow=never`, so that the repository's own configuration starts no
+program and, with git 2.38 or newer, a bare repository is never found by
+walking up), a time limit of 30 seconds and an output cap of
 4 MiB. A git that is stopped by a signal is never an exit status: it is a git
 call that could not run (`git-failed`), so a killed ancestry check never reads
 as "not an ancestor". A value from outside goes behind
@@ -192,9 +195,9 @@ repository state it is given.
 
 - `--repo` is the trusted checkout root: the directory the job's checkout step
   made, not a path taken from the spec or the pull request.
-- `--default-ref` is a remote-tracking ref of the default branch (for example
-  `refs/remotes/origin/main`, after a fetch the job made), or the base the host
-  event names, that the spec author cannot move. It is never a local branch
+- `--default-ref` is the remote-tracking ref of the pull request's target
+  branch (for example `refs/remotes/origin/main`, after a fetch the job made),
+  or the base the host event names, that the spec author cannot move. It is never a local branch
   and never the head of the pull request, and a ref the author can push to is
   the author's own input.
 - `--base` is the pull request base id from the host event (for example the
@@ -203,8 +206,16 @@ repository state it is given.
   ancestry checks compare, so `base_commit` and `commands_ref` report as not
   being commits, and the diff base may not be found.
 - The checkout is the one the job trusts: the lint refuses a git directory that
-  lies inside the work tree anywhere but at `.git`, but it does not vouch for
-  a checkout whose `.git` the pull request could have replaced.
+  lies inside the work tree anywhere but at `.git` (and a work tree that lies
+  inside its git directory), but it does not vouch for a checkout whose `.git`
+  the pull request could have replaced.
+- Git is 2.38 or newer. The protection against a repository found by walking
+  up from the spec directory relies on `safe.bareRepository=explicit`, which
+  git has known since 2.38; an older git ignores it and only the layout check
+  above stands. `GIT_NO_LAZY_FETCH` (git 2.44 and newer) is defence in depth:
+  a read never fetches because no transport is allowed
+  (`GIT_ALLOW_PROTOCOL`), whichever git version runs. The lint does not check
+  the version.
 
 A pull-request job, after checking out the merge or head commit with full
 history and fetching the default branch:
