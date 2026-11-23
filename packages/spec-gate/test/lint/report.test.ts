@@ -150,7 +150,7 @@ describe("report shape", () => {
       ...base,
       skipped: [
         { rule: "b-rule", reason: "gate" },
-        { rule: "a-rule", reason: "no-git" },
+        { rule: "a-rule", reason: "no-git", extra: "dropped" } as never,
       ],
     });
     expect(report.skipped).toEqual([

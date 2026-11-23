@@ -3,7 +3,7 @@
  * rules that apply, apply the acknowledgements and build the report.
  */
 import fs from "node:fs";
-import { applyAcks } from "./acks.js";
+import { ackTextProblem, applyAcks } from "./acks.js";
 import { loadAcks, loadInputs, type FindingSink } from "./load.js";
 import { resolveProfile } from "./profile.js";
 import { RULES, findRule, planRules } from "./registry.js";
@@ -47,9 +47,12 @@ function stamp(
   if (def === undefined) {
     throw new Error(`rule ${rule} is not in the registry`);
   }
-  if (def.ackable && finding.id === undefined) {
+  if (
+    def.ackable &&
+    (finding.id === undefined || ackTextProblem(finding.id) !== null)
+  ) {
     throw new Error(
-      `rule ${rule} is ackable and returned a finding without id`,
+      `rule ${rule} is ackable and returned a finding without an id an ack can name`,
     );
   }
   return { ...finding, rule, level: def.level };

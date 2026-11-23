@@ -43,6 +43,7 @@ const ENGINE_RULES: readonly RuleDef[] = [
     summary:
       "The triage class leads to no spec (unsuitable, decision, split, clarify).",
     needs: [],
+    uses: ["triage"],
   },
   {
     id: "profile-mismatch",
@@ -52,6 +53,7 @@ const ENGINE_RULES: readonly RuleDef[] = [
     ackable: false,
     summary: "`--profile` disagrees with the profile the triage class gives.",
     needs: [],
+    uses: ["triage"],
   },
   {
     id: "profile-default",

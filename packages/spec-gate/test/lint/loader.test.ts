@@ -297,6 +297,8 @@ describe("a named pipe in place of an input", () => {
         }),
       );
     },
+    // above the run limit, so the group kill fires before vitest gives up
+    30_000,
   );
 
   it("lint-ack refuses an acks.yaml that is a pipe and does not block", async () => {
@@ -308,5 +310,5 @@ describe("a named pipe in place of an input", () => {
     );
     expect(run.code).toBe(2);
     expect(run.stderr).toContain("lint-ack:");
-  });
+  }, 30_000);
 });

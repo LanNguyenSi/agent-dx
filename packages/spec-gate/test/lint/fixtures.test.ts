@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { RULES, lintSpecDir, type LintOptions } from "../../src/lint/index.js";
+import {
+  RULES,
+  ackTextProblem,
+  lintSpecDir,
+  type LintOptions,
+} from "../../src/lint/index.js";
 import { FIXTURES } from "./helpers.js";
 
 interface Expected {
@@ -86,7 +91,10 @@ describe("lint fixtures", () => {
       for (const f of all.filter((x) => x.rule === rule.id)) {
         expect(f.level).toBe(rule.level);
         // an ack matches on the id, so an ackable rule must always name one
-        if (rule.ackable) expect(f.id, `${rule.id} finding id`).toBeDefined();
+        if (rule.ackable) {
+          expect(f.id, `${rule.id} finding id`).toBeDefined();
+          expect(ackTextProblem(f.id), `${rule.id} finding id`).toBeNull();
+        }
       }
     });
   }

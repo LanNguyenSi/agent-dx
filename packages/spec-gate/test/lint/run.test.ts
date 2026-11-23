@@ -77,7 +77,21 @@ describe("an ackable rule must name its target", () => {
 
   it("a finding without an id is a contract violation and throws", () => {
     expect(() => lint(specDir(), [...RULES, noId])).toThrow(
-      /rule no-id is ackable and returned a finding without id/,
+      /rule no-id is ackable and returned a finding without an id an ack can name/,
+    );
+  });
+
+  it.each([
+    ["empty", ""],
+    ["blank", "  "],
+    ["multi-line", "AC-1\nAC-2"],
+  ])("a finding with an %s id is a contract violation and throws", (_n, id) => {
+    const badId = custom({
+      id: "bad-id",
+      check: () => [{ file: "spec.md", path: "$", id, message: "m" }],
+    });
+    expect(() => lint(specDir(), [...RULES, badId])).toThrow(
+      /rule bad-id is ackable and returned a finding without an id an ack can name/,
     );
   });
 
@@ -197,6 +211,17 @@ describe("ack-unused only for a rule that was evaluated", () => {
     expect(report.errors.map((f) => f.rule)).toContain("format");
     expect(unused(report)).toEqual([]);
     expect(skippedReason(report, "profile-default")).toBe("input-failed");
+  });
+
+  it("every triage-based engine rule is listed as skipped when triage.json failed", () => {
+    const report = lint(specDir({ "triage.json": "{ not json" }), RULES);
+    for (const rule of [
+      "profile-default",
+      "profile-mismatch",
+      "profile-no-spec",
+    ]) {
+      expect(skippedReason(report, rule), rule).toBe("input-failed");
+    }
   });
 
   it("profile-default acknowledged while --profile is given is unused: the rule ran", () => {

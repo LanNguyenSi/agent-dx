@@ -74,10 +74,11 @@ A finding is `{ rule, level, file, path, id?, line?, code?, message }`:
 status gate is closed), `input-absent` (an input the rule needs is not there),
 `input-failed` (an input the rule needs or uses did not parse or could not be
 read) and `no-git` (the rule needs a repository and none was given). A rule
-that was evaluated and found nothing is not listed. Reasons are checked in that
-order, except that a failed input is named before an absent one.
+that was evaluated and found nothing is not listed. Reasons are checked in the
+order `profile`, `gate`, `no-git`, `input-failed`, `input-absent`; the first
+that applies is the one named. `skipped` is sorted by rule id.
 
-Every list is sorted by `file`, `line` (a finding without a line first),
+`errors`, `warnings` and `acked` are each sorted by `file`, `line` (a finding without a line first),
 `path`, `rule`, `id` (none first) and `message`; strings compare by UTF-16 code
 unit. Usage errors go to stderr as text, never into the report.
 
