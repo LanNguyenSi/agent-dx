@@ -3,10 +3,13 @@
 `spec-gate lint <spec-dir>` checks a spec directory and prints one JSON
 report line. It is deterministic: the same files give the same report, byte
 for byte, and the report holds no absolute path and no time. The engine
-reads files only; it never runs a command and never reads the repository.
+reads the spec directory's files; it never runs a command, and it reads a git
+repository only when it is given a reference (see "Git inputs"), offline and
+read-only: it never fetches and never writes.
 
 ```
 spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>] [--config <path>]
+                          [--repo <dir>] [--default-ref <ref>] [--base <commit>]
 spec-gate lint-ack <spec-dir> <rule> <id> --reason <text>
 ```
 
@@ -19,9 +22,10 @@ spec-gate lint-ack <spec-dir> <rule> <id> --reason <text>
 | `bindings.yaml` | no | the bindings format |
 | `questions.json` | no | the questions format |
 | `triage.json` | no | the triage format; decides the profile |
-| `source/meta.json` | no (the full profile reports its absence through `ledger-complete`) | the source line list (`lines[]`, each `{ id, kind }`) |
+| `source/meta.json` | no (the full profile reports its absence through `ledger-complete`) | `base_commit` and `commands_ref` (each a full commit id, 40 or 64 lower-case hex digits, both required) and the source line list (`lines[]`, each `{ id, kind }`) |
 | `acks.yaml` | no | acknowledged warnings, see below |
-| the file given to `--config` | no | repo-wide settings in `.spec-gate/config.yaml` format; it sits outside the spec directory and is only read for `--config` |
+| the file given to `--config` | no | repo-wide settings in `.spec-gate/config.yaml` format; it sits outside the spec directory and is only read for `--config`, which cannot be combined with git inputs |
+| `.spec-gate/config.yaml` at the reference commit | no | the same settings, read from git instead of a path when git inputs are given; see "Git inputs" |
 
 Every read refuses a symlink and anything that is not a regular file (a file
 below a directory that is a link counts), refuses a file over 4 MiB, and
@@ -77,10 +81,25 @@ A finding is `{ rule, level, file, path, id?, line?, code?, message }`:
 (the rule does not run in the active profile), `gate` (a gated rule while the
 status gate is closed), `input-absent` (an input the rule needs is not there),
 `input-failed` (an input the rule needs or uses did not parse or could not be
-read) and `no-git` (the rule needs a repository and none was given). A rule
+read) and `no-git` (the rule needs a repository and no git input, neither
+`--default-ref` nor `--base`, was given). A rule
 that was evaluated and found nothing is not listed. Reasons are checked in the
 order `profile`, `gate`, `no-git`, `input-failed`, `input-absent`; the first
 that applies is the one named. `skipped` is sorted by rule id.
+
+A skipped rule did not look, so it is not a pass. Under `--final`, which is the
+run that gates `propose` and approval, every error rule skipped with reason
+`no-git` or `input-absent` adds one error finding of the engine rule
+`rule-skipped`: `file` and `path` are `$` (the run, not a file), `id` is the
+skipped rule's id, `code` is the reason, and the finding cannot be
+acknowledged. The reasons `profile` and `gate` are legitimate (the rule does
+not apply, and no gate is closed under `--final`), and `input-failed` already
+failed the run with the `file` or `format` error of the broken input, so none
+of them adds a finding. Warning rules never add one. The `skipped` list stays
+as it is. Without `--final` nothing changes. In practice a final run needs
+git inputs, and every optional file that an error rule needs, such as
+`triage.json` for `triage-stale` or `source/meta.json` for
+`meta-frontmatter-mismatch`, must be there.
 
 `errors`, `warnings` and `acked` are each sorted by `file`, `line` (a finding without a line first),
 `path`, `rule`, `id` (none first) and `message`; strings compare by UTF-16 code
@@ -92,10 +111,153 @@ unit. Usage errors go to stderr as text, never into the report.
 |---|---|
 | 0 | no error finding, and with `--strict` no unacknowledged warning |
 | 1 | the report has an error, or with `--strict` an unacknowledged warning |
-| 2 | a usage error (unknown option, missing argument, a bad `--profile` value, a `--config` value with no file name), a spec directory that is missing or not a directory, or an unexpected exception |
+| 2 | a usage error (unknown option, missing argument, a bad `--profile` value, a `--config` value with no file name or together with git inputs, a git input without `--repo` or that is refused, see "Git inputs"), a spec directory that is missing or not a directory, or an unexpected exception |
 
 Help and version exit 0. `lint-ack` exits 0 when it wrote an entry and 2 on any
 refusal.
+## Git inputs
+
+The reference-state rules compare what a spec names (`base_commit`,
+`commands_ref`) and what a spec change touches (`.spec-gate/`) with git. The
+caller gives the repository state; the lint never fetches, never writes and
+never reads a remote, so the same repository gives the same report.
+
+| Flag | Meaning |
+|---|---|
+| `--default-ref <ref>` | a full ref name under `refs/` (for example `refs/remotes/origin/main`): the remote-tracking ref of the pull request's target branch, fetched by the job; resolved to a commit once, offline. An annotated tag peels to its commit |
+| `--base <commit>` | the full id of the pull request base commit (a commit object; an abbreviation and the id of a tag object are refused) |
+| `--repo <dir>` | the trusted checkout root: a directory inside the git work tree to read; required with `--default-ref` and `--base`, never discovered from `<spec-dir>`; `<spec-dir>` must lie inside that work tree |
+
+Git inputs are given when `--default-ref` or `--base` is, and they need
+`--repo`: without it the run is a usage error. The repository is never found
+by walking up from `<spec-dir>`, because the spec author writes that
+directory, and a spec pull request can commit files that look like a git
+directory (`HEAD`, `objects/`, `refs/`, `config`, `info/grafts`) and so
+present a repository of its own choosing as the one to read. `--repo` alone is
+not a git input: the git rules are skipped with `no-git` (and fail a `--final`
+run, see above). Everything git needs is resolved once, before any rule runs,
+into full commit ids:
+
+- the reference commit: the `--base` commit when given, else the commit
+  `--default-ref` names. It is the commit the ancestry checks compare
+  against. With both flags `--base` wins, and `--default-ref` is still
+  validated, so a bad value is never ignored; `--base` must then be an
+  ancestor of the `--default-ref` commit, or equal to it (a usage error
+  otherwise: a base that is not on `--default-ref` is a commit the author
+  could have put on a branch of their own).
+- the head: `HEAD` of the repository. The rules read committed state; the
+  working tree is not diffed (the spec files themselves are read from the
+  working tree as always).
+- the diff base: `merge-base(HEAD, reference commit)`. A change made only on
+  the base side after the fork does not count against the spec change.
+  When several merge bases exist the one git names first is used; a change
+  from another side can then only be over-reported, never missed.
+
+A value that cannot be used is a usage error (exit 2, one line on stderr, no
+report), never a finding: a `--default-ref` that is not a valid full ref name
+under `refs/` (a short name, a leading dash, a name `git check-ref-format`
+refuses), that names no ref, or that does not lead to a commit; a `--base`
+that is not the full id of a commit in the repository, or not an ancestor of
+(or equal to) the `--default-ref` commit when both are given; a git input
+without `--repo`; a `--repo` with no path or outside a git work tree, or in a
+repository that is not the one the `.git` entry of its work tree names (see
+the repository check below); a spec
+directory outside the repository; a
+repository without a commit at `HEAD`; a `HEAD` that shares no history with
+the reference commit; and `--config` together with git inputs. The message
+names the flag, never git's output, an argument or a path.
+
+Every git call is an argument list (no shell) with a scrubbed environment (no
+`GIT_*` variable of the caller; `GIT_NO_REPLACE_OBJECTS`, `GIT_NO_LAZY_FETCH`,
+`GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0`, `GIT_GRAFT_FILE` set to the
+null device and `GIT_ALLOW_PROTOCOL` set to the empty string, so a replace ref
+or a graft file cannot change what an id means and no transport is started,
+whatever `protocol.<name>.allow` the repository sets), four configuration
+overrides before the subcommand (`safe.bareRepository=explicit`,
+`core.fsmonitor=false`, `core.hooksPath` set to the null device and
+`protocol.allow=never`, so that the repository's own configuration starts no
+program and, with git 2.38 or newer, a bare repository is never found by
+walking up), a time limit of 30 seconds and an output cap of
+4 MiB. A git that is stopped by a signal is never an exit status: it is a git
+call that could not run (`git-failed`), so a killed ancestry check never reads
+as "not an ancestor". A value from outside goes behind
+`--end-of-options`, and only full commit ids are passed on after they were
+resolved. A file is read at a commit by `ls-tree` first: the entry must be a
+regular file (a symbolic link, a submodule and a directory are refused, and a
+path below a link is not found), and only then is the blob read. Git's own
+messages never reach the report. A git call that cannot run or does not
+finish is an error finding of the rule that needed it (code `git-failed`), not
+a pass.
+
+The repository check. Git looks for the repository from `--repo` upwards, and
+the one it finds is used only when all of this holds, each part with its own
+usage error:
+
+1. `<top level>/.git` exists and is not a symbolic link.
+2. It leads to the git directory git found: it is that directory, or a
+   regular file `gitdir: <path>` whose path (a relative one counts from the
+   top level) is that directory.
+3. The common git directory is not inside the work tree, unless it is the
+   git directory and that is `<top level>/.git` itself.
+
+Git never checks out an entry named `.git`, so nothing a spec author commits
+can be the `.git` entry of a work tree: a git directory found by walking up
+into committed files (`HEAD`, `objects/` and `refs/` somewhere in the tree)
+fails part 1 or 2, wherever its `core.worktree` points. Every layout git
+makes itself passes: a plain checkout, a linked worktree (also one inside a
+bare repository), a separate git directory outside the work tree, a
+submodule. A submodule's repository is whichever one its URL names, and a pull
+request can set that URL, so `--repo` names the superproject root.
+
+What the caller must guarantee. The lint can only be as strict as the
+repository state it is given.
+
+- `--repo` is the trusted checkout root: the directory the job's checkout step
+  made, not a path taken from the spec or the pull request.
+- `--default-ref` is the remote-tracking ref of the pull request's target
+  branch (for example `refs/remotes/origin/main`, after a fetch the job made),
+  or the base the host event names, that the spec author cannot move. It is never a local branch
+  and never the head of the pull request, and a ref the author can push to is
+  the author's own input.
+- `--base` is the pull request base id from the host event (for example the
+  base sha of a `pull_request` event), a full commit id.
+- The full history is fetched. A shallow clone does not hold the commits the
+  ancestry checks compare, so `base_commit` and `commands_ref` report as not
+  being commits, and the diff base may not be found.
+- The checkout is the one the job trusts: the lint refuses a repository that
+  the `.git` entry of its work tree does not name (the repository check
+  above), but it does not vouch for a checkout whose `.git` the pull request
+  could have replaced, or that something other than git put on disk.
+- Git is 2.38 or newer. The protection against a repository found by walking
+  up from the spec directory relies on `safe.bareRepository=explicit`, which
+  git has known since 2.38; an older git ignores it and only the layout check
+  above stands. `GIT_NO_LAZY_FETCH` (git 2.45 and newer) is defence in depth:
+  a read never fetches because no transport is allowed
+  (`GIT_ALLOW_PROTOCOL`), whichever git version runs. The lint does not check
+  the version.
+
+A pull-request job, after checking out the merge or head commit with full
+history, fetches the pull request's target branch and names its
+remote-tracking ref (`PR_BASE_REF` is the name of the target branch and
+`PR_BASE_SHA` its commit, both from the host event):
+
+```
+git fetch origin "+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF"
+spec-gate lint specs/<id> --final \
+  --repo "$GITHUB_WORKSPACE" \
+  --default-ref "refs/remotes/origin/$PR_BASE_REF" \
+  --base "$PR_BASE_SHA"
+```
+
+The config. With git inputs `.spec-gate/config.yaml` is read at the reference
+commit, never from the working tree and never from the head of the spec pull
+request, so a pull request cannot change the limits it is checked against. A
+config that does not exist there means the format defaults. One that is a
+link, over 4 MiB, not UTF-8 or unreadable is a `file` finding, one that does
+not parse is a `format` finding, both naming `repo:.spec-gate/config.yaml`,
+and the rules still run on their defaults. Without git inputs `--config <path>`
+works as before; with git inputs it is a usage error.
+
 ## Profiles
 
 The profile comes from `triage.json`: the class its fields give when
@@ -133,8 +295,10 @@ draft.
 
 The table is generated from the registry in `src/lint/registry.ts`, and a test
 fails when it drifts. A rule is added by registering it there; the report shape
-does not change. Every registered rule needs a positive and a negative fixture
-under `test/fixtures/lint-<rule>/`, and a test checks that they exist.
+does not change. Every registered rule that does not need git has a positive
+and a negative fixture under `test/fixtures/lint-<rule>/`, and a test checks
+that they exist; the rules that need git are covered as described under
+"Writing a rule".
 
 <!-- BEGIN generated: rules -->
 | Rule | Level | Profiles | Gated | Ackable | Checks |
@@ -145,6 +309,7 @@ under `test/fixtures/lint-<rule>/`, and a test checks that they exist.
 | `profile-mismatch` | error | light, full | no | no | `--profile` disagrees with the profile the triage class gives. |
 | `profile-default` | warning | light, full | no | yes | No `triage.json` and no `--profile`: the full profile is used. Acknowledge with id `triage`. |
 | `ack-invalid` | error | light, full | no | no | An ack names an unknown rule, an error rule or a rule that cannot be acknowledged, or repeats an earlier ack. |
+| `rule-skipped` | error | light, full | no | no | Under --final, an error rule was skipped with reason no-git or input-absent: one error per rule, id the skipped rule's id, code the reason; a final run that did not look is not a pass. |
 | `ack-unused` | warning | light, full | no | no | A valid ack for a rule that ran in this run matches no current warning. |
 | `goal-count` | error | light, full | no | no | Exactly one GOAL line (form rule 1). |
 | `ac-coverage` | error | light, full | no | no | Every AC is covered by at least one test-plan row; required fields per kind are checked by the format layer (form rule 2). |
@@ -164,6 +329,11 @@ under `test/fixtures/lint-<rule>/`, and a test checks that they exist.
 | `prose` | warning | full | no | yes | No AC text, test-plan claim or expected contains a whole word of the fixed vague-word list in src/lint/prose.ts. Acknowledge with the AC or row ID. |
 | `question-budget` | warning | full | no | yes | The number of unanswered questions is at most questions.warn_above (default 7, set with --config). Acknowledge with id questions. |
 | `triage-stale` | error | light, full | no | no | triage.json stores the class its own fields derive and the current rule version; it runs in both profiles. |
+| `meta-frontmatter-mismatch` | error | light, full | no | no | base_commit and commands_ref in source/meta.json equal those in the spec.md frontmatter; it needs no repository and runs in both profiles. |
+| `base-commit-not-ancestor` | error | light, full | no | no | The frontmatter base_commit is the full id of a commit in the repository and an ancestor of the reference commit (the --base commit, else the --default-ref commit); a commit that exists only on the pull request head or a fork is an error. |
+| `commands-ref-not-ancestor` | error | light, full | no | no | The frontmatter commands_ref is the full id of a commit in the repository and an ancestor of the reference commit, checked like base_commit. |
+| `spec-changes-config` | error | light, full | no | no | No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count. |
+| `static-command-unknown` | error | light, full | no | no | Every static test-plan row's check_command_ref names a command of .spec-gate/commands.yaml at commands_ref; a missing or invalid command set there is an error, and the set is not read at a commands_ref that failed its ancestry check. |
 <!-- END generated: rules -->
 
 The form rules:
@@ -176,7 +346,7 @@ The form rules:
 - the Non-goals section is not empty.
 
 The content rules run in the full profile, except `triage-stale` which runs in
-both. Their families:
+both; the reference-state rules also run in both. Their families:
 
 Coverage. `df-coverage`: every DF whose parsed `affects_behavior` is `true`
 is named by at least one test-plan row's `covers`; a DF with `false` may
@@ -250,6 +420,47 @@ one that cannot be read is a `file` finding, both naming `file` as
 path given to `--config`; in both cases the budget falls back to the default of
 7 and the rule still runs. `--config ""` is a usage error: exit 2, one line
 on stderr, no report. The finding is ackable with id `questions`.
+
+Reference states. The five rules below check the revisions a spec names; none
+of them can be acknowledged. `meta-frontmatter-mismatch` needs no repository
+and runs in both profiles, like the others, because a reference state is not a
+matter of how much content a spec carries: `base_commit` and `commands_ref` in
+`source/meta.json` must equal those in the `spec.md` frontmatter, one error
+per field that differs. It needs `source/meta.json`: absent, it is skipped
+`input-absent` (the full profile reports the absence through `ledger-complete`),
+and failed (a missing or malformed commit id is a `format` error), skipped
+`input-failed`. The remaining four need git inputs and are skipped `no-git`
+without them.
+
+- `base-commit-not-ancestor` and `commands-ref-not-ancestor`: the
+  frontmatter value is the full id of a commit object in the repository and an
+  ancestor of the reference commit (`git merge-base --is-ancestor`; the
+  reference commit itself counts). "The commit exists" and "reachable from
+  `HEAD`" are not the test: a commit that exists only on the head of the pull
+  request, or on a fork, is the spec author's own input and is an error, even
+  when the head descends from it and `meta.json` names the same commit. Codes:
+  `not-a-commit` (absent, abbreviated, or the id of a tag object) and
+  `not-ancestor`. After a squash merge the commits of the pre-PR default
+  branch stay valid and a commit of the squashed pull request branch is not
+  an ancestor of the new tip, so it is an error.
+- `spec-changes-config`: no path at or below `.spec-gate/` differs between the
+  diff base and `HEAD`; one error per changed path, named `repo:<path>`
+  (control characters in a path print as `?`). The first path component is
+  compared without regard to case, after Unicode normalisation (NFC), so
+  `.Spec-Gate/commands.yaml` counts: on a case-insensitive file system it is
+  the same directory. The changed paths of the whole tree are listed and
+  matched in code, not by a pathspec. Renames are not detected, so a
+  moved file shows both paths, and no textconv or external diff program runs.
+- `static-command-unknown`: every test-plan row of kind `static` has a
+  `check_command_ref` that names a command of `.spec-gate/commands.yaml` at
+  `commands_ref`. The file is read at that commit only, never from the working
+  tree or the head. A missing or non-regular file there, a file that is not
+  valid UTF-8 and one that does not parse are one error each (codes
+  `commands-file-missing`, `commands-file-invalid`), and so is every row whose
+  name the set does not have (the finding names the row). The command set at a
+  `commands_ref` that failed `commands-ref-not-ancestor` is never read: the rule
+  then reports one error with code `commands-ref-untrusted`. A spec with no
+  static row needs no command set.
 
 Triage. `triage-stale`: a `triage.json` that stores a `class` must store
 the very class its own fields derive and the current `rule_version`; one
@@ -325,7 +536,13 @@ Declare the inputs the check reads:
 - `uses`: inputs the check reads when they are there. The rule runs when one
   is absent and is skipped only when one failed.
 
-A skip is not a pass and not a finding: the rule did not look. It shows in
-`skipped` with its reason, and acks for it stay quiet. A rule that reads the
-repository sets `needsGit` and is skipped with `no-git` when the run has no
-repository.
+A skip is not a pass and not a finding: the rule did not look (under
+`--final` an error rule skipped for `no-git` or `input-absent` becomes a
+`rule-skipped` error). It shows in `skipped` with its reason, and acks for it
+stay quiet. A rule that reads the repository sets `needsGit` and is skipped
+with `no-git` when the run has no git inputs; it reads them from `ctx.git`
+(resolved full commit ids, see "Git inputs") and calls the primitives in
+`src/lint/git/`, never `git` itself. A rule that needs git has no static
+fixture directory: its passing and failing cases are built from temporary
+repositories in `test/lint/git-rules.test.ts`, which has a guard that every
+such rule has both.

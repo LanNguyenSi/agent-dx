@@ -5,13 +5,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ackTextProblem, applyAcks } from "./acks.js";
+import { loadConfigAtReference } from "./git/config.js";
+import {
+  hasGitInputs,
+  resolveGitInputs,
+  type GitRequest,
+} from "./git/resolve.js";
 import { loadAcks, loadConfig, loadInputs, type FindingSink } from "./load.js";
 import { resolveProfile } from "./profile.js";
 import { RULES, findRule, planRules } from "./registry.js";
 import { buildReport } from "./report.js";
 import type {
   Finding,
-  GitInputs,
   LintReport,
   Mode,
   Profile,
@@ -26,14 +31,20 @@ export interface LintOptions {
   final?: boolean;
   /** Used when `triage.json` gives no profile; an error when it disagrees. */
   profile?: Profile;
-  /** The repository and base revision for rules that need them. */
-  git?: GitInputs;
+  /**
+   * The git flags for the rules that read the repository. With a default ref
+   * or a base commit the repository is read, offline and read-only, and
+   * `.spec-gate/config.yaml` is read at the reference commit; without one
+   * every rule that needs git is skipped. Resolved once, here.
+   */
+  git?: GitRequest;
   /**
    * A `.spec-gate/config.yaml`-format file, read for the rules that take
    * repo-wide settings. Absent: every rule uses its format default. A file
    * that cannot be read or parsed is a `file` or `format` finding and the
    * rules still run on their defaults. The empty string is a usage error:
-   * the run fails without a report.
+   * the run fails without a report, and so is a path together with git
+   * inputs (the config is read at the reference commit then).
    */
   configPath?: string;
 }
@@ -69,9 +80,10 @@ function stamp(
 
 /**
  * Lints one spec directory. `rules` defaults to the registry; a test passes
- * its own list. Returns a failure only when `specDir` is not a directory
- * or `configPath` names no file (empty, or a path without a file name);
- * every problem inside the directory is a finding.
+ * its own list. Returns a failure only on a usage error: `specDir` is not a
+ * directory, `configPath` names no file (empty, or a path without a file
+ * name) or comes with git inputs, or a git input does not resolve; every
+ * problem inside the directory is a finding.
  */
 export function lintSpecDir(
   specDir: string,
@@ -93,6 +105,16 @@ export function lintSpecDir(
   ) {
     return { ok: false, message: "--config needs a path" };
   }
+  if (options.configPath !== undefined && hasGitInputs(options.git)) {
+    return {
+      ok: false,
+      message:
+        "--config cannot be combined with --default-ref or --base: the config is read at the reference commit then",
+    };
+  }
+  const resolved = resolveGitInputs(specDir, options.git);
+  if (!resolved.ok) return { ok: false, message: resolved.message };
+  const git = resolved.git;
 
   const found: Finding[] = [];
   const sink: FindingSink = {
@@ -103,7 +125,9 @@ export function lintSpecDir(
   const config =
     options.configPath !== undefined
       ? loadConfig(options.configPath, sink)
-      : undefined;
+      : git !== undefined
+        ? loadConfigAtReference(git, sink)
+        : undefined;
 
   const mode: Mode = options.final === true ? "final" : "lint";
   const choice = resolveProfile(inputs.triage, options.profile);
@@ -115,13 +139,29 @@ export function lintSpecDir(
     status: spec?.frontmatter.status ?? null,
     profile: choice.profile,
     mode,
-    ...(options.git !== undefined ? { git: options.git } : {}),
+    ...(git !== undefined ? { git } : {}),
     ...(config?.state === "ok" ? { config: config.value } : {}),
   };
   const plan = planRules(rules, ctx);
   for (const rule of plan.evaluated) {
     if (rule.check === undefined) continue;
     for (const finding of rule.check(ctx)) sink.add(rule.id, finding);
+  }
+  if (mode === "final" && findRule(rules, "rule-skipped") !== undefined) {
+    for (const skip of plan.skipped) {
+      if (
+        (skip.reason === "no-git" || skip.reason === "input-absent") &&
+        findRule(rules, skip.rule)?.level === "error"
+      ) {
+        sink.add("rule-skipped", {
+          file: "$",
+          path: "$",
+          id: skip.rule,
+          code: skip.reason,
+          message: `the error rule ${skip.rule} was skipped (${skip.reason}) and a final run does not pass without it`,
+        });
+      }
+    }
   }
 
   const errors = found.filter((f) => f.level === "error");

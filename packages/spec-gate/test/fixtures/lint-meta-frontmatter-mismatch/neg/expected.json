@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "rule": "meta-frontmatter-mismatch",
+      "file": "source/meta.json",
+      "path": "commands_ref"
+    }
+  ],
+  "warnings": [],
+  "acked": []
+}

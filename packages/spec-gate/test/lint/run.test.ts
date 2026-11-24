@@ -8,6 +8,12 @@ import {
   type RuleDef,
   type RuleFinding,
 } from "../../src/lint/index.js";
+import {
+  SPEC_REL,
+  REMOTE_MAIN,
+  plainHistory,
+  specFiles,
+} from "./git-helpers.js";
 import { specDir } from "./helpers.js";
 
 const NO_TRIAGE = { "triage.json": null };
@@ -101,11 +107,22 @@ describe("an ackable rule must name its target", () => {
   });
 });
 
-/** Skips of rules other than the ones the registry itself gates at `draft`. */
+/** The rules the registry itself skips in a plain run: two gated at `draft`, four that need a repository. */
+const NEEDS_GIT = new Set([
+  "base-commit-not-ancestor",
+  "commands-ref-not-ancestor",
+  "spec-changes-config",
+  "static-command-unknown",
+]);
+const REGISTRY_SKIPS = new Set([
+  "binding-status",
+  "residual-open",
+  ...NEEDS_GIT,
+]);
+
+/** Skips of rules other than the ones the registry itself skips in a plain run. */
 const otherSkips = (report: LintReport) =>
-  report.skipped.filter(
-    (s) => s.rule !== "binding-status" && s.rule !== "residual-open",
-  );
+  report.skipped.filter((s) => !REGISTRY_SKIPS.has(s.rule));
 
 describe("ack-unused only for a rule that was evaluated", () => {
   const unused = (report: LintReport) =>
@@ -151,7 +168,13 @@ describe("ack-unused only for a rule that was evaluated", () => {
     expect(skippedReason(draft, "custom-rule")).toBe("gate");
     const final = lint(dir, [...RULES, gated], { final: true });
     expect(final.acked.map((f) => f.rule)).toEqual(["custom-rule"]);
-    expect(final.skipped).toEqual([]);
+    // only the rules that need a repository are left skipped under --final
+    expect(final.skipped.map((s) => s.reason)).toEqual([
+      "no-git",
+      "no-git",
+      "no-git",
+      "no-git",
+    ]);
   });
 
   it("input-absent: a rule that needs an input that is not there", () => {
@@ -193,17 +216,25 @@ describe("ack-unused only for a rule that was evaluated", () => {
     expect(otherSkips(report)).toEqual([]);
   });
 
-  it("no-git: a rule that needs a repository, evaluated once one is given", () => {
+  it("no-git: a rule that needs a repository, evaluated once one is given", async () => {
     const git = custom({ needsGit: true });
-    const dir = specDir({ "acks.yaml": ack("custom-rule") });
-    const without = lint(dir, [...RULES, git]);
+    const { repo, c1 } = await plainHistory();
+    await repo.commit(
+      {
+        ...specFiles({ base: c1, ref: c1 }),
+        [`${SPEC_REL}/acks.yaml`]: ack("custom-rule"),
+      },
+      "spec",
+    );
+    const without = lint(repo.spec, [...RULES, git]);
     expect(unused(without)).toEqual([]);
     expect(skippedReason(without, "custom-rule")).toBe("no-git");
-    const withGit = lint(dir, [...RULES, git], {
-      git: { repo: "r", base: "b" },
+    const withGit = lint(repo.spec, [...RULES, git], {
+      git: { repo: repo.dir, defaultRef: REMOTE_MAIN },
     });
     expect(withGit.acked.map((f) => f.rule)).toEqual(["custom-rule"]);
     expect(otherSkips(withGit)).toEqual([]);
+    expect(withGit.skipped.map((s) => s.reason)).toEqual(["gate", "gate"]);
   });
 
   it("an engine rule whose input failed: profile-default with an unparsable triage.json", () => {
@@ -243,7 +274,9 @@ describe("ack-unused only for a rule that was evaluated", () => {
     expect(skippedReason(report, "profile-default")).toBeUndefined();
     expect(skippedReason(report, "triage-stale")).toBe("input-absent");
     for (const s of report.skipped.filter((x) => x.rule !== "triage-stale")) {
-      expect(s.reason, s.rule).toBe("profile");
+      expect(s.reason, s.rule).toBe(
+        NEEDS_GIT.has(s.rule) ? "no-git" : "profile",
+      );
     }
   });
 
@@ -269,10 +302,20 @@ describe("ack-unused only for a rule that was evaluated", () => {
     const fullOnly = RULES.filter((r) => !r.profiles.includes("light")).map(
       (r) => r.id,
     );
-    expect(report.skipped.every((s) => s.reason === "profile")).toBe(true);
-    expect(report.skipped.map((s) => s.rule).sort()).toEqual(
+    // the rules that need a repository are not skipped for the profile
+    const profileSkips = report.skipped.filter((s) => s.reason !== "no-git");
+    expect(profileSkips.every((s) => s.reason === "profile")).toBe(true);
+    expect(profileSkips.map((s) => s.rule).sort()).toEqual(
       [...fullOnly].sort(),
     );
+    expect(
+      report.skipped.filter((s) => s.reason === "no-git").map((s) => s.rule),
+    ).toEqual([
+      "base-commit-not-ancestor",
+      "commands-ref-not-ancestor",
+      "spec-changes-config",
+      "static-command-unknown",
+    ]);
   });
 
   it("an invalid ack is still reported when its rule was skipped", () => {
@@ -290,10 +333,14 @@ describe("ack-unused only for a rule that was evaluated", () => {
 });
 
 describe("the skipped list", () => {
-  it("holds exactly the two status-gated rules when everything else ran", () => {
+  it("holds the two status-gated rules and the four rules that need a repository when everything else ran", () => {
     expect(lint(specDir(), RULES).skipped).toEqual([
+      { rule: "base-commit-not-ancestor", reason: "no-git" },
       { rule: "binding-status", reason: "gate" },
+      { rule: "commands-ref-not-ancestor", reason: "no-git" },
       { rule: "residual-open", reason: "gate" },
+      { rule: "spec-changes-config", reason: "no-git" },
+      { rule: "static-command-unknown", reason: "no-git" },
     ]);
   });
 
@@ -360,7 +407,7 @@ describe("the skipped list", () => {
 });
 
 describe("the engine hands the repository to a rule that needs it", () => {
-  it("options.git reaches the check of a needsGit rule", () => {
+  it("options.git reaches the check of a needsGit rule as resolved full commit ids", async () => {
     const git = custom({
       id: "git-test",
       level: "error",
@@ -370,14 +417,23 @@ describe("the engine hands the repository to a rule that needs it", () => {
         {
           file: "spec.md",
           path: "$",
-          message: `${ctx.git!.repo}@${ctx.git!.base}`,
+          message: [
+            path.isAbsolute(ctx.git!.repo),
+            ctx.git!.reference,
+            ctx.git!.diffBase,
+            ctx.git!.head,
+          ].join(" "),
         },
       ],
     });
-    const report = lint(specDir(), [...RULES, git], {
-      git: { repo: "r", base: "b" },
+    const { repo, c1 } = await plainHistory();
+    const head = await repo.commit(specFiles({ base: c1, ref: c1 }), "spec");
+    const report = lint(repo.spec, [...RULES, git], {
+      git: { repo: repo.dir, defaultRef: REMOTE_MAIN },
     });
-    expect(report.errors.map((f) => f.message)).toEqual(["r@b"]);
+    expect(
+      report.errors.filter((f) => f.rule === "git-test").map((f) => f.message),
+    ).toEqual([`true ${c1} ${c1} ${head}`]);
   });
 });
 

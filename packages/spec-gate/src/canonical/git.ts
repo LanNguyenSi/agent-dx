@@ -1,13 +1,22 @@
 /**
  * Reads from a git repository, and nothing else: `rev-parse`, `cat-file`
  * and `ls-tree`. The program is `git`, started with an argument list and no
- * shell. The package never runs anything the repository holds.
+ * shell, with the overrides of `git-hardening.ts` so that nothing the
+ * repository's own configuration names is run. The package never runs
+ * anything the repository holds.
  */
 import { spawnSync } from "node:child_process";
 import type { CommandSet, FormatError } from "../formats/index.js";
 import { parseCommandSet } from "../formats/index.js";
 import { COMMIT_RE } from "../formats/validate.js";
-import { DigestError } from "./errors.js";
+import { DigestError, type DigestErrorCode } from "./errors.js";
+import {
+  REPO_LAYOUT_ARGS,
+  applyGitSwitches,
+  gitConfigOverrides,
+  gitDirProblem,
+  parseRepoLayout,
+} from "./git-hardening.js";
 
 /** The one path in the repository the digest reads, at `commands_ref`. */
 export const COMMANDS_PATH = ".spec-gate/commands.yaml";
@@ -31,17 +40,12 @@ function gitEnv(): NodeJS.ProcessEnv {
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith("GIT_")) env[key] = value;
   }
-  env["GIT_TERMINAL_PROMPT"] = "0";
-  // A replace ref must not swap the content of the object a sha names.
-  env["GIT_NO_REPLACE_OBJECTS"] = "1";
-  // A partial clone must not fetch from the network during a read.
-  env["GIT_NO_LAZY_FETCH"] = "1";
-  env["GIT_OPTIONAL_LOCKS"] = "0";
+  applyGitSwitches(env);
   return env;
 }
 
 function git(cwd: string, args: string[]): GitRun {
-  const run = spawnSync("git", ["-C", cwd, ...args], {
+  const run = spawnSync("git", ["-C", cwd, ...gitConfigOverrides(), ...args], {
     env: gitEnv(),
     timeout: GIT_TIMEOUT_MS,
     killSignal: "SIGKILL",
@@ -60,8 +64,12 @@ function git(cwd: string, args: string[]): GitRun {
             : run.error.message;
     throw new DigestError("git-failed", why);
   }
+  if (run.status === null) {
+    // A signal is not an exit status: it must not read as a refusal.
+    throw new DigestError("git-failed", "git was stopped before it finished");
+  }
   return {
-    status: run.status ?? 1,
+    status: run.status,
     stdout: run.stdout,
     stderr: run.stderr.toString("utf8").trim(),
   };
@@ -71,28 +79,68 @@ function firstLine(text: string): string {
   return text.split("\n")[0] ?? "";
 }
 
-/** The top level of the work tree that holds `dir`. */
-export function repoToplevel(dir: string): string {
-  const run = git(dir, ["rev-parse", "--show-toplevel"]);
-  const top = run.stdout.toString("utf8").trim();
-  if (run.status !== 0 || top === "") {
+/**
+ * The top level of the work tree git finds from `dir`, once the repository
+ * it found there passed the layout check of `gitDirProblem`. The check is
+ * made on what this lookup reports, so a git directory found by walking up
+ * from `dir` is the one that is checked, wherever its `core.worktree`
+ * points. `outside` is the error for a `dir` that is in no work tree: its
+ * code, what to say when git gave no reason, and what the caller can do.
+ */
+function checkedToplevel(
+  dir: string,
+  outside: { code: DigestErrorCode; silent: string; advice: string },
+): string {
+  const run = git(dir, [...REPO_LAYOUT_ARGS]);
+  const layout =
+    run.status === 0 ? parseRepoLayout(run.stdout.toString("utf8")) : null;
+  if (layout === null) {
     throw new DigestError(
-      "repo-not-found",
-      `${dir} is not inside a git work tree (${firstLine(run.stderr) || "no top level"}); pass --repo <path>`,
+      outside.code,
+      `${dir} is not inside a git work tree (${firstLine(run.stderr) || outside.silent}); ${outside.advice}`,
     );
   }
-  return top;
-}
-
-/** Throws unless `repo` is a git repository. */
-export function assertRepo(repo: string): void {
-  const run = git(repo, ["rev-parse", "--git-dir"]);
-  if (run.status !== 0) {
+  const problem = gitDirProblem(
+    layout.toplevel,
+    layout.gitDir,
+    layout.commonDir,
+  );
+  if (problem !== null) {
     throw new DigestError(
       "repo-invalid",
-      `${repo} is not a git repository (${firstLine(run.stderr) || "git refused it"})`,
+      `${dir} is not in a plain git checkout: ${problem}`,
     );
   }
+  return layout.toplevel;
+}
+
+/**
+ * The top level of the work tree that holds `dir`, the spec directory. The
+ * repository found by walking up from it must pass the layout check: the
+ * spec author writes what lies above the spec directory too.
+ */
+export function repoToplevel(dir: string): string {
+  return checkedToplevel(dir, {
+    code: "repo-not-found",
+    silent: "no top level",
+    advice: "pass --repo <path>",
+  });
+}
+
+/**
+ * Throws unless `repo` is inside a git work tree whose git directory is the
+ * one the `.git` entry of that work tree names (see `gitDirProblem`): a
+ * plain checkout, a linked worktree, a separate git directory, a submodule.
+ * A git directory found any other way is content a spec author can commit,
+ * so it is refused. A bare repository and a git directory are not work
+ * trees and are refused too.
+ */
+export function assertRepo(repo: string): void {
+  checkedToplevel(repo, {
+    code: "repo-invalid",
+    silent: "git refused it",
+    advice: "a bare repository or a git directory is not accepted",
+  });
 }
 
 /**

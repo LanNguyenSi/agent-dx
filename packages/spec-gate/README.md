@@ -21,11 +21,17 @@ temporary file renamed into place, and prints the derivation; a
 written, is refused with a named error. The rule is documented in
 [docs/triage.md](docs/triage.md).
 
-`spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>] [--config <path>]`
+`spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>] [--config <path>] [--repo <dir>] [--default-ref <ref>] [--base <commit>]`
 checks a spec directory and prints one JSON report line (`spec-gate-lint/1`);
 it exits 0 without errors, 1 with findings (with `--strict`, also for
 unacknowledged warnings) and 2 on a usage error (including `--config` with an
-empty path). `spec-gate lint-ack <spec-dir>
+empty path or together with `--default-ref` or `--base`, and a git input that
+does not resolve). With `--default-ref <full ref name>` or `--base <full commit
+id>` it also checks the reference states of the spec against git, offline and
+read-only (it never fetches), in the repository `--repo <dir>` names, which is
+required with either flag and never discovered from `<spec-dir>`; without
+them those rules are skipped, and under `--final` a skipped error rule fails
+the run. `spec-gate lint-ack <spec-dir>
 <rule> <id> --reason <text>` acknowledges one warning in `acks.yaml`. The
 rules, the report, profiles and exit codes are described in
 [docs/lint.md](docs/lint.md); the code lives in `src/lint/`.
@@ -39,6 +45,8 @@ table and the revision each step reads each input at are described in
 ## Digest
 
 `spec-gate digest <spec-dir> [--repo <path>]` prints the digest of the
-normative layer of a spec directory. What goes in, what stays out, the
+normative layer of a spec directory, reading the commands from a git work
+tree whose git directory is the one a checkout has (a pull request cannot
+commit one of its own). What goes in, what stays out, the
 canonical form and the errors are described in [docs/digest.md](docs/digest.md).
 The code lives in `src/canonical/`.

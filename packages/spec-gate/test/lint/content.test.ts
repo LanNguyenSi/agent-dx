@@ -14,6 +14,10 @@ function lint(
   return result.report;
 }
 
+/** A `source/meta.json` with the valid reference commits and the given `lines` text. */
+const metaWith = (lines: string): string =>
+  `{ "base_commit": "0123456789abcdef0123456789abcdef01234567", "commands_ref": "0123456789abcdef0123456789abcdef01234567", "lines": ${lines} }`;
+
 const findingsOf = (report: LintReport, rule: string) =>
   [...report.errors, ...report.warnings].filter((f) => f.rule === rule);
 
@@ -302,8 +306,9 @@ describe("ledger-complete: ledger lines equal meta lines", () => {
 
   it("a meta line with no ledger entry is an error", () => {
     const report = lint({
-      "source/meta.json":
-        '{ "lines": [ { "id": "L1-0123456789ab", "kind": "text" }, { "id": "L2-000000000000", "kind": "text" } ] }',
+      "source/meta.json": metaWith(
+        '[ { "id": "L1-0123456789ab", "kind": "text" }, { "id": "L2-000000000000", "kind": "text" } ]',
+      ),
     });
     expect(findingsOf(report, "ledger-complete")).toEqual([
       expect.objectContaining({
@@ -317,7 +322,7 @@ describe("ledger-complete: ledger lines equal meta lines", () => {
 
   it("a ledger entry whose source line meta does not list is an error", () => {
     const report = lint({
-      "source/meta.json": '{ "lines": [] }',
+      "source/meta.json": metaWith("[]"),
     });
     expect(findingsOf(report, "ledger-complete")).toEqual([
       expect.objectContaining({

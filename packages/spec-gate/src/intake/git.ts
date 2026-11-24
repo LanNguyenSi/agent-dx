@@ -8,6 +8,10 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import {
+  applyGitSwitches,
+  gitConfigOverrides,
+} from "../canonical/git-hardening.js";
 import { IntakeError } from "./errors.js";
 
 /** Every `git` call gets this timeout, in milliseconds. */
@@ -18,7 +22,8 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
  * The environment of a git call: the caller's, without any `GIT_*` variable
  * (a leaked `GIT_DIR` would point the call at another repository, a leaked
  * `GIT_CONFIG_PARAMETERS` would rewrite a remote URL), plus switches that keep
- * the call non-interactive and exact.
+ * the call non-interactive and exact (no replace refs, no lazy fetch, no
+ * grafts).
  */
 export function gitEnv(
   base: NodeJS.ProcessEnv = process.env,
@@ -27,16 +32,11 @@ export function gitEnv(
   for (const [key, value] of Object.entries(base)) {
     if (!key.startsWith("GIT_")) env[key] = value;
   }
-  env["GIT_TERMINAL_PROMPT"] = "0";
-  // A replace ref must not swap the content of the object a sha names.
-  env["GIT_NO_REPLACE_OBJECTS"] = "1";
-  // A partial clone must not fetch from the network during a read.
-  env["GIT_NO_LAZY_FETCH"] = "1";
-  env["GIT_OPTIONAL_LOCKS"] = "0";
+  applyGitSwitches(env, { fetching: true });
   return env;
 }
 
-export type ProcessFailureKind = "spawn" | "timeout" | "output";
+export type ProcessFailureKind = "spawn" | "timeout" | "output" | "signal";
 
 /** A process that could not run to completion; `kind` says why. */
 export class ProcessFailure extends Error {
@@ -137,22 +137,37 @@ export function runProcess(
       );
     });
     child.on("close", (code) => {
-      settle(() =>
+      settle(() => {
+        if (code === null) {
+          // A signal is not an exit status: it must not read as a refusal.
+          reject(
+            new ProcessFailure(
+              "signal",
+              `${program} was stopped before it finished`,
+            ),
+          );
+          return;
+        }
         resolve({
-          status: code ?? 1,
+          status: code,
           stdout: Buffer.concat(chunks).toString("utf8"),
-        }),
-      );
+        });
+      });
     });
   });
 }
 
-/** One git call in `repoDir`; a failure to run is a `ProcessFailure`. */
+/**
+ * One git call in `repoDir`; a failure to run is a `ProcessFailure`. The
+ * calls carry the overrides every git call of the package carries, except
+ * `protocol.allow=never`: intake fetches from the remote on purpose.
+ */
 export function runGit(
   repoDir: string,
   args: readonly string[],
 ): Promise<ProcessRun> {
-  return runProcess("git", ["-C", repoDir, ...args], {
+  const overrides = gitConfigOverrides({ fetching: true });
+  return runProcess("git", ["-C", repoDir, ...overrides, ...args], {
     env: gitEnv(),
     timeoutMs: GIT_TIMEOUT_MS,
   });

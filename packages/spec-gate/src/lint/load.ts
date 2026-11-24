@@ -1,6 +1,6 @@
 /**
  * Loads the files of a spec directory into `LintInputs`. Git is never
- * involved. Every problem becomes a finding (`file` for a file that cannot
+ * involved here (the config at the reference commit is read in `git/config.ts`). Every problem becomes a finding (`file` for a file that cannot
  * be read, `format` for text that does not parse); nothing here throws.
  */
 import path from "node:path";
@@ -41,7 +41,7 @@ function idOfPath(path: string): string | undefined {
   return isId(head) ? head : undefined;
 }
 
-function formatFindings(
+export function formatFindings(
   sink: FindingSink,
   file: string,
   errors: readonly FormatError[],

@@ -9,6 +9,7 @@
 import { markdownCell } from "../formats/markdown.js";
 import { CONTENT_RULES } from "./rules/content.js";
 import { FORM_RULES } from "./rules/form.js";
+import { REF_RULES } from "./rules/refs.js";
 import type { RuleContext, RuleDef, SkipReason, SkippedRule } from "./types.js";
 
 export const RULE_ID_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
@@ -78,6 +79,16 @@ const ENGINE_RULES: readonly RuleDef[] = [
     needs: [],
   },
   {
+    id: "rule-skipped",
+    level: "error",
+    profiles: BOTH,
+    gated: false,
+    ackable: false,
+    summary:
+      "Under --final, an error rule was skipped with reason no-git or input-absent: one error per rule, id the skipped rule's id, code the reason; a final run that did not look is not a pass.",
+    needs: [],
+  },
+  {
     id: "ack-unused",
     level: "warning",
     profiles: BOTH,
@@ -94,6 +105,7 @@ export const RULES: readonly RuleDef[] = [
   ...ENGINE_RULES,
   ...FORM_RULES,
   ...CONTENT_RULES,
+  ...REF_RULES,
 ];
 
 export function findRule(

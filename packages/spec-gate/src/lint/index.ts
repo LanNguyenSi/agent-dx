@@ -9,3 +9,5 @@ export * from "./report.js";
 export * from "./load.js";
 export * from "./run.js";
 export { valueOf } from "./inputs.js";
+export * from "./git/resolve.js";
+export * from "./git/config.js";

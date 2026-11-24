@@ -1,7 +1,8 @@
 /**
- * `source/meta.json`, as far as lint reads it: the source line list. The
- * intake step writes the whole file; the reader here validates what the
- * rules need and, unlike the intake reader, never throws.
+ * `source/meta.json`, as far as lint reads it: the source line list and the
+ * two reference commits the intake step recorded. The intake step writes the
+ * whole file; the reader here validates what the rules need and, unlike the
+ * intake reader, never throws.
  */
 import {
   ErrorSink,
@@ -11,7 +12,12 @@ import {
   type ParseResult,
   type SourceLineKind,
 } from "../formats/index.js";
-import { describeType, hasOwn, isRecord } from "../formats/validate.js";
+import {
+  COMMIT_RE,
+  describeType,
+  hasOwn,
+  isRecord,
+} from "../formats/validate.js";
 
 export const SOURCE_LINE_KINDS: readonly SourceLineKind[] = [
   "text",
@@ -19,12 +25,22 @@ export const SOURCE_LINE_KINDS: readonly SourceLineKind[] = [
   "code",
 ];
 
-export interface SourceMetaLines {
+export interface LintSourceMeta {
+  /** Full commit ids, as in the `spec.md` frontmatter. */
+  base_commit: string;
+  commands_ref: string;
   lines: { id: string; kind: SourceLineKind }[];
 }
 
-/** Parses the text of a `source/meta.json`; validates `lines[]` only. */
-export function parseSourceMeta(text: string): ParseResult<SourceMetaLines> {
+/** The reference commits of `source/meta.json`, in the order they are checked. */
+export const META_COMMIT_FIELDS = ["base_commit", "commands_ref"] as const;
+
+/**
+ * Parses the text of a `source/meta.json`; validates `lines[]`,
+ * `base_commit` and `commands_ref` (a full commit id: 40 or 64 lower-case
+ * hex digits).
+ */
+export function parseSourceMeta(text: string): ParseResult<LintSourceMeta> {
   const decoded = parseJsonText(text);
   if (!decoded.ok) return decoded;
   const sink = new ErrorSink();
@@ -36,6 +52,29 @@ export function parseSourceMeta(text: string): ParseResult<SourceMetaLines> {
       `meta must be an object, got ${describeType(doc)}`,
     );
     return { ok: false, errors: sink.errors };
+  }
+  const commits: Record<string, string> = {};
+  for (const field of META_COMMIT_FIELDS) {
+    if (!hasOwn(doc, field)) {
+      sink.add("missing-field", field, `meta is missing ${field}`);
+      continue;
+    }
+    const value = doc[field];
+    if (typeof value !== "string") {
+      sink.add(
+        "wrong-type",
+        field,
+        `${field} must be a string, got ${describeType(value)}`,
+      );
+    } else if (!COMMIT_RE.test(value)) {
+      sink.add(
+        "invalid-value",
+        field,
+        `${field} must be a full commit id (40 or 64 lower-case hex digits), got ${JSON.stringify(value)}`,
+      );
+    } else {
+      commits[field] = value;
+    }
   }
   if (!hasOwn(doc, "lines")) {
     sink.add("missing-field", "lines", "meta is missing lines");
@@ -50,7 +89,7 @@ export function parseSourceMeta(text: string): ParseResult<SourceMetaLines> {
     );
     return { ok: false, errors: sink.errors };
   }
-  const lines: SourceMetaLines["lines"] = [];
+  const lines: LintSourceMeta["lines"] = [];
   const seen = new Set<string>();
   raw.forEach((entry: unknown, i) => {
     const at = `lines[${i}]`;
@@ -94,5 +133,12 @@ export function parseSourceMeta(text: string): ParseResult<SourceMetaLines> {
   if (sink.errors.length > 0) {
     return { ok: false, errors: sink.errors as FormatError[] };
   }
-  return { ok: true, value: { lines } };
+  return {
+    ok: true,
+    value: {
+      base_commit: commits["base_commit"]!,
+      commands_ref: commits["commands_ref"]!,
+      lines,
+    },
+  };
 }
