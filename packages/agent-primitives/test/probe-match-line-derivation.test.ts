@@ -1685,4 +1685,69 @@ describe("cli: probe -M without -n", () => {
     expect(envelope.status).toBe("usage_error");
     expect(envelope.message).toContain("--file is required");
   });
+
+  it("a -M derivation followed by a defaults-file refusal: --summary's note is the refusal, not the derivation notice", async () => {
+    const repo = makeRepo();
+    fs.writeFileSync(path.join(repo, ".agent-primitives.json"), "{ not json");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-M",
+      "n > 0",
+      "-w",
+      "true",
+      "-t",
+      "node fixture.test.js",
+      "-i",
+      "inplace",
+      "--summary",
+    ]);
+    expect(run.code).toBe(2);
+    // The derivation reached line 2 (the unique `n > 0`) and pushed its
+    // notice; the invalid repo defaults file refused right after the
+    // `line_required` guard. The note must name THAT refusal.
+    expect(run.stdout).toContain("reason=defaults_file_invalid");
+    const noteLine = run.stdout
+      .trimEnd()
+      .split("\n")
+      .find((line) => line.startsWith("note: "));
+    expect(noteLine).toBeDefined();
+    expect(noteLine).toContain(".agent-primitives.json");
+    expect(noteLine).toContain("not valid JSON");
+    expect(noteLine).not.toContain("derived from the unique");
+  });
+
+  it("the same defaults-file refusal with no derivation (a -r/-n run): --summary's note is unchanged", async () => {
+    const repo = makeRepo();
+    fs.writeFileSync(path.join(repo, ".agent-primitives.json"), "{ not json");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "node fixture.test.js",
+      "-i",
+      "inplace",
+      "--summary",
+    ]);
+    expect(run.code).toBe(2);
+    expect(run.stdout).toContain("reason=defaults_file_invalid");
+    const noteLine = run.stdout
+      .trimEnd()
+      .split("\n")
+      .find((line) => line.startsWith("note: "));
+    expect(noteLine).toBeDefined();
+    expect(noteLine).toContain(".agent-primitives.json");
+    expect(noteLine).toContain("not valid JSON");
+    expect(noteLine).not.toContain("derived from the unique");
+  });
 });

@@ -81,6 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose per-call bound equalled the budget could leave a sliver of budget
   after the first hanging call, start the next repository's call with it,
   and report that repository as unresolved instead of "was not run".
+- `probe --summary` printed the `-n/--line derived from the unique
+  -M/--match occurrence` notice as the `note:` of a refusal that happened
+  after that derivation, because the notice was the run's first warning.
+  The note now skips that notice and names the next warning (normally
+  the refusal's message); a refusal with no derivation keeps the note it
+  printed before.
 
 ## [0.22.1] - 2026-11-17
 

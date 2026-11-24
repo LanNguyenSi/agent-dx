@@ -57,6 +57,7 @@ import {
   type BaselineGateTarget,
   type RunSetupContext,
 } from "./setup.js";
+import { MATCH_LINE_DERIVATION_NOTICE_PREFIX } from "./summary.js";
 
 /**
  * The public surface of the probe pipeline: the CLI-facing option/result
@@ -869,7 +870,7 @@ async function runProbePipeline(
       if (hits.length === 1) {
         line = hits[0];
         warnings.push(
-          `-n/--line derived from the unique -M/--match occurrence: line ${String(line)} of ${displayFile}`,
+          `${MATCH_LINE_DERIVATION_NOTICE_PREFIX} line ${String(line)} of ${displayFile}`,
         );
       } else if (hits.length === 0) {
         return {
