@@ -1428,18 +1428,24 @@ The placement rule is a physical one plus one about errno codes. The path
 is resolved by a `realpath` walk that follows every symlinked component
 and applies each `..` to where the component before it physically
 points, exactly as the kernel opens the path (keeping the case it was
-given, as the JavaScript `realpath` does); when that fails with `ENOENT`, `ENOTDIR` or `ELOOP`, the path
-is placed by its deepest existing prefix, resolved the same way, plus the
-missing tail verbatim. A `..` in that tail would climb from a component
-that does not resolve (`missing/../x`, `dangling-link/../x`), so such a
-path is not placed at all and is not read as inside the root. The same
-holds for a tail the kernel could still follow: the walk follows at most
-64 links for the whole path, and a path that fails only on that budget
-(64 `l -> .` steps ahead of a symlinked component, say) is refused rather
-than placed at a shorter spelling whose tail is still a live link. Any
-other failure (`EACCES`, `ENAMETOOLONG`, `EIO`, ...) means probe cannot
-say where the path is, and it is not read as inside the root. The case
-that motivated it: a symlink whose own mode is 000 (`lchmod`, macOS only)
+given, as the JavaScript `realpath` does); when that fails with `ENOENT` or `ENOTDIR`
+(the walk reached a name that is missing, or one below something that is
+not a directory), the path is placed by its deepest existing prefix,
+resolved the same way, plus the missing tail verbatim. A `..` in that
+tail would climb from a component that does not resolve
+(`missing/../x`, `dangling-link/../x`), so such a path is not placed at
+all and is not read as inside the root. Any
+other failure (`EACCES`, `ENAMETOOLONG`, `EIO`, `ELOOP`, ...) means probe cannot
+say where the path is: it is not read as inside the root, and it is never
+placed at a shorter spelling instead. `ELOOP` is the walk's own limit. It
+follows at most 64 links for the whole path and refuses a path that needs
+more, a symlink cycle and a merely long path alike (64 `l -> .` steps
+ahead of a symlinked component, say), because the kernel counts links
+afresh for a shorter spelling and may still follow what the walk stopped
+at; probe does not try to predict whether it would. A `--file` that is a
+symlink cycle, or sits below one, is therefore answered
+`file_outside_root`, not `file_not_found`. The case
+that motivated the errno rule: a symlink whose own mode is 000 (`lchmod`, macOS only)
 still opens through to its target, yet `realpath` fails on it with
 `EACCES`. `--file` naming such a link, or sitting below one, is answered
 `file_outside_root` with and without `-n`, under `inplace` and `worktree`
@@ -1466,7 +1472,11 @@ recorded spelling. What the rule does NOT establish: a `--file` that is
 itself a dangling symlink is still judged where the link sits, not where
 it points, so for a dangling link to an outside path the answer
 (`file_not_found` inside the root, `file_outside_root` once the outside
-path exists) still depends on whether that path exists. A `--link` value carrying a
+path exists) still depends on whether that path exists. The same holds on
+Linux for a link into `/proc` that the kernel follows by handle rather
+than by the text `readlink` returns for it (`/proc/<pid>/fd/<n>`,
+`/proc/<pid>/cwd`, `/proc/<pid>/root`): where that text names nothing, or
+another place, the link is judged by the text. A `--link` value carrying a
 `$(...)` command substitution or a backtick is refused outright
 (`InvalidArgumentError`, before anything runs) rather than merely being
 inert the way it already is for `-p`/`--file` above: the same rule

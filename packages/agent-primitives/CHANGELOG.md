@@ -40,7 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fails its `mkdir` with `EACCES`), and `--allow-outside` with `-i worktree`
   answers `file_outside_root` for such a path instead of
   `worktree_allow_outside_unsupported`. The two `..`-through-a-symlink
-  shapes this rule left open are closed by the next entry.
+  shapes this rule left open are closed by the next entry, which also
+  takes `ELOOP` out of the fallback.
 - `probe` no longer judges a path whose `..` climbs out of a symlinked
   directory at its lexical spelling. `resolveDeepestExisting` used the
   JavaScript `fs.realpathSync`, which collapses `..` before it looks
@@ -53,10 +54,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps the case it is given, as the link policy's alias checks need),
   and on a missing path places the deepest existing prefix the same way;
   a `..` after a component that does not resolve is refused
-  (`UnresolvablePathError`) instead of collapsed, and so is a path that
-  fails only on the walk's 64-link budget while the rest of it would
-  still resolve. Such a `--file` is
+  (`UnresolvablePathError`) instead of collapsed. A missing path means
+  `ENOENT` or `ENOTDIR` only: a path the walk gives up on at its own
+  64-link budget, a symlink cycle included, is refused as well and no
+  longer placed at a shorter spelling, since the kernel counts links
+  afresh for that spelling and may still follow it (a marker path spelled
+  through 64 `l -> .` steps ahead of a symlinked `wt-<uuid>` was judged
+  inside the log dir that way). Such a `--file` is
   answered `file_outside_root` with nothing outside read or written.
+  Answers that change for a symlink cycle, all still exit `2`: a `--file`
+  or a cwd that is one or sits below one answers `file_outside_root`
+  instead of `file_not_found`, a `--link` below one answers
+  `file_outside_root` instead of `link_source_not_found`, and a
+  `--log-dir` below one under `-i worktree` answers `file_outside_root`
+  instead of failing its `mkdir` with `ELOOP`.
   `resolveDeepestExistingLenient` runs the same placement and differs
   only in never throwing, so the two never spell a path both can place
   differently. The worktree cleanup gate refuses a leftover
@@ -69,7 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the gate runs git no longer redirects the delete. The isolation
   copy's own root and `init`'s directory check after `mkdir` use the
   same walk. A `--file` that is itself a dangling symlink is still
-  judged where the link sits; that shape stays open.
+  judged where the link sits, and so is, on Linux, a link into `/proc`
+  whose `readlink` text names nothing while the kernel follows it by
+  handle; both shapes stay open.
 
 ### Added
 

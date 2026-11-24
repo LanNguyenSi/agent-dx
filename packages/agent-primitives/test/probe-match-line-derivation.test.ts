@@ -961,9 +961,11 @@ describe("probe(): the layers in front of the derivation guard (isolation, path 
       reason: "file_not_found",
     },
     {
+      // Not placed at all: the walk ran out of its link budget, and a
+      // path past that budget is refused rather than judged where it sits.
       name: "a symlink loop",
       options: () => ({ file: "loop-a.js" }),
-      reason: "file_not_found",
+      reason: "file_outside_root",
     },
     {
       name: "a missing file",

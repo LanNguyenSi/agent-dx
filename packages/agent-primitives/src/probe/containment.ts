@@ -76,12 +76,19 @@ export class UnresolvablePathError extends Error {
   }
 }
 
-/** The failures `resolveDeepestExisting` walks up from: the path (or an
- * ancestor) does not exist, an ancestor is not a directory, or the chain
- * is a symlink cycle. Every other code (`EACCES`, `EPERM`, `EIO`, ...)
- * says the path may well exist and be reachable by the kernel while this
- * process cannot place it, and throws. */
-const UNPLACED_PATH_CODES = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
+/** The failures `resolveDeepestExisting` walks up from: a name the walk
+ * itself looked up under a placed directory and found missing (`ENOENT`),
+ * or one that sits below something that is not a directory (`ENOTDIR`).
+ * The kernel reaches that same name from the placed prefix and stops
+ * there too. Every other failure throws. `EACCES`, `EPERM`, `EIO`,
+ * `ENAMETOOLONG` and the like say the path may well exist and be
+ * reachable by the kernel while this process cannot place it. `ELOOP`
+ * is on that side as well: the walk raises it itself once it has
+ * followed `MAX_LINK_SOURCE_HOPS` links in one path, a count the kernel
+ * does not share (it starts again at zero for the shorter spelling a
+ * walk-up would return), so the walk cannot say that the component it
+ * stopped at is dead for the kernel, and does not try to. */
+const UNPLACED_PATH_CODES = new Set(["ENOENT", "ENOTDIR"]);
 
 /**
  * `realpath`, walked physically: every symlinked component, the last one
@@ -176,23 +183,36 @@ function walkPhysical(
  * root was placed at `<root>/two.js` while the kernel opens
  * `<outside>/two.js`.
  *
- * The walk-up is for a path that does not exist (`ENOENT`, `ENOTDIR`)
- * or cannot be followed at all (`ELOOP`) only, and the re-appended tail
- * must be dead for the kernel as well: its first component has to fail
- * on its own under the placed prefix. A path that only exceeds the walk's
- * budget of `MAX_LINK_SOURCE_HOPS` links (64 `l -> .` steps ahead of a
- * symlinked `wt-<uuid>`, say) fails here for a component the kernel
- * would still follow from the shorter spelling, and is refused with
- * `UnresolvablePathError` rather than placed. Any other failure throws
- * `UnresolvablePathError` instead: a symlink whose own mode is 000
- * (`lchmod`, macOS) cannot be read (`EACCES`) while the kernel still
- * follows the link for `stat` and `open`, and falling back to "the
- * parent's realpath plus the link's own name" would place a link that
- * points OUTSIDE the root inside it. Every caller that decides whether
- * a run may read, write or delete what the path names (`probe`,
- * `probe --plan`, the link policy, `init`'s target, the worktree cleanup
- * gate) uses this function, handles the error as a refusal or a skip,
- * and then acts on the very spelling it judged.
+ * The walk-up is for a path that does not exist only: the walk reached
+ * a name under a placed directory and the filesystem answered `ENOENT`
+ * or `ENOTDIR` for it, which is the answer the kernel gets for the same
+ * name from the same directory. Any other failure throws
+ * `UnresolvablePathError`, and nothing is re-appended. That covers a
+ * path the walk gives up on at its own budget of `MAX_LINK_SOURCE_HOPS`
+ * links, a symlink cycle and a merely long path alike (64 `l -> .`
+ * steps ahead of a symlinked `wt-<uuid>`, say): the kernel counts links
+ * from zero for the shorter spelling a walk-up would return and may
+ * well follow the component the walk stopped at, and whether it does is
+ * not something this function predicts. It also covers a symlink whose
+ * own mode is 000 (`lchmod`, macOS), which cannot be read (`EACCES`)
+ * while the kernel still follows it for `stat` and `open`, and a
+ * location whose absolute spelling is longer than `PATH_MAX`
+ * (`ENAMETOOLONG`), which the kernel still reaches one relative link at
+ * a time: falling back to "the parent's realpath plus the link's own
+ * name" would place a link that points OUTSIDE the root inside it.
+ *
+ * Still placed where it sits, not where the kernel may take it: a
+ * symlink the walk can read but whose target it cannot find. A create
+ * through a dangling link lands where the link points, and on Linux a
+ * link into `/proc` that the kernel follows by handle
+ * (`/proc/<pid>/fd/<n>`, `cwd`, `root`) can be live while the text
+ * `readlink` returns for it names nothing, or another place.
+ *
+ * Every caller that decides whether a run may read, write or delete
+ * what the path names (`probe`, `probe --plan`, the link policy,
+ * `init`'s target, the worktree cleanup gate) uses this function,
+ * handles the error as a refusal or a skip, and then acts on the very
+ * spelling it judged.
  * `resolveDeepestExistingLenient` is for the callers that only report
  * on, list or bookkeep a path (`doctor`, the registered-worktree
  * listings and the leftover dedupe, the ancestor-mode capture, `init`'s
@@ -261,35 +281,10 @@ function placeDeepestExisting(p: string, lenient: boolean): string {
         ),
       );
     }
-    // The tail is re-appended verbatim, so it must be dead for the
-    // kernel too: its first component must fail on its own under the
-    // placed prefix. It does for a missing name, a name below a file and
-    // a genuine cycle. One that resolves alone failed only on this walk's
-    // link budget, which counts the whole path, and the kernel would
-    // follow it from the shorter spelling returned here.
-    if (!lenient && tail.length > 0 && resolvesAlone(placed, tail[0])) {
-      throw new UnresolvablePathError(
-        p,
-        new Error(
-          `${tail[0]} resolves on its own below ${placed}; the path only exceeds the ${String(MAX_LINK_SOURCE_HOPS)}-link budget`,
-        ),
-      );
-    }
     return joinComponents(placed, tail);
   }
   // Not even the filesystem root resolved.
   return joinComponents(root, components);
-}
-
-/** Whether `name` resolves physically under the placed directory `dir`
- * when walked alone, with a budget of its own. */
-function resolvesAlone(dir: string, name: string): boolean {
-  try {
-    walkPhysical(dir, [name], { links: 0 });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** `components` appended under `dir` as plain strings, never through

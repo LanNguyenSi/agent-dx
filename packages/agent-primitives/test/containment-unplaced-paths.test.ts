@@ -25,7 +25,7 @@ import { expectNoIsolationLeftovers } from "./helpers/no-leftovers.js";
 /**
  * What the callers of `resolveDeepestExisting` do with a path this
  * process cannot place physically (`realpath` fails with something other
- * than `ENOENT`, `ENOTDIR` or `ELOOP`):
+ * than `ENOENT` or `ENOTDIR`):
  *
  * - the callers that decide what a run may read, write or delete refuse
  *   it (probe, probe --plan, init, the worktree cleanup gate);

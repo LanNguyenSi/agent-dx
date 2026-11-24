@@ -39,8 +39,74 @@ function makeTmpDir(): string {
   return dir;
 }
 
+/** Removal of the directory chains `deepLink` builds: they are longer
+ * than `PATH_MAX`, which a recursive remove by absolute path cannot
+ * reach on every Node version, so each is taken down from the inside. */
+const deepTeardowns: (() => void)[] = [];
+
+const canLchmod =
+  typeof fs.lchmodSync === "function" && process.getuid?.() !== 0;
+
+/**
+ * `<dir>/<name>`, a symlink whose physical location is longer than
+ * `PATH_MAX` and ends at `victim`: a chain of 200-character directories
+ * below `dir`, entered through relative links (`<name>` -> `m` -> `m` ->
+ * `out` -> `victim`) that each stay well below `PATH_MAX`. The kernel
+ * follows them one at a time, each relative to the directory it sits in;
+ * an `lstat` of the absolute spelling of the last stretch fails with
+ * `ENAMETOOLONG`.
+ */
+function deepLink(dir: string, victim: string, name: string): void {
+  const segment = "a".repeat(200);
+  const pathMax = process.platform === "darwin" ? 1024 : 4096;
+  const perHop = Math.floor(pathMax / 2 / (segment.length + 1));
+  const hops = 3;
+  const stretch = `${segment}/`.repeat(perHop);
+  const saved = process.cwd();
+  deepTeardowns.push(() => {
+    try {
+      process.chdir(dir);
+      let depth = 0;
+      while (fs.existsSync(segment)) {
+        process.chdir(segment);
+        depth++;
+      }
+      for (; depth > 0; depth--) {
+        for (const link of ["m", "out"]) fs.rmSync(link, { force: true });
+        process.chdir("..");
+        fs.rmdirSync(segment);
+      }
+    } finally {
+      process.chdir(saved);
+    }
+  });
+  try {
+    process.chdir(dir);
+    for (let hop = 0; hop < hops; hop++) {
+      for (let i = 0; i < perHop; i++) {
+        fs.mkdirSync(segment);
+        process.chdir(segment);
+      }
+      if (hop === hops - 1) fs.symlinkSync(victim, "out");
+      else fs.symlinkSync(`${stretch}${hop === hops - 2 ? "out" : "m"}`, "m");
+    }
+  } finally {
+    process.chdir(saved);
+  }
+  fs.symlinkSync(`${stretch}m`, path.join(dir, name));
+}
+
+/** Whether `spelling` names the very directory `expected` does, to the
+ * kernel: the same device and inode. */
+function sameDirectory(spelling: string, expected: string): boolean {
+  const a = fs.statSync(spelling);
+  const b = fs.statSync(expected);
+  return a.dev === b.dev && a.ino === b.ino;
+}
+
 let savedLockDir: string | undefined;
 afterEach(() => {
+  for (const teardown of deepTeardowns.splice(0)) teardown();
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -266,9 +332,20 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
     expect(
       resolveDeepestExisting(path.join(fx.repo, "fixture.js", "child.js")),
     ).toBe(path.join(repo, "fixture.js", "child.js"));
-    expect(resolveDeepestExisting(path.join(fx.repo, "loop-a.js"))).toBe(
-      path.join(repo, "loop-a.js"),
-    );
+  });
+
+  it("a symlink cycle is refused by the strict one, as any path past the link budget is, and placed where it sits by the lenient one", () => {
+    const fx = fixture();
+    const repo = fs.realpathSync.native(fx.repo);
+    for (const name of ["loop-a.js", path.join("loop-b.js", "below.js")]) {
+      const spelling = path.join(fx.repo, name);
+      expect(() => resolveDeepestExisting(spelling)).toThrow(
+        UnresolvablePathError,
+      );
+      expect(resolveDeepestExistingLenient(spelling)).toBe(
+        path.join(repo, name),
+      );
+    }
   });
 
   it("a relative spelling is spliced onto the current directory and its .. still placed physically", () => {
@@ -300,7 +377,7 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
     return { base, head: path.join(base, previous) };
   }
 
-  it("the walk's link budget: exactly 64 links resolve, and a 65th that the kernel would follow from the shorter spelling is refused, never re-appended", () => {
+  it("the walk's link budget: exactly 64 links resolve, and a 65th is refused, never re-appended below the 64 that were placed", () => {
     const at64 = chain(64);
     expect(resolveDeepestExisting(at64.head)).toBe(
       path.join(at64.base, "real"),
@@ -312,6 +389,10 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
     // re-appending `s` verbatim would name `<base>/far` to the kernel.
     expect(() => resolveDeepestExisting(path.join(at64.head, "s"))).toThrow(
       UnresolvablePathError,
+    );
+    // The lenient one never throws and keeps that shorter spelling.
+    expect(resolveDeepestExistingLenient(path.join(at64.head, "s"))).toBe(
+      path.join(at64.base, "real", "s"),
     );
     const at63 = chain(63);
     expect(resolveDeepestExisting(path.join(at63.head, "s"))).toBe(
@@ -339,6 +420,78 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
       }
     }
   });
+
+  /** `<base>/log` with `l -> .`, and `<base>/victim/wt`. */
+  function logAndVictim(): { log: string; victim: string } {
+    const base = makeTmpDir();
+    const log = path.join(base, "log");
+    const victim = path.join(base, "victim");
+    fs.mkdirSync(log);
+    fs.mkdirSync(path.join(victim, "wt"), { recursive: true });
+    fs.symlinkSync(".", path.join(log, "l"));
+    return { log, victim };
+  }
+
+  /** The strict resolver's error for `spelling`, or `undefined`. */
+  function refusal(spelling: string): unknown {
+    try {
+      resolveDeepestExisting(spelling);
+    } catch (err) {
+      return err;
+    }
+    return undefined;
+  }
+
+  it("a link whose physical location is longer than PATH_MAX is refused, and no less so behind a spent link budget: the kernel follows it either way", () => {
+    const { log, victim } = logAndVictim();
+    deepLink(log, victim, "U");
+    // The shape is live: the kernel reaches <victim>/wt through it.
+    expect(
+      sameDirectory(path.join(log, "U", "wt"), path.join(victim, "wt")),
+    ).toBe(true);
+    for (const [steps, code] of [
+      [0, "ENAMETOOLONG"],
+      // `U` is the 64th link and the first link of its target the 65th.
+      [63, "ELOOP"],
+      // `U` itself is the 65th link.
+      [64, "ELOOP"],
+    ] as const) {
+      const spelling = `${log}/${"l/".repeat(steps)}U/wt`;
+      const thrown = refusal(spelling);
+      expect(thrown).toBeInstanceOf(UnresolvablePathError);
+      expect((thrown as UnresolvablePathError).code).toBe(code);
+      // The lenient one never throws: it keeps the spelling inside
+      // <log>, which is why nothing that acts on a path may use it.
+      expect(resolveDeepestExistingLenient(spelling)).toBe(
+        path.join(log, "U", "wt"),
+      );
+    }
+  });
+
+  it.skipIf(!canLchmod)(
+    "a symlink whose own mode is 000 is refused, and no less so behind a spent link budget: the kernel follows it either way",
+    () => {
+      const { log, victim } = logAndVictim();
+      fs.symlinkSync(victim, path.join(log, "U"));
+      fs.lchmodSync(path.join(log, "U"), 0o000);
+      expect(
+        sameDirectory(path.join(log, "U", "wt"), path.join(victim, "wt")),
+      ).toBe(true);
+      for (const [steps, code] of [
+        [0, "EACCES"],
+        [63, "EACCES"],
+        [64, "ELOOP"],
+      ] as const) {
+        const spelling = `${log}/${"l/".repeat(steps)}U/wt`;
+        const thrown = refusal(spelling);
+        expect(thrown).toBeInstanceOf(UnresolvablePathError);
+        expect((thrown as UnresolvablePathError).code).toBe(code);
+        expect(resolveDeepestExistingLenient(spelling)).toBe(
+          path.join(log, "U", "wt"),
+        );
+      }
+    },
+  );
 
   const caseInsensitiveTmp = (() => {
     const probeDir = fs.mkdtempSync(
@@ -524,6 +677,54 @@ describe("the worktree cleanup gate judges the physical location and removes exa
         fs.readFileSync(path.join(victim, "wt", "docs", "thesis.txt"), "utf8"),
       ).toBe("keep\n");
     });
+  }
+
+  for (const shape of [
+    "a link to an over-PATH_MAX location",
+    "a mode-000 link",
+  ] as const) {
+    for (const steps of [0, 64]) {
+      it.skipIf(shape === "a mode-000 link" && !canLchmod)(
+        `a recorded path whose wt-<uuid> is ${shape} the walk cannot read but the kernel follows, behind ${String(steps)} \`l -> .\` steps: the marker is refused and kept, <victim>/wt is untouched`,
+        async () => {
+          useLockDir();
+          const repo = repoOnly();
+          const logDir = makeTmpDir();
+          const victim = makeTmpDir();
+          fs.mkdirSync(path.join(victim, "wt", "docs"), { recursive: true });
+          fs.writeFileSync(
+            path.join(victim, "wt", "docs", "thesis.txt"),
+            "keep\n",
+          );
+          fs.symlinkSync(".", path.join(logDir, "l"));
+          if (shape === "a mode-000 link") {
+            fs.symlinkSync(victim, path.join(logDir, U));
+            fs.lchmodSync(path.join(logDir, U), 0o000);
+          } else {
+            deepLink(logDir, victim, U);
+          }
+          // The recorded path is live for the kernel: a removal of the
+          // spelling <log-dir>/wt-<uuid>/wt would empty <victim>/wt.
+          expect(
+            sameDirectory(path.join(logDir, U, "wt"), path.join(victim, "wt")),
+          ).toBe(true);
+          const targetPath = `${logDir}/${"l/".repeat(steps)}${U}/wt`;
+          const realRoot = plantMarker(repo, targetPath, logDir);
+
+          const result = await probeRun(repo, logDir);
+
+          expect(result.status).toBe("inconclusive");
+          expect(result.reason).toBe("stale_worktree");
+          expect(readMarkerFor(realRoot)?.targetPath).toBe(targetPath);
+          expect(
+            fs.readFileSync(
+              path.join(victim, "wt", "docs", "thesis.txt"),
+              "utf8",
+            ),
+          ).toBe("keep\n");
+        },
+      );
+    }
   }
 
   /** A `git` on PATH that re-points `lnk` at `to` the first time the
