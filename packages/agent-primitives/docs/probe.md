@@ -902,7 +902,11 @@ The four rules, in this order:
    symlinking a sibling checkout's install) sits inside the repository
    and is linked, and the copy gets the same symlink the real tree has;
    a candidate whose own parent chain leaves the root (a `vendor-dir` of
-   `../../elsewhere`) is skipped. The parent chain is resolved through
+   `../../elsewhere`) is skipped, and so is a candidate whose target
+   cannot be placed physically (a `node_modules` symlink whose own mode
+   is 000, `EACCES`), with the warning `skipped linking <dir>: its target
+   cannot be resolved (EACCES)`; no rule below can be applied to a target
+   whose location is unknown. The parent chain is resolved through
    realpath on both sides of the comparison, so a repository reached
    through a symlinked ancestor (macOS's `/tmp` -> `/private/tmp` is the
    common case) links exactly the same as one reached directly. A
@@ -1419,15 +1423,26 @@ nothing else.
 work-tree root (or inside the cwd when not in a repo), unless
 `--allow-outside` is passed; otherwise the result is `status: "inconclusive"`,
 `reason: "file_outside_root"`, exit `2`.
-A path that cannot be placed physically is never read as inside: a
-symlink whose own mode is 000 (`lchmod`, macOS only) still opens through
-to its target, yet `realpath` fails on it with `EACCES`, so probe cannot
-say where it points. `--file` naming such a link, or sitting below one, is
-answered `file_outside_root` with and without `-n`, under `inplace` and
-`worktree` isolation, and also with `--allow-outside`; nothing behind the
-link is read or written. Only a path that does not exist (`ENOENT`,
-`ENOTDIR`) or loops (`ELOOP`, which the kernel cannot open either) is
-placed by its deepest existing ancestor plus the missing tail. A `--link` value carrying a
+
+The placement rule is one about errno codes. The path is resolved with
+`realpath`; when that fails with `ENOENT`, `ENOTDIR` or `ELOOP`, the path
+is placed by its deepest existing ancestor plus the missing tail. Any
+other failure (`EACCES`, `ENAMETOOLONG`, `EIO`, ...) means probe cannot
+say where the path is, and it is not read as inside the root. The case
+that motivated it: a symlink whose own mode is 000 (`lchmod`, macOS only)
+still opens through to its target, yet `realpath` fails on it with
+`EACCES`. `--file` naming such a link, or sitting below one, is answered
+`file_outside_root` with and without `-n`, under `inplace` and `worktree`
+isolation, and also with `--allow-outside` (so `--allow-outside` with
+`-i worktree` answers `file_outside_root` for such a path rather than
+`worktree_allow_outside_unsupported`); nothing behind the link is read or
+written. The same answer now covers a file below a directory this process
+may not traverse (mode 000, `EACCES` on Linux and macOS) or named by a
+component too long for the filesystem, and a log directory or cwd behind
+an unreadable component. What the rule does NOT establish: a link whose
+target walks `..` out of a symlinked directory (`odl/../two.js` with `odl`
+pointing outside the root) can still be judged inside the root. That
+shape predates this rule and is a known open one. A `--link` value carrying a
 `$(...)` command substitution or a backtick is refused outright
 (`InvalidArgumentError`, before anything runs) rather than merely being
 inert the way it already is for `-p`/`--file` above: the same rule

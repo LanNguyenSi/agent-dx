@@ -74,14 +74,16 @@ export class UnresolvablePathError extends Error {
   }
 }
 
-/** The `realpathSync` failures that mean "nothing the kernel could open
- * sits there": the path (or an ancestor) does not exist, an ancestor is
- * not a directory, or the chain is a symlink cycle (the kernel answers
- * `ELOOP` to `stat` and `open` as well, so there is no file to reach
- * through it). `resolveDeepestExisting` falls back to the deepest
- * ancestor that does resolve for exactly these. Every other code
+/** The `realpathSync` failures `resolveDeepestExisting` falls back on:
+ * the path (or an ancestor) does not exist, an ancestor is not a
+ * directory, or the chain is a symlink cycle. Every other code
  * (`EACCES`, `EPERM`, `EIO`, ...) says the path may well exist and be
- * reachable by the kernel while this process cannot place it. */
+ * reachable by the kernel while this process cannot place it, and
+ * throws. That is the whole rule: an errno one. It does not make the
+ * fallback's placement right for every path it admits: a link whose
+ * target walks `..` out of a symlinked directory (`odl/../two.js` with
+ * `odl` pointing outside the root) is still judged inside the root.
+ * That shape predates this rule and is a known open one. */
 const UNPLACED_PATH_CODES = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
 
 /**
@@ -104,10 +106,14 @@ const UNPLACED_PATH_CODES = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
  * while the kernel still follows the link for `stat` and `open`, and
  * falling back to "the parent's realpath plus the link's own name" would
  * place a link that points OUTSIDE the root inside it. Every caller that
- * judges containment, or reads or writes what the path names, uses this
- * function and handles the error as a refusal; a caller that only
- * reports on or cleans up after a path, and for which a wrong placement
- * is harmless, uses `resolveDeepestExistingLenient` (the old fallback).
+ * decides whether a run may read, write or delete what the path names
+ * (`probe`, `probe --plan`, the link policy, `init`'s target, the
+ * worktree cleanup gate) uses this function and handles the error as a
+ * refusal or a skip. `resolveDeepestExistingLenient` (the old fallback)
+ * is for the callers that only report on, list or bookkeep a path
+ * (`doctor`, the registered-worktree listings and the leftover dedupe,
+ * the ancestor-mode capture, `init`'s directory root) and that never act
+ * on the answer alone: they must not throw on a path they cannot place.
  *
  * Both consumers of `isPathContained` must pass paths through this
  * function on both sides, or the comparison is spelling-dependent again:

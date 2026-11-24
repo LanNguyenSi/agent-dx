@@ -486,9 +486,16 @@ function sitsPhysicallyInside(
  * would key the run's lock, backup and marker.
  */
 function unresolvablePathMessage(err: UnresolvablePathError): string {
+  // `err.message` names the path and the errno. The symlink explanation
+  // is only true for `EACCES` (a component that denies reading it, such
+  // as a symlink with its own mode 000, can lead anywhere); any other
+  // code gets the bare refusal.
   return (
-    `${err.message}; refusing to treat it as inside the containment root ` +
-    "(a symlink whose own permissions deny reading it can point anywhere)"
+    `${err.message}; refusing to treat it as inside the containment root` +
+    (err.code === "EACCES"
+      ? " (a path component whose permissions deny reading it, a symlink " +
+        "with its own mode 000 for one, can lead anywhere)"
+      : "")
   );
 }
 

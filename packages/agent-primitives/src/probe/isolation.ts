@@ -2783,15 +2783,28 @@ export async function cleanupWorktree(
   }
   if (ownStat?.isSymbolicLink() === true && opts.scratchRoot !== undefined) {
     const own = path.resolve(worktreePath);
-    const location = path.join(
-      resolveDeepestExistingLenient(path.dirname(own)),
-      path.basename(own),
-    );
-    const inScratchRoot = isPathContained(
-      resolveDeepestExistingLenient(path.resolve(opts.scratchRoot)),
-      location,
-    );
-    if (isScratchWorktreePath(location) && inScratchRoot) {
+    let location: string | undefined;
+    let inScratchRoot = false;
+    try {
+      location = path.join(
+        resolveDeepestExisting(path.dirname(own)),
+        path.basename(own),
+      );
+      inScratchRoot = isPathContained(
+        resolveDeepestExisting(path.resolve(opts.scratchRoot)),
+        location,
+      );
+    } catch (err) {
+      // A location that cannot be placed is not shown to be the probe's
+      // own scratch link: it is left alone here, and the gate below
+      // refuses the path for the same reason.
+      if (!(err instanceof UnresolvablePathError)) throw err;
+    }
+    if (
+      location !== undefined &&
+      isScratchWorktreePath(location) &&
+      inScratchRoot
+    ) {
       try {
         fs.unlinkSync(worktreePath);
       } catch {
@@ -2801,8 +2814,35 @@ export async function cleanupWorktree(
       }
     }
   }
-  const target = resolveDeepestExistingLenient(path.resolve(worktreePath));
-  const rootReal = resolveDeepestExistingLenient(path.resolve(root));
+  // Every judgement below decides what `rmSync` may delete, so a path
+  // this process cannot place physically (a component that is a symlink
+  // whose own mode is 000, say, which the kernel still follows) is
+  // refused instead of being read as the spelling it has in the log dir:
+  // the lenient fallback would call `<outside>/wt` reached through such
+  // a link `<log-dir>/wt-<uuid>/wt` and delete it.
+  let target: string;
+  let rootReal: string;
+  let scratchRootReal: string | undefined;
+  try {
+    target = resolveDeepestExisting(path.resolve(worktreePath));
+    rootReal = resolveDeepestExisting(path.resolve(root));
+    scratchRootReal =
+      opts.scratchRoot !== undefined
+        ? resolveDeepestExisting(path.resolve(opts.scratchRoot))
+        : undefined;
+  } catch (err) {
+    if (!(err instanceof UnresolvablePathError)) throw err;
+    return {
+      ok: false,
+      verified: false,
+      refused: true,
+      detail:
+        `refusing to remove ${worktreePath}: it cannot be placed ` +
+        `physically (${err.path}, ${err.code ?? "unresolvable"}), so ` +
+        `whether it lies in the probe's scratch area is not established`,
+      logPaths,
+    };
+  }
 
   const before = await listRegisteredWorktrees(root, logDir, { track });
   logPaths.push(...before.logPaths);
@@ -2816,11 +2856,7 @@ export async function cleanupWorktree(
   const mainWorktree =
     before.ok && before.form !== "gitdir-files" ? before.paths[0] : undefined;
   const contained =
-    opts.scratchRoot !== undefined &&
-    isPathContained(
-      resolveDeepestExistingLenient(path.resolve(opts.scratchRoot)),
-      target,
-    );
+    scratchRootReal !== undefined && isPathContained(scratchRootReal, target);
   const foreignOwner = liveForeignOwner(target);
   let refusal: string | undefined;
   if (!isScratchWorktreePath(target)) {
