@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `probe` no longer treats a symlink whose own mode is 000 (`lchmod`,
+  macOS only) as an in-repo file. `resolveDeepestExisting` caught every
+  `realpath` failure and fell back to the parent's realpath plus the
+  link's own name, so a mode-000 link to an outside file (`EACCES` from
+  `realpath`, while the kernel still follows it for `stat` and `open`)
+  passed the containment check: `-M` without `-n` read the outside file
+  and named its line numbers, and a run with `-n` mutated it. The
+  fallback now applies only when the path does not exist (`ENOENT`,
+  `ENOTDIR`) or loops (`ELOOP`); any other failure throws the new
+  `UnresolvablePathError`, which `probe` and `probe --plan` answer as
+  `file_outside_root` (`--allow-outside` included) with nothing read or
+  written, `init` answers as `target_escapes_directory`, and the link
+  policy answers as a skipped link. `doctor`, the leftover listing and
+  removal, and the ancestor-mode capture keep the old fallback through
+  `resolveDeepestExistingLenient` and do not throw.
+
 ### Added
 
 - `probe -M`/`-w` may now omit `-n`/`--line`: when the `-M` text occurs

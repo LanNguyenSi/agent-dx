@@ -13,7 +13,7 @@ import {
   removeMarkerFor,
   writeMarker,
 } from "../lock.js";
-import { resolveDeepestExisting } from "./containment.js";
+import { resolveDeepestExistingLenient } from "./containment.js";
 import {
   beginInplace,
   beginWorktree,
@@ -1458,7 +1458,8 @@ export async function prepareWorktreeSession(input: {
     if (!isScratchWorktreePath(registeredPath)) continue;
     if (registeredPath === realRoot) continue;
     const known = leftovers.some(
-      (l) => resolveDeepestExisting(path.resolve(l.path)) === registeredPath,
+      (l) =>
+        resolveDeepestExistingLenient(path.resolve(l.path)) === registeredPath,
     );
     if (!known) leftovers.push({ path: registeredPath, fromMarker: false });
   }

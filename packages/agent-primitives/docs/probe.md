@@ -1418,7 +1418,16 @@ nothing else.
 `--file` and every explicit link LOCATION must resolve inside the git
 work-tree root (or inside the cwd when not in a repo), unless
 `--allow-outside` is passed; otherwise the result is `status: "inconclusive"`,
-`reason: "file_outside_root"`, exit `2`. A `--link` value carrying a
+`reason: "file_outside_root"`, exit `2`.
+A path that cannot be placed physically is never read as inside: a
+symlink whose own mode is 000 (`lchmod`, macOS only) still opens through
+to its target, yet `realpath` fails on it with `EACCES`, so probe cannot
+say where it points. `--file` naming such a link, or sitting below one, is
+answered `file_outside_root` with and without `-n`, under `inplace` and
+`worktree` isolation, and also with `--allow-outside`; nothing behind the
+link is read or written. Only a path that does not exist (`ENOENT`,
+`ENOTDIR`) or loops (`ELOOP`, which the kernel cannot open either) is
+placed by its deepest existing ancestor plus the missing tail. A `--link` value carrying a
 `$(...)` command substitution or a backtick is refused outright
 (`InvalidArgumentError`, before anything runs) rather than merely being
 inert the way it already is for `-p`/`--file` above: the same rule

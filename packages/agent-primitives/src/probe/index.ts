@@ -7,6 +7,7 @@ import {
   isPathContained,
   resolveDeepestExisting,
   resolveLinkSourceTarget,
+  UnresolvablePathError,
 } from "./containment.js";
 import { readDefaultsFile } from "./defaults-file.js";
 import {
@@ -471,6 +472,24 @@ function sitsPhysicallyInside(
     if (ok) return true;
   }
   return false;
+}
+
+/**
+ * The refusal text for a path `resolveDeepestExisting` could not place
+ * (`UnresolvablePathError`): a symlink whose own mode is 000 is the case
+ * that matters, since the kernel still follows it for `stat` and `open`
+ * while this process cannot say where it points, so judging it inside
+ * the containment root would let a link to an outside file be read and
+ * mutated as if it were an in-repo one. The caller answers
+ * `file_outside_root`: containment is not established, and
+ * `--allow-outside` does not change that, since the same unplaced path
+ * would key the run's lock, backup and marker.
+ */
+function unresolvablePathMessage(err: UnresolvablePathError): string {
+  return (
+    `${err.message}; refusing to treat it as inside the containment root ` +
+    "(a symlink whose own permissions deny reading it can point anywhere)"
+  );
 }
 
 /** Whether `p` itself is a symlink (`lstatSync`, never following it):
@@ -1399,7 +1418,18 @@ async function runProbePipeline(
  */
 export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   const start = Date.now();
-  const result = await runProbePipeline(opts);
+  let result: Omit<ProbeResult, "totalDurationMs">;
+  try {
+    result = await runProbePipeline(opts);
+  } catch (err) {
+    if (!(err instanceof UnresolvablePathError)) throw err;
+    result = {
+      status: "inconclusive",
+      reason: "file_outside_root",
+      warnings: [unresolvablePathMessage(err)],
+      isolation: emptyIsolationField(opts.isolation),
+    };
+  }
   return {
     ...result,
     ...(opts.env !== undefined && Object.keys(opts.env).length > 0
@@ -2724,7 +2754,21 @@ async function runProbePlanPipeline(
 export async function probePlan(
   opts: ProbePlanOptions,
 ): Promise<ProbePlanResult> {
-  const result = await runProbePlanPipeline(opts);
+  let result: ProbePlanResult;
+  try {
+    result = await runProbePlanPipeline(opts);
+  } catch (err) {
+    if (!(err instanceof UnresolvablePathError)) throw err;
+    result = {
+      status: "usage_error",
+      reason: "file_outside_root",
+      warnings: [unresolvablePathMessage(err)],
+      baselines: [],
+      results: [],
+      summary: summarize([]),
+      isolation: emptyIsolationField(opts.isolation),
+    };
+  }
   // Added here, on the one way out every plan result takes, so a plan
   // that stopped early says it for the kills it did collect too.
   const unsettled = buildDetectionPlanWarning(result.results);

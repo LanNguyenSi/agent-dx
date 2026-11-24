@@ -4,6 +4,8 @@ import { UsageError } from "../envelope.js";
 import {
   isPathContained,
   resolveDeepestExisting,
+  resolveDeepestExistingLenient,
+  UnresolvablePathError,
 } from "../probe/containment.js";
 import {
   findLedgerMatch,
@@ -346,7 +348,21 @@ function resolveTargetPath(
     }
   }
 
-  const resolvedFile = resolveDeepestExisting(filePath);
+  let resolvedFile: string;
+  try {
+    resolvedFile = resolveDeepestExisting(filePath);
+  } catch (err) {
+    // A target this process cannot place (a symlink whose own mode is
+    // 000, say) is never judged to sit inside the directory: refused the
+    // same way a target resolving outside it is.
+    if (!(err instanceof UnresolvablePathError)) throw err;
+    throw new InitFsUsageError(
+      `init: cannot resolve the target for harness "${harness}" to check ` +
+        `it stays inside --target-dir (${absTargetDir}): ${filePath} ` +
+        `(${err.code ?? "unresolvable"})`,
+      "target_escapes_directory",
+    );
+  }
   if (!isPathContained(resolvedTargetDir, resolvedFile)) {
     throw new InitFsUsageError(
       `init: resolved target for harness "${harness}" escapes --target-dir ` +
@@ -603,7 +619,7 @@ export function init(options: InitOptions = {}): InitResult {
 
   const harnesses = options.harnesses ?? ["claude"];
   const absTargetDir = path.resolve(options.targetDir ?? process.cwd());
-  const resolvedTargetDir = resolveDeepestExisting(absTargetDir);
+  const resolvedTargetDir = resolveDeepestExistingLenient(absTargetDir);
   const force = options.force ?? false;
   const content = options.content ?? readPackagedSkill();
   const warnings: string[] = [];

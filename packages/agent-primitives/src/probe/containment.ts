@@ -44,6 +44,47 @@ export function isPathContained(root: string, absTarget: string): boolean {
 }
 
 /**
+ * Thrown by `resolveDeepestExisting` when `fs.realpathSync` fails for a
+ * reason other than the path not existing (see `UNPLACED_PATH_CODES`):
+ * the kernel may still be able to follow the path (`stat` and `open`
+ * succeed) even though the physical location cannot be established, so
+ * no answer about where the path points is available, and a caller
+ * that needs one must refuse instead of guessing.
+ */
+export class UnresolvablePathError extends Error {
+  /** The path handed to `resolveDeepestExisting`. */
+  readonly path: string;
+  /** The errno code of the failed `realpathSync`, e.g. `EACCES`. */
+  readonly code: string | undefined;
+
+  constructor(p: string, cause: unknown) {
+    const code =
+      cause instanceof Error && "code" in cause
+        ? String((cause as NodeJS.ErrnoException).code)
+        : undefined;
+    super(
+      `cannot resolve ${p} to a physical location${
+        code !== undefined ? ` (${code})` : ""
+      }`,
+      { cause },
+    );
+    this.name = "UnresolvablePathError";
+    this.path = p;
+    this.code = code;
+  }
+}
+
+/** The `realpathSync` failures that mean "nothing the kernel could open
+ * sits there": the path (or an ancestor) does not exist, an ancestor is
+ * not a directory, or the chain is a symlink cycle (the kernel answers
+ * `ELOOP` to `stat` and `open` as well, so there is no file to reach
+ * through it). `resolveDeepestExisting` falls back to the deepest
+ * ancestor that does resolve for exactly these. Every other code
+ * (`EACCES`, `EPERM`, `EIO`, ...) says the path may well exist and be
+ * reachable by the kernel while this process cannot place it. */
+const UNPLACED_PATH_CODES = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
+
+/**
  * Resolves `p` to its realpath. When `p` itself does not exist yet (a
  * missing `--file`, or a marker naming a target that has since been
  * deleted), resolves as much of the path as does exist (walking up to the
@@ -56,18 +97,55 @@ export function isPathContained(root: string, absTarget: string): boolean {
  * only when nothing above it resolves either (the filesystem root, or a
  * whole ancestor chain that does not exist).
  *
+ * That fallback is for a path that does not exist (`ENOENT`, `ENOTDIR`)
+ * or cannot be followed at all (`ELOOP`) only. Any other `realpathSync`
+ * failure throws `UnresolvablePathError` instead: a symlink whose own
+ * mode is 000 (`lchmod`, macOS) makes `realpathSync` fail with `EACCES`
+ * while the kernel still follows the link for `stat` and `open`, and
+ * falling back to "the parent's realpath plus the link's own name" would
+ * place a link that points OUTSIDE the root inside it. Every caller that
+ * judges containment, or reads or writes what the path names, uses this
+ * function and handles the error as a refusal; a caller that only
+ * reports on or cleans up after a path, and for which a wrong placement
+ * is harmless, uses `resolveDeepestExistingLenient` (the old fallback).
+ *
  * Both consumers of `isPathContained` must pass paths through this
  * function on both sides, or the comparison is spelling-dependent again:
  * `probe`'s containment and lock/marker key, and `doctor`'s stale-marker
  * check.
  */
 export function resolveDeepestExisting(p: string): string {
+  return resolveWith(p, false);
+}
+
+/**
+ * `resolveDeepestExisting` with the fallback for EVERY `realpathSync`
+ * failure, `EACCES` included: the deepest ancestor that does resolve
+ * plus the tail verbatim. For a caller that only reports on a path or
+ * cleans up after it (`doctor`, the leftover listing and removal, the
+ * ancestor-mode capture) and must not throw on one it cannot place. It
+ * must never decide whether a path is inside the containment root or
+ * which file a run reads or writes: it places a mode-000 symlink to an
+ * outside file at its own in-root spelling.
+ */
+export function resolveDeepestExistingLenient(p: string): string {
+  return resolveWith(p, true);
+}
+
+function resolveWith(p: string, lenient: boolean): string {
   try {
     return fs.realpathSync(p);
-  } catch {
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (
+      !lenient &&
+      !(typeof code === "string" && UNPLACED_PATH_CODES.has(code))
+    ) {
+      throw new UnresolvablePathError(p, err);
+    }
     const parent = path.dirname(p);
     if (parent === p) return p; // filesystem root
-    return path.join(resolveDeepestExisting(parent), path.basename(p));
+    return path.join(resolveWith(parent, lenient), path.basename(p));
   }
 }
 
