@@ -9,6 +9,8 @@ import {
   resolveDeepestExistingLenient,
   UnresolvablePathError,
   resolveLinkSourceTarget,
+  absoluteSpelling,
+  physicalRealpath,
 } from "./containment.js";
 import {
   canonicalDestRelPath,
@@ -1402,7 +1404,11 @@ export async function beginWorktree(
   // reason `rootReal` exists on the source side.
   let wtReal: string;
   try {
-    wtReal = fs.realpathSync(worktreePath);
+    // Placed physically, as `resolveDeepestExisting` places every path
+    // this is compared with: the JavaScript `realpath` would spell a
+    // symlinked ancestor whose target walks `..` differently, and every
+    // string comparison below would then miss.
+    wtReal = physicalRealpath(worktreePath);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -2742,10 +2748,11 @@ export interface CleanupWorktreeResult {
  * `liveForeignOwner`), and either reported by `git worktree list` as a
  * worktree of this repository before the removal, or contained
  * (through realpath) in `scratchRoot`, the current run's own log dir.
- * The gate judges the path as `path.resolve` spells it, so a marker
- * path that walks `..` through a symlink is judged at its collapsed
- * spelling while git and the delete act on the raw one: a known open
- * shape. Any other path is refused, and so is one whose registration could
+ * A recorded path with a `.` or `..` component is refused outright (the
+ * scratch shape never has one), every other one is judged at its
+ * physical location (`resolveDeepestExisting`), and the delete and
+ * `git worktree remove` both act on exactly that judged location,
+ * never on the recorded spelling. Any other path is refused, and so is one whose registration could
  * not be checked and that is not under that log dir: neither git nor
  * the recursive delete touches it, and the result says so, so the
  * caller can keep its marker and name the path.
@@ -2766,6 +2773,25 @@ export async function cleanupWorktree(
 ): Promise<CleanupWorktreeResult> {
   const track: TrackGitCall = opts.track ?? ((started) => started);
   const logPaths: string[] = [];
+  // The scratch shape `<log-dir>/wt-<uuid>/wt` is built by joining
+  // plain names and never carries a `.` or `..` component, so a recorded
+  // path that does (only a marker file can supply one) is not this
+  // module's own and is refused before anything looks it up.
+  const dotComponent = worktreePath
+    .split(path.sep)
+    .find((component) => component === "." || component === "..");
+  if (dotComponent !== undefined) {
+    return {
+      ok: false,
+      verified: false,
+      refused: true,
+      detail:
+        `refusing to remove ${worktreePath}: it carries a "${dotComponent}" ` +
+        `component, which the probe's own scratch shape ` +
+        `(<log-dir>/wt-<uuid>/wt) never has`,
+      logPaths,
+    };
+  }
   // A recorded worktree path that is itself a SYMLINK is never a
   // worktree this module created: `beginWorktree` has git create a
   // DIRECTORY there and nothing in it ever replaces that with a link.
@@ -2785,14 +2811,11 @@ export async function cleanupWorktree(
     ownStat = undefined;
   }
   if (ownStat?.isSymbolicLink() === true && opts.scratchRoot !== undefined) {
-    const own = path.resolve(worktreePath);
+    const own = absoluteSpelling(worktreePath);
     let location: string | undefined;
     let inScratchRoot = false;
     try {
-      location = path.join(
-        resolveDeepestExisting(path.dirname(own)),
-        path.basename(own),
-      );
+      location = `${resolveDeepestExisting(path.dirname(own))}${path.sep}${path.basename(own)}`;
       inScratchRoot = isPathContained(
         resolveDeepestExisting(path.resolve(opts.scratchRoot)),
         location,
@@ -2809,7 +2832,7 @@ export async function cleanupWorktree(
       inScratchRoot
     ) {
       try {
-        fs.unlinkSync(worktreePath);
+        fs.unlinkSync(location);
       } catch {
         // Best-effort: whatever is still there fails the gate or the
         // assertion below, and is reported the same as any other
@@ -2827,7 +2850,7 @@ export async function cleanupWorktree(
   let rootReal: string;
   let scratchRootReal: string | undefined;
   try {
-    target = resolveDeepestExisting(path.resolve(worktreePath));
+    target = resolveDeepestExisting(absoluteSpelling(worktreePath));
     rootReal = resolveDeepestExisting(path.resolve(root));
     scratchRootReal =
       opts.scratchRoot !== undefined
@@ -2888,16 +2911,20 @@ export async function cleanupWorktree(
     };
   }
 
-  // Reached only for a path the gate above admitted.
+  // Reached only for a path the gate above admitted. Both removals act
+  // on `target`, the physical location the gate judged, never on the
+  // recorded spelling: a symlinked component of that spelling could be
+  // re-pointed between the judgement and the removal (the listing above
+  // runs git in between), and the delete would then follow it.
   try {
-    fs.rmSync(worktreePath, { recursive: true, force: true });
+    fs.rmSync(target, { recursive: true, force: true });
   } catch {
     // Best-effort: whatever is still there fails the assertion below.
   }
   const removeResult = await trackGit(
     track,
     gitArgv(
-      ["worktree", "remove", "--force", "--force", "--", worktreePath],
+      ["worktree", "remove", "--force", "--force", "--", target],
       logDir,
       `worktree-remove-${randomUUID()}.log`,
       root,
@@ -2957,7 +2984,7 @@ export async function cleanupWorktree(
       after = viaGitdir;
     }
   }
-  const stillOnDisk = fs.existsSync(worktreePath);
+  const stillOnDisk = fs.existsSync(target);
   if (after.ok) {
     const stillRegistered = after.paths.includes(target);
     const ok = !stillRegistered && !stillOnDisk;

@@ -44,17 +44,19 @@ export function isPathContained(root: string, absTarget: string): boolean {
 }
 
 /**
- * Thrown by `resolveDeepestExisting` when `fs.realpathSync` fails for a
- * reason other than the path not existing (see `UNPLACED_PATH_CODES`):
+ * Thrown by `resolveDeepestExisting` when `realpath` fails for a reason
+ * other than the path not existing (see `UNPLACED_PATH_CODES`), or when
+ * a `..` would have to climb from a component that does not resolve:
  * the kernel may still be able to follow the path (`stat` and `open`
  * succeed) even though the physical location cannot be established, so
  * no answer about where the path points is available, and a caller
- * that needs one must refuse instead of guessing.
+ * that needs one must refuse instead of guessing. `code` is `undefined`
+ * for the `..` case.
  */
 export class UnresolvablePathError extends Error {
   /** The path handed to `resolveDeepestExisting`. */
   readonly path: string;
-  /** The errno code of the failed `realpathSync`, e.g. `EACCES`. */
+  /** The errno code of the failed lookup, e.g. `EACCES`. */
   readonly code: string | undefined;
 
   constructor(p: string, cause: unknown) {
@@ -74,46 +76,122 @@ export class UnresolvablePathError extends Error {
   }
 }
 
-/** The `realpathSync` failures `resolveDeepestExisting` falls back on:
- * the path (or an ancestor) does not exist, an ancestor is not a
- * directory, or the chain is a symlink cycle. Every other code
- * (`EACCES`, `EPERM`, `EIO`, ...) says the path may well exist and be
- * reachable by the kernel while this process cannot place it, and
- * throws. That is the whole rule: an errno one. It does not make the
- * fallback's placement right for every path it admits: a link whose
- * target walks `..` out of a symlinked directory (`odl/../two.js` with
- * `odl` pointing outside the root) is still judged inside the root.
- * That shape predates this rule and is a known open one. */
+/** The failures `resolveDeepestExisting` walks up from: the path (or an
+ * ancestor) does not exist, an ancestor is not a directory, or the chain
+ * is a symlink cycle. Every other code (`EACCES`, `EPERM`, `EIO`, ...)
+ * says the path may well exist and be reachable by the kernel while this
+ * process cannot place it, and throws. */
 const UNPLACED_PATH_CODES = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
 
 /**
- * Resolves `p` to its realpath. When `p` itself does not exist yet (a
- * missing `--file`, or a marker naming a target that has since been
- * deleted), resolves as much of the path as does exist (walking up to the
- * deepest existing ancestor) and re-appends the missing tail verbatim,
- * instead of returning `p` unresolved: a symlinked ancestor (macOS's
- * `/tmp` -> `/private/tmp`, or any symlinked checkout path) would
- * otherwise make `isPathContained` compare a resolved root against an
- * unresolved file path, so the same file reads as inside the root under
- * one spelling and outside it under another. Falls back to `p` itself
- * only when nothing above it resolves either (the filesystem root, or a
- * whole ancestor chain that does not exist).
+ * `realpath`, walked physically: every symlinked component, the last one
+ * included, is followed the way the kernel follows it, and each `..` is
+ * applied to where the component before it physically points, never to
+ * its spelling. Throws an errno error (`ENOENT`, `ENOTDIR`, `ELOOP`,
+ * `EACCES`, ...) when the path does not fully resolve, as `realpath`
+ * does.
  *
- * That fallback is for a path that does not exist (`ENOENT`, `ENOTDIR`)
- * or cannot be followed at all (`ELOOP`) only. Any other `realpathSync`
- * failure throws `UnresolvablePathError` instead: a symlink whose own
- * mode is 000 (`lchmod`, macOS) makes `realpathSync` fail with `EACCES`
- * while the kernel still follows the link for `stat` and `open`, and
- * falling back to "the parent's realpath plus the link's own name" would
- * place a link that points OUTSIDE the root inside it. Every caller that
- * decides whether a run may read, write or delete what the path names
- * (`probe`, `probe --plan`, the link policy, `init`'s target, the
- * worktree cleanup gate) uses this function and handles the error as a
- * refusal or a skip. `resolveDeepestExistingLenient` (the old fallback)
- * is for the callers that only report on, list or bookkeep a path
- * (`doctor`, the registered-worktree listings and the leftover dedupe,
- * the ancestor-mode capture, `init`'s directory root) and that never act
- * on the answer alone: they must not throw on a path they cannot place.
+ * Not the JavaScript `fs.realpathSync`: it normalises its argument with
+ * `path.resolve` before looking anything up and splices every link
+ * target it follows with `path.resolve` too, so `dd.js -> odl/../two.js`
+ * with `odl` a link to a directory outside the root comes back as
+ * `<root>/two.js` while the kernel opens `<outside>/two.js`. Not
+ * `fs.realpathSync.native` either: libc `realpath(3)` places `..`
+ * physically, but on a case-insensitive volume it also re-spells every
+ * component in the case the volume stores, and the link policy tells
+ * case aliases apart by exactly that spelling (see `canonicalDestRelPath`
+ * and `entryRelationTo` in `link-policy.ts`). This walk keeps the case it
+ * is given, as the JavaScript one did, and differs from it only in where
+ * a `..` climbs from.
+ */
+export function physicalRealpath(p: string): string {
+  const { root, components } = splitPath(absoluteSpelling(p));
+  return walkPhysical(root, components, { links: 0 }).location;
+}
+
+/** An errno-shaped error for a failure the walk detects itself. */
+function errnoError(code: string, p: string): NodeJS.ErrnoException {
+  const err: NodeJS.ErrnoException = new Error(`${code}: ${p}`);
+  err.code = code;
+  return err;
+}
+
+/** `components` walked from the physical directory `start`, every
+ * symlink followed (see `physicalRealpath`); `isDir` says whether the
+ * location reached is a directory, which a following `..` needs. */
+function walkPhysical(
+  start: string,
+  components: readonly string[],
+  budget: { links: number },
+): { location: string; isDir: boolean } {
+  let current = start;
+  let isDir = true;
+  for (const component of components) {
+    if (component === "..") {
+      if (!isDir) throw errnoError("ENOTDIR", current);
+      current = path.dirname(current);
+      continue;
+    }
+    const candidate = appendComponent(current, component);
+    const lst = fs.lstatSync(candidate);
+    if (!lst.isSymbolicLink()) {
+      current = candidate;
+      isDir = lst.isDirectory();
+      continue;
+    }
+    if (++budget.links > MAX_LINK_SOURCE_HOPS) {
+      throw errnoError("ELOOP", candidate);
+    }
+    const rawTarget = fs.readlinkSync(candidate);
+    const target = path.isAbsolute(rawTarget)
+      ? splitPath(rawTarget)
+      : { root: current, components: splitComponents(rawTarget) };
+    const landed = walkPhysical(target.root, target.components, budget);
+    current = landed.location;
+    isDir = landed.isDir;
+  }
+  return { location: current, isDir };
+}
+
+/**
+ * Resolves `p` to its physical location, the one the kernel itself
+ * reaches (`physicalRealpath`). When `p` itself does not exist yet (a
+ * missing `--file`, or a marker naming a target that has since been
+ * deleted), the deepest prefix of `p` that does resolve is placed the
+ * same way and the missing tail is re-appended verbatim, instead of
+ * returning `p` unresolved: a symlinked ancestor (macOS's `/tmp` ->
+ * `/private/tmp`, or any symlinked checkout path) would otherwise make
+ * `isPathContained` compare a resolved root against an unresolved file
+ * path, so the same file reads as inside the root under one spelling
+ * and outside it under another.
+ *
+ * That walk-up keeps the rule `resolvePhysicalLocation` keeps: a `..`
+ * is only ever applied to a prefix that resolved physically. A `..` in
+ * the re-appended tail (`<root>/missing/../x`, or
+ * `<root>/dangling-link/../x`) would climb from a component the
+ * filesystem could not place, so `p` is not placed at all and
+ * `UnresolvablePathError` is thrown. The JavaScript `fs.realpathSync`
+ * this function used before collapsed every `..` lexically, so
+ * `dd.js -> odl/../two.js` with `odl` a link to a directory outside the
+ * root was placed at `<root>/two.js` while the kernel opens
+ * `<outside>/two.js`.
+ *
+ * The walk-up is for a path that does not exist (`ENOENT`, `ENOTDIR`)
+ * or cannot be followed at all (`ELOOP`) only. Any other failure throws
+ * `UnresolvablePathError` instead: a symlink whose own mode is 000
+ * (`lchmod`, macOS) cannot be read (`EACCES`) while the kernel still
+ * follows the link for `stat` and `open`, and falling back to "the
+ * parent's realpath plus the link's own name" would place a link that
+ * points OUTSIDE the root inside it. Every caller that decides whether
+ * a run may read, write or delete what the path names (`probe`,
+ * `probe --plan`, the link policy, `init`'s target, the worktree cleanup
+ * gate) uses this function, handles the error as a refusal or a skip,
+ * and then acts on the very spelling it judged.
+ * `resolveDeepestExistingLenient` is for the callers that only report
+ * on, list or bookkeep a path (`doctor`, the registered-worktree
+ * listings and the leftover dedupe, the ancestor-mode capture, `init`'s
+ * directory root) and that never act on the answer alone: they must not
+ * throw on a path they cannot place.
  *
  * Both consumers of `isPathContained` must pass paths through this
  * function on both sides, or the comparison is spelling-dependent again:
@@ -121,39 +199,75 @@ const UNPLACED_PATH_CODES = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
  * check.
  */
 export function resolveDeepestExisting(p: string): string {
-  return resolveWith(p, false);
+  return placeDeepestExisting(p, false);
 }
 
 /**
- * `resolveDeepestExisting` with the fallback for EVERY `realpathSync`
- * failure, `EACCES` included: the deepest ancestor that does resolve
- * plus the tail verbatim. For a caller that only reports on a path and
- * must not throw on one it cannot place (`doctor`, the registered-worktree
- * listings, the leftover dedupe, the ancestor-mode capture, init's target
- * directory root); not the worktree removal gate, which is strict. It
- * must never decide whether a path is inside the containment root or
- * which file a run reads or writes: it places a mode-000 symlink to an
- * outside file at its own in-root spelling.
+ * `resolveDeepestExisting` without the refusals: a failure of any code
+ * (`EACCES` included) walks up to the next shorter prefix, and a `..`
+ * left in the re-appended tail is kept there verbatim rather than thrown
+ * on. Wherever `resolveDeepestExisting` answers at all, this answers the
+ * same string (both run the one walk below and differ only in what they
+ * do where the strict one throws). For a caller that only reports on a
+ * path and must not throw on one it cannot place (`doctor`, the
+ * registered-worktree listings, the leftover dedupe, the ancestor-mode
+ * capture, init's target directory root); not the worktree removal
+ * gate, which is strict. It must never decide whether a path is inside
+ * the containment root or which file a run reads or writes: it places a
+ * mode-000 symlink to an outside file at its own in-root spelling.
  */
 export function resolveDeepestExistingLenient(p: string): string {
-  return resolveWith(p, true);
+  return placeDeepestExisting(p, true);
 }
 
-function resolveWith(p: string, lenient: boolean): string {
-  try {
-    return fs.realpathSync(p);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (
-      !lenient &&
-      !(typeof code === "string" && UNPLACED_PATH_CODES.has(code))
-    ) {
-      throw new UnresolvablePathError(p, err);
+/** `p` made absolute without touching any of its components: an
+ * absolute `p` as it is, a relative one spliced onto the current
+ * directory as a plain string. Unlike `path.resolve`, a `..` survives,
+ * so the physical resolvers above still see it. */
+export function absoluteSpelling(p: string): string {
+  return path.isAbsolute(p) ? p : `${process.cwd()}${path.sep}${p}`;
+}
+
+function placeDeepestExisting(p: string, lenient: boolean): string {
+  const { root, components } = splitPath(absoluteSpelling(p));
+  for (let kept = components.length; kept >= 0; kept--) {
+    let placed: string;
+    try {
+      placed = walkPhysical(root, components.slice(0, kept), {
+        links: 0,
+      }).location;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (
+        !lenient &&
+        !(typeof code === "string" && UNPLACED_PATH_CODES.has(code))
+      ) {
+        throw new UnresolvablePathError(p, err);
+      }
+      continue;
     }
-    const parent = path.dirname(p);
-    if (parent === p) return p; // filesystem root
-    return path.join(resolveWith(parent, lenient), path.basename(p));
+    const tail = components.slice(kept);
+    if (!lenient && tail.includes("..")) {
+      throw new UnresolvablePathError(
+        p,
+        new Error(
+          `a ".." follows ${joinComponents(root, components.slice(0, kept + tail.indexOf("..")))}, which could not be placed`,
+        ),
+      );
+    }
+    return joinComponents(placed, tail);
   }
+  // Not even the filesystem root resolved.
+  return joinComponents(root, components);
+}
+
+/** `components` appended under `dir` as plain strings, never through
+ * `path.join` (which would collapse a `..` lexically). */
+function joinComponents(dir: string, components: readonly string[]): string {
+  let joined = dir;
+  for (const component of components)
+    joined = appendComponent(joined, component);
+  return joined;
 }
 
 /**
@@ -183,8 +297,8 @@ function isELOOP(err: unknown): boolean {
  * own symlink chain, placed physically, or `undefined` when the chain
  * cannot be placed at all.
  *
- * `resolveDeepestExisting(p)` (JavaScript `fs.realpathSync`) is the
- * wrong tool for a link source, for two separate reasons. It throws with
+ * `resolveDeepestExisting(p)` is the wrong tool for a link source, and the
+ * JavaScript `fs.realpathSync` it once used doubly so. It throws with
  * no partial information when `p` ITSELF is a symlink whose chain does
  * not fully resolve (a dangling target, or one this process cannot
  * stat), so its fallback walks up from `p`'s OWN parent: right for an
@@ -221,8 +335,8 @@ function isELOOP(err: unknown): boolean {
  * because every hop is already placed physically the far end reported
  * is where the chain actually ends, dangling or not, however many links
  * sit in between and whether each target is spelled relative or
- * absolute. Nothing on this path ever goes through `resolveDeepestExisting`
- * or any other lexical normalisation: an earlier version handed an
+ * absolute. Nothing on this path goes through a lexical normalisation:
+ * an earlier version handed an
  * absolute target back verbatim and ran the final hop through
  * `resolveDeepestExisting`, so `oracle -> <root>/sub/../name` (the same
  * shape as the relative one, spelled absolutely) was collapsed to
@@ -267,9 +381,9 @@ function isELOOP(err: unknown): boolean {
  * Deliberately narrow rather than folded into `resolveDeepestExisting`
  * itself: that function has other callers (a `--file` target, a link's
  * eventual on-disk destination inside `link-policy.ts`) whose own
- * fallback behaviour -- reporting the path unresolved when it does not
- * fully exist -- is exactly what they need, and none of them is ever
- * handed a readlink-derived path.
+ * fallback behaviour -- reporting a dangling final link where it sits
+ * rather than where it points -- is what they rely on, and none of them is
+ * ever handed a readlink-derived path.
  */
 export function resolveLinkSourceTarget(p: string): string | undefined {
   let current = resolvePhysicalLocation(p);

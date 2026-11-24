@@ -1424,9 +1424,15 @@ work-tree root (or inside the cwd when not in a repo), unless
 `--allow-outside` is passed; otherwise the result is `status: "inconclusive"`,
 `reason: "file_outside_root"`, exit `2`.
 
-The placement rule is one about errno codes. The path is resolved with
-`realpath`; when that fails with `ENOENT`, `ENOTDIR` or `ELOOP`, the path
-is placed by its deepest existing ancestor plus the missing tail. Any
+The placement rule is a physical one plus one about errno codes. The path
+is resolved by a `realpath` walk that follows every symlinked component
+and applies each `..` to where the component before it physically
+points, exactly as the kernel opens the path (keeping the case it was
+given, as the JavaScript `realpath` does); when that fails with `ENOENT`, `ENOTDIR` or `ELOOP`, the path
+is placed by its deepest existing prefix, resolved the same way, plus the
+missing tail verbatim. A `..` in that tail would climb from a component
+that does not resolve (`missing/../x`, `dangling-link/../x`), so such a
+path is not placed at all and is not read as inside the root. Any
 other failure (`EACCES`, `ENAMETOOLONG`, `EIO`, ...) means probe cannot
 say where the path is, and it is not read as inside the root. The case
 that motivated it: a symlink whose own mode is 000 (`lchmod`, macOS only)
@@ -1440,12 +1446,23 @@ written. The same answer now covers a file below a directory this process
 may not traverse (mode 000, `EACCES` on Linux and macOS) or named by a
 component too long for the filesystem, a log directory behind an
 unreadable component under `-i worktree` (under `-i inplace` its `mkdir`
-still fails with `EACCES`), and a cwd behind one. What the rule does NOT establish: a link whose
-target walks `..` out of a symlinked directory (`odl/../two.js` with `odl`
-pointing outside the root) can still be judged inside the root. That
-shape predates this rule and is a known open one, as is a leftover marker
-path spelled with `..` through a symlink at the worktree cleanup gate,
-which judges the collapsed path but removes the raw one. A `--link` value carrying a
+still fails with `EACCES`), and a cwd behind one. A `--file` whose link
+target walks `..` out of a symlinked directory (`dd.js -> odl/../two.js`
+with `odl` pointing outside the root) is judged at `<outside>/two.js`,
+where the kernel opens it, whether or not a `two.js` exists in the root,
+and is answered `file_outside_root` with nothing outside read or written.
+What a run judges is always the path it then acts on: a `..` in the
+`--file` argument itself (`-f odl/../two.js`) is resolved against the cwd
+before anything is judged, so that run judges and mutates `<root>/two.js`
+and never reaches the outside file. The worktree cleanup gate refuses a
+leftover marker path with a `.` or `..` component outright (the scratch
+shape `<log-dir>/wt-<uuid>/wt` never has one), judges every other one at
+its physical location, and removes exactly that location, never the
+recorded spelling. What the rule does NOT establish: a `--file` that is
+itself a dangling symlink is still judged where the link sits, not where
+it points, so for a dangling link to an outside path the answer
+(`file_not_found` inside the root, `file_outside_root` once the outside
+path exists) still depends on whether that path exists. A `--link` value carrying a
 `$(...)` command substitution or a backtick is refused outright
 (`InvalidArgumentError`, before anything runs) rather than merely being
 inert the way it already is for `-p`/`--file` above: the same rule

@@ -39,12 +39,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (under `-i inplace` a log directory below a mode-000 directory still
   fails its `mkdir` with `EACCES`), and `--allow-outside` with `-i worktree`
   answers `file_outside_root` for such a path instead of
-  `worktree_allow_outside_unsupported`. A link whose target walks `..`
-  out of a symlinked directory (`odl/../two.js`, `odl` pointing outside
-  the root) is still judged inside the root, and so is a leftover
-  marker path spelled with `..` through a symlink at the worktree cleanup
-  gate (it judges the collapsed path but removes the raw one); both
-  shapes predate this change and stay open.
+  `worktree_allow_outside_unsupported`. The two `..`-through-a-symlink
+  shapes this rule left open are closed by the next entry.
+- `probe` no longer judges a path whose `..` climbs out of a symlinked
+  directory at its lexical spelling. `resolveDeepestExisting` used the
+  JavaScript `fs.realpathSync`, which collapses `..` before it looks
+  anything up, so `dd.js -> odl/../two.js` with `odl` pointing outside
+  the root was placed at `<root>/two.js` while the kernel opens
+  `<outside>/two.js`: `-M` without `-n` read the outside file and named
+  its lines, and a run with `-n` mutated it, under `inplace` and
+  `worktree` isolation and through `--plan`. It now places every path
+  with a physical `lstat`/`readlink` walk (new `physicalRealpath`; it
+  keeps the case it is given, as the link policy's alias checks need),
+  and on a missing path places the deepest existing prefix the same way;
+  a `..` after a component that does not resolve is refused
+  (`UnresolvablePathError`) instead of collapsed. Such a `--file` is
+  answered `file_outside_root` with nothing outside read or written.
+  `resolveDeepestExistingLenient` runs the same placement and differs
+  only in never throwing, so the two never spell a path both can place
+  differently. The worktree cleanup gate refuses a leftover
+  marker path with a `.` or `..` component (`<log-dir>/link/../wt-<uuid>/wt`,
+  or `<log-dir>/wt-<uuid>/wt/link/..` with `link` pointing at another
+  directory, which used to delete that directory's contents); the marker
+  stays and the run answers `stale_worktree`. It also removes the
+  judged physical location with both `rmSync` and `git worktree remove`
+  rather than the recorded spelling, so a symlinked component re-pointed
+  while the gate runs git no longer redirects the delete. The isolation
+  copy's own root and `init`'s directory check after `mkdir` use the
+  same walk. A `--file` that is itself a dangling symlink is still
+  judged where the link sits; that shape stays open.
 
 ### Added
 
