@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   isPathContained,
   isRelContained,
+  physicalRealpath,
   resolveDeepestExisting,
   UnresolvablePathError,
 } from "./containment.js";
@@ -1025,7 +1026,11 @@ function namedPathTouchesRoot(absPath: string, rootReal: string): boolean {
   for (const segment of segments) {
     let placed: string;
     try {
-      placed = path.join(fs.realpathSync(prefix), segment);
+      // Placed physically: a symlinked step whose target walks `..` is
+      // followed the way the kernel does. The JavaScript `realpath`
+      // collapses that `..` lexically, places the step at a decoy, and
+      // every later step is then judged below the wrong directory.
+      placed = path.join(physicalRealpath(prefix), segment);
     } catch {
       return true;
     }

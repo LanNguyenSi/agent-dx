@@ -3,6 +3,7 @@ import path from "node:path";
 import { UsageError } from "../envelope.js";
 import {
   isPathContained,
+  physicalRealpath,
   resolveDeepestExisting,
   resolveDeepestExistingLenient,
   UnresolvablePathError,
@@ -438,7 +439,10 @@ function writeOne(
   try {
     fs.mkdirSync(dir, { recursive: true });
 
-    const realDir = fs.realpathSync(dir);
+    // Placed physically, as `resolveDeepestExisting` places the target:
+    // the JavaScript `realpath` collapses a `..` in a symlinked
+    // component's target lexically and would place `dir` elsewhere.
+    const realDir = physicalRealpath(dir);
     if (!isPathContained(resolvedTargetDir, realDir)) {
       throw new InitFsUsageError(
         `init: resolved target for harness "${harness}" escapes ` +

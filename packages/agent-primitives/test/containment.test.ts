@@ -1152,13 +1152,26 @@ describe("resolveDeepestExisting(): which realpath failures fall back to the dee
     );
   });
 
-  it("a symlink loop (ELOOP) falls back to its own location: the kernel cannot open it either", () => {
+  it("a symlink loop (ELOOP) throws: the walk only knows that it ran out of its own link budget, and does not fall back from that", () => {
     const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
     fs.symlinkSync("loop-b", path.join(root, "loop-a"));
     fs.symlinkSync("loop-a", path.join(root, "loop-b"));
-    expect(resolveDeepestExisting(path.join(root, "loop-a"))).toBe(
+    for (const target of [
       path.join(root, "loop-a"),
-    );
+      path.join(root, "loop-a", "below.js"),
+    ]) {
+      let thrown: unknown;
+      try {
+        resolveDeepestExisting(target);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(UnresolvablePathError);
+      expect((thrown as UnresolvablePathError).code).toBe("ELOOP");
+      expect((thrown as UnresolvablePathError).path).toBe(target);
+      // Lenient keeps the old fallback: the loop where it sits.
+      expect(resolveDeepestExistingLenient(target)).toBe(target);
+    }
   });
 
   it.skipIf(!notRoot)(
