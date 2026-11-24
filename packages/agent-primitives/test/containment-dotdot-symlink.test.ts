@@ -237,12 +237,15 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
       path.join(fx.outside, "gone"),
       path.join(fx.repo, "dangling"),
     );
+    fs.symlinkSync("fixture.js", path.join(fx.repo, "link-to-file"));
     for (const spelling of [
       `${fx.repo}/missing/../one.js`,
       `${fx.repo}/dangling/../one.js`,
       // A regular file is no directory to climb from (ENOTDIR to the
-      // kernel), so its `..` is never applied either.
+      // kernel), so its `..` is never applied either, also when a
+      // followed link is what lands on the file.
       `${fx.repo}/fixture.js/../one.js`,
+      `${fx.repo}/link-to-file/../one.js`,
     ]) {
       expect(() => resolveDeepestExisting(spelling)).toThrow(
         UnresolvablePathError,
@@ -266,6 +269,75 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
     expect(resolveDeepestExisting(path.join(fx.repo, "loop-a.js"))).toBe(
       path.join(repo, "loop-a.js"),
     );
+  });
+
+  it("a relative spelling is spliced onto the current directory and its .. still placed physically", () => {
+    const fx = fixture();
+    const saved = process.cwd();
+    process.chdir(fx.repo);
+    try {
+      expect(resolveDeepestExisting("odl/../one.js")).toBe(
+        path.join(fs.realpathSync.native(fx.outside), "one.js"),
+      );
+    } finally {
+      process.chdir(saved);
+    }
+  });
+
+  /** `<base>/c<n-1> -> ... -> c0 -> real`: a chain of `n` links ending at
+   * the directory `<base>/real`, which holds `real/s -> <base>/far`. */
+  function chain(n: number): { base: string; head: string } {
+    const base = makeTmpDir();
+    fs.mkdirSync(path.join(base, "real"));
+    fs.mkdirSync(path.join(base, "far"));
+    fs.mkdirSync(path.join(base, "real", "plain"));
+    fs.symlinkSync(path.join(base, "far"), path.join(base, "real", "s"));
+    let previous = "real";
+    for (let i = 0; i < n; i++) {
+      fs.symlinkSync(previous, path.join(base, `c${String(i)}`));
+      previous = `c${String(i)}`;
+    }
+    return { base, head: path.join(base, previous) };
+  }
+
+  it("the walk's link budget: exactly 64 links resolve, and a 65th that the kernel would follow from the shorter spelling is refused, never re-appended", () => {
+    const at64 = chain(64);
+    expect(resolveDeepestExisting(at64.head)).toBe(
+      path.join(at64.base, "real"),
+    );
+    expect(resolveDeepestExisting(path.join(at64.head, "plain"))).toBe(
+      path.join(at64.base, "real", "plain"),
+    );
+    // 64 links to `real`, then `s` is the 65th: placing `<base>/real` and
+    // re-appending `s` verbatim would name `<base>/far` to the kernel.
+    expect(() => resolveDeepestExisting(path.join(at64.head, "s"))).toThrow(
+      UnresolvablePathError,
+    );
+    const at63 = chain(63);
+    expect(resolveDeepestExisting(path.join(at63.head, "s"))).toBe(
+      path.join(at63.base, "far"),
+    );
+  });
+
+  it("a path past the budget through `l -> .` steps is refused, whatever number of steps", () => {
+    const base = makeTmpDir();
+    const log = path.join(base, "log");
+    fs.mkdirSync(log);
+    fs.mkdirSync(path.join(base, "victim", "wt"), { recursive: true });
+    fs.symlinkSync(".", path.join(log, "l"));
+    fs.symlinkSync(path.join(base, "victim"), path.join(log, "U"));
+    for (const steps of [63, 64, 65, 100]) {
+      const spelling = `${log}/${"l/".repeat(steps)}U/wt`;
+      if (steps === 63) {
+        expect(resolveDeepestExisting(spelling)).toBe(
+          path.join(base, "victim", "wt"),
+        );
+      } else {
+        expect(() => resolveDeepestExisting(spelling)).toThrow(
+          UnresolvablePathError,
+        );
+      }
+    }
   });
 
   const caseInsensitiveTmp = (() => {
@@ -418,6 +490,99 @@ describe("the worktree cleanup gate judges the physical location and removes exa
     });
   }
 
+  for (const shape of ["l -> . steps", "a link chain"] as const) {
+    it(`a recorded path behind 64 or more links (${shape}) ahead of a symlinked wt-<uuid>: the marker is refused and kept, <victim>/wt is untouched`, async () => {
+      useLockDir();
+      const repo = repoOnly();
+      const logDir = makeTmpDir();
+      const victim = makeTmpDir();
+      fs.mkdirSync(path.join(victim, "wt", "docs"), { recursive: true });
+      fs.writeFileSync(path.join(victim, "wt", "docs", "thesis.txt"), "keep\n");
+      let targetPath: string;
+      if (shape === "l -> . steps") {
+        fs.symlinkSync(".", path.join(logDir, "l"));
+        fs.symlinkSync(victim, path.join(logDir, U));
+        targetPath = `${logDir}/${"l/".repeat(64)}${U}/wt`;
+      } else {
+        fs.mkdirSync(path.join(logDir, "real"));
+        fs.symlinkSync(victim, path.join(logDir, "real", U));
+        let previous = "real";
+        for (let i = 0; i < 64; i++) {
+          fs.symlinkSync(previous, path.join(logDir, `c${String(i)}`));
+          previous = `c${String(i)}`;
+        }
+        targetPath = `${logDir}/${previous}/${U}/wt`;
+      }
+      const realRoot = plantMarker(repo, targetPath, logDir);
+
+      const result = await probeRun(repo, logDir);
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("stale_worktree");
+      expect(readMarkerFor(realRoot)?.targetPath).toBe(targetPath);
+      expect(
+        fs.readFileSync(path.join(victim, "wt", "docs", "thesis.txt"), "utf8"),
+      ).toBe("keep\n");
+    });
+  }
+
+  /** A `git` on PATH that re-points `lnk` at `to` the first time the
+   * gate lists the registered worktrees (after the judgement, before the
+   * removal); `flag` records that it did. */
+  function repointingGit(
+    lnk: string,
+    to: string,
+  ): { binDir: string; flag: string } {
+    const binDir = makeTmpDir();
+    const flag = path.join(binDir, "swapped");
+    const shim = path.join(binDir, "git");
+    fs.writeFileSync(
+      shim,
+      [
+        "#!/bin/sh",
+        `case " $* " in *" worktree list "*)`,
+        `  if [ ! -e '${flag}' ]; then`,
+        `    : > '${flag}'`,
+        `    rm -f '${lnk}'`,
+        `    ln -s '${to}' '${lnk}'`,
+        "  fi",
+        "  ;;",
+        "esac",
+        `exec '${realGitPath()}' "$@"`,
+        "",
+      ].join("\n"),
+    );
+    fs.chmodSync(shim, 0o755);
+    return { binDir, flag };
+  }
+
+  it("a re-pointed component reaching another registered worktree of the repository: git worktree remove gets the judged location, and the other worktree stays registered and on disk", async () => {
+    const repo = repoOnly();
+    const logDir = makeTmpDir();
+    const elsewhere = makeTmpDir();
+    const judged = path.join(logDir, "real", U, "wt");
+    fs.mkdirSync(judged, { recursive: true });
+    const other = path.join(elsewhere, U, "wt");
+    fs.mkdirSync(path.dirname(other));
+    git(repo, ["worktree", "add", "--detach", "--", other, "HEAD"]);
+    const lnk = path.join(logDir, "lnk");
+    fs.symlinkSync(path.join(logDir, "real"), lnk);
+    const recorded = path.join(lnk, U, "wt");
+    const { binDir, flag } = repointingGit(lnk, elsewhere);
+
+    const cleanup = await withPathPrepended(binDir, () =>
+      cleanupWorktree(repo, recorded, logDir, { scratchRoot: logDir }),
+    );
+
+    expect(fs.existsSync(flag)).toBe(true);
+    expect(cleanup.refused).toBe(false);
+    expect(fs.existsSync(judged)).toBe(false);
+    expect(fs.existsSync(path.join(other, "fixture.js"))).toBe(true);
+    expect(git(repo, ["worktree", "list", "--porcelain"])).toContain(
+      `worktree ${fs.realpathSync(other)}`,
+    );
+  });
+
   it("a symlinked component re-pointed while the gate runs git does not redirect the removal: the judged location is removed, never the new target", async () => {
     const repo = repoOnly();
     const logDir = makeTmpDir();
@@ -435,28 +600,7 @@ describe("the worktree cleanup gate judges the physical location and removes exa
     fs.symlinkSync(path.join(logDir, "real"), lnk);
     const recorded = path.join(lnk, U, "wt");
 
-    // A git that re-points `lnk` the first time the gate lists the
-    // registered worktrees (after the judgement, before the removal).
-    const binDir = makeTmpDir();
-    const flag = path.join(binDir, "swapped");
-    const shim = path.join(binDir, "git");
-    fs.writeFileSync(
-      shim,
-      [
-        "#!/bin/sh",
-        `case " $* " in *" worktree list "*)`,
-        `  if [ ! -e '${flag}' ]; then`,
-        `    : > '${flag}'`,
-        `    rm -f '${lnk}'`,
-        `    ln -s '${elsewhere}' '${lnk}'`,
-        "  fi",
-        "  ;;",
-        "esac",
-        `exec '${realGitPath()}' "$@"`,
-        "",
-      ].join("\n"),
-    );
-    fs.chmodSync(shim, 0o755);
+    const { binDir, flag } = repointingGit(lnk, elsewhere);
 
     const cleanup = await withPathPrepended(binDir, () =>
       cleanupWorktree(repo, recorded, logDir, { scratchRoot: logDir }),
@@ -522,6 +666,46 @@ function dotdotAncestor(): { spelled: string; physical: string } {
     physical: path.join(fs.realpathSync.native(base), "deep", "realdir"),
   };
 }
+
+describe("a plan file named through a later step below a prefix whose symlink target walks ..", () => {
+  it("is not operator input: every step after that prefix is judged below where the kernel puts it", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "x", "R");
+    fs.mkdirSync(path.join(root, "dir"), { recursive: true });
+    fs.mkdirSync(path.join(base, "x", "y"));
+    fs.mkdirSync(path.join(base, "x", "E"));
+    const elsewhere = makeTmpDir();
+    fs.writeFileSync(path.join(elsewhere, "plan.json"), "{}\n");
+    fs.symlinkSync(
+      path.join(elsewhere, "plan.json"),
+      path.join(root, "dir", "plan.json"),
+    );
+    // The kernel's route: `<base>/a/dd -> odl/../E` is `<base>/x/E`, whose
+    // `s` links into `<root>/dir`.
+    fs.symlinkSync(path.join(root, "dir"), path.join(base, "x", "E", "s"));
+    const a = path.join(base, "a");
+    fs.mkdirSync(path.join(a, "E"), { recursive: true });
+    fs.symlinkSync(path.join(base, "x", "y"), path.join(a, "odl"));
+    fs.symlinkSync("odl/../E", path.join(a, "dd"));
+    // The decoy the JavaScript `realpath` reaches instead: `<base>/a/E/s`.
+    const decoy = makeTmpDir();
+    fs.symlinkSync(decoy, path.join(a, "E", "s"));
+    fs.symlinkSync(
+      path.join(elsewhere, "plan.json"),
+      path.join(decoy, "plan.json"),
+    );
+    expect(
+      linkSourceIsOperatorInput(
+        {
+          kind: "plan",
+          planPath: path.join(a, "dd", "s", "plan.json"),
+          planRealPath: fs.realpathSync(path.join(elsewhere, "plan.json")),
+        },
+        fs.realpathSync.native(root),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("a directory reached through an ancestor whose symlink target walks ..", () => {
   it("a --log-dir there: the -i worktree copy is judged at its physical location and the run completes", async () => {

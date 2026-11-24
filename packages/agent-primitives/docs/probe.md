@@ -1432,7 +1432,11 @@ given, as the JavaScript `realpath` does); when that fails with `ENOENT`, `ENOTD
 is placed by its deepest existing prefix, resolved the same way, plus the
 missing tail verbatim. A `..` in that tail would climb from a component
 that does not resolve (`missing/../x`, `dangling-link/../x`), so such a
-path is not placed at all and is not read as inside the root. Any
+path is not placed at all and is not read as inside the root. The same
+holds for a tail the kernel could still follow: the walk follows at most
+64 links for the whole path, and a path that fails only on that budget
+(64 `l -> .` steps ahead of a symlinked component, say) is refused rather
+than placed at a shorter spelling whose tail is still a live link. Any
 other failure (`EACCES`, `ENAMETOOLONG`, `EIO`, ...) means probe cannot
 say where the path is, and it is not read as inside the root. The case
 that motivated it: a symlink whose own mode is 000 (`lchmod`, macOS only)

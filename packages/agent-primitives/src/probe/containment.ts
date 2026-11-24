@@ -177,7 +177,13 @@ function walkPhysical(
  * `<outside>/two.js`.
  *
  * The walk-up is for a path that does not exist (`ENOENT`, `ENOTDIR`)
- * or cannot be followed at all (`ELOOP`) only. Any other failure throws
+ * or cannot be followed at all (`ELOOP`) only, and the re-appended tail
+ * must be dead for the kernel as well: its first component has to fail
+ * on its own under the placed prefix. A path that only exceeds the walk's
+ * budget of `MAX_LINK_SOURCE_HOPS` links (64 `l -> .` steps ahead of a
+ * symlinked `wt-<uuid>`, say) fails here for a component the kernel
+ * would still follow from the shorter spelling, and is refused with
+ * `UnresolvablePathError` rather than placed. Any other failure throws
  * `UnresolvablePathError` instead: a symlink whose own mode is 000
  * (`lchmod`, macOS) cannot be read (`EACCES`) while the kernel still
  * follows the link for `stat` and `open`, and falling back to "the
@@ -255,10 +261,35 @@ function placeDeepestExisting(p: string, lenient: boolean): string {
         ),
       );
     }
+    // The tail is re-appended verbatim, so it must be dead for the
+    // kernel too: its first component must fail on its own under the
+    // placed prefix. It does for a missing name, a name below a file and
+    // a genuine cycle. One that resolves alone failed only on this walk's
+    // link budget, which counts the whole path, and the kernel would
+    // follow it from the shorter spelling returned here.
+    if (!lenient && tail.length > 0 && resolvesAlone(placed, tail[0])) {
+      throw new UnresolvablePathError(
+        p,
+        new Error(
+          `${tail[0]} resolves on its own below ${placed}; the path only exceeds the ${String(MAX_LINK_SOURCE_HOPS)}-link budget`,
+        ),
+      );
+    }
     return joinComponents(placed, tail);
   }
   // Not even the filesystem root resolved.
   return joinComponents(root, components);
+}
+
+/** Whether `name` resolves physically under the placed directory `dir`
+ * when walked alone, with a budget of its own. */
+function resolvesAlone(dir: string, name: string): boolean {
+  try {
+    walkPhysical(dir, [name], { links: 0 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** `components` appended under `dir` as plain strings, never through

@@ -53,7 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps the case it is given, as the link policy's alias checks need),
   and on a missing path places the deepest existing prefix the same way;
   a `..` after a component that does not resolve is refused
-  (`UnresolvablePathError`) instead of collapsed. Such a `--file` is
+  (`UnresolvablePathError`) instead of collapsed, and so is a path that
+  fails only on the walk's 64-link budget while the rest of it would
+  still resolve. Such a `--file` is
   answered `file_outside_root` with nothing outside read or written.
   `resolveDeepestExistingLenient` runs the same placement and differs
   only in never throwing, so the two never spell a path both can place
