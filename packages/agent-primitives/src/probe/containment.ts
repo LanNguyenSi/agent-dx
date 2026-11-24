@@ -79,15 +79,16 @@ export class UnresolvablePathError extends Error {
 /** The failures `resolveDeepestExisting` walks up from: a name the walk
  * itself looked up under a placed directory and found missing (`ENOENT`),
  * or one that sits below something that is not a directory (`ENOTDIR`).
- * The kernel reaches that same name from the placed prefix and stops
- * there too. Every other failure throws. `EACCES`, `EPERM`, `EIO`,
- * `ENAMETOOLONG` and the like say the path may well exist and be
- * reachable by the kernel while this process cannot place it. `ELOOP`
- * is on that side as well: the walk raises it itself once it has
- * followed `MAX_LINK_SOURCE_HOPS` links in one path, a count the kernel
- * does not share (it starts again at zero for the shorter spelling a
- * walk-up would return), so the walk cannot say that the component it
- * stopped at is dead for the kernel, and does not try to. */
+ * For an ordinary name the kernel gets the same answer from the same
+ * directory and stops there too; the exceptions are named on
+ * `resolveDeepestExisting`. Every other failure throws. `EACCES`,
+ * `EPERM`, `EIO`, `ENAMETOOLONG` and the like say the path may well
+ * exist and be reachable by the kernel while this process cannot place
+ * it. `ELOOP` is on that side as well: the walk raises it itself once it
+ * has followed `MAX_LINK_SOURCE_HOPS` links in one path, a count the
+ * kernel does not share (it starts again at zero for the shorter
+ * spelling a walk-up would return), so the walk cannot say that the
+ * component it stopped at is dead for the kernel, and does not try to. */
 const UNPLACED_PATH_CODES = new Set(["ENOENT", "ENOTDIR"]);
 
 /**
@@ -185,8 +186,9 @@ function walkPhysical(
  *
  * The walk-up is for a path that does not exist only: the walk reached
  * a name under a placed directory and the filesystem answered `ENOENT`
- * or `ENOTDIR` for it, which is the answer the kernel gets for the same
- * name from the same directory. Any other failure throws
+ * or `ENOTDIR` for it, which for an ordinary name is the answer the
+ * kernel gets for the same name from the same directory (the names it
+ * is not are listed below). Any other failure throws
  * `UnresolvablePathError`, and nothing is re-appended. That covers a
  * path the walk gives up on at its own budget of `MAX_LINK_SOURCE_HOPS`
  * links, a symlink cycle and a merely long path alike (64 `l -> .`
@@ -202,11 +204,16 @@ function walkPhysical(
  * name" would place a link that points OUTSIDE the root inside it.
  *
  * Still placed where it sits, not where the kernel may take it: a
- * symlink the walk can read but whose target it cannot find. A create
- * through a dangling link lands where the link points, and on Linux a
- * link into `/proc` that the kernel follows by handle
- * (`/proc/<pid>/fd/<n>`, `cwd`, `root`) can be live while the text
- * `readlink` returns for it names nothing, or another place.
+ * symlink the walk can read but whose target it cannot find, in three
+ * known shapes that stay open. A create through a dangling link lands
+ * where the link points. On macOS a link into
+ * `<file>/..namedfork/rsrc` opens that file's resource fork, when the
+ * file already carries one, while `lstat` of `<file>/..namedfork`
+ * answers `ENOTDIR`, so a link to the fork of a file OUTSIDE the root
+ * is placed inside it. On Linux a link into `/proc` that the kernel
+ * follows by handle (`/proc/<pid>/fd/<n>` of a removed directory or an
+ * unlinked file, say) is live while the text `readlink` returns for it
+ * names nothing.
  *
  * Every caller that decides whether a run may read, write or delete
  * what the path names (`probe`, `probe --plan`, the link policy,
@@ -283,7 +290,16 @@ function placeDeepestExisting(p: string, lenient: boolean): string {
     }
     return joinComponents(placed, tail);
   }
-  // Not even the filesystem root resolved.
+  // Not reached: the walk of no components (`kept` 0) cannot fail, so
+  // the loop always answers. Should it ever fall through, the strict
+  // resolver refuses rather than hand back a spelling whose `..` nobody
+  // checked.
+  if (!lenient) {
+    throw new UnresolvablePathError(
+      p,
+      new Error("no prefix of the path could be placed"),
+    );
+  }
   return joinComponents(root, components);
 }
 

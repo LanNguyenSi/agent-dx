@@ -2912,10 +2912,14 @@ export async function cleanupWorktree(
   }
 
   // Reached only for a path the gate above admitted. Both removals act
-  // on `target`, the physical location the gate judged, never on the
-  // recorded spelling: a symlinked component of that spelling could be
+  // on `target`, the location the gate judged, never on the recorded
+  // spelling: a symlinked component of that spelling could be
   // re-pointed between the judgement and the removal (the listing above
-  // runs git in between), and the delete would then follow it.
+  // runs git in between), and the delete would then follow it. That
+  // holds for a path that fully resolves, whose `target` carries no
+  // link. Known open: a `wt-<uuid>` that is a dangling link at the
+  // judgement is judged where it sits, and a target that appears for it
+  // before the removal is followed.
   try {
     fs.rmSync(target, { recursive: true, force: true });
   } catch {

@@ -1427,8 +1427,9 @@ work-tree root (or inside the cwd when not in a repo), unless
 The placement rule is a physical one plus one about errno codes. The path
 is resolved by a `realpath` walk that follows every symlinked component
 and applies each `..` to where the component before it physically
-points, exactly as the kernel opens the path (keeping the case it was
-given, as the JavaScript `realpath` does); when that fails with `ENOENT` or `ENOTDIR`
+points, the way the kernel opens a path that fully resolves (keeping the case it was
+given, as the JavaScript `realpath` does; the shapes where the walk and
+the kernel still part are named below); when that fails with `ENOENT` or `ENOTDIR`
 (the walk reached a name that is missing, or one below something that is
 not a directory), the path is placed by its deepest existing prefix,
 resolved the same way, plus the missing tail verbatim. A `..` in that
@@ -1467,16 +1468,25 @@ before anything is judged, so that run judges and mutates `<root>/two.js`
 and never reaches the outside file. The worktree cleanup gate refuses a
 leftover marker path with a `.` or `..` component outright (the scratch
 shape `<log-dir>/wt-<uuid>/wt` never has one), judges every other one at
-its physical location, and removes exactly that location, never the
-recorded spelling. What the rule does NOT establish: a `--file` that is
+its physical location, and for a path that fully resolves removes exactly
+that location, never the recorded spelling. One race stays open there: a
+`wt-<uuid>` that is a dangling link when the gate judges it is judged
+where it sits, and if its target appears before the removal, the removal
+follows the link. What the rule does NOT establish: a `--file` that is
 itself a dangling symlink is still judged where the link sits, not where
 it points, so for a dangling link to an outside path the answer
 (`file_not_found` inside the root, `file_outside_root` once the outside
-path exists) still depends on whether that path exists. The same holds on
-Linux for a link into `/proc` that the kernel follows by handle rather
-than by the text `readlink` returns for it (`/proc/<pid>/fd/<n>`,
-`/proc/<pid>/cwd`, `/proc/<pid>/root`): where that text names nothing, or
-another place, the link is judged by the text. A `--link` value carrying a
+path exists) still depends on whether that path exists. Two more links
+are judged where they sit although the kernel follows them, and both stay
+open. On macOS, a link into `<file>/..namedfork/rsrc` opens the resource
+fork of `<file>` when that file already carries one, while the walk gets
+`ENOTDIR` for `<file>/..namedfork` and places the link at its own
+spelling: a `--file` link to the fork of a file outside the root is read
+as inside it, `-M` without `-n` names lines of that fork, and a run with
+`-n` under `-i inplace` writes to it and ends `restore_failed`. On Linux, a link into `/proc` that
+the kernel follows by handle rather than by the text `readlink` returns
+for it (`/proc/<pid>/fd/<n>` of a removed directory or an unlinked file)
+is judged by that text, which names nothing. A `--link` value carrying a
 `$(...)` command substitution or a backtick is refused outright
 (`InvalidArgumentError`, before anything runs) rather than merely being
 inert the way it already is for `-p`/`--file` above: the same rule

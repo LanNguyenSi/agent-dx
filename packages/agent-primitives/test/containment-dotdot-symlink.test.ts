@@ -5,6 +5,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { markerFilePathFor, readMarkerFor, writeMarker } from "../src/lock.js";
 import {
+  isPathContained,
+  physicalRealpath,
   resolveDeepestExisting,
   resolveDeepestExistingLenient,
   resolvePhysicalLocation,
@@ -347,6 +349,82 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
       );
     }
   });
+
+  it("a link whose target climbs with .. from a regular file is placed where the link sits: the kernel answers ENOTDIR for it too", () => {
+    const fx = fixture();
+    const repo = fs.realpathSync.native(fx.repo);
+    // `f2.js` is a file in the repository, so `f2.js/..` is ENOTDIR to
+    // the kernel and to the walk alike, and the walk-up places the link.
+    fs.symlinkSync("f2.js/../one.js", path.join(fx.repo, "via-file.js"));
+    const spelling = path.join(fx.repo, "via-file.js");
+    expect(() => fs.statSync(spelling)).toThrow(/ENOTDIR/);
+    expect(resolveDeepestExisting(spelling)).toBe(
+      path.join(repo, "via-file.js"),
+    );
+    expect(resolveDeepestExistingLenient(spelling)).toBe(
+      path.join(repo, "via-file.js"),
+    );
+  });
+
+  it("a missing first component below the filesystem root: placed verbatim, and a .. after it is refused by the strict one", () => {
+    const fsRoot = path.parse(os.tmpdir()).root;
+    const missing = `${fsRoot}agent-primitives-no-such-top-level-${String(process.pid)}`;
+    expect(fs.existsSync(missing)).toBe(false);
+    const plain = `${missing}${path.sep}x.js`;
+    expect(resolveDeepestExisting(plain)).toBe(plain);
+    expect(resolveDeepestExistingLenient(plain)).toBe(plain);
+    const climbing = `${missing}${path.sep}..${path.sep}etc`;
+    expect(() => resolveDeepestExisting(climbing)).toThrow(
+      UnresolvablePathError,
+    );
+    expect(resolveDeepestExistingLenient(climbing)).toBe(climbing);
+  });
+
+  it("physicalRealpath takes the spelling it is given: a .. through a symlinked directory lands where the kernel puts it", () => {
+    const fx = fixture();
+    const spelling = `${fx.repo}${path.sep}odl${path.sep}..${path.sep}two.js`;
+    expect(physicalRealpath(spelling)).toBe(
+      path.join(fs.realpathSync.native(fx.outside), "two.js"),
+    );
+    expect(physicalRealpath(spelling)).toBe(fs.realpathSync.native(spelling));
+  });
+
+  /** Whether this volume gives a file a resource fork under
+   * `<file>/..namedfork/rsrc` (macOS, on a filesystem that has forks). */
+  const hasNamedForks = (() => {
+    if (process.platform !== "darwin") return false;
+    const probeDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-fork-probe-"),
+    );
+    try {
+      const file = path.join(probeDir, "f");
+      fs.writeFileSync(file, "data\n");
+      fs.writeFileSync(path.join(file, "..namedfork", "rsrc"), "fork\n");
+      return true;
+    } catch {
+      return false;
+    } finally {
+      fs.rmSync(probeDir, { recursive: true, force: true });
+    }
+  })();
+
+  it.skipIf(!hasNamedForks)(
+    "KNOWN OPEN (macOS): a link into <outside-file>/..namedfork/rsrc is placed where the link sits, inside the root, although the kernel opens the outside fork",
+    () => {
+      // Pins today's answer so that a fix flips this test on purpose:
+      // `lstat` of `<file>/..namedfork` answers ENOTDIR, the walk-up
+      // places the link at its own spelling, and the kernel follows it.
+      const fx = fixture();
+      const repo = fs.realpathSync.native(fx.repo);
+      const fork = path.join(fx.outside, "two.js", "..namedfork", "rsrc");
+      fs.writeFileSync(fork, "the outside fork\n");
+      fs.symlinkSync(fork, path.join(fx.repo, "fork-link.js"));
+      const judged = resolveDeepestExisting(path.join(fx.repo, "fork-link.js"));
+      expect(judged).toBe(path.join(repo, "fork-link.js"));
+      expect(isPathContained(repo, judged)).toBe(true);
+      expect(fs.readFileSync(judged, "utf8")).toBe("the outside fork\n");
+    },
+  );
 
   it("a relative spelling is spliced onto the current directory and its .. still placed physically", () => {
     const fx = fixture();

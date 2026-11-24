@@ -65,9 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Answers that change for a symlink cycle, all still exit `2`: a `--file`
   or a cwd that is one or sits below one answers `file_outside_root`
   instead of `file_not_found`, a `--link` below one answers
-  `file_outside_root` instead of `link_source_not_found`, and a
-  `--log-dir` below one under `-i worktree` answers `file_outside_root`
-  instead of failing its `mkdir` with `ELOOP`.
+  `file_outside_root` instead of `link_source_not_found`, a `--plan`
+  mutant `file` that is one or sits below one answers `usage_error`
+  `file_outside_root` instead of `usage_error` `file_not_found`, and a
+  `--log-dir` that is one or sits below one under `-i worktree` answers
+  `file_outside_root` instead of failing its `mkdir` with `ELOOP`.
   `resolveDeepestExistingLenient` runs the same placement and differs
   only in never throwing, so the two never spell a path both can place
   differently. The worktree cleanup gate refuses a leftover
@@ -75,14 +77,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or `<log-dir>/wt-<uuid>/wt/link/..` with `link` pointing at another
   directory, which used to delete that directory's contents); the marker
   stays and the run answers `stale_worktree`. It also removes the
-  judged physical location with both `rmSync` and `git worktree remove`
-  rather than the recorded spelling, so a symlinked component re-pointed
-  while the gate runs git no longer redirects the delete. The isolation
+  judged location with both `rmSync` and `git worktree remove`
+  rather than the recorded spelling, so for a path that fully resolves a
+  symlinked component re-pointed while the gate runs git no longer
+  redirects the delete. The isolation
   copy's own root and `init`'s directory check after `mkdir` use the
-  same walk. A `--file` that is itself a dangling symlink is still
-  judged where the link sits, and so is, on Linux, a link into `/proc`
-  whose `readlink` text names nothing while the kernel follows it by
-  handle; both shapes stay open.
+  same walk. Four shapes stay open, all older than this entry. A `--file`
+  that is itself a dangling symlink is still judged where the link sits.
+  On macOS, a link into `<file>/..namedfork/rsrc` of a file outside the
+  root that already carries a resource fork is judged where the link
+  sits while the kernel opens the outside fork. On Linux, so is a link
+  to `/proc/<pid>/fd/<n>` of a removed directory or an unlinked file,
+  which the kernel follows by handle while its `readlink` text names
+  nothing. At the cleanup gate, a `wt-<uuid>` that is a dangling link
+  when it is judged is followed by the removal if its target appears in
+  between.
 
 ### Added
 
