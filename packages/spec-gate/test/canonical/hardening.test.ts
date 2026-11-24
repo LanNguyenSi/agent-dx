@@ -97,7 +97,7 @@ describe("the shared overrides", () => {
     ]);
   });
 
-  it("an offline call allows no transport, whatever the repository says; one that fetches leaves that to the configuration", () => {
+  it("no transport is allowed by default, whatever the repository says; only a fetching call leaves that to the configuration", () => {
     const base = {
       GIT_GRAFT_FILE: os.devNull,
       GIT_NO_LAZY_FETCH: "1",
@@ -105,17 +105,17 @@ describe("the shared overrides", () => {
       GIT_OPTIONAL_LOCKS: "0",
       GIT_TERMINAL_PROMPT: "0",
     };
-    const offline: NodeJS.ProcessEnv = {};
-    applyGitSwitches(offline, { offline: true });
-    expect(offline).toEqual({ ...base, GIT_ALLOW_PROTOCOL: "" });
+    const byDefault: NodeJS.ProcessEnv = {};
+    applyGitSwitches(byDefault);
+    expect(byDefault).toEqual({ ...base, GIT_ALLOW_PROTOCOL: "" });
     // the empty string is a value, not an absent variable
-    expect(Object.keys(offline)).toContain("GIT_ALLOW_PROTOCOL");
+    expect(Object.keys(byDefault)).toContain("GIT_ALLOW_PROTOCOL");
+    const notFetching: NodeJS.ProcessEnv = {};
+    applyGitSwitches(notFetching, { fetching: false });
+    expect(notFetching).toEqual({ ...base, GIT_ALLOW_PROTOCOL: "" });
     const fetching: NodeJS.ProcessEnv = {};
-    applyGitSwitches(fetching, { offline: false });
+    applyGitSwitches(fetching, { fetching: true });
     expect(fetching).toEqual(base);
-    const unset: NodeJS.ProcessEnv = {};
-    applyGitSwitches(unset);
-    expect(unset).toEqual(base);
   });
 });
 

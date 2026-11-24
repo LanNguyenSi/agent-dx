@@ -32,7 +32,7 @@ export function gitEnv(
   for (const [key, value] of Object.entries(base)) {
     if (!key.startsWith("GIT_")) env[key] = value;
   }
-  applyGitSwitches(env);
+  applyGitSwitches(env, { fetching: true });
   return env;
 }
 

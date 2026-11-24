@@ -49,22 +49,23 @@ export function gitConfigOverrides(
  * it has, so an ancestry answer would not be the one the object database
  * gives).
  *
- * A call that never talks to a remote (`offline: true`: lint and digest) also
- * sets `GIT_ALLOW_PROTOCOL` to the empty string: no transport is allowed, and
- * a repository's own `protocol.<name>.allow` cannot widen that, which it can
- * with the `protocol.allow=never` override alone. Intake, which fetches,
- * leaves the transports to the configuration.
+ * By default it also sets `GIT_ALLOW_PROTOCOL` to the empty string: no
+ * transport is allowed, and a repository's own `protocol.<name>.allow`
+ * cannot widen that, which it can with the `protocol.allow=never` override
+ * alone. Only a call that fetches (`fetching: true`, the intake step) leaves
+ * the transports to the configuration; the safe setting is the default, so a
+ * new call site that forgets the option stays offline.
  */
 export function applyGitSwitches(
   env: NodeJS.ProcessEnv,
-  options: { offline?: boolean } = {},
+  options: { fetching?: boolean } = {},
 ): void {
   env["GIT_TERMINAL_PROMPT"] = "0";
   env["GIT_NO_REPLACE_OBJECTS"] = "1";
   env["GIT_NO_LAZY_FETCH"] = "1";
   env["GIT_OPTIONAL_LOCKS"] = "0";
   env["GIT_GRAFT_FILE"] = os.devNull;
-  if (options.offline === true) env["GIT_ALLOW_PROTOCOL"] = "";
+  if (options.fetching !== true) env["GIT_ALLOW_PROTOCOL"] = "";
 }
 
 function real(p: string): string | null {

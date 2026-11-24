@@ -51,7 +51,7 @@ export function gitEnv(): NodeJS.ProcessEnv {
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith("GIT_")) env[key] = value;
   }
-  applyGitSwitches(env, { offline: true });
+  applyGitSwitches(env);
   return env;
 }
 
