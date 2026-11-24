@@ -7,7 +7,7 @@ import { isPidAlive, lockKey, listMarkers, type MarkerEntry } from "../lock.js";
 import {
   containmentRoot,
   isPathContained,
-  resolveDeepestExisting,
+  resolveDeepestExistingLenient,
 } from "../probe/containment.js";
 import {
   GIT_MIN_VERSION_WORKTREE_LIST_Z,
@@ -552,13 +552,13 @@ export async function doctor(
   // invoked under another (a symlinked ancestor, e.g. macOS's `/tmp` ->
   // `/private/tmp`), and comparing the two unresolved reports "no stale
   // markers" while one is sitting right there.
-  const markerRoot = resolveDeepestExisting(containmentRoot(cwd));
+  const markerRoot = resolveDeepestExistingLenient(containmentRoot(cwd));
   const staleMarkers = listMarkers(options.lockDir).filter(
     (m) =>
       !isPidAlive(m.pid) &&
       isPathContained(
         markerRoot,
-        resolveDeepestExisting(path.resolve(m.targetPath)),
+        resolveDeepestExistingLenient(path.resolve(m.targetPath)),
       ),
   );
   // Which of these the next `probe` would really recover is decided by
@@ -663,7 +663,7 @@ export async function doctor(
   const markerTarget =
     worktreeMarker !== undefined &&
     typeof worktreeMarker.targetPath === "string"
-      ? resolveDeepestExisting(path.resolve(worktreeMarker.targetPath))
+      ? resolveDeepestExistingLenient(path.resolve(worktreeMarker.targetPath))
       : undefined;
   const manualRemove = (worktreePath: string): string =>
     `git -C ${markerRoot} worktree remove --force --force -- ${worktreePath}`;
@@ -1021,7 +1021,9 @@ function listScratchWorktreesSync(
           : `git worktree list --porcelain -z exited ${String(nul.status)}`,
     };
   }
-  const resolved = paths.map((p) => resolveDeepestExisting(path.resolve(p)));
+  const resolved = paths.map((p) =>
+    resolveDeepestExistingLenient(path.resolve(p)),
+  );
   const main = resolved[0];
   return {
     ok: true,

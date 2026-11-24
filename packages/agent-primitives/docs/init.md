@@ -104,7 +104,9 @@ written, so a FIFO at the target path cannot block the run. `-t` naming
 a file instead of a directory, a directory sitting at the target file
 path, an entry there that is not a regular file, an existing target
 that is not writable, a symlink at the target file path, a resolved
-target that escapes `--target-dir`, and a platform whose `fs.constants`
+target that escapes `--target-dir` (or whose location cannot be resolved
+at all, such as a path below a symlink with its own mode 000 or a directory
+that cannot be traversed), and a platform whose `fs.constants`
 offers no usable `O_NOFOLLOW` for the write's symlink guard are each
 reported as `status: "usage_error"`, exit `2`, with a `reason` naming
 which one it was (`target_not_a_directory`,

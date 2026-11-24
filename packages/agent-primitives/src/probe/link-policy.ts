@@ -4,6 +4,7 @@ import {
   isPathContained,
   isRelContained,
   resolveDeepestExisting,
+  UnresolvablePathError,
 } from "./containment.js";
 
 /**
@@ -681,7 +682,22 @@ export function planLinks(
       );
       continue;
     }
-    const resolved = resolveDeepestExisting(candidate.absDir);
+    let resolved: string;
+    try {
+      resolved = resolveDeepestExisting(candidate.absDir);
+    } catch (err) {
+      // A candidate whose target this process cannot place (a symlink
+      // whose own mode is 000) is never linked: where it points is
+      // unknown, so none of the rules below can be applied to it.
+      if (!(err instanceof UnresolvablePathError)) throw err;
+      warnings.push(
+        skippedLinkWarning(
+          candidate,
+          `its target cannot be resolved (${err.code ?? "unresolvable"})`,
+        ),
+      );
+      continue;
+    }
     if (
       candidate.namedBy !== undefined &&
       !isPathContained(ctx.rootReal, resolved)

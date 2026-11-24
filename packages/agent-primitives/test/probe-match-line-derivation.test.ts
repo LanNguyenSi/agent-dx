@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { probe, type ProbeOptions } from "../src/probe/index.js";
+import { probe, probePlan, type ProbeOptions } from "../src/probe/index.js";
 import { matchLineNumbers } from "../src/probe/mutant.js";
 import { parsePlanFile } from "../src/probe/plan.js";
 import { expectNoIsolationLeftovers } from "./helpers/no-leftovers.js";
@@ -1751,3 +1751,189 @@ describe("cli: probe -M without -n", () => {
     expect(noteLine).not.toContain("derived from the unique");
   });
 });
+
+// A symlink whose OWN mode is 000 (`lchmod`, macOS only: Linux has no
+// symlink modes) makes `fs.realpathSync` fail with EACCES while the
+// kernel still follows the link for `stat` and `open`. Judging such a
+// link by the parent's realpath plus its own name read it as an in-repo
+// file, so the `-M` derivation read the outside file behind it and a run
+// with `-n` mutated it. Skipped under uid 0 (root reads everything, so
+// the mode changes nothing) and off darwin.
+describe.skipIf(process.platform !== "darwin" || process.getuid?.() === 0)(
+  "probe(): an in-repo mode-000 symlink to an outside file is never inside the root",
+  () => {
+    type Mode = "inplace" | "worktree";
+    const MODES: Mode[] = ["inplace", "worktree"];
+
+    /** The layered repository plus `link-000.js` -> `outside/two.js`
+     * (two lines carry the `-M` text) with the link's own mode set to
+     * 000. Untracked, so the committed fixture stays as it is. */
+    function withMode000Link(): Layered & {
+      link: string;
+      outsideFile: string;
+      before: string;
+    } {
+      const fx = initLayeredRepo();
+      const outsideFile = path.join(fx.outside, "two.js");
+      const link = path.join(fx.repo, "link-000.js");
+      fs.symlinkSync(outsideFile, link);
+      fs.lchmodSync(link, 0o000);
+      return {
+        ...fx,
+        link,
+        outsideFile,
+        before: fs.readFileSync(outsideFile, "utf8"),
+      };
+    }
+
+    for (const mode of MODES) {
+      for (const line of [undefined, 1]) {
+        it(`${mode} isolation, ${line === undefined ? "without -n" : "-n 1"}: answers file_outside_root and touches nothing outside the root`, async () => {
+          const lockDir = useLockDir();
+          const fx = withMode000Link();
+          const result = await probe(
+            matchOptions(fx.repo, {
+              file: "link-000.js",
+              isolation: mode,
+              ...(line === undefined ? {} : { line }),
+            }),
+          );
+          expect(result.status).toBe("inconclusive");
+          expect(result.reason).toBe("file_outside_root");
+          const text = result.warnings.join("\n");
+          expect(text).toContain("link-000.js");
+          // Never the derivation's own answers: the outside file's line
+          // numbers are not disclosed, nothing was searched.
+          expect(text).not.toContain("occurs on");
+          expect(text).not.toContain("derived from");
+          expect(fs.readFileSync(fx.outsideFile, "utf8")).toBe(fx.before);
+          expectNoIsolationLeftovers(fx.repo, lockDir);
+        });
+      }
+    }
+
+    it("answers the same with and without -n", async () => {
+      useLockDir();
+      const fx = withMode000Link();
+      for (const mode of MODES) {
+        const options = matchOptions(fx.repo, {
+          file: "link-000.js",
+          isolation: mode,
+        });
+        const without = await answerOf(options);
+        const withLine = await answerOf({ ...options, line: 1 });
+        expect(without).toEqual(withLine);
+        expect(without.reason).toBe("file_outside_root");
+      }
+    });
+
+    it("--allow-outside does not make it a placed path: still file_outside_root, nothing written", async () => {
+      useLockDir();
+      const fx = withMode000Link();
+      const result = await probe(
+        matchOptions(fx.repo, {
+          file: "link-000.js",
+          line: 1,
+          allowOutside: true,
+        }),
+      );
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("file_outside_root");
+      expect(fs.readFileSync(fx.outsideFile, "utf8")).toBe(fx.before);
+    });
+
+    it("a file below a mode-000 symlinked directory is refused: -M without -n derives nothing from it", async () => {
+      useLockDir();
+      const fx = initLayeredRepo();
+      const dirLink = path.join(fx.repo, "dir-000");
+      fs.symlinkSync(fx.outside, dirLink);
+      fs.lchmodSync(dirLink, 0o000);
+      const outsideFile = path.join(fx.outside, "two.js");
+      const before = fs.readFileSync(outsideFile, "utf8");
+      const options = matchOptions(fx.repo, { file: "dir-000/two.js" });
+      const without = await answerOf(options);
+      const withLine = await answerOf({ ...options, line: 1 });
+      expect(without).toEqual(withLine);
+      expect(without.reason).toBe("file_outside_root");
+      expect(fs.readFileSync(outsideFile, "utf8")).toBe(before);
+    });
+
+    it("an auto-discovered node_modules that is a mode-000 symlink is skipped with a warning, the run goes on and links nothing", async () => {
+      const lockDir = useLockDir();
+      const fx = initLayeredRepo();
+      fs.writeFileSync(path.join(fx.repo, ".gitignore"), "node_modules\n");
+      const nm = path.join(fx.repo, "node_modules");
+      fs.symlinkSync(fx.outside, nm);
+      fs.lchmodSync(nm, 0o000);
+      const result = await probe(
+        matchOptions(fx.repo, { isolation: "worktree", line: 2 }),
+      );
+      expect(result.reason).not.toBe("file_outside_root");
+      expect(result.status).toBe("killed");
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.warnings.join("\n")).toMatch(
+        /skipped linking .*node_modules: its target cannot be resolved \(EACCES\)/,
+      );
+      expectNoIsolationLeftovers(fx.repo, lockDir);
+    });
+
+    it("a mode-000 symlink to a file INSIDE the repo is refused too: where it points cannot be placed", async () => {
+      useLockDir();
+      const fx = initLayeredRepo();
+      const inside = path.join(fx.repo, "link-000-in.js");
+      fs.symlinkSync("fixture.js", inside);
+      fs.lchmodSync(inside, 0o000);
+      const result = await probe(
+        matchOptions(fx.repo, { file: "link-000-in.js", line: 2 }),
+      );
+      expect(result.reason).toBe("file_outside_root");
+    });
+
+    for (const mode of MODES) {
+      it(`a plan naming it answers file_outside_root under ${mode} isolation and writes nothing`, async () => {
+        const lockDir = useLockDir();
+        const fx = withMode000Link();
+        const result = await probePlan({
+          mutants: [
+            {
+              file: "link-000.js",
+              line: 1,
+              form: "replace",
+              replaceText: "x",
+            },
+          ],
+          testCommand: "node fixture.test.js",
+          isolation: mode,
+          expect: "fail",
+          cwd: fx.repo,
+          logDir: makeTmpDir(),
+        });
+        expect(result.status).toBe("usage_error");
+        expect(result.reason).toBe("file_outside_root");
+        expect(fs.readFileSync(fx.outsideFile, "utf8")).toBe(fx.before);
+        expectNoIsolationLeftovers(fx.repo, lockDir);
+      });
+    }
+
+    it("a regular file with mode 000 is unchanged: -M without -n still derives its refusal from the failed read", async () => {
+      useLockDir();
+      const fx = initLayeredRepo();
+      const secret = path.join(fx.repo, "secret-000.js");
+      fs.writeFileSync(secret, "n > 0\n");
+      fs.chmodSync(secret, 0o000);
+      try {
+        const without = await answerOf(
+          matchOptions(fx.repo, { file: "secret-000.js" }),
+        );
+        const withLine = await answerOf(
+          matchOptions(fx.repo, { file: "secret-000.js", line: 1 }),
+        );
+        expect(without).toEqual(withLine);
+        expect(without.status).toBe("threw");
+        expect(without.text).toMatch(/EACCES/);
+      } finally {
+        fs.chmodSync(secret, 0o644);
+      }
+    });
+  },
+);

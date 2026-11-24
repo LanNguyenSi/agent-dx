@@ -2,12 +2,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
+import { doctor } from "../src/doctor/index.js";
+import { InitFsUsageError, init } from "../src/init/index.js";
+import { lockKey } from "../src/lock.js";
 import {
   escapingRootMentions,
   isCaseInsensitiveFilesystem,
   isPathContained,
   isRelContained,
   resolveDeepestExisting,
+  resolveDeepestExistingLenient,
+  UnresolvablePathError,
 } from "../src/probe/containment.js";
 
 /**
@@ -1123,3 +1128,156 @@ describe("isRelContained: a name starting with two dots is inside", () => {
     expect(isPathContained(root, path.join(root, "..", "x"))).toBe(false);
   });
 });
+
+describe("resolveDeepestExisting(): which realpath failures fall back to the deepest existing ancestor", () => {
+  const notRoot = process.getuid?.() !== 0;
+  const canLchmod = process.platform === "darwin" && notRoot;
+
+  it("a path that does not exist (ENOENT) resolves to the deepest existing ancestor plus the missing tail", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    expect(resolveDeepestExisting(path.join(root, "a", "b", "c.js"))).toBe(
+      path.join(root, "a", "b", "c.js"),
+    );
+    fs.mkdirSync(path.join(root, "a"));
+    expect(resolveDeepestExisting(path.join(root, "a", "b", "c.js"))).toBe(
+      path.join(root, "a", "b", "c.js"),
+    );
+  });
+
+  it("a path under a regular file (ENOTDIR) resolves to the file plus the tail", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    fs.writeFileSync(path.join(root, "f.js"), "x\n");
+    expect(resolveDeepestExisting(path.join(root, "f.js", "child"))).toBe(
+      path.join(root, "f.js", "child"),
+    );
+  });
+
+  it("a symlink loop (ELOOP) falls back to its own location: the kernel cannot open it either", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    fs.symlinkSync("loop-b", path.join(root, "loop-a"));
+    fs.symlinkSync("loop-a", path.join(root, "loop-b"));
+    expect(resolveDeepestExisting(path.join(root, "loop-a"))).toBe(
+      path.join(root, "loop-a"),
+    );
+  });
+
+  it.skipIf(!notRoot)(
+    "any other failure (EACCES) throws UnresolvablePathError naming the path and the code",
+    () => {
+      const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+      const closed = path.join(root, "closed");
+      fs.mkdirSync(closed);
+      fs.writeFileSync(path.join(closed, "f.js"), "x\n");
+      fs.chmodSync(closed, 0o000);
+      try {
+        const target = path.join(closed, "f.js");
+        let thrown: unknown;
+        try {
+          resolveDeepestExisting(target);
+        } catch (err) {
+          thrown = err;
+        }
+        expect(thrown).toBeInstanceOf(UnresolvablePathError);
+        expect((thrown as UnresolvablePathError).code).toBe("EACCES");
+        expect((thrown as UnresolvablePathError).path).toBe(target);
+        expect((thrown as Error).message).toContain(target);
+      } finally {
+        fs.chmodSync(closed, 0o755);
+      }
+    },
+  );
+
+  it.skipIf(!notRoot)(
+    "resolveDeepestExistingLenient keeps the old fallback for the same EACCES: the deepest placeable ancestor plus the tail",
+    () => {
+      const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+      const closed = path.join(root, "closed");
+      fs.mkdirSync(closed);
+      fs.writeFileSync(path.join(closed, "f.js"), "x\n");
+      fs.chmodSync(closed, 0o000);
+      try {
+        expect(resolveDeepestExistingLenient(path.join(closed, "f.js"))).toBe(
+          path.join(closed, "f.js"),
+        );
+        // An ordinary resolution is the same.
+        expect(resolveDeepestExistingLenient(root)).toBe(root);
+        expect(
+          resolveDeepestExistingLenient(path.join(root, "nope", "x")),
+        ).toBe(path.join(root, "nope", "x"));
+      } finally {
+        fs.chmodSync(closed, 0o755);
+      }
+    },
+  );
+
+  it.skipIf(!canLchmod)(
+    "a symlink whose own mode is 000 (macOS) throws instead of reading as its own in-root spelling",
+    () => {
+      const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+      const outside = resolveDeepestExisting(path.resolve(makeTmpDir()));
+      fs.writeFileSync(path.join(outside, "secret.js"), "x\n");
+      const link = path.join(root, "link.js");
+      fs.symlinkSync(path.join(outside, "secret.js"), link);
+      fs.lchmodSync(link, 0o000);
+      expect(() => resolveDeepestExisting(link)).toThrow(UnresolvablePathError);
+      // A path BELOW such a link cannot be placed either.
+      const dirLink = path.join(root, "dir-link");
+      fs.symlinkSync(outside, dirLink);
+      fs.lchmodSync(dirLink, 0o000);
+      expect(() =>
+        resolveDeepestExisting(path.join(dirLink, "secret.js")),
+      ).toThrow(UnresolvablePathError);
+      // Lenient reproduces what the old function answered: inside.
+      expect(isPathContained(root, resolveDeepestExistingLenient(link))).toBe(
+        true,
+      );
+    },
+  );
+});
+
+describe.skipIf(process.platform !== "darwin" || process.getuid?.() === 0)(
+  "resolveDeepestExisting(): callers outside probe, with a mode-000 symlink (macOS)",
+  () => {
+    it("init refuses a target below it as escaping --target-dir, never writing through it", () => {
+      const targetDir = makeTmpDir();
+      const outside = makeTmpDir();
+      const link = path.join(targetDir, ".claude");
+      fs.symlinkSync(outside, link);
+      fs.lchmodSync(link, 0o000);
+      let thrown: unknown;
+      try {
+        init({ targetDir, content: "x\n" });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(InitFsUsageError);
+      expect((thrown as InitFsUsageError).reason).toBe(
+        "target_escapes_directory",
+      );
+      expect(fs.readdirSync(outside)).toEqual([]);
+    });
+
+    it("doctor does not crash on a stale marker whose target sits below it", async () => {
+      const lockDir = makeTmpDir();
+      const cwd = makeTmpDir();
+      const root = resolveDeepestExisting(cwd);
+      const outside = makeTmpDir();
+      const link = path.join(cwd, "link-000");
+      fs.symlinkSync(outside, link);
+      fs.lchmodSync(link, 0o000);
+      fs.writeFileSync(
+        path.join(lockDir, `${lockKey(root)}.marker.json`),
+        JSON.stringify({
+          targetPath: path.join(link, "f.js"),
+          backupPath: path.join(root, "f.js.bak"),
+          preHash: "",
+          mutatedHash: "",
+          pid: 2 ** 30,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+      const result = await doctor({ required: [], optional: [], cwd, lockDir });
+      expect(result.checks.length).toBeGreaterThan(0);
+    });
+  },
+);

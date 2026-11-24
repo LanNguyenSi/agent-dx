@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `probe` no longer treats a symlink whose own mode is 000 (`lchmod`,
+  macOS only) as an in-repo file. `resolveDeepestExisting` caught every
+  `realpath` failure and fell back to the parent's realpath plus the
+  link's own name, so a mode-000 link to an outside file (`EACCES` from
+  `realpath`, while the kernel still follows it for `stat` and `open`)
+  passed the containment check: `-M` without `-n` read the outside file
+  and named its line numbers, and a run with `-n` mutated it. The
+  fallback now applies only when the path does not exist (`ENOENT`,
+  `ENOTDIR`) or loops (`ELOOP`); any other failure throws the new
+  `UnresolvablePathError`, which `probe` and `probe --plan` answer as
+  `file_outside_root` (`--allow-outside` included) with nothing read or
+  written, `init` answers as `target_escapes_directory`, and the link
+  policy answers as a skipped link. The cleanup gate of a recovered
+  worktree is strict too: a marker naming `<log-dir>/wt-<uuid>/wt` with
+  `wt-<uuid>` a mode-000 symlink to an outside directory used to be
+  read as inside the log dir and `rmSync` deleted `<outside>/wt`; it is
+  now refused (the marker stays, the run answers `stale_worktree`),
+  like a plain symlink there. `doctor`, the registered-worktree
+  listings, the leftover dedupe and the ancestor-mode capture keep the
+  old fallback through `resolveDeepestExistingLenient` and do not throw.
+  The rule is an errno one and holds on Linux as well: a path whose
+  `realpath` fails with anything but `ENOENT`, `ENOTDIR` or `ELOOP`
+  (`EACCES` below a mode-000 directory, `ENAMETOOLONG`, ...) is no
+  longer read as the spelling it has. Answers that change with it: a
+  file below an in-repo mode-000 directory, a file with an over-long
+  name, a log directory behind an unreadable component under
+  `-i worktree`, and a cwd behind one now answer `file_outside_root`
+  (under `-i inplace` a log directory below a mode-000 directory still
+  fails its `mkdir` with `EACCES`), and `--allow-outside` with `-i worktree`
+  answers `file_outside_root` for such a path instead of
+  `worktree_allow_outside_unsupported`. A link whose target walks `..`
+  out of a symlinked directory (`odl/../two.js`, `odl` pointing outside
+  the root) is still judged inside the root, and so is a leftover
+  marker path spelled with `..` through a symlink at the worktree cleanup
+  gate (it judges the collapsed path but removes the raw one); both
+  shapes predate this change and stay open.
+
 ### Added
 
 - `probe -M`/`-w` may now omit `-n`/`--line`: when the `-M` text occurs
