@@ -7,7 +7,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { gitConfigOverrides } from "../../src/canonical/git-hardening.js";
+import {
+  REPO_LAYOUT_ARGS,
+  gitConfigOverrides,
+} from "../../src/canonical/git-hardening.js";
 import { lintSpecDir } from "../../src/lint/index.js";
 import { git, runBounded, shimGit } from "../canonical/helpers.js";
 import {
@@ -38,9 +41,11 @@ const EVIL_PLAN = STATIC_PLAN.replace(
  * their choosing, and either calls it the default branch or, with `graft`,
  * grafts it under the real default tip. `worktree` is the `core.worktree` of
  * the layout: `.` makes `specs/` its own work tree, `s1` puts the work tree
- * (the spec directory) below the git directory.
+ * (the spec directory) below the git directory, `..` names the checkout root.
+ * With `twin` the checkout root holds a second layout of that name whose
+ * `core.worktree` is `../specs`, so that the two can name each other.
  */
-async function embeddedLayout(graft: boolean, worktree = ".") {
+async function embeddedLayout(graft: boolean, worktree = ".", twin?: string) {
   const { repo, c1 } = await plainHistory();
   const attacker = path.join(scratch(), "attacker");
   await git(scratch(), ["clone", "-q", repo.dir, attacker]);
@@ -53,30 +58,33 @@ async function embeddedLayout(graft: boolean, worktree = ".") {
   await git(attacker, ["commit", "-q", "-m", "evil"], 5);
   const x = await git(attacker, ["rev-parse", "HEAD"]);
 
-  const layout = path.join(repo.dir, "specs");
-  fs.mkdirSync(layout, { recursive: true });
-  fs.cpSync(
-    path.join(attacker, ".git", "objects"),
-    path.join(layout, "objects"),
-    {
-      recursive: true,
-    },
-  );
-  fs.writeFileSync(path.join(layout, "HEAD"), "ref: refs/heads/main\n");
-  const put = (ref: string, id: string) => {
-    fs.mkdirSync(path.dirname(path.join(layout, ref)), { recursive: true });
-    fs.writeFileSync(path.join(layout, ref), `${id}\n`);
+  const write = (layout: string, coreWorktree: string) => {
+    fs.mkdirSync(layout, { recursive: true });
+    fs.cpSync(
+      path.join(attacker, ".git", "objects"),
+      path.join(layout, "objects"),
+      {
+        recursive: true,
+      },
+    );
+    fs.writeFileSync(path.join(layout, "HEAD"), "ref: refs/heads/main\n");
+    const put = (ref: string, id: string) => {
+      fs.mkdirSync(path.dirname(path.join(layout, ref)), { recursive: true });
+      fs.writeFileSync(path.join(layout, ref), `${id}\n`);
+    };
+    put("refs/heads/main", graft ? c1 : x);
+    put("refs/remotes/origin/main", graft ? c1 : x);
+    if (graft) {
+      fs.mkdirSync(path.join(layout, "info"));
+      fs.writeFileSync(path.join(layout, "info/grafts"), `${c1} ${x}\n`);
+    }
+    fs.writeFileSync(
+      path.join(layout, "config"),
+      `[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = ${coreWorktree}\n`,
+    );
   };
-  put("refs/heads/main", graft ? c1 : x);
-  put("refs/remotes/origin/main", graft ? c1 : x);
-  if (graft) {
-    fs.mkdirSync(path.join(layout, "info"));
-    fs.writeFileSync(path.join(layout, "info/grafts"), `${c1} ${x}\n`);
-  }
-  fs.writeFileSync(
-    path.join(layout, "config"),
-    `[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = ${worktree}\n`,
-  );
+  write(path.join(repo.dir, "specs"), worktree);
+  if (twin !== undefined) write(path.join(repo.dir, twin), "../specs");
   await repo.sh("add", "-A", "-f");
   await repo.commit(
     specFiles({ base: x, ref: x, plan: EVIL_PLAN }),
@@ -167,42 +175,97 @@ describe("on a git that ignores safe.bareRepository", () => {
     process.env["PATH"] = saved;
   });
 
-  for (const [worktree, where, why] of [
-    [
-      ".",
-      "specs",
-      "its git directory lies inside the work tree and is not its .git",
-    ],
-    ["s1", "specs/s1", "its work tree lies inside its git directory"],
-  ] as const) {
-    it(`the layout check refuses a committed git directory named as --repo (core.worktree = ${worktree})`, async () => {
-      const { repo } = await embeddedLayout(false, worktree);
-      const dir = path.join(repo.dir, where);
+  const noEntry = "its work tree has no .git entry";
+  const elsewhere =
+    "the .git entry of its work tree does not lead to its git directory";
+
+  /**
+   * Committed layouts and the directory named as `--repo`; `top` and
+   * `gitDir` are what git makes of that directory (relative to the checkout
+   * root), `why` the part of the rule that refuses it.
+   */
+  const layouts: Array<{
+    name: string;
+    worktree: string;
+    twin?: string;
+    where: string;
+    top: string;
+    gitDir: string;
+    why: string;
+  }> = [
+    {
+      name: "core.worktree = .",
+      worktree: ".",
+      where: "specs",
+      top: "specs",
+      gitDir: "specs",
+      why: noEntry,
+    },
+    {
+      name: "core.worktree = s1",
+      worktree: "s1",
+      where: "specs/s1",
+      top: "specs/s1",
+      gitDir: "specs",
+      why: noEntry,
+    },
+    {
+      name: "two layouts that name each other, the one that holds the spec",
+      worktree: "../lb",
+      twin: "lb",
+      where: "specs/s1",
+      top: "lb",
+      gitDir: "specs",
+      why: noEntry,
+    },
+    {
+      name: "two layouts that name each other, the one whose work tree holds the spec",
+      worktree: "../lb",
+      twin: "lb",
+      where: "lb",
+      top: "specs",
+      gitDir: "lb",
+      why: noEntry,
+    },
+    {
+      name: "core.worktree = the checkout root",
+      worktree: "..",
+      where: "specs",
+      top: ".",
+      gitDir: "specs",
+      why: elsewhere,
+    },
+  ];
+
+  for (const layout of layouts) {
+    it(`the layout check refuses a committed git directory named as --repo (${layout.name})`, async () => {
+      const { repo } = await embeddedLayout(
+        false,
+        layout.worktree,
+        layout.twin,
+      );
+      const dir = path.join(repo.dir, layout.where);
       const shim = shimGit(scratch(), {
         drop: ["safe.bareRepository=explicit"],
       });
-      // control: through this git the layout is found from the directory
-      const raw = await runBounded(
-        "git",
-        ["-C", dir, "rev-parse", "--show-toplevel"],
-        {
-          env: {
-            ...Object.fromEntries(
-              Object.entries(process.env).filter(
-                ([k]) => !k.startsWith("GIT_"),
-              ),
-            ),
-            PATH: shim.path,
-          },
+      // control: through this git the layout is found from the directory,
+      // and its work tree is the one its configuration names
+      const raw = await runBounded("git", ["-C", dir, ...REPO_LAYOUT_ARGS], {
+        env: {
+          ...Object.fromEntries(
+            Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")),
+          ),
+          PATH: shim.path,
         },
-      );
+      });
       expect(raw.code).toBe(0);
-      expect(raw.stdout.trim()).toBe(
-        fs.realpathSync(path.join(repo.dir, "specs", worktree)),
-      );
+      expect(raw.stdout.split("\n").slice(0, 2)).toEqual([
+        fs.realpathSync(path.join(repo.dir, layout.top)),
+        fs.realpathSync(path.join(repo.dir, layout.gitDir)),
+      ]);
       process.env["PATH"] = shim.path;
       expect(usageError(repo, { defaultRef: REMOTE_MAIN, repo: dir })).toBe(
-        `--repo is not a plain git checkout: ${why}`,
+        `--repo is not a plain git checkout: ${layout.why}`,
       );
     });
   }
@@ -295,8 +358,67 @@ describe("the git directory of the repository in use", () => {
     fs.writeFileSync(path.join(repo.dir, ".git"), "gitdir: gitstore\n");
     expect(await repo.head()).toMatch(/^[0-9a-f]{40}$/);
     expect(usageError(repo, { defaultRef: REMOTE_MAIN })).toBe(
-      "--repo is not a plain git checkout: its git directory lies inside the work tree and is not its .git",
+      "--repo is not a plain git checkout: its common git directory lies inside the work tree",
     );
+  });
+
+  it("a separate git directory outside the work tree is accepted; a .git that is a link to it is refused", async () => {
+    const { repo } = await plainHistory();
+    await repo.commit(
+      specFiles({ base: await repo.head(), ref: await repo.head() }),
+      "spec",
+    );
+    const store = path.join(scratch(), "separate-store");
+    // git moves the repository there and leaves a gitdir file behind
+    await repo.sh("init", "-q", "--separate-git-dir", store);
+    expect(fs.statSync(path.join(repo.dir, ".git")).isFile()).toBe(true);
+    expect(fs.existsSync(path.join(store, "HEAD"))).toBe(true);
+    expect(lintIn(repo, { defaultRef: REMOTE_MAIN }).errors).toEqual([]);
+    fs.rmSync(path.join(repo.dir, ".git"));
+    fs.symlinkSync(store, path.join(repo.dir, ".git"));
+    // control: git itself takes the link for the repository
+    expect(await repo.head()).toMatch(/^[0-9a-f]{40}$/);
+    expect(usageError(repo, { defaultRef: REMOTE_MAIN })).toBe(
+      "--repo is not a plain git checkout: the .git entry of its work tree is a symbolic link",
+    );
+  });
+
+  it("a linked worktree inside a bare repository is accepted", async () => {
+    const { repo } = await plainHistory();
+    await repo.commit(
+      specFiles({ base: await repo.head(), ref: await repo.head() }),
+      "spec",
+    );
+    const bare = path.join(scratch(), "proj.git");
+    await git(scratch(), ["clone", "-q", "--bare", repo.dir, bare]);
+    await git(bare, ["worktree", "add", "-q", "--detach", "main", "pr"]);
+    const work = path.join(bare, "main");
+    // the layout: the work tree lies inside the common directory
+    const raw = await runBounded("git", ["-C", work, ...REPO_LAYOUT_ARGS], {
+      env: Object.fromEntries(
+        Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")),
+      ),
+    });
+    expect(raw.stdout.trim().split("\n")).toEqual([
+      fs.realpathSync(work),
+      fs.realpathSync(path.join(bare, "worktrees", "main")),
+      fs.realpathSync(bare),
+    ]);
+    for (const named of [work, path.join(work, "specs")]) {
+      const result = lintSpecDir(path.join(work, "specs/s1"), {
+        git: { defaultRef: "refs/heads/main", repo: named },
+      });
+      expect(result.ok, named).toBe(true);
+      expect(result.ok ? result.report.errors : [], named).toEqual([]);
+    }
+    // the bare repository itself is still not a work tree
+    const viaBare = lintSpecDir(path.join(work, "specs/s1"), {
+      git: { defaultRef: "refs/heads/main", repo: bare },
+    });
+    expect(viaBare).toEqual({
+      ok: false,
+      message: "--repo is not inside a git work tree",
+    });
   });
 
   it("a linked worktree whose common directory lies inside its own work tree is refused", async () => {

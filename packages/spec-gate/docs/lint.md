@@ -159,10 +159,9 @@ under `refs/` (a short name, a leading dash, a name `git check-ref-format`
 refuses), that names no ref, or that does not lead to a commit; a `--base`
 that is not the full id of a commit in the repository, or not an ancestor of
 (or equal to) the `--default-ref` commit when both are given; a git input
-without `--repo`; a `--repo` with no path or outside a git work tree, or whose
-git directory lies inside the work tree anywhere but at `<top level>/.git` (or
-whose common git directory, for a linked worktree, lies inside it, or whose
-work tree lies inside its git directory or its common directory); a spec
+without `--repo`; a `--repo` with no path or outside a git work tree, or in a
+repository that is not the one the `.git` entry of its work tree names (see
+the repository check below); a spec
 directory outside the repository; a
 repository without a commit at `HEAD`; a `HEAD` that shares no history with
 the reference commit; and `--config` together with git inputs. The message
@@ -190,6 +189,25 @@ messages never reach the report. A git call that cannot run or does not
 finish is an error finding of the rule that needed it (code `git-failed`), not
 a pass.
 
+The repository check. Git looks for the repository from `--repo` upwards, and
+the one it finds is used only when all of this holds, each part with its own
+usage error:
+
+1. `<top level>/.git` exists and is not a symbolic link.
+2. It leads to the git directory git found: it is that directory, or a
+   regular file `gitdir: <path>` whose path (a relative one counts from the
+   top level) is that directory.
+3. The common git directory is not inside the work tree, unless it is the
+   git directory and that is `<top level>/.git` itself.
+
+Git never checks out an entry named `.git`, so nothing a spec author commits
+can be the `.git` entry of a work tree: a git directory found by walking up
+into committed files (`HEAD`, `objects/` and `refs/` somewhere in the tree)
+fails part 1 or 2, wherever its `core.worktree` points. Every layout git
+makes itself passes: a plain checkout, a linked worktree (also one inside a
+bare repository), a separate git directory outside the work tree, a
+submodule.
+
 What the caller must guarantee. The lint can only be as strict as the
 repository state it is given.
 
@@ -205,25 +223,28 @@ repository state it is given.
 - The full history is fetched. A shallow clone does not hold the commits the
   ancestry checks compare, so `base_commit` and `commands_ref` report as not
   being commits, and the diff base may not be found.
-- The checkout is the one the job trusts: the lint refuses a git directory that
-  lies inside the work tree anywhere but at `.git` (and a work tree that lies
-  inside its git directory), but it does not vouch for a checkout whose `.git`
-  the pull request could have replaced.
+- The checkout is the one the job trusts: the lint refuses a repository that
+  the `.git` entry of its work tree does not name (the repository check
+  above), but it does not vouch for a checkout whose `.git` the pull request
+  could have replaced, or that something other than git put on disk.
 - Git is 2.38 or newer. The protection against a repository found by walking
   up from the spec directory relies on `safe.bareRepository=explicit`, which
   git has known since 2.38; an older git ignores it and only the layout check
-  above stands. `GIT_NO_LAZY_FETCH` (git 2.44 and newer) is defence in depth:
+  above stands. `GIT_NO_LAZY_FETCH` (git 2.45 and newer) is defence in depth:
   a read never fetches because no transport is allowed
   (`GIT_ALLOW_PROTOCOL`), whichever git version runs. The lint does not check
   the version.
 
 A pull-request job, after checking out the merge or head commit with full
-history and fetching the default branch:
+history, fetches the pull request's target branch and names its
+remote-tracking ref (`PR_BASE_REF` is the name of the target branch and
+`PR_BASE_SHA` its commit, both from the host event):
 
 ```
+git fetch origin "+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF"
 spec-gate lint specs/<id> --final \
   --repo "$GITHUB_WORKSPACE" \
-  --default-ref refs/remotes/origin/main \
+  --default-ref "refs/remotes/origin/$PR_BASE_REF" \
   --base "$PR_BASE_SHA"
 ```
 

@@ -166,7 +166,7 @@ export function runGit(
   repoDir: string,
   args: readonly string[],
 ): Promise<ProcessRun> {
-  const overrides = gitConfigOverrides({ network: true });
+  const overrides = gitConfigOverrides({ fetching: true });
   return runProcess("git", ["-C", repoDir, ...overrides, ...args], {
     env: gitEnv(),
     timeoutMs: GIT_TIMEOUT_MS,

@@ -171,7 +171,7 @@ an unknown option) is reported by the option parser and exits non-zero too.
 | `spec-invalid`              | `spec.md` does not parse; the format errors follow                                                                                                                |
 | `testplan-invalid`          | `testplan.yaml` does not parse; the format errors follow                                                                                                          |
 | `repo-not-found`            | no `--repo`, and `<spec-dir>` is not inside a git work tree                                                                                                       |
-| `repo-invalid`              | the repository is not a git work tree (a bare repository or a git directory is refused), or its git directory is not where a checkout puts it (see below)           |
+| `repo-invalid`              | the repository is not a git work tree (a bare repository or a git directory is refused), or it is not the one the `.git` entry of its work tree names (see below)   |
 | `git-failed`                | `git` is missing, timed out, wrote more than 4 MiB, or could not read an object (in a partial clone, an object that is not available locally; nothing is fetched) |
 | `commands-ref-unresolvable` | `commands_ref` is not a full commit ID, or is not a commit object in the repository (the ID of an annotated tag is refused)                                       |
 | `commands-file-missing`     | a row refers to a command and `.spec-gate/commands.yaml` is not a regular file at `commands_ref` (absent, or a link, a submodule or a directory)                  |
@@ -192,21 +192,32 @@ program and, with git 2.38 or newer, a bare repository is never found by
 walking up from the spec directory. A git call that is stopped
 by a signal is a `git-failed` error, never an exit status.
 
-The repository check. The repository, whether found from `<spec-dir>` or given
-with `--repo`, must have the git directory a checkout has: `<top level>/.git`,
-or a directory outside the work tree (a linked worktree, a separate git
-directory) whose common directory is outside the work tree too. A git
-directory the work tree holds anywhere else is content a spec author can
-commit, so it is `repo-invalid`, and so is a work tree that lies inside its git
-directory or its common directory; this closes the case where a pull request
-carries a git directory of its own that the default lookup from `<spec-dir>`
-would otherwise find first. A caller that cannot trust `<spec-dir>` names the
-checkout root with `--repo`.
+The repository check. Git looks for the repository from `<spec-dir>` upwards,
+or from `--repo` upwards, and the one it finds is used only when all of this
+holds (`repo-invalid` otherwise, the message says which part):
+
+1. `<top level>/.git` exists and is not a symbolic link.
+2. It leads to the git directory git found: it is that directory, or a
+   regular file `gitdir: <path>` whose path (a relative one counts from the
+   top level) is that directory.
+3. The common git directory is not inside the work tree, unless it is the
+   git directory and that is `<top level>/.git` itself.
+
+Git never checks out an entry named `.git`, so nothing a spec author commits
+can be the `.git` entry of a work tree: a git directory found by walking up
+into committed files (`HEAD`, `objects/` and `refs/` somewhere in the tree)
+fails part 1 or 2, wherever its `core.worktree` points. This closes the case
+where a pull request carries a git directory of its own that the default
+lookup from `<spec-dir>` would otherwise find first. Every layout git makes
+itself passes: a plain checkout, a linked worktree (also one inside a bare
+repository), a separate git directory outside the work tree, a submodule. The
+check does not vouch for a tree that something other than git put on disk, and
+a caller that cannot trust `<spec-dir>` names the checkout root with `--repo`.
 
 The protections rely on git 2.38 or newer: `safe.bareRepository=explicit`,
 which keeps a bare repository from being found by walking up, is known since
 that version, and an older git ignores it, so that only the layout check above
-stands. `GIT_NO_LAZY_FETCH` (git 2.44 and newer) is defence in depth next to
+stands. `GIT_NO_LAZY_FETCH` (git 2.45 and newer) is defence in depth next to
 `GIT_ALLOW_PROTOCOL`. The digest does not check the version.
 
 ## Golden fixtures

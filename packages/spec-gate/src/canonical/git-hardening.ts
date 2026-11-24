@@ -4,7 +4,7 @@
  * overrides that switch off the ways a repository's own configuration can
  * run a program or change what an id means, the environment variable that
  * switches off `info/grafts`, and the check that the git directory of a
- * repository is where a checkout puts it.
+ * repository is the one the `.git` entry of its work tree names.
  *
  * A repository the spec author can write into (a pull request checkout) is
  * hostile input: its `.git/config` and any git directory it embeds must not
@@ -25,17 +25,19 @@ import path from "node:path";
  * - `protocol.allow=never`: no transport is started unless the repository
  *   names one in a `protocol.<name>.allow` of its own, which is why
  *   `applyGitSwitches` sets `GIT_ALLOW_PROTOCOL` as well. Left out for a call
- *   that talks to a remote (`network: true`), which is the intake step only.
+ *   that fetches (`fetching: true`, the same option `applyGitSwitches`
+ *   takes), which is the intake step only; the override is the default, so a
+ *   new call site that forgets the option stays offline.
  */
 export function gitConfigOverrides(
-  options: { network?: boolean } = {},
+  options: { fetching?: boolean } = {},
 ): string[] {
   const pairs = [
     "safe.bareRepository=explicit",
     "core.fsmonitor=false",
     `core.hooksPath=${os.devNull}`,
   ];
-  if (options.network !== true) pairs.push("protocol.allow=never");
+  if (options.fetching !== true) pairs.push("protocol.allow=never");
   return pairs.flatMap((pair) => ["-c", pair]);
 }
 
@@ -43,7 +45,7 @@ export function gitConfigOverrides(
  * Sets the switches every git call carries on top of a scrubbed
  * environment: no terminal prompt, no replace refs (a replace ref must not
  * swap the content of the object an id names), no lazy fetch in a partial
- * clone (git 2.44 and later; defence in depth, the transport switch below
+ * clone (git 2.45 and later; defence in depth, the transport switch below
  * is the one that holds on older versions), no optional locks, and no graft
  * file (`info/grafts` would make a commit appear to have other parents than
  * it has, so an ancestry answer would not be the one the object database
@@ -86,19 +88,89 @@ export function isInside(outer: string, inner: string): boolean {
   );
 }
 
+/** A `.git` file above this size is not read; git refuses one too. */
+export const MAX_GITFILE_BYTES = 1024 * 1024;
+
 /**
- * Why the git directory of a work tree is not one a checkout makes, or
- * `null` when it is. The three paths are what `git rev-parse --show-toplevel
- * --absolute-git-dir --git-common-dir` printed.
+ * Where the `.git` entry of the work tree `top` (a real path) leads: the
+ * entry itself when it is a directory, the path a `gitdir: <path>` file
+ * names (a relative one counts from `top`), or the reason it leads nowhere.
+ * The entry is examined without following a link at that name.
+ */
+function dotGitTarget(top: string): { target: string } | { problem: string } {
+  const entry = path.join(top, ".git");
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(entry);
+  } catch {
+    return { problem: "its work tree has no .git entry" };
+  }
+  if (stat.isSymbolicLink()) {
+    return { problem: "the .git entry of its work tree is a symbolic link" };
+  }
+  if (stat.isDirectory()) return { target: entry };
+  if (!stat.isFile()) {
+    return {
+      problem:
+        "the .git entry of its work tree is neither a directory nor a file",
+    };
+  }
+  const notGitfile = {
+    problem: "the .git file of its work tree is not a gitdir file",
+  };
+  if (stat.size > MAX_GITFILE_BYTES) return notGitfile;
+  let text: string;
+  try {
+    text = fs.readFileSync(entry, "utf8");
+  } catch {
+    return notGitfile;
+  }
+  // The form git reads: the prefix, then the path up to the line ends that
+  // close the file.
+  const prefix = "gitdir: ";
+  if (!text.startsWith(prefix)) return notGitfile;
+  let end = text.length;
+  while (end > prefix.length && "\r\n".includes(text[end - 1]!)) end -= 1;
+  const named = text.slice(prefix.length, end);
+  if (named === "") return notGitfile;
+  return { target: path.resolve(top, named) };
+}
+
+/**
+ * Why the repository git found is not the one the work tree's own `.git`
+ * entry names, or `null` when it is. The three paths are what `git rev-parse
+ * --show-toplevel --absolute-git-dir --git-common-dir` printed for the
+ * directory the lookup started from.
  *
- * A git directory inside the work tree is only `<toplevel>/.git`: anything
- * else there (a bare layout committed into the tree, with `core.worktree`
- * pointing back) is content the author wrote. A git directory outside the
- * work tree (a linked worktree, a separate git directory, a submodule) must
- * have its common directory outside the work tree too. The reverse layout is
- * refused as well: a work tree that lies inside the git directory or the
- * common directory (a committed layout whose `core.worktree` names a
- * subdirectory of it).
+ * One rule, in three parts that must all hold:
+ *
+ * 1. `<toplevel>/.git` exists, and is not a symbolic link.
+ * 2. It leads to the git directory git reported: it is a directory whose
+ *    real path is that git directory, or a regular file `gitdir: <path>`
+ *    whose path (a relative one counts from `<toplevel>`) has that real path.
+ * 3. The common directory is not inside the work tree, unless the git
+ *    directory is `<toplevel>/.git` itself and the common directory is that
+ *    same directory.
+ *
+ * Why this is enough: git refuses to check out an entry named `.git`, so
+ * nothing a spec author commits can be the `.git` entry of a work tree. A
+ * git directory that was found by walking up into committed files (a bare
+ * layout with `HEAD`, `objects/` and `refs/` somewhere in the tree) is
+ * therefore never what parts 1 and 2 ask for, whatever its `core.worktree`
+ * says: the work tree it names either has no `.git` entry, or has one that
+ * leads to another git directory. No list of forbidden positions of the two
+ * directories relative to each other is needed, and a layout git itself
+ * makes is accepted wherever it lies: a plain checkout, a linked worktree
+ * (also one inside a bare repository or inside the main work tree), a
+ * separate git directory outside the work tree, a submodule. Part 3 keeps
+ * the object store out of the work tree, where a spec author writes: a
+ * `.git` file that names a directory of the work tree itself is refused,
+ * and so is a `commondir` that does.
+ *
+ * The check is only as good as the paths it is given: a caller must take
+ * them from the lookup that starts at the directory it was handed (the spec
+ * directory, or `--repo`), not from a second lookup at the top level that a
+ * found layout names.
  */
 export function gitDirProblem(
   toplevel: string,
@@ -111,17 +183,16 @@ export function gitDirProblem(
   if (top === null || dir === null || common === null) {
     return "its git directory cannot be resolved";
   }
-  const dotGit = isInside(top, dir) && dir === path.join(top, ".git");
-  if (isInside(top, dir) && !dotGit) {
-    return "its git directory lies inside the work tree and is not its .git";
+  const found = dotGitTarget(top);
+  if ("problem" in found) return found.problem;
+  if (real(found.target) !== dir) {
+    return "the .git entry of its work tree does not lead to its git directory";
   }
-  if (isInside(dir, top) || isInside(common, top)) {
-    return "its work tree lies inside its git directory";
+  const own = dir === path.join(top, ".git") && common === dir;
+  if (isInside(top, common) && !own) {
+    return "its common git directory lies inside the work tree";
   }
-  if (dotGit) return null;
-  return isInside(top, common)
-    ? "its common git directory lies inside the work tree"
-    : null;
+  return null;
 }
 
 /**

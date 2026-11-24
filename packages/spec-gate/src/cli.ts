@@ -193,7 +193,8 @@ program
   )
   .option(
     "--default-ref <ref>",
-    "full ref name under refs/ (for example refs/remotes/origin/main) of the fetched default branch, " +
+    "full ref name under refs/ of the fetched target branch of the pull request " +
+      "(for example refs/remotes/origin/main when it targets main), " +
       "the reference commit for the ancestry checks; resolved offline, never fetched. " +
       "Must be a remote-tracking ref (or the event's base) the spec author cannot move, never a local branch " +
       "or the pull request head. Needs --repo. Without --default-ref and --base the git rules are skipped (no-git)",
