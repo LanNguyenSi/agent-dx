@@ -2454,7 +2454,8 @@ What a run that stops early prints, by case:
   `-M/--match` run that derived its line recorded an informational
   `-n/--line derived ...` notice as that run's first warning before any
   later refusal appended its own message; the `note:` then names the
-  refusal's own message, not that derivation notice.
+  first warning that is not that derivation notice (normally the
+  refusal's message).
 - A single-probe `mutant_not_applicable` refusal prints a `totals:` line
   that counts the mutant (`total=1 inconclusive=1`) and a `note:` line
   with its own warning (a derivation notice, if any preceded it, is not

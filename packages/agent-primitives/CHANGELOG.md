@@ -84,8 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `probe --summary` printed the `-n/--line derived from the unique
   -M/--match occurrence` notice as the `note:` of a refusal that happened
   after that derivation, because the notice was the run's first warning.
-  The note now names the refusal's own message; a refusal with no
-  derivation keeps the note it printed before.
+  The note now skips that notice and names the next warning (normally
+  the refusal's message); a refusal with no derivation keeps the note it
+  printed before.
 
 ## [0.22.1] - 2026-11-17
 
