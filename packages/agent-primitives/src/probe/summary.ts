@@ -187,6 +187,16 @@ function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+/** The prefix of the `-n/--line` derivation notice `runProbePipeline`
+ * pushes into `warnings` when a `-M/--match` run derives its line from a
+ * unique occurrence. It is an informational note, not a refusal, and it
+ * is always the first warning of such a run. `--summary`'s note skips it:
+ * a refusal that happens after a derivation must print its own text, not
+ * this notice, while a refusal with no derivation (no such warning) keeps
+ * the first warning it has always printed. */
+export const MATCH_LINE_DERIVATION_NOTICE_PREFIX =
+  "-n/--line derived from the unique -M/--match occurrence:";
+
 function relativeTo(cwd: string | undefined, file: string): string {
   if (cwd === undefined || !path.isAbsolute(file)) return file;
   const rel = path.relative(cwd, file);
@@ -463,7 +473,16 @@ export function renderProbeSummary(
     extras: string[],
   ): { text: string; intact: boolean; keptRows: number } => {
     const tail: string[] = [...extras, ...baselineLines, totals];
-    const note = input.message ?? input.warnings?.[0];
+    // A refusal's note is its own text. A `-M/--match` run that derived
+    // its line pushed the derivation notice as the first warning before
+    // any later refusal appended its own message, so the note must skip
+    // that notice and take the next warning; a run with no derivation has
+    // no such warning, so its first warning (what it always printed) is
+    // still the note. An explicit `message` outranks both.
+    const refusalNote = input.warnings?.find(
+      (warning) => !warning.startsWith(MATCH_LINE_DERIVATION_NOTICE_PREFIX),
+    );
+    const note = input.message ?? refusalNote ?? input.warnings?.[0];
     // The refused line's content rides on the note (the single form prints
     // no mutant line for a refusal, so this is where `line=` appears); a
     // note carrying it survives even with a mutant counted, unlike a bare

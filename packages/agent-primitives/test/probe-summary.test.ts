@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  MATCH_LINE_DERIVATION_NOTICE_PREFIX,
   PRINTABLE_FIELDS,
   firstFailingLine,
   mutationProbeReportItem,
@@ -784,6 +785,54 @@ describe("summary helpers", () => {
       "note: line 99 is out of range (file has 3 lines)\n",
     );
     expect(text).not.toContain("line=");
+  });
+
+  it("a refusal after a -M line derivation: the note is the refusal, not the derivation notice", () => {
+    const derivationNotice = `${MATCH_LINE_DERIVATION_NOTICE_PREFIX} line 2 of fixture.js`;
+    const refusal = `${path.join("/repo", ".agent-primitives.json")}: not valid JSON`;
+    const text = renderProbeSummary({
+      status: "usage_error",
+      reason: "defaults_file_invalid",
+      warnings: [derivationNotice, refusal],
+    });
+    const lines = text.trimEnd().split("\n");
+    expect(lines[lines.length - 1]).toBe(`note: ${refusal}`);
+    expect(text).not.toContain("derived from the unique -M/--match");
+  });
+
+  it("a refusal with no derivation: the note is still its first warning, byte for byte", () => {
+    const refusal = `${path.join("/repo", ".agent-primitives.json")}: not valid JSON`;
+    const text = renderProbeSummary({
+      status: "usage_error",
+      reason: "defaults_file_invalid",
+      warnings: [refusal],
+    });
+    const lines = text.trimEnd().split("\n");
+    expect(lines[lines.length - 1]).toBe(`note: ${refusal}`);
+  });
+
+  it("an explicit message outranks both the derivation notice and a later warning", () => {
+    const text = renderProbeSummary({
+      status: "usage_error",
+      reason: "plan_unreadable",
+      message: "plan file could not be read",
+      warnings: [
+        `${MATCH_LINE_DERIVATION_NOTICE_PREFIX} line 2 of fixture.js`,
+        "a later warning",
+      ],
+    });
+    expect(text).toContain("note: plan file could not be read");
+    expect(text).not.toContain("derived from the unique -M/--match");
+  });
+
+  it("a derivation notice as the only warning still prints (the first-warning fallback)", () => {
+    const derivationNotice = `${MATCH_LINE_DERIVATION_NOTICE_PREFIX} line 2 of fixture.js`;
+    const text = renderProbeSummary({
+      status: "usage_error",
+      reason: "usage_error",
+      warnings: [derivationNotice],
+    });
+    expect(text.trimEnd().split("\n").at(-1)).toBe(`note: ${derivationNotice}`);
   });
 
   it("a plan's mutant_not_applicable row: file:line id, log=- (never ran), line= appended last", () => {

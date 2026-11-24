@@ -2449,11 +2449,16 @@ What a run that stops early prints, by case:
   usage error given `--summary` alone; `patch` has no `--summary` and
   always gets the envelope.
 - A refusal that names no mutant prints the `totals:` line (`total=0`)
-  and a `note:` line with the first warning or message: an unreadable
-  plan file, a single-probe `--file` outside the containment root.
+  and a `note:` line with its own message or first warning: an unreadable
+  plan file, a single-probe `--file` outside the containment root. A
+  `-M/--match` run that derived its line recorded an informational
+  `-n/--line derived ...` notice as that run's first warning before any
+  later refusal appended its own message; the `note:` then names the
+  refusal's own message, not that derivation notice.
 - A single-probe `mutant_not_applicable` refusal prints a `totals:` line
   that counts the mutant (`total=1 inconclusive=1`) and a `note:` line
-  with the first warning, ending with `line=<the line's content>` when
+  with its own warning (a derivation notice, if any preceded it, is not
+  the note), ending with `line=<the line's content>` when
   the refusal carries `line_content`. In a `--plan` the same refusal is
   an ordinary mutant line (`inconclusive(mutant_not_applicable)`) whose
   id is `file:line` like every other line (the line is known even when
