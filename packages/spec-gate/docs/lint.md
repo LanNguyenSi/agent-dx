@@ -206,7 +206,8 @@ into committed files (`HEAD`, `objects/` and `refs/` somewhere in the tree)
 fails part 1 or 2, wherever its `core.worktree` points. Every layout git
 makes itself passes: a plain checkout, a linked worktree (also one inside a
 bare repository), a separate git directory outside the work tree, a
-submodule.
+submodule. A submodule's repository is whichever one its URL names, and a pull
+request can set that URL, so `--repo` names the superproject root.
 
 What the caller must guarantee. The lint can only be as strict as the
 repository state it is given.

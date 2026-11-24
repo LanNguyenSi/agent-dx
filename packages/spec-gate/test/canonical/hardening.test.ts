@@ -212,7 +212,8 @@ describe("gitDirProblem and parseRepoLayout", () => {
     expect(run.timedOut).toBe(false);
     expect(run.stderr).toBe("");
     expect(run.stdout).toBe(oddEntry);
-  });
+    // above the child's time limit, so its group kill fires before vitest gives up
+  }, 30_000);
 
   it("part 2, a directory: <top>/.git must be the git directory git reported", () => {
     const { top, t, o } = pair();

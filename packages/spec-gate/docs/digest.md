@@ -213,6 +213,9 @@ itself passes: a plain checkout, a linked worktree (also one inside a bare
 repository), a separate git directory outside the work tree, a submodule. The
 check does not vouch for a tree that something other than git put on disk, and
 a caller that cannot trust `<spec-dir>` names the checkout root with `--repo`.
+A submodule passes because git made its `.git` file, but its repository is
+whichever one the submodule URL names, and a pull request can set that URL: a
+job that checks out submodules names the superproject root with `--repo`.
 
 The protections rely on git 2.38 or newer: `safe.bareRepository=explicit`,
 which keeps a bare repository from being found by walking up, is known since

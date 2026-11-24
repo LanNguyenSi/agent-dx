@@ -47,6 +47,6 @@ table and the revision each step reads each input at are described in
 `spec-gate digest <spec-dir> [--repo <path>]` prints the digest of the
 normative layer of a spec directory, reading the commands from a git work
 tree whose git directory is the one a checkout has (a pull request cannot
-supply its own). What goes in, what stays out, the
+commit one of its own). What goes in, what stays out, the
 canonical form and the errors are described in [docs/digest.md](docs/digest.md).
 The code lives in `src/canonical/`.
