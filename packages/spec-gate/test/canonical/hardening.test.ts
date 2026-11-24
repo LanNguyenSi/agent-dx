@@ -248,10 +248,12 @@ describe("gitDirProblem and parseRepoLayout", () => {
         elsewhere,
       );
     }
-    // a relative path is not counted from the directory of the process
-    const fromCwd = path.relative(process.cwd(), dir);
-    expect(fromCwd).not.toBe(relative);
-    gitfile(`gitdir: ${fromCwd}\n`);
+    // a relative path is counted from the work tree, not from another
+    // directory: a path relative to a deeper sibling names the git directory
+    // only from there, and from the work tree it names something else
+    const fromElsewhere = path.relative(o("x/y/z"), dir);
+    expect(path.resolve(top, fromElsewhere)).not.toBe(dir);
+    gitfile(`gitdir: ${fromElsewhere}\n`);
     expect(gitDirProblem(top, dir, common)).toBe(elsewhere);
     // a path that does not exist leads nowhere
     gitfile("gitdir: ../out/gone\n");
