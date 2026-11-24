@@ -127,9 +127,10 @@ export function resolveDeepestExisting(p: string): string {
 /**
  * `resolveDeepestExisting` with the fallback for EVERY `realpathSync`
  * failure, `EACCES` included: the deepest ancestor that does resolve
- * plus the tail verbatim. For a caller that only reports on a path or
- * cleans up after it (`doctor`, the leftover listing and removal, the
- * ancestor-mode capture) and must not throw on one it cannot place. It
+ * plus the tail verbatim. For a caller that only reports on a path and
+ * must not throw on one it cannot place (`doctor`, the registered-worktree
+ * listings, the leftover dedupe, the ancestor-mode capture, init's target
+ * directory root); not the worktree removal gate, which is strict. It
  * must never decide whether a path is inside the containment root or
  * which file a run reads or writes: it places a mode-000 symlink to an
  * outside file at its own in-root spelling.

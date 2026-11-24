@@ -34,13 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`EACCES` below a mode-000 directory, `ENAMETOOLONG`, ...) is no
   longer read as the spelling it has. Answers that change with it: a
   file below an in-repo mode-000 directory, a file with an over-long
-  name, and a log directory or cwd behind an unreadable component now
-  answer `file_outside_root`, and `--allow-outside` with `-i worktree`
+  name, a log directory behind an unreadable component under
+  `-i worktree`, and a cwd behind one now answer `file_outside_root`
+  (under `-i inplace` a log directory below a mode-000 directory still
+  fails its `mkdir` with `EACCES`), and `--allow-outside` with `-i worktree`
   answers `file_outside_root` for such a path instead of
   `worktree_allow_outside_unsupported`. A link whose target walks `..`
   out of a symlinked directory (`odl/../two.js`, `odl` pointing outside
-  the root) is still judged inside the root; that shape predates this
-  change and stays open.
+  the root) is still judged inside the root, and so is a leftover
+  marker path spelled with `..` through a symlink at the worktree cleanup
+  gate (it judges the collapsed path but removes the raw one); both
+  shapes predate this change and stay open.
 
 ### Added
 

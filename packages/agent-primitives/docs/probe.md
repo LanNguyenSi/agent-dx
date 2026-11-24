@@ -1438,11 +1438,14 @@ isolation, and also with `--allow-outside` (so `--allow-outside` with
 `worktree_allow_outside_unsupported`); nothing behind the link is read or
 written. The same answer now covers a file below a directory this process
 may not traverse (mode 000, `EACCES` on Linux and macOS) or named by a
-component too long for the filesystem, and a log directory or cwd behind
-an unreadable component. What the rule does NOT establish: a link whose
+component too long for the filesystem, a log directory behind an
+unreadable component under `-i worktree` (under `-i inplace` its `mkdir`
+still fails with `EACCES`), and a cwd behind one. What the rule does NOT establish: a link whose
 target walks `..` out of a symlinked directory (`odl/../two.js` with `odl`
 pointing outside the root) can still be judged inside the root. That
-shape predates this rule and is a known open one. A `--link` value carrying a
+shape predates this rule and is a known open one, as is a leftover marker
+path spelled with `..` through a symlink at the worktree cleanup gate,
+which judges the collapsed path but removes the raw one. A `--link` value carrying a
 `$(...)` command substitution or a backtick is refused outright
 (`InvalidArgumentError`, before anything runs) rather than merely being
 inert the way it already is for `-p`/`--file` above: the same rule

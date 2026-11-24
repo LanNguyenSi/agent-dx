@@ -2742,7 +2742,10 @@ export interface CleanupWorktreeResult {
  * `liveForeignOwner`), and either reported by `git worktree list` as a
  * worktree of this repository before the removal, or contained
  * (through realpath) in `scratchRoot`, the current run's own log dir.
- * Any other path is refused, and so is one whose registration could
+ * The gate judges the path as `path.resolve` spells it, so a marker
+ * path that walks `..` through a symlink is judged at its collapsed
+ * spelling while git and the delete act on the raw one: a known open
+ * shape. Any other path is refused, and so is one whose registration could
  * not be checked and that is not under that log dir: neither git nor
  * the recursive delete touches it, and the result says so, so the
  * caller can keep its marker and name the path.
