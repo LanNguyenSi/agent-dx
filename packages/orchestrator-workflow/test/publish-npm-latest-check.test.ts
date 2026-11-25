@@ -34,7 +34,11 @@ const workflow = parse(
 ) as {
   jobs: {
     publish: {
-      concurrency?: { group?: string; "cancel-in-progress"?: boolean };
+      concurrency?: {
+        group?: string;
+        "cancel-in-progress"?: boolean;
+        queue?: string;
+      };
       steps: Step[];
     };
   };
@@ -53,6 +57,7 @@ describe("publish-npm.yml latest check, wiring", () => {
       "publish-npm-${{ needs.parse.outputs.pkg }}",
     );
     expect(job.concurrency?.["cancel-in-progress"]).toBe(false);
+    expect(job.concurrency?.queue).toBe("max");
   });
 
   it("passes every success exit through assert_latest", () => {
@@ -123,7 +128,13 @@ describe("operator workflows are serialised with publish", () => {
       const wf = parse(operatorWorkflow(file)) as {
         jobs: Record<
           string,
-          { concurrency?: { group?: string; "cancel-in-progress"?: boolean } }
+          {
+            concurrency?: {
+              group?: string;
+              "cancel-in-progress"?: boolean;
+              queue?: string;
+            };
+          }
         >;
       };
       const c = wf.jobs[jobName]?.concurrency;
@@ -132,6 +143,7 @@ describe("operator workflows are serialised with publish", () => {
       );
       expect(c?.group).toBe("publish-npm-${{ inputs.package }}");
       expect(c?.["cancel-in-progress"]).toBe(false);
+      expect(c?.queue).toBe("max");
     });
   }
 });
@@ -157,6 +169,67 @@ describe("npm-dist-tag.yml deprecated-latest guard", () => {
     expect(run).toContain('npm view "${PACKAGE}@${VERSION}" deprecated');
     expect(run).toMatch(/::error::[^\n]*deprecated/);
     expect(run).toContain("exit 1");
+  });
+});
+
+describe("npm-dist-tag.yml deprecated-latest guard, executed", () => {
+  const wf = parse(operatorWorkflow("npm-dist-tag.yml")) as {
+    jobs: { "dist-tag": { steps: Step[] } };
+  };
+  const guardBody =
+    wf.jobs["dist-tag"].steps.find(
+      (s) => s.name === "Refuse latest on a deprecated version",
+    )?.run ?? "";
+  // Stub npm: STUB_NPM_FAIL=1 exits non-zero, otherwise prints STUB_DEP.
+  const stub = `#!/usr/bin/env bash
+[ "\${STUB_NPM_FAIL:-0}" = 1 ] && exit 1
+[ -n "\${STUB_DEP:-}" ] && echo "$STUB_DEP"
+exit 0
+`;
+
+  const runGuard = (env: Record<string, string>) => {
+    const dir = mkdtempSync(join(tmpdir(), "dist-tag-guard-"));
+    try {
+      const bin = join(dir, "bin");
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(join(bin, "npm"), stub);
+      chmodSync(join(bin, "npm"), 0o755);
+      return spawnSync(
+        "bash",
+        ["--noprofile", "--norc", "-eo", "pipefail", "-c", guardBody],
+        {
+          encoding: "utf8",
+          env: {
+            PATH: `${bin}:${process.env.PATH ?? ""}`,
+            PACKAGE: "demo",
+            VERSION: "1.0.0",
+            ...env,
+          },
+        },
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("refuses latest on a deprecated version", () => {
+    const r = runGuard({ TAG: "latest", STUB_DEP: "do not use" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/::error::.*deprecated/);
+  });
+
+  it("allows latest on a clean version", () => {
+    expect(runGuard({ TAG: "latest" }).status).toBe(0);
+  });
+
+  it("does not look at the deprecation for another tag", () => {
+    expect(runGuard({ TAG: "next", STUB_DEP: "do not use" }).status).toBe(0);
+  });
+
+  it("fails closed when the registry read fails", () => {
+    const r = runGuard({ TAG: "latest", STUB_NPM_FAIL: "1" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/::error::could not read the deprecation/);
   });
 });
 

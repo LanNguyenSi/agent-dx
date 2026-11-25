@@ -29,13 +29,16 @@ name: Move an npm dist-tag
 # idempotency check exits before touching the registry. This workflow does.
 #
 # Serialisation: the job shares the concurrency group of publish-npm.yml for
-# the same package (publish-npm-<package>), queued and never cancelled, so a
-# tag move cannot interleave with a publish of that package. GitHub keeps at
-# most one waiting run per group: a newly queued run replaces the one that
-# is waiting. A dispatch of this workflow while a publish run is already
-# waiting behind a running one therefore replaces that waiting publish, and
-# the tag it would have published is not published. Wait for running and
-# waiting publishes of the package to finish before dispatching.
+# the same package (publish-npm-<package>), queued with `queue: max` and never
+# cancelled, so a tag move cannot interleave with a publish of that package.
+# GitHub's default keeps one waiting run per group and lets a newer run
+# replace it; `queue: max` instead keeps up to 100 waiting runs in
+# first-in-first-out order, and only a run arriving at a full queue is
+# cancelled. A dispatch of this workflow therefore waits its turn behind
+# running and waiting publishes and cannot drop one. The group name is built
+# from the raw `package` input and is case insensitive; a package value that
+# fails validation still waits in the queue before the validation step
+# rejects it.
 #
 # `latest` is refused for a deprecated version (see the step "Refuse latest
 # on a deprecated version"), the same rule print-deprecations.mjs applies
@@ -92,6 +95,7 @@ jobs:
     concurrency:
       group: publish-npm-${{ inputs.package }}
       cancel-in-progress: false
+      queue: max
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
@@ -179,7 +183,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$TAG" = "latest" ]; then
-            deprecated=$(npm view "${PACKAGE}@${VERSION}" deprecated 2>/dev/null || true)
+            if ! deprecated=$(npm view "${PACKAGE}@${VERSION}" deprecated 2>/dev/null); then
+              echo "::error::could not read the deprecation of ${PACKAGE}@${VERSION}" >&2
+              exit 1
+            fi
             if [ -n "$deprecated" ]; then
               echo "::error::${PACKAGE}@${VERSION} is deprecated ('${deprecated}'); latest must not point at a deprecated version. Un-deprecate it first or choose another version." >&2
               exit 1

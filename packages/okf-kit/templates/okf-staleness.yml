@@ -19,8 +19,9 @@ name: OKF staleness
 # bundle (find them by this workflow's file name).
 #
 # Actions are pinned by commit SHA with the release in a trailing comment.
-# Take new SHAs from this repository's own .github/workflows/okf-staleness.yml,
-# where Renovate keeps them current, rather than from a floating tag.
+# Take new SHAs from LanNguyenSi/agent-dx's own
+# .github/workflows/okf-staleness.yml, where Renovate keeps them current,
+# rather than from a floating tag.
 
 on:
   pull_request:
