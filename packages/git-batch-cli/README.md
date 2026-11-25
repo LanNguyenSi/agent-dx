@@ -17,7 +17,7 @@ Part of [`agent-dx`](https://github.com/LanNguyenSi/agent-dx). Source: `packages
 
 ## Install / quick start
 
-Requires Node.js 20 or later. Not published to npm; link it from a local checkout:
+Requires Node.js 20 or later and Git 2.24 or later (the sync checkout commands pass `--end-of-options` so a remote-provided branch name can never be parsed as an option). Not published to npm; link it from a local checkout:
 
 ```bash
 cd packages/git-batch-cli

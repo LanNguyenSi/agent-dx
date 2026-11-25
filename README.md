@@ -28,9 +28,11 @@ Requires Node.js >= 20; friction-log requires Node.js >= 22. CI runs on Node 22.
 Try one of the published CLIs directly:
 
 ```bash
-npx orchestrator-workflow init
-npx okf-kit check path/to/bundle
+npx orchestrator-workflow@0.53.0 init
+npx okf-kit@0.22.0 check path/to/bundle
 ```
+
+Both pins are the current releases at the time of writing; each package's changelog or `npm view <package> version` shows newer ones.
 
 For any other package, clone the repo, then build that one package locally:
 

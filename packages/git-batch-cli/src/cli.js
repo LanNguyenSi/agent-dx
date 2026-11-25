@@ -971,20 +971,51 @@ function hasRemoteBranch(repoPath, branch) {
   );
 }
 
+// A target branch is a branch name, never an option: refs/remotes/origin/HEAD
+// is whatever the remote says it is, so a name like "-x" must never reach
+// git checkout's own option parser. A leading "-" is refused outright; git's
+// check-ref-format --branch rule (exit code 0 only for valid branch names,
+// and it rejects leading dashes too) covers the rest.
+function isValidTargetBranchName(repoPath, branch) {
+  if (typeof branch !== "string" || branch === "" || branch.startsWith("-")) {
+    return false;
+  }
+
+  return (
+    runGit(repoPath, ["check-ref-format", "--branch", branch], {
+      allowFailure: true
+    }).code === 0
+  );
+}
+
 async function ensureCheckedOut(repoPath, currentBranch, targetBranch, options, result) {
   if (currentBranch === targetBranch) {
     return;
   }
 
+  if (!isValidTargetBranchName(repoPath, targetBranch)) {
+    throw new Error(
+      `${path.basename(repoPath)}: refusing to check out invalid branch name: ${targetBranch}`
+    );
+  }
+
+  // --end-of-options (git >= 2.24) additionally stops git from parsing the
+  // branch or the start point as an option, defence in depth behind the
+  // validation above.
   if (hasLocalBranch(repoPath, targetBranch)) {
-    await executeGitCommand(repoPath, ["checkout", targetBranch], options, result);
+    await executeGitCommand(
+      repoPath,
+      ["checkout", "--end-of-options", targetBranch],
+      options,
+      result
+    );
     return;
   }
 
   if (hasRemoteBranch(repoPath, targetBranch)) {
     await executeGitCommand(
       repoPath,
-      ["checkout", "-b", targetBranch, "--track", `origin/${targetBranch}`],
+      ["checkout", "-b", targetBranch, "--track", "--end-of-options", `origin/${targetBranch}`],
       options,
       result
     );

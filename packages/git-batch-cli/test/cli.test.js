@@ -1264,3 +1264,125 @@ test("status text output quotes a common_dir that contains whitespace", async ()
   const pairs = lines[0].match(/[a-z_]+=(?:"(?:[^"\\]|\\.)*"|\S*)/g);
   assert.equal(pairs[pairs.length - 1], `common_dir=${JSON.stringify(expected)}`);
 });
+
+// A remote can point refs/remotes/origin/HEAD at any ref name, including one
+// that starts with a dash. Such a name must never reach `git checkout`'s
+// option parser: the validator refuses it and --end-of-options bounds the
+// blast radius even if the validator were ever bypassed.
+function setupDashOriginHeadRepo(root, repoName) {
+  const repo = setupClonedRepo(root, repoName);
+  const sha = git(repo.repoPath, ["rev-parse", "main"]).trim();
+
+  // git branch cannot create "-x" (its own parser refuses it), so the refs
+  // are written directly, exactly as a hostile remote would deliver them.
+  git(repo.originPath, ["update-ref", "refs/heads/-x", sha]);
+  git(repo.originPath, ["symbolic-ref", "HEAD", "refs/heads/-x"]);
+  git(repo.repoPath, ["update-ref", "refs/remotes/origin/-x", sha]);
+  git(repo.repoPath, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/-x"]);
+
+  return repo;
+}
+
+test("runSync refuses an option-shaped target branch detected from origin HEAD", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-dash-origin-"));
+  const repo = setupDashOriginHeadRepo(root, "dash-origin-repo");
+
+  const [result] = await runSync(
+    discoverRepositories(root, {
+      includeCurrent: false,
+      includeHidden: false
+    }),
+    {
+      protectedBranches: ["main", "master"],
+      includeDirty: false,
+      dryRun: false
+    }
+  );
+
+  assert.equal(result.outcome, "error");
+  assert.match(
+    result.error,
+    /dash-origin-repo: refusing to check out invalid branch name: -x/
+  );
+  // Nothing was checked out: the clone is still on main.
+  assert.equal(git(repo.repoPath, ["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+});
+
+test("runSync refuses an option-shaped local target branch the validator must catch", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-dash-local-"));
+  const repo = setupDashOriginHeadRepo(root, "dash-local-repo");
+  const sha = git(repo.repoPath, ["rev-parse", "main"]).trim();
+
+  // The local branch exists too, so ensureCheckedOut would take the plain
+  // `checkout --end-of-options -x` path, which git would happily run: only
+  // the validation refuses here, not git.
+  git(repo.repoPath, ["update-ref", "refs/heads/-x", sha]);
+
+  const [result] = await runSync(
+    discoverRepositories(root, {
+      includeCurrent: false,
+      includeHidden: false
+    }),
+    {
+      protectedBranches: ["main", "master"],
+      includeDirty: false,
+      dryRun: false
+    }
+  );
+
+  assert.equal(result.outcome, "error");
+  assert.match(
+    result.error,
+    /dash-local-repo: refusing to check out invalid branch name: -x/
+  );
+  assert.equal(git(repo.repoPath, ["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+});
+
+test("runSync dry-run records --end-of-options in both checkout forms", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-checkout-eoo-"));
+  const tracked = setupClonedRepo(root, "track-checkout-repo");
+  const local = setupClonedRepo(root, "local-checkout-repo");
+
+  // develop lives only on track-checkout-repo's origin, so its sync uses
+  // the -b --track form; local-checkout-repo sits on a feature branch with
+  // main checked out locally, so its sync uses the plain checkout form.
+  git(tracked.seedPath, ["checkout", "-b", "develop"]);
+  git(tracked.seedPath, ["push", "-q", "-u", "origin", "develop"]);
+  git(tracked.repoPath, ["fetch", "-q", "origin", "develop"]);
+  git(local.repoPath, ["checkout", "-b", "feature"]);
+
+  const results = await runSync(
+    discoverRepositories(root, {
+      includeCurrent: false,
+      includeHidden: false
+    }),
+    {
+      protectedBranches: ["develop", "main"],
+      protectedBranchesExplicit: true,
+      includeDirty: false,
+      dryRun: true
+    }
+  );
+
+  const trackResult = results.find((entry) => entry.repo === "track-checkout-repo");
+  const localResult = results.find((entry) => entry.repo === "local-checkout-repo");
+
+  assert.equal(trackResult.outcome, "ok");
+  assert.ok(
+    trackResult.actions.some(
+      (action) =>
+        action.command === "git checkout -b develop --track --end-of-options origin/develop"
+    ),
+    JSON.stringify(trackResult.actions)
+  );
+  assert.equal(localResult.outcome, "ok");
+  assert.ok(
+    localResult.actions.some(
+      (action) => action.command === "git checkout --end-of-options main"
+    ),
+    JSON.stringify(localResult.actions)
+  );
+  // Dry-run leaves both branches untouched.
+  assert.equal(git(tracked.repoPath, ["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+  assert.equal(git(local.repoPath, ["symbolic-ref", "--short", "HEAD"]).trim(), "feature");
+});
