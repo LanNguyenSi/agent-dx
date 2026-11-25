@@ -409,20 +409,50 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
   })();
 
   it.skipIf(!hasNamedForks)(
-    "KNOWN OPEN (macOS): a link into <outside-file>/..namedfork/rsrc is placed where the link sits, inside the root, although the kernel opens the outside fork",
+    "macOS: a link into <outside-file>/..namedfork/rsrc is refused by the strict one, since the kernel opens the outside fork where the walk finds nothing; the lenient one still places it where the link sits",
     () => {
-      // Pins today's answer so that a fix flips this test on purpose:
-      // `lstat` of `<file>/..namedfork` answers ENOTDIR, the walk-up
-      // places the link at its own spelling, and the kernel follows it.
+      // `lstat` of `<file>/..namedfork` answers ENOTDIR, so the walk
+      // finds the link's target missing and, alone, places the link at
+      // its own spelling inside the root. The kernel follows it.
       const fx = fixture();
       const repo = fs.realpathSync.native(fx.repo);
+      const outside = fs.realpathSync.native(fx.outside);
       const fork = path.join(fx.outside, "two.js", "..namedfork", "rsrc");
       fs.writeFileSync(fork, "the outside fork\n");
-      fs.symlinkSync(fork, path.join(fx.repo, "fork-link.js"));
-      const judged = resolveDeepestExisting(path.join(fx.repo, "fork-link.js"));
-      expect(judged).toBe(path.join(repo, "fork-link.js"));
-      expect(isPathContained(repo, judged)).toBe(true);
-      expect(fs.readFileSync(judged, "utf8")).toBe("the outside fork\n");
+      const link = path.join(fx.repo, "fork-link.js");
+      fs.symlinkSync(fork, link);
+      expect(fs.readFileSync(link, "utf8")).toBe("the outside fork\n");
+      const thrown = refusal(link);
+      expect(thrown).toBeInstanceOf(UnresolvablePathError);
+      expect((thrown as UnresolvablePathError).path).toBe(link);
+      expect((thrown as UnresolvablePathError).code).toBeUndefined();
+      // The fork spelled directly is the same disagreement.
+      expect(refusal(fork)).toBeInstanceOf(UnresolvablePathError);
+      // The lenient one does not ask the kernel and answers what it
+      // answered before, which is why nothing that acts may use it.
+      const lenient = resolveDeepestExistingLenient(link);
+      expect(lenient).toBe(path.join(repo, "fork-link.js"));
+      expect(isPathContained(repo, lenient)).toBe(true);
+      expect(resolveDeepestExistingLenient(fork)).toBe(
+        path.join(outside, "two.js", "..namedfork", "rsrc"),
+      );
+    },
+  );
+
+  it.skipIf(!hasNamedForks)(
+    "macOS: a link into the fork of a file that carries none is a dangling link to the kernel too, and stays placed where it sits",
+    () => {
+      const fx = fixture();
+      const repo = fs.realpathSync.native(fx.repo);
+      const link = path.join(fx.repo, "no-fork-link.js");
+      fs.symlinkSync(
+        path.join(fx.outside, "one.js", "..namedfork", "rsrc"),
+        link,
+      );
+      expect(() => fs.statSync(link)).toThrow(/ENOENT/);
+      expect(resolveDeepestExisting(link)).toBe(
+        path.join(repo, "no-fork-link.js"),
+      );
     },
   );
 
@@ -455,16 +485,26 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
     return { base, head: path.join(base, previous) };
   }
 
-  it("the walk's link budget: exactly 64 links resolve, and a 65th is refused, never re-appended below the 64 that were placed", () => {
+  /** More links than the kernel follows in one lookup on either
+   * platform this suite runs on (32 on macOS, 40 on Linux), and fewer
+   * than the walk's own budget of 64. */
+  const PAST_KERNEL_LINKS = 50;
+  /** A number of links the kernel follows on both. */
+  const WITHIN_KERNEL_LINKS = 20;
+
+  it("the walk's link budget: exactly 64 links are walked, and a 65th is refused, never re-appended below the 64 that were placed", () => {
     const at64 = chain(64);
-    expect(resolveDeepestExisting(at64.head)).toBe(
-      path.join(at64.base, "real"),
-    );
-    expect(resolveDeepestExisting(path.join(at64.head, "plain"))).toBe(
+    // The walk on its own, without the kernel's answer: 64 links resolve.
+    expect(physicalRealpath(at64.head)).toBe(path.join(at64.base, "real"));
+    expect(physicalRealpath(path.join(at64.head, "plain"))).toBe(
       path.join(at64.base, "real", "plain"),
+    );
+    expect(resolveDeepestExistingLenient(at64.head)).toBe(
+      path.join(at64.base, "real"),
     );
     // 64 links to `real`, then `s` is the 65th: placing `<base>/real` and
     // re-appending `s` verbatim would name `<base>/far` to the kernel.
+    expect(() => physicalRealpath(path.join(at64.head, "s"))).toThrow(/ELOOP/);
     expect(() => resolveDeepestExisting(path.join(at64.head, "s"))).toThrow(
       UnresolvablePathError,
     );
@@ -473,9 +513,126 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
       path.join(at64.base, "real", "s"),
     );
     const at63 = chain(63);
-    expect(resolveDeepestExisting(path.join(at63.head, "s"))).toBe(
+    expect(physicalRealpath(path.join(at63.head, "s"))).toBe(
       path.join(at63.base, "far"),
     );
+  });
+
+  it("a chain the walk places in full and the kernel does not follow (more links than its own limit) is refused by the strict one with the kernel's ELOOP", () => {
+    for (const links of [PAST_KERNEL_LINKS, 63, 64]) {
+      const built = chain(links);
+      expect(() => fs.statSync(built.head)).toThrow(/ELOOP/);
+      for (const spelling of [built.head, path.join(built.head, "plain")]) {
+        const thrown = refusal(spelling);
+        expect(thrown).toBeInstanceOf(UnresolvablePathError);
+        expect((thrown as UnresolvablePathError).code).toBe("ELOOP");
+      }
+      // The lenient one answers the walk's placement, unasked.
+      expect(resolveDeepestExistingLenient(built.head)).toBe(
+        path.join(built.base, "real"),
+      );
+    }
+    // A chain the kernel follows is placed as before, `s` included.
+    const short = chain(WITHIN_KERNEL_LINKS);
+    expect(resolveDeepestExisting(short.head)).toBe(
+      path.join(short.base, "real"),
+    );
+    expect(resolveDeepestExisting(path.join(short.head, "plain"))).toBe(
+      path.join(short.base, "real", "plain"),
+    );
+    expect(resolveDeepestExisting(path.join(short.head, "s"))).toBe(
+      path.join(short.base, "far"),
+    );
+  });
+
+  it("a path the walk finds missing while the kernel fails another way (ELOOP on a dangling chain past its limit) is refused, not placed", () => {
+    const base = makeTmpDir();
+    let previous = "gone";
+    for (let i = 0; i < PAST_KERNEL_LINKS; i++) {
+      fs.symlinkSync(previous, path.join(base, `d${String(i)}`));
+      previous = `d${String(i)}`;
+    }
+    const head = path.join(base, previous);
+    // The walk follows every link and finds `gone` missing (ENOENT),
+    // which alone places the head where it sits.
+    expect(() => physicalRealpath(head)).toThrow(/ENOENT/);
+    expect(() => fs.statSync(head)).toThrow(/ELOOP/);
+    const thrown = refusal(head);
+    expect(thrown).toBeInstanceOf(UnresolvablePathError);
+    expect((thrown as UnresolvablePathError).code).toBe("ELOOP");
+    expect(resolveDeepestExistingLenient(head)).toBe(head);
+    // The same dangling chain cut short enough for the kernel: ENOENT to
+    // both, and placed where it sits as before.
+    const shortHead = path.join(base, `d${String(WITHIN_KERNEL_LINKS - 1)}`);
+    expect(() => fs.statSync(shortHead)).toThrow(/ENOENT/);
+    expect(resolveDeepestExisting(shortHead)).toBe(shortHead);
+  });
+
+  it("<file>/. is placed at the file by the walk and is ENOTDIR to the kernel: refused by the strict one, placed by the lenient one", () => {
+    const fx = fixture();
+    const repo = fs.realpathSync.native(fx.repo);
+    fs.symlinkSync("fixture.js/.", path.join(fx.repo, "dot-link.js"));
+    for (const spelling of [
+      `${fx.repo}${path.sep}fixture.js${path.sep}.`,
+      `${fx.repo}${path.sep}fixture.js${path.sep}`,
+      path.join(fx.repo, "dot-link.js"),
+    ]) {
+      expect(() => fs.statSync(spelling)).toThrow(/ENOTDIR/);
+      const thrown = refusal(spelling);
+      expect(thrown).toBeInstanceOf(UnresolvablePathError);
+      expect((thrown as UnresolvablePathError).code).toBe("ENOTDIR");
+      expect(resolveDeepestExistingLenient(spelling)).toBe(
+        path.join(repo, "fixture.js"),
+      );
+    }
+    // A directory spelled the same two ways is a directory to both.
+    fs.mkdirSync(path.join(fx.repo, "dir"));
+    for (const spelling of [
+      `${fx.repo}${path.sep}dir${path.sep}.`,
+      `${fx.repo}${path.sep}dir${path.sep}`,
+    ]) {
+      expect(resolveDeepestExisting(spelling)).toBe(path.join(repo, "dir"));
+    }
+  });
+
+  it("a symlinked component re-pointed between the walk and the kernel's answer is refused: the kernel reaches another file than the one placed", () => {
+    const fx = fixture();
+    const repo = fs.realpathSync.native(fx.repo);
+    fs.mkdirSync(path.join(fx.repo, "inner"));
+    fs.writeFileSync(path.join(fx.repo, "inner", "two.js"), "inside\n");
+    fs.writeFileSync(path.join(fx.outside, "odir", "two.js"), OUTSIDE);
+    const lnk = path.join(fx.repo, "lnk");
+    fs.symlinkSync("inner", lnk);
+    const spelling = path.join(lnk, "two.js");
+    // Unraced, the link is followed and the file placed inside the root.
+    expect(resolveDeepestExisting(spelling)).toBe(
+      path.join(repo, "inner", "two.js"),
+    );
+    // Raced: the walk has placed `<root>/inner/two.js` when `lnk` is
+    // re-pointed at `<outside>/odir`, just before the kernel is asked
+    // (the walk itself only ever calls `lstat` and `readlink`).
+    const realStat = fs.statSync;
+    let repointed = false;
+    const spy = vi.spyOn(fs, "statSync").mockImplementation(((
+      ...args: Parameters<typeof fs.statSync>
+    ) => {
+      if (!repointed) {
+        repointed = true;
+        fs.unlinkSync(lnk);
+        fs.symlinkSync(path.join(fx.outside, "odir"), lnk);
+      }
+      return realStat(...args);
+    }) as typeof fs.statSync);
+    let thrown: unknown;
+    try {
+      thrown = refusal(spelling);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(repointed).toBe(true);
+    expect(thrown).toBeInstanceOf(UnresolvablePathError);
+    expect((thrown as UnresolvablePathError).path).toBe(spelling);
+    expect((thrown as UnresolvablePathError).code).toBeUndefined();
   });
 
   it("a path past the budget through `l -> .` steps is refused, whatever number of steps", () => {
@@ -485,18 +642,26 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
     fs.mkdirSync(path.join(base, "victim", "wt"), { recursive: true });
     fs.symlinkSync(".", path.join(log, "l"));
     fs.symlinkSync(path.join(base, "victim"), path.join(log, "U"));
-    for (const steps of [63, 64, 65, 100]) {
+    for (const steps of [WITHIN_KERNEL_LINKS, 63, 64, 65, 100]) {
       const spelling = `${log}/${"l/".repeat(steps)}U/wt`;
-      if (steps === 63) {
+      if (steps === WITHIN_KERNEL_LINKS) {
         expect(resolveDeepestExisting(spelling)).toBe(
           path.join(base, "victim", "wt"),
         );
       } else {
+        // 63 steps and `U` are the 64 links the walk still places
+        // (`physicalRealpath` below), and more than the kernel follows.
         expect(() => resolveDeepestExisting(spelling)).toThrow(
           UnresolvablePathError,
         );
       }
     }
+    expect(physicalRealpath(`${log}/${"l/".repeat(63)}U/wt`)).toBe(
+      path.join(base, "victim", "wt"),
+    );
+    expect(() => physicalRealpath(`${log}/${"l/".repeat(64)}U/wt`)).toThrow(
+      /ELOOP/,
+    );
   });
 
   /** `<base>/log` with `l -> .`, and `<base>/victim/wt`. */
@@ -1020,5 +1185,68 @@ describe("a directory reached through an ancestor whose symlink target walks .."
       path.relative(targetDir, result.targets[0]!.path),
     );
     expect(fs.readFileSync(written, "utf8")).toBe("skill\n");
+  });
+});
+
+describe("a --log-dir behind a symlinked ancestor and a link chain exactly as long as the kernel follows", () => {
+  /** The longest chain of links to a directory the kernel follows in
+   * one lookup on this platform (32 on macOS, 40 on Linux). */
+  function kernelLinkLimit(): number {
+    const base = makeTmpDir();
+    fs.mkdirSync(path.join(base, "real"));
+    let previous = "real";
+    for (let links = 1; links <= 64; links++) {
+      const name = `k${String(links)}`;
+      fs.symlinkSync(previous, path.join(base, name));
+      try {
+        fs.statSync(path.join(base, name));
+      } catch {
+        return links - 1;
+      }
+      previous = name;
+    }
+    return 64;
+  }
+
+  it("an operator --link to such a chain is linked: the copy's destination is judged from the copy's physical root, where the log dir's own symlink does not count against the kernel's limit", async () => {
+    useLockDir();
+    const fx = fixture();
+    const limit = kernelLinkLimit();
+    expect(limit).toBeLessThan(64);
+    let next = path.join(fx.outside, "odir");
+    for (let i = limit; i >= 1; i--) {
+      const hop = path.join(fx.repo, `hop${String(i)}`);
+      fs.symlinkSync(next, hop);
+      next = hop;
+    }
+    const head = path.join(fx.repo, "hop1");
+    expect(fs.statSync(head).isDirectory()).toBe(true);
+    // One symlinked ancestor ahead of the same chain is one link too
+    // many for the kernel, which is what the destination in the copy
+    // would be if it were spelled through the log dir as given.
+    const behind = makeTmpDir();
+    fs.symlinkSync(head, path.join(behind, "hop1"));
+    const alias = path.join(makeTmpDir(), "alias");
+    fs.symlinkSync(behind, alias);
+    expect(() => fs.statSync(path.join(alias, "hop1"))).toThrow(/ELOOP/);
+
+    const realLogs = makeTmpDir();
+    const logDir = path.join(makeTmpDir(), "to-logs");
+    fs.symlinkSync(realLogs, logDir);
+    const result = await probe({
+      file: "fixture.js",
+      line: 2,
+      form: "replace",
+      replaceText: "  return true;",
+      testCommand: "node fixture.test.js",
+      isolation: "worktree",
+      expect: "fail",
+      cwd: fx.repo,
+      logDir,
+      links: ["hop1"],
+    });
+    expect(result.reason ?? "").not.toBe("worktree_sync_failed");
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([head]);
   });
 });
