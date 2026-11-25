@@ -1593,8 +1593,12 @@ export async function beginWorktree(
       // spelling it is handed, and a symlinked ancestor of the log dir
       // (macOS's `/var` -> `/private/var`) is one more link in that
       // lookup, enough to push a destination the copy already carries as
-      // a chain of exactly the kernel's own limit past it. Every check
-      // and every syscall below uses this one spelling.
+      // a chain of exactly the kernel's own limit past it. The resolves
+      // of this destination and of its parent in this loop, and the
+      // `mkdirSync`, `rmSync` and `symlinkSync` on it, use this one
+      // spelling. `nonDirectoryAncestor` below, the postcondition after
+      // the loop and the mapped cwd still spell the copy through
+      // `worktreePath`.
       const dest = path.join(wtReal, relPath);
       // The target first, and once: a link may only ever point at the
       // source tree. A target inside the copy would make the copy refer

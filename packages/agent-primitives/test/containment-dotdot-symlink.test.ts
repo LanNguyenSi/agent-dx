@@ -635,6 +635,64 @@ describe("resolveDeepestExisting and its lenient twin place a .. physically and 
     expect((thrown as UnresolvablePathError).code).toBeUndefined();
   });
 
+  it("a symlinked component re-pointed and its old target removed between the walk and the kernel's answer is refused: the placed file is gone, whatever the kernel reaches now", () => {
+    const fx = fixture();
+    const repo = fs.realpathSync.native(fx.repo);
+    const placed = path.join(repo, "inner", "two.js");
+    fs.mkdirSync(path.join(fx.repo, "inner"));
+    fs.writeFileSync(placed, "inside\n");
+    fs.writeFileSync(path.join(fx.outside, "odir", "two.js"), OUTSIDE);
+    const lnk = path.join(fx.repo, "lnk");
+    fs.symlinkSync("inner", lnk);
+    const spelling = path.join(lnk, "two.js");
+    expect(resolveDeepestExisting(spelling)).toBe(placed);
+    // Raced as above, and the file the walk placed is removed as well:
+    // the kernel still reaches a file through the spelling (the outside
+    // one), while there is nothing left at the placement to hold it
+    // against.
+    const realStat = fs.statSync;
+    let raced = false;
+    const spy = vi.spyOn(fs, "statSync").mockImplementation(((
+      ...args: Parameters<typeof fs.statSync>
+    ) => {
+      if (!raced) {
+        raced = true;
+        fs.unlinkSync(lnk);
+        fs.symlinkSync(path.join(fx.outside, "odir"), lnk);
+        fs.unlinkSync(placed);
+      }
+      return realStat(...args);
+    }) as typeof fs.statSync);
+    let thrown: unknown;
+    try {
+      thrown = refusal(spelling);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(raced).toBe(true);
+    expect(fs.statSync(spelling).isFile()).toBe(true);
+    expect(fs.existsSync(placed)).toBe(false);
+    expect(thrown).toBeInstanceOf(UnresolvablePathError);
+    expect((thrown as UnresolvablePathError).path).toBe(spelling);
+    expect((thrown as UnresolvablePathError).code).toBe("ENOENT");
+  });
+
+  it("an empty path is the current directory to both resolvers: the kernel is asked about the absolute spelling that was walked, not about the argument as given", () => {
+    const dir = makeTmpDir();
+    const saved = process.cwd();
+    process.chdir(dir);
+    try {
+      // `stat("")` itself is ENOENT to the kernel.
+      expect(() => fs.statSync("")).toThrow(/ENOENT/);
+      expect(resolveDeepestExisting("")).toBe(fs.realpathSync.native(dir));
+      expect(resolveDeepestExisting("")).toBe(
+        resolveDeepestExistingLenient(""),
+      );
+    } finally {
+      process.chdir(saved);
+    }
+  });
+
   it("a path past the budget through `l -> .` steps is refused, whatever number of steps", () => {
     const base = makeTmpDir();
     const log = path.join(base, "log");
