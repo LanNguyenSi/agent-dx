@@ -12,7 +12,11 @@ import {
   readMarkerFor,
   writeMarker,
 } from "../src/lock.js";
-import { resolveDeepestExisting } from "../src/probe/containment.js";
+import {
+  resolveDeepestExisting,
+  resolveDeepestExistingLenient,
+  UnresolvablePathError,
+} from "../src/probe/containment.js";
 import {
   beginInplace,
   cleanupWorktree,
@@ -670,3 +674,409 @@ describe.skipIf(!canLchmod)(
     });
   },
 );
+
+/**
+ * A link the kernel follows although the walk finds nothing behind it,
+ * or follows to another file than the one the walk placed: the strict
+ * resolver asks the kernel and refuses on the disagreement, so every
+ * caller that acts on the path refuses it, and the lenient resolver
+ * answers what it always did.
+ */
+describe("a link the kernel follows where the walk finds nothing, or another file", () => {
+  type Mode = "inplace" | "worktree";
+  const MODES: Mode[] = ["inplace", "worktree"];
+  /** Two lines carry the `-M` text, so a derivation that read the file
+   * would answer `match_ambiguous` and name them. */
+  const TWO_LINES = "n > 0 a\nn > 0 b\n";
+
+  /** Whether this volume gives a file a resource fork under
+   * `<file>/..namedfork/rsrc` (macOS, on a filesystem that has forks). */
+  const hasNamedForks = (() => {
+    if (process.platform !== "darwin") return false;
+    const probeDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-fork-probe-"),
+    );
+    try {
+      const file = path.join(probeDir, "f");
+      fs.writeFileSync(file, "data\n");
+      fs.writeFileSync(path.join(file, "..namedfork", "rsrc"), "fork\n");
+      return true;
+    } catch {
+      return false;
+    } finally {
+      fs.rmSync(probeDir, { recursive: true, force: true });
+    }
+  })();
+  const onLinux = process.platform === "linux";
+
+  const openFds: number[] = [];
+  afterEach(() => {
+    for (const fd of openFds.splice(0)) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Already closed.
+      }
+    }
+  });
+
+  /** `/proc/<pid>/fd/<n>` for a descriptor of this process, held open
+   * until the test ends. */
+  function procFd(fd: number): string {
+    openFds.push(fd);
+    return `/proc/${String(process.pid)}/fd/${String(fd)}`;
+  }
+
+  /** `/proc/<pid>/fd/<n>` of a directory that is removed once it is
+   * open. */
+  function removedDirectory(dir: string): string {
+    fs.mkdirSync(dir);
+    const target = procFd(
+      fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY),
+    );
+    fs.rmdirSync(dir);
+    return target;
+  }
+
+  /** `/proc/<pid>/fd/<n>` of a file that is unlinked once it is open. */
+  function unlinkedFile(file: string): string {
+    fs.writeFileSync(file, TWO_LINES);
+    const target = procFd(fs.openSync(file, "r+"));
+    fs.unlinkSync(file);
+    return target;
+  }
+
+  interface Live {
+    /** What the in-repository link points at. */
+    target: string;
+    /** Where the walk alone places `<repo>/<name>`: the lenient
+     * resolver's answer, and the strict one's before it asked the
+     * kernel. */
+    walkPlacement: (repo: string, name: string) => string;
+    /** Throws unless what the kernel reaches is as it was built. */
+    expectUntouched: () => void;
+  }
+
+  /**
+   * What a run answers when the link is a `link` value instead of the
+   * `--file`:
+   *
+   * - `not_a_directory`: `link_source_not_found`, as for any link value
+   *   the kernel does not reach a directory through;
+   * - `skipped`: the link policy's strict resolve refuses the candidate,
+   *   the run goes on without the link and says so;
+   * - `outside`: the link-source walk reports the far end outside the
+   *   root (`file_outside_root`);
+   * - `walk_placement`: the far end the link-source walk reports is
+   *   inside the root, and that spelling, never the link the kernel
+   *   follows by handle, is what the copy is given.
+   */
+  type OperatorAnswer = "not_a_directory" | "skipped";
+  type ContentAnswer = "not_a_directory" | "outside" | "walk_placement";
+
+  interface Shape {
+    label: string;
+    runs: boolean;
+    build: (repo: string) => Live;
+    operatorLink: OperatorAnswer;
+    contentLink: ContentAnswer;
+  }
+
+  const whereItSits = (repo: string, name: string): string =>
+    path.join(fs.realpathSync.native(repo), name);
+
+  const SHAPES: Shape[] = [
+    {
+      label:
+        "macOS, the resource fork of a file outside the root (<file>/..namedfork/rsrc)",
+      runs: hasNamedForks,
+      build: () => {
+        const victim = path.join(makeTmpDir(), "victim.js");
+        fs.writeFileSync(victim, "data\n");
+        const fork = path.join(victim, "..namedfork", "rsrc");
+        fs.writeFileSync(fork, TWO_LINES);
+        return {
+          target: fork,
+          walkPlacement: whereItSits,
+          expectUntouched: () => {
+            expect(fs.readFileSync(fork, "utf8")).toBe(TWO_LINES);
+            expect(fs.readFileSync(victim, "utf8")).toBe("data\n");
+          },
+        };
+      },
+      // A fork is a file, and `lstat` of `<file>/..namedfork/rsrc`
+      // succeeds, so the link-source walk ends on the outside fork.
+      operatorLink: "not_a_directory",
+      contentLink: "outside",
+    },
+    {
+      label: "Linux, /proc/<pid>/fd/<n> of an unlinked file outside the root",
+      runs: onLinux,
+      build: () => {
+        const gone = path.join(makeTmpDir(), "gone.js");
+        const target = unlinkedFile(gone);
+        expect(fs.readlinkSync(target)).toBe(`${gone} (deleted)`);
+        return {
+          target,
+          walkPlacement: whereItSits,
+          expectUntouched: () => {
+            expect(fs.readFileSync(target, "utf8")).toBe(TWO_LINES);
+          },
+        };
+      },
+      operatorLink: "not_a_directory",
+      contentLink: "outside",
+    },
+    {
+      label:
+        "Linux, /proc/<pid>/fd/<n> of a removed directory outside the root",
+      runs: onLinux,
+      build: () => {
+        const gone = path.join(makeTmpDir(), "gone-dir");
+        const target = removedDirectory(gone);
+        expect(fs.readlinkSync(target)).toBe(`${gone} (deleted)`);
+        return {
+          target,
+          walkPlacement: whereItSits,
+          expectUntouched: () => {
+            expect(fs.statSync(target).isDirectory()).toBe(true);
+          },
+        };
+      },
+      operatorLink: "skipped",
+      contentLink: "outside",
+    },
+    {
+      // The text `readlink` returns names a file that exists, so the
+      // walk places the link in full, at that other file.
+      label:
+        "Linux, /proc/<pid>/fd/<n> of an unlinked file whose readlink text names another file inside the root",
+      runs: onLinux,
+      build: (repo) => {
+        const gone = whereItSits(repo, "was-here.js");
+        const target = unlinkedFile(gone);
+        const decoy = `${gone} (deleted)`;
+        fs.writeFileSync(decoy, "the decoy\n");
+        expect(fs.readlinkSync(target)).toBe(decoy);
+        return {
+          target,
+          walkPlacement: () => decoy,
+          expectUntouched: () => {
+            expect(fs.readFileSync(target, "utf8")).toBe(TWO_LINES);
+            expect(fs.readFileSync(decoy, "utf8")).toBe("the decoy\n");
+          },
+        };
+      },
+      operatorLink: "not_a_directory",
+      contentLink: "not_a_directory",
+    },
+    {
+      label:
+        "Linux, /proc/<pid>/fd/<n> of a removed directory whose readlink text names another directory inside the root",
+      runs: onLinux,
+      build: (repo) => {
+        const gone = whereItSits(repo, "was-here");
+        const target = removedDirectory(gone);
+        const decoy = `${gone} (deleted)`;
+        fs.mkdirSync(decoy);
+        fs.writeFileSync(path.join(decoy, "marker.txt"), "the decoy\n");
+        expect(fs.readlinkSync(target)).toBe(decoy);
+        return {
+          target,
+          walkPlacement: () => decoy,
+          expectUntouched: () => {
+            expect(fs.readdirSync(target)).toEqual([]);
+            expect(fs.readdirSync(decoy)).toEqual(["marker.txt"]);
+          },
+        };
+      },
+      operatorLink: "skipped",
+      contentLink: "walk_placement",
+    },
+  ];
+
+  /** A test command that leaves a trace of every run: no trace means no
+   * baseline (and no mutant) ever ran. */
+  function tracingCommand(trace: string): string {
+    return `echo ran >> '${trace}'; node fixture.test.js`;
+  }
+
+  for (const shape of SHAPES) {
+    describe.skipIf(!shape.runs)(shape.label, () => {
+      function linked(name: string): { repo: string; live: Live } {
+        const repo = initRepo();
+        const live = shape.build(repo);
+        fs.symlinkSync(live.target, path.join(repo, name));
+        // The shape is live: the kernel reaches something through it.
+        expect(() => fs.statSync(path.join(repo, name))).not.toThrow();
+        return { repo, live };
+      }
+
+      it("the strict resolver refuses the link, and the lenient one answers the walk's placement unchanged", () => {
+        const { repo, live } = linked("live-link.js");
+        const link = path.join(repo, "live-link.js");
+        let thrown: unknown;
+        try {
+          resolveDeepestExisting(link);
+        } catch (err) {
+          thrown = err;
+        }
+        expect(thrown).toBeInstanceOf(UnresolvablePathError);
+        expect((thrown as UnresolvablePathError).path).toBe(link);
+        expect((thrown as UnresolvablePathError).code).toBeUndefined();
+        expect(resolveDeepestExistingLenient(link)).toBe(
+          live.walkPlacement(repo, "live-link.js"),
+        );
+        live.expectUntouched();
+      });
+
+      for (const mode of MODES) {
+        for (const line of [undefined, 1]) {
+          it(`probe(), --file, ${mode} isolation, ${line === undefined ? "-M without -n" : "-n 1"}: file_outside_root, nothing read or written, nothing left behind`, async () => {
+            const lockDir = useLockDir();
+            const { repo, live } = linked("live-link.js");
+            const trace = path.join(makeTmpDir(), "trace");
+            const result = await probe(
+              probeOptions(repo, {
+                file: "live-link.js",
+                form: "match",
+                matchText: "n > 0",
+                withText: "true",
+                testCommand: tracingCommand(trace),
+                isolation: mode,
+                ...(line === undefined ? { line: undefined } : { line }),
+              }),
+            );
+            expect(result.status).toBe("inconclusive");
+            expect(result.reason).toBe("file_outside_root");
+            const text = result.warnings.join("\n");
+            expect(text).toContain("live-link.js");
+            expect(text).toContain(
+              "refusing to treat it as inside the containment root",
+            );
+            expect(text).not.toContain("occurs on");
+            expect(fs.existsSync(trace)).toBe(false);
+            live.expectUntouched();
+            expectNoIsolationLeftovers(repo, lockDir);
+          });
+        }
+
+        it(`probePlan(), mutant file, ${mode} isolation: usage_error file_outside_root, nothing read or written, nothing left behind`, async () => {
+          const lockDir = useLockDir();
+          const { repo, live } = linked("live-link.js");
+          const trace = path.join(makeTmpDir(), "trace");
+          const result = await probePlan({
+            mutants: [
+              {
+                file: "live-link.js",
+                line: 1,
+                form: "match",
+                matchText: "n > 0",
+                withText: "true",
+              },
+            ],
+            testCommand: tracingCommand(trace),
+            isolation: mode,
+            expect: "fail",
+            cwd: repo,
+            logDir: makeTmpDir(),
+          });
+          expect(result.status).toBe("usage_error");
+          expect(result.reason).toBe("file_outside_root");
+          expect(fs.existsSync(trace)).toBe(false);
+          live.expectUntouched();
+          expectNoIsolationLeftovers(repo, lockDir);
+        });
+      }
+
+      it(`the link as an operator --link value (worktree isolation): ${shape.operatorLink}, never linked into the copy`, async () => {
+        useLockDir();
+        const { repo, live } = linked("live-link");
+        const trace = path.join(makeTmpDir(), "trace");
+        const result = await probe(
+          probeOptions(repo, {
+            links: ["live-link"],
+            testCommand: tracingCommand(trace),
+          }),
+        );
+        expect(result.isolation.linked).toEqual([]);
+        const text = result.warnings.join("\n");
+        if (shape.operatorLink === "not_a_directory") {
+          expect(result.status).toBe("usage_error");
+          expect(result.reason).toBe("link_source_not_found");
+          expect(text).toContain("is not a directory");
+          expect(fs.existsSync(trace)).toBe(false);
+        } else {
+          expect(result.status).toBe("killed");
+          expect(text).toContain("skipped linking");
+          expect(text).toContain("its target cannot be resolved");
+        }
+        live.expectUntouched();
+      });
+
+      for (const lane of ["plan", "defaults-file"] as const) {
+        it(`the link as a ${lane} link value (worktree isolation): ${shape.contentLink}, the copy never reaches what the kernel follows the link to`, async () => {
+          useLockDir();
+          const { repo, live } = linked("live-link");
+          const trace = path.join(makeTmpDir(), "trace");
+          const testCommand = tracingCommand(trace);
+          let result: {
+            status: string;
+            reason?: string;
+            warnings: string[];
+            isolation: { linked: string[] };
+          };
+          if (lane === "plan") {
+            result = await probePlan({
+              mutants: [
+                {
+                  file: "fixture.js",
+                  line: 2,
+                  form: "replace",
+                  replaceText: "  return false;",
+                },
+              ],
+              testCommand,
+              isolation: "worktree",
+              expect: "fail",
+              cwd: repo,
+              logDir: makeTmpDir(),
+              planLinks: ["live-link"],
+              planPath: path.join(repo, "plan.json"),
+            });
+          } else {
+            fs.writeFileSync(
+              path.join(repo, ".agent-primitives.json"),
+              JSON.stringify({ link: ["live-link"] }),
+            );
+            result = await probe(probeOptions(repo, { testCommand }));
+          }
+          const text = result.warnings.join("\n");
+          const refusedStatus =
+            lane === "plan" ? "usage_error" : "inconclusive";
+          if (shape.contentLink === "outside") {
+            expect(result.status).toBe(refusedStatus);
+            expect(result.reason).toBe("file_outside_root");
+            expect(text).toContain("does not resolve inside the root");
+            expect(result.isolation.linked).toEqual([]);
+            expect(fs.existsSync(trace)).toBe(false);
+          } else if (shape.contentLink === "not_a_directory") {
+            expect(result.status).toBe("usage_error");
+            expect(result.reason).toBe("link_source_not_found");
+            expect(result.isolation.linked).toEqual([]);
+            expect(fs.existsSync(trace)).toBe(false);
+          } else {
+            // The far end the walk reports is the in-root directory the
+            // readlink text names, and that directory, under its own
+            // name, is the one the run links into the copy.
+            expect(result.status).toBe("killed");
+            expect(result.isolation.linked).toEqual([
+              live.walkPlacement(repo, "live-link"),
+            ]);
+          }
+          live.expectUntouched();
+        });
+      }
+    });
+  }
+});

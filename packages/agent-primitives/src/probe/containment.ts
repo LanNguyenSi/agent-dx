@@ -45,13 +45,17 @@ export function isPathContained(root: string, absTarget: string): boolean {
 
 /**
  * Thrown by `resolveDeepestExisting` when `realpath` fails for a reason
- * other than the path not existing (see `UNPLACED_PATH_CODES`), or when
- * a `..` would have to climb from a component that does not resolve:
- * the kernel may still be able to follow the path (`stat` and `open`
- * succeed) even though the physical location cannot be established, so
- * no answer about where the path points is available, and a caller
- * that needs one must refuse instead of guessing. `code` is `undefined`
- * for the `..` case.
+ * other than the path not existing (see `UNPLACED_PATH_CODES`), when
+ * a `..` would have to climb from a component that does not resolve, or
+ * when the kernel's own answer for the path contradicts the placement
+ * (`assertKernelAgrees`): the kernel may still be able to follow the
+ * path (`stat` and `open` succeed) even though the physical location
+ * cannot be established, so no answer about where the path points is
+ * available, and a caller that needs one must refuse instead of
+ * guessing. `code` is the errno of the failed lookup, the kernel's own
+ * included; it is `undefined` for the `..` case and for a path the
+ * kernel reaches although the walk found it missing, or reaches
+ * somewhere other than where the walk placed it.
  */
 export class UnresolvablePathError extends Error {
   /** The path handed to `resolveDeepestExisting`. */
@@ -203,17 +207,37 @@ function walkPhysical(
  * a time: falling back to "the parent's realpath plus the link's own
  * name" would place a link that points OUTSIDE the root inside it.
  *
+ * The placement is a model of the kernel's lookup, built from `lstat`
+ * and `readlink`, and the kernel is asked once whether it agrees
+ * (`assertKernelAgrees`: one `stat` of the spelling that was walked,
+ * which follows every link the kernel follows). A path the walk found
+ * missing must be missing for the kernel too (`ENOENT` or `ENOTDIR`):
+ * when the kernel reaches something, or fails any other way, the path
+ * is refused with `UnresolvablePathError`. A path the walk placed in
+ * full must be reached by the kernel, at the very file the placement
+ * names (same device and inode): a failed `stat`, or another file, is
+ * refused the same way. Nothing is modelled and no name is special:
+ * the check is what refuses a link into `<file>/..namedfork/rsrc` on
+ * macOS (the kernel opens that file's resource fork, when the file
+ * carries one, while `lstat` of `<file>/..namedfork` answers `ENOTDIR`,
+ * so the walk alone placed a link to the fork of a file OUTSIDE the
+ * root inside it), a link into `/proc` on Linux that the kernel follows
+ * by handle (`/proc/<pid>/fd/<n>` of a removed directory or an unlinked
+ * file is live while the text `readlink` returns for it names nothing,
+ * or names some other file), a chain of more links than the kernel
+ * follows in one lookup, and `<file>/.`, which the walk places at the
+ * file while the kernel answers `ENOTDIR`.
+ *
  * Still placed where it sits, not where the kernel may take it: a
- * symlink the walk can read but whose target it cannot find, in three
- * known shapes that stay open. A create through a dangling link lands
- * where the link points. On macOS a link into
- * `<file>/..namedfork/rsrc` opens that file's resource fork, when the
- * file already carries one, while `lstat` of `<file>/..namedfork`
- * answers `ENOTDIR`, so a link to the fork of a file OUTSIDE the root
- * is placed inside it. On Linux a link into `/proc` that the kernel
- * follows by handle (`/proc/<pid>/fd/<n>` of a removed directory or an
- * unlinked file, say) is live while the text `readlink` returns for it
- * names nothing.
+ * symlink the walk can read and whose target neither it nor the kernel
+ * finds. A create through such a dangling link lands where the link
+ * points, and that shape stays open. The kernel is asked at one moment:
+ * a path that changes between that answer and the caller's own use of
+ * it is not covered by it. And it is asked here only:
+ * `resolveLinkSourceTarget` and `physicalRealpath` answer from the walk
+ * alone, so a `link` value named by repository content that is a
+ * symlink to `/proc/<pid>/fd/<n>` of a removed directory is still
+ * judged on the text `readlink` returns for it.
  *
  * Every caller that decides whether a run may read, write or delete
  * what the path names (`probe`, `probe --plan`, the link policy,
@@ -237,9 +261,10 @@ export function resolveDeepestExisting(p: string): string {
 
 /**
  * `resolveDeepestExisting` without the refusals: a failure of any code
- * (`EACCES` included) walks up to the next shorter prefix, and a `..`
+ * (`EACCES` included) walks up to the next shorter prefix, a `..`
  * left in the re-appended tail is kept there verbatim rather than thrown
- * on. Wherever `resolveDeepestExisting` answers at all, this answers the
+ * on, and the kernel is not asked whether it agrees with the placement.
+ * Wherever `resolveDeepestExisting` answers at all, this answers the
  * same string (both run the one walk below and differ only in what they
  * do where the strict one throws). For a caller that only reports on a
  * path and must not throw on one it cannot place (`doctor`, the
@@ -262,7 +287,8 @@ export function absoluteSpelling(p: string): string {
 }
 
 function placeDeepestExisting(p: string, lenient: boolean): string {
-  const { root, components } = splitPath(absoluteSpelling(p));
+  const spelling = absoluteSpelling(p);
+  const { root, components } = splitPath(spelling);
   for (let kept = components.length; kept >= 0; kept--) {
     let placed: string;
     try {
@@ -288,6 +314,7 @@ function placeDeepestExisting(p: string, lenient: boolean): string {
         ),
       );
     }
+    if (!lenient) assertKernelAgrees(p, spelling, placed, tail.length > 0);
     return joinComponents(placed, tail);
   }
   // Not reached: the walk of no components (`kept` 0) cannot fail, so
@@ -301,6 +328,63 @@ function placeDeepestExisting(p: string, lenient: boolean): string {
     );
   }
   return joinComponents(root, components);
+}
+
+/**
+ * The strict resolver's last step: the kernel's own answer for
+ * `spelling` (the absolute spelling of `p` the walk judged), held
+ * against what the walk concluded. `fs.statSync` follows every link the
+ * kernel follows, by whatever means the kernel follows it, so it needs
+ * no model of any of them.
+ *
+ * `walkedUp` (the walk placed a prefix at `placed` and re-appended a
+ * tail, that is, it found the path missing): the kernel must find it
+ * missing too, with `ENOENT` or `ENOTDIR`. A `stat` that succeeds says
+ * the kernel reaches something the walk could not place, and any other
+ * failure says the kernel did not get as far as the walk did; both
+ * throw.
+ *
+ * Otherwise (every component placed, at `placed`): the kernel must
+ * reach the path, and reach the file that sits at `placed`, by device
+ * and inode. A failed `stat` of either spelling, or two different
+ * files, throws.
+ */
+function assertKernelAgrees(
+  p: string,
+  spelling: string,
+  placed: string,
+  walkedUp: boolean,
+): void {
+  let reached: fs.BigIntStats;
+  try {
+    reached = fs.statSync(spelling, { bigint: true });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (walkedUp && typeof code === "string" && UNPLACED_PATH_CODES.has(code)) {
+      return;
+    }
+    throw new UnresolvablePathError(p, err);
+  }
+  if (walkedUp) {
+    throw new UnresolvablePathError(
+      p,
+      new Error(
+        `the kernel reaches ${spelling}, which could not be placed below ${placed}`,
+      ),
+    );
+  }
+  let at: fs.BigIntStats;
+  try {
+    at = fs.statSync(placed, { bigint: true });
+  } catch (err) {
+    throw new UnresolvablePathError(p, err);
+  }
+  if (reached.dev !== at.dev || reached.ino !== at.ino) {
+    throw new UnresolvablePathError(
+      p,
+      new Error(`the kernel does not reach ${placed} through ${spelling}`),
+    );
+  }
 }
 
 /** `components` appended under `dir` as plain strings, never through

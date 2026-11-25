@@ -1488,17 +1488,28 @@ follows the link. What the rule does NOT establish: a `--file` that is
 itself a dangling symlink is still judged where the link sits, not where
 it points, so for a dangling link to an outside path the answer
 (`file_not_found` inside the root, `file_outside_root` once the outside
-path exists) still depends on whether that path exists. Two more links
-are judged where they sit although the kernel follows them, and both stay
-open. On macOS, a link into `<file>/..namedfork/rsrc` opens the resource
-fork of `<file>` when that file already carries one, while the walk gets
-`ENOTDIR` for `<file>/..namedfork` and places the link at its own
-spelling: a `--file` link to the fork of a file outside the root is read
-as inside it, `-M` without `-n` names lines of that fork, and a run with
-`-n` under `-i inplace` writes to it and ends `restore_failed`. On Linux, a link into `/proc` that
-the kernel follows by handle rather than by the text `readlink` returns
-for it (`/proc/<pid>/fd/<n>` of a removed directory or an unlinked file)
-is judged by that text, which names nothing. A `--link` value carrying a
+path exists) still depends on whether that path exists. The placement is
+a model of the kernel's own lookup, so the kernel is asked once whether
+it agrees: a `stat` of the spelling that was judged must fail with
+`ENOENT` or `ENOTDIR` when the placement found the path missing, and must
+reach the very file the placement names (same device and inode) when it
+placed the path in full. A path where the two disagree cannot be placed:
+as a `--file` it is answered `file_outside_root` with nothing read or
+written, and as a link candidate it is skipped with a warning. That
+covers, on macOS, a link into `<file>/..namedfork/rsrc`, which opens the
+resource fork of `<file>` when that file already carries one while the
+walk gets `ENOTDIR` for `<file>/..namedfork`; on Linux, a link into
+`/proc` that the kernel follows by handle rather than by the text
+`readlink` returns for it (`/proc/<pid>/fd/<n>` of a removed directory or
+an unlinked file); a path through more symlinks than the kernel follows
+in one lookup (fewer than the 64 the walk follows); and `<file>/.`, which
+is `ENOTDIR` to the kernel. One shape of the `/proc` kind stays open on
+Linux: a `link` value named by repository content (a `--plan` file's or
+the defaults file's own) that is a symlink to `/proc/<pid>/fd/<n>` of a
+removed directory is judged by the link-source walk on the `readlink`
+text alone, so when that text names a path inside the root the value is
+accepted, and the run links the in-root path the text names, not the
+removed directory. A `--link` value carrying a
 `$(...)` command substitution or a backtick is refused outright
 (`InvalidArgumentError`, before anything runs) rather than merely being
 inert the way it already is for `-p`/`--file` above: the same rule

@@ -102,16 +102,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   symlinked component re-pointed while the gate runs git no longer
   redirects the delete. The isolation
   copy's own root and `init`'s directory check after `mkdir` use the
-  same walk. Four shapes stay open, all older than this entry. A `--file`
+  same walk. Two shapes stay open, both older than this entry. A `--file`
   that is itself a dangling symlink is still judged where the link sits.
-  On macOS, a link into `<file>/..namedfork/rsrc` of a file outside the
-  root that already carries a resource fork is judged where the link
-  sits while the kernel opens the outside fork. On Linux, so is a link
-  to `/proc/<pid>/fd/<n>` of a removed directory or an unlinked file,
-  which the kernel follows by handle while its `readlink` text names
-  nothing. At the cleanup gate, a `wt-<uuid>` that is a dangling link
-  when it is judged is followed by the removal if its target appears in
-  between.
+  At the cleanup gate, a `wt-<uuid>` that is a dangling link when it is
+  judged is followed by the removal if its target appears in between.
+  Two links the kernel follows although the walk finds nothing behind
+  them (a macOS resource fork, a Linux `/proc` handle) are refused by
+  the next entry.
+- `probe` no longer places a link the kernel follows where its own walk
+  finds nothing. `resolveDeepestExisting` built its answer from `lstat`
+  and `readlink` alone, so a link whose target the walk could not find
+  was placed where the link sits, inside the root, while the kernel
+  opened something through it: on macOS a link into
+  `<file>/..namedfork/rsrc` of a file outside the root that carries a
+  resource fork, on Linux a link to `/proc/<pid>/fd/<n>` of a removed
+  directory or an unlinked file. The strict resolver now asks the kernel
+  once, after the placement: a `stat` of the judged spelling must fail
+  with `ENOENT` or `ENOTDIR` for a path the walk found missing, and must
+  reach the very file the walk placed (same device and inode) for a path
+  it placed in full. Otherwise it throws `UnresolvablePathError`, and
+  such paths are now refused: a `--file` answers `file_outside_root` and
+  a `--plan` mutant `file` `usage_error` `file_outside_root`, with
+  nothing read or written, and a link candidate is skipped with a
+  warning. No name is treated specially. Two more answers change with
+  it: a path through more symlinks than the kernel follows in one lookup
+  (fewer than the 64 the walk follows) is refused instead of placed, and
+  so is `<file>/.`, which is `ENOTDIR` to the kernel.
+  `resolveDeepestExistingLenient` does not ask the kernel and answers as
+  before. The isolation copy now spells a link's destination from the
+  copy's physical root, so a `--log-dir` behind a symlinked ancestor
+  does not put a `--link` chain of exactly the kernel's limit past it.
+  One shape stays open, on Linux: a `link` value named by repository
+  content (a `--plan` file's or the defaults file's own) that is a
+  symlink to `/proc/<pid>/fd/<n>` of a removed directory is judged by
+  the link-source walk on the `readlink` text alone, so when that text
+  names a path inside the root the value is accepted, and the run links
+  the in-root path the text names, not the removed directory.
 
 ### Added
 

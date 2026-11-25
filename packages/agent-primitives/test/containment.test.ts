@@ -1294,3 +1294,46 @@ describe.skipIf(process.platform !== "darwin" || process.getuid?.() === 0)(
     });
   },
 );
+
+describe("resolveDeepestExisting(): the kernel's answer agrees with the placement for the ordinary shapes, which keep their answers", () => {
+  it("a missing file below a symlinked root is placed below where the root points", () => {
+    const real = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const holder = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const linkedRoot = path.join(holder, "root-link");
+    fs.symlinkSync(real, linkedRoot);
+    for (const tail of ["missing.js", path.join("no-dir", "missing.js")]) {
+      const spelling = path.join(linkedRoot, tail);
+      expect(resolveDeepestExisting(spelling)).toBe(path.join(real, tail));
+      expect(resolveDeepestExistingLenient(spelling)).toBe(
+        path.join(real, tail),
+      );
+    }
+  });
+
+  it("an existing file reached through a symlinked directory and through a link of its own is placed at the file", () => {
+    const real = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const holder = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    fs.writeFileSync(path.join(real, "f.js"), "x\n");
+    fs.symlinkSync(real, path.join(holder, "dir-link"));
+    fs.symlinkSync(path.join(real, "f.js"), path.join(holder, "file-link.js"));
+    for (const spelling of [
+      path.join(holder, "dir-link", "f.js"),
+      path.join(holder, "file-link.js"),
+    ]) {
+      expect(resolveDeepestExisting(spelling)).toBe(path.join(real, "f.js"));
+    }
+  });
+
+  it("a dangling link is missing to the kernel as well and stays placed where it sits, wherever it points", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const outside = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    fs.symlinkSync(path.join(outside, "gone.js"), path.join(root, "out.js"));
+    fs.symlinkSync("gone.js", path.join(root, "in.js"));
+    for (const name of ["out.js", "in.js"]) {
+      const spelling = path.join(root, name);
+      expect(() => fs.statSync(spelling)).toThrow(/ENOENT/);
+      expect(resolveDeepestExisting(spelling)).toBe(spelling);
+      expect(resolveDeepestExistingLenient(spelling)).toBe(spelling);
+    }
+  });
+});
