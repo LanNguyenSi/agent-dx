@@ -12,6 +12,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `templates/okf-staleness.yml` pins `actions/checkout` and `actions/setup-node`
   by commit SHA with the release in a trailing comment, instead of floating
   major tags.
+- `okf-kit init` no longer creates, truncates or writes a file through a
+  symbolic link. A repository or an unpacked archive can ship a link such as
+  `docs -> ~/somewhere` or `docs/okf/index.md -> ~/.zshrc` (git keeps
+  symlinks), and the scaffold followed it to a path outside the repository.
+  `init` now walks the absolute target from the filesystem root down with
+  `lstat` and refuses (exit `2`, nothing written) a symbolic link at any
+  component, a dangling link and the target itself included, wherever the
+  link points. No directory is trusted, and neither the working directory
+  nor a `.git` entry changes the verdict, so the same link is refused from a
+  subdirectory, from outside the checkout and through any spelling of the
+  path. This also refuses a link of your own above the checkout when the
+  target is spelled through it: pass the real path (`realpath`) instead; a
+  relative target from a checkout you entered through a link is unaffected.
+  The one exception is a link that is a direct entry of `/` on macOS and
+  Linux (`/tmp`, `/var`), which is followed when it leads to an existing
+  directory; nothing is exempt on Windows. A component that is not a
+  directory, or that cannot be examined, is refused. Each of the eight
+  scaffold files must be missing or a regular file with a single hard link
+  (a link, directory, FIFO, socket, or a file with more hard links is
+  refused), and all eight are checked before any is written. Missing
+  directories are created one level at a time and files are opened with
+  `O_NOFOLLOW` (`O_EXCL` without `--force`), so a link planted at a scaffold
+  name after the check fails the open. Not covered: a link swapped into a
+  parent directory, or a hard link created, between the check and the write
+  (Node has no `openat`); on Windows only the `lstat` checks apply. Scaffold
+  bytes are unchanged. See
+  [Scaffold a bundle](docs/init.md#symbolic-links-are-refused).
 
 ### Added
 
@@ -64,31 +91,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alternative counts at column 0 only, exactly as in the boundary check, and
   two sibling subtests at the same indent inside one range straddle, while a
   subtest nested deeper than the range's start does not.
-
-### Security
-
-- `okf-kit init` no longer creates, truncates or writes a file through a
-  symbolic link. A repository can ship a link such as `docs -> ~/somewhere`
-  or `docs/okf/index.md -> ~/.zshrc` (git keeps symlinks), and the scaffold
-  followed it to a path outside the repository. Before the first write,
-  `init` now checks with `lstat` and refuses (exit `2`, nothing written)
-  when the target directory, a component between the walk root and the
-  target, or any of the eight scaffold files is a link, a dangling link
-  included; a target that is itself a link is refused (pass its real path).
-  The walk root is the nearest ancestor of the target holding a `.git`
-  entry, whatever the working directory is, so a relative target from a
-  subdirectory and an absolute target from outside the clone are walked the
-  same way; without one it is the working directory when the target lies
-  under it, else the target's parent. The root and everything above it are
-  trusted, and a link is never taken as the root. An existing scaffold file
-  that is a directory, FIFO or socket, or a regular file with more than one
-  hard link, is refused too; all eight are checked before any is written, so
-  a refusal leaves no partial scaffold. Missing directories are created one
-  level at a time and files are opened with `O_NOFOLLOW` (`O_EXCL` without
-  `--force`), so a link planted at a scaffold name after the check fails the
-  open. A link planted in a parent directory, or a hard link created,
-  between the check and the write is not covered, and on Windows only the
-  `lstat` checks apply. Scaffold bytes are unchanged.
 
 ## [0.22.0] - 2026-11-17
 

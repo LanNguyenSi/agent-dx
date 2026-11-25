@@ -7,11 +7,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { UsageError } from "../src/errors.js";
 import { runInit } from "../src/init.js";
 import {
-  assertNoSymlinkBelow,
-  findWalkRoot,
+  MAX_ROOT_LINK_HOPS,
+  createDirectories,
+  resolvePhysicalTarget,
+  systemWalkStart,
   writeFileNoFollow,
 } from "../src/safe-fs.js";
-import { runCli } from "./helpers.js";
+import { CLI_PATH, runCli } from "./helpers.js";
 
 const SCAFFOLD_FILENAMES = [
   "index.md",
@@ -25,6 +27,55 @@ const SCAFFOLD_FILENAMES = [
 ];
 
 const NOTHING_WRITTEN = /nothing was written/i;
+
+function listing(dir: string): string[] {
+  return fs.existsSync(dir) ? fs.readdirSync(dir).sort() : [];
+}
+
+/**
+ * Every entry below `dir` with its type, link text or file content, read
+ * with lstat so no link is followed. Two equal snapshots mean nothing was
+ * created, removed, truncated or rewritten anywhere below `dir`.
+ */
+function snapshot(dir: string): string[] {
+  const out: string[] = [];
+  const visit = (current: string): void => {
+    for (const name of fs.readdirSync(current).sort()) {
+      const full = path.join(current, name);
+      const rel = path.relative(dir, full);
+      const stat = fs.lstatSync(full);
+      if (stat.isSymbolicLink()) {
+        out.push(`${rel} -> ${fs.readlinkSync(full)}`);
+      } else if (stat.isDirectory()) {
+        out.push(`${rel}/`);
+        visit(full);
+      } else if (stat.isFile()) {
+        out.push(`${rel} = ${fs.readFileSync(full, "utf8")}`);
+      } else {
+        out.push(`${rel} (special)`);
+      }
+    }
+  };
+  visit(dir);
+  return out;
+}
+
+function refusal(fn: () => unknown): UsageError {
+  try {
+    fn();
+  } catch (error) {
+    expect(error).toBeInstanceOf(UsageError);
+    return error as UsageError;
+  }
+  throw new Error("expected a refusal");
+}
+
+function expectScaffoldIn(dir: string): void {
+  expect(fs.lstatSync(dir).isDirectory()).toBe(true);
+  for (const name of SCAFFOLD_FILENAMES) {
+    expect(fs.lstatSync(path.join(dir, name)).isFile()).toBe(true);
+  }
+}
 
 describe("init never writes through a symbolic link", () => {
   let base: string;
@@ -45,20 +96,6 @@ describe("init never writes through a symbolic link", () => {
     fs.rmSync(base, { recursive: true, force: true });
   });
 
-  function listing(dir: string): string[] {
-    return fs.existsSync(dir) ? fs.readdirSync(dir).sort() : [];
-  }
-
-  function refusal(fn: () => unknown): UsageError {
-    try {
-      fn();
-    } catch (error) {
-      expect(error).toBeInstanceOf(UsageError);
-      return error as UsageError;
-    }
-    throw new Error("expected runInit to refuse");
-  }
-
   describe.each([false, true])("force=%s", (force) => {
     it("refuses a scaffold file that is a link to an outside file, names it, and leaves the outside file alone", () => {
       const victim = path.join(outside, "victim.txt");
@@ -67,7 +104,7 @@ describe("init never writes through a symbolic link", () => {
       fs.mkdirSync(target, { recursive: true });
       fs.symlinkSync(victim, path.join(target, "index.md"));
 
-      const error = refusal(() => runInit(target, { force, cwd: repo }));
+      const error = refusal(() => runInit(target, { force }));
 
       expect(error.message).toContain(path.join(target, "index.md"));
       expect(error.message).toContain(victim);
@@ -86,7 +123,7 @@ describe("init never writes through a symbolic link", () => {
       fs.mkdirSync(target);
       fs.symlinkSync(missing, path.join(target, "log.md"));
 
-      const error = refusal(() => runInit(target, { force, cwd: repo }));
+      const error = refusal(() => runInit(target, { force }));
 
       expect(error.message).toContain(path.join(target, "log.md"));
       expect(error.message).toContain(missing);
@@ -99,10 +136,11 @@ describe("init never writes through a symbolic link", () => {
       const linkedTarget = path.join(repo, "okf");
       fs.symlinkSync(outside, linkedTarget);
 
-      const error = refusal(() => runInit(linkedTarget, { force, cwd: repo }));
+      const error = refusal(() => runInit(linkedTarget, { force }));
 
       expect(error.message).toContain(linkedTarget);
       expect(error.message).toContain(outside);
+      expect(error.message).toMatch(/real path/);
       expect(error.message).toMatch(NOTHING_WRITTEN);
       expect(listing(outside)).toEqual([]);
     });
@@ -111,10 +149,13 @@ describe("init never writes through a symbolic link", () => {
       fs.symlinkSync(outside, path.join(repo, "docs"));
       const target = path.join(repo, "docs", "okf");
 
-      const error = refusal(() => runInit(target, { force, cwd: repo }));
+      const error = refusal(() => runInit(target, { force }));
 
-      expect(error.message).toContain(path.join(repo, "docs"));
+      expect(error.message).toContain(
+        `${path.join(repo, "docs")} is a symbolic link`,
+      );
       expect(error.message).toContain(outside);
+      expect(error.message).toMatch(/real path/);
       expect(error.message).toMatch(NOTHING_WRITTEN);
       expect(listing(outside)).toEqual([]);
     });
@@ -123,39 +164,17 @@ describe("init never writes through a symbolic link", () => {
       const missing = path.join(outside, "later");
       fs.symlinkSync(missing, path.join(repo, "docs"));
 
-      refusal(() =>
-        runInit(path.join(repo, "docs", "okf"), { force, cwd: repo }),
-      );
+      refusal(() => runInit(path.join(repo, "docs", "okf"), { force }));
 
       expect(fs.existsSync(missing)).toBe(false);
     });
-  });
-
-  it("refuses a link above the target when the target is given relative to the working directory", () => {
-    fs.symlinkSync(outside, path.join(repo, "docs"));
-
-    const result = runCli(["init", path.join("docs", "okf")], repo);
-
-    expect(result.status).toBe(2);
-    expect(result.stderr).toContain(path.join(repo, "docs"));
-    expect(result.stderr).toMatch(NOTHING_WRITTEN);
-    expect(listing(outside)).toEqual([]);
-  });
-
-  it("refuses a link above the target when the target is given as an absolute path", () => {
-    fs.symlinkSync(outside, path.join(repo, "docs"));
-
-    const result = runCli(["init", path.join(repo, "docs", "okf")], repo);
-
-    expect(result.status).toBe(2);
-    expect(listing(outside)).toEqual([]);
   });
 
   it("does not let a `..` in the target argument hide a link", () => {
     fs.symlinkSync(outside, path.join(repo, "docs"));
 
     const error = refusal(() =>
-      runInit(path.join(repo, "x", "..", "docs", "okf"), { cwd: repo }),
+      runInit(path.join(repo, "x", "..", "docs", "okf")),
     );
 
     expect(error.message).toMatch(NOTHING_WRITTEN);
@@ -168,7 +187,7 @@ describe("init never writes through a symbolic link", () => {
     fs.mkdirSync(target);
     execFileSync("mkfifo", [path.join(target, "index.md")]);
 
-    const error = refusal(() => runInit(target, { force: true, cwd: repo }));
+    const error = refusal(() => runInit(target, { force: true }));
 
     expect(error.message).toContain(path.join(target, "index.md"));
     expect(error.message).toMatch(/FIFO/);
@@ -180,7 +199,7 @@ describe("init never writes through a symbolic link", () => {
     const target = path.join(repo, "okf");
     fs.mkdirSync(path.join(target, "log.md"), { recursive: true });
 
-    const error = refusal(() => runInit(target, { force: true, cwd: repo }));
+    const error = refusal(() => runInit(target, { force: true }));
 
     expect(error.message).toContain(path.join(target, "log.md"));
     expect(error.message).toMatch(/directory/);
@@ -197,7 +216,7 @@ describe("init never writes through a symbolic link", () => {
     fs.writeFileSync(path.join(target, "index.md"), "old\n");
     fs.symlinkSync(victim, path.join(target, "benchmark-template.md"));
 
-    refusal(() => runInit(target, { force: true, cwd: repo }));
+    refusal(() => runInit(target, { force: true }));
 
     expect(fs.readFileSync(path.join(target, "index.md"), "utf8")).toBe(
       "old\n",
@@ -209,49 +228,59 @@ describe("init never writes through a symbolic link", () => {
   it("does not create missing directories when it refuses", () => {
     fs.symlinkSync(outside, path.join(repo, "linked"));
 
-    refusal(() => runInit(path.join(repo, "linked", "a", "b"), { cwd: repo }));
+    refusal(() => runInit(path.join(repo, "linked", "a", "b")));
 
     expect(listing(outside)).toEqual([]);
   });
 
-  it("accepts a target outside the working directory below a link the user placed above it", () => {
-    const real = path.join(base, "real");
-    fs.mkdirSync(real);
-    fs.symlinkSync(real, path.join(base, "shortcut"));
-    const target = path.join(base, "shortcut", "bundle");
+  it("refuses a path component that is a file, and says so", () => {
+    fs.writeFileSync(path.join(repo, "f"), "x\n");
+    const before = snapshot(base);
 
-    const result = runInit(target, { cwd: repo });
+    const error = refusal(() => runInit(path.join(repo, "f", "okf")));
 
-    expect(result.filesWritten.sort()).toEqual([...SCAFFOLD_FILENAMES].sort());
-    for (const name of SCAFFOLD_FILENAMES) {
-      expect(fs.existsSync(path.join(real, "bundle", name))).toBe(true);
-    }
+    expect(error.message).toContain(
+      `${path.join(repo, "f")} exists and is not a directory`,
+    );
+    expect(error.message).toMatch(NOTHING_WRITTEN);
+    expect(snapshot(base)).toEqual(before);
   });
 
-  it("refuses a link below a target outside the working directory", () => {
-    const victim = path.join(outside, "victim.txt");
-    fs.writeFileSync(victim, "precious\n");
-    const target = path.join(base, "elsewhere");
-    fs.mkdirSync(target);
-    fs.symlinkSync(victim, path.join(target, "index.md"));
+  it("refuses a link the user placed above the checkout, and scaffolds when given the real path", () => {
+    fs.symlinkSync(repo, path.join(base, "alias"));
+    const before = snapshot(base);
 
-    refusal(() => runInit(target, { force: true, cwd: repo }));
+    const error = refusal(() =>
+      runInit(path.join(base, "alias", "docs", "okf")),
+    );
 
-    expect(fs.readFileSync(victim, "utf8")).toBe("precious\n");
+    expect(error.message).toContain(path.join(base, "alias"));
+    expect(error.message).toContain(repo);
+    expect(error.message).toMatch(/real path/);
+    expect(snapshot(base)).toEqual(before);
+
+    const real = path.join(
+      fs.realpathSync(path.join(base, "alias")),
+      "docs",
+      "okf",
+    );
+    runInit(real);
+    expectScaffoldIn(path.join(repo, "docs", "okf"));
   });
 
-  it("scaffolds normally under the working directory without links, with and without --force", () => {
+  it("scaffolds normally without links, with and without --force", () => {
     const target = path.join(repo, "docs", "okf");
-    expect(runInit(target, { cwd: repo }).filesWritten.sort()).toEqual(
+    expect(runInit(target).filesWritten.sort()).toEqual(
       [...SCAFFOLD_FILENAMES].sort(),
     );
-    expect(
-      runInit(target, { cwd: repo, force: true }).filesWritten.sort(),
-    ).toEqual([...SCAFFOLD_FILENAMES].sort());
+    expect(runInit(target, { force: true }).filesWritten.sort()).toEqual(
+      [...SCAFFOLD_FILENAMES].sort(),
+    );
+    expectScaffoldIn(target);
   });
 
-  it("scaffolds into the working directory itself", () => {
-    expect(runInit(repo, { cwd: repo }).filesWritten.sort()).toEqual(
+  it("scaffolds into an existing empty directory", () => {
+    expect(runInit(repo).filesWritten.sort()).toEqual(
       [...SCAFFOLD_FILENAMES].sort(),
     );
   });
@@ -259,130 +288,59 @@ describe("init never writes through a symbolic link", () => {
   it("the CLI scaffolds the default docs/okf target and exits 0 when no links are involved", () => {
     const result = runCli(["init"], repo);
     expect(result.status).toBe(0);
-    expect(fs.existsSync(path.join(repo, "docs", "okf", "index.md"))).toBe(
-      true,
-    );
+    expectScaffoldIn(path.join(repo, "docs", "okf"));
   });
 
-  describe("walk root beyond the working directory", () => {
-    function makeClone(): { sub: string } {
-      fs.mkdirSync(path.join(repo, ".git"));
-      const sub = path.join(repo, "packages", "x");
-      fs.mkdirSync(sub, { recursive: true });
-      return { sub };
-    }
+  it("the CLI refusal names the link and its text, exits 2 and says to pass the real path", () => {
+    fs.symlinkSync(outside, path.join(repo, "docs"));
 
-    it("refuses ../../docs/okf from a subdirectory when docs/okf is a link", () => {
-      const { sub } = makeClone();
-      fs.mkdirSync(path.join(repo, "docs"));
-      fs.symlinkSync(outside, path.join(repo, "docs", "okf"));
+    const result = runCli(["init", path.join("docs", "okf")], repo);
 
-      const result = runCli(
-        ["init", path.join("..", "..", "docs", "okf")],
-        sub,
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain(
+      `${path.join(repo, "docs")} is a symbolic link`,
+    );
+    expect(result.stderr).toContain(outside);
+    expect(result.stderr).toMatch(/real path/);
+    expect(result.stderr).toMatch(NOTHING_WRITTEN);
+    expect(listing(outside)).toEqual([]);
+  });
+
+  // The first component of the temp directory as the OS spells it. On macOS
+  // that is /var, a link in the filesystem root to private/var; on a Linux CI
+  // runner it is a real /tmp and this control has nothing to exercise.
+  const rootEntry = path.join(
+    path.parse(os.tmpdir()).root,
+    os.tmpdir().split(path.sep).filter(Boolean)[0] ?? "",
+  );
+  const tmpIsBehindRootLink =
+    path.parse(os.tmpdir()).root === "/" &&
+    fs.lstatSync(rootEntry).isSymbolicLink();
+
+  it.runIf(tmpIsBehindRootLink)(
+    "follows a real link in the filesystem root (the OS temp directory) and writes at the physical location",
+    () => {
+      const spelled = fs.mkdtempSync(
+        path.join(os.tmpdir(), "okf-kit-root-link-"),
       );
+      try {
+        expect(fs.realpathSync(spelled)).not.toBe(spelled);
+        const target = path.join(spelled, "docs", "okf");
 
-      expect(result.status).toBe(2);
-      expect(result.stderr).toContain(path.join(repo, "docs", "okf"));
-      expect(result.stderr).toMatch(/real path/);
-      expect(result.stderr).toMatch(NOTHING_WRITTEN);
-      expect(listing(outside)).toEqual([]);
-    });
+        const result = runInit(target);
 
-    it("refuses ../../docs/okf from a subdirectory when docs is a link", () => {
-      const { sub } = makeClone();
-      fs.symlinkSync(outside, path.join(repo, "docs"));
+        expect(result.targetDir).toBe(target);
+        expectScaffoldIn(path.join(fs.realpathSync(spelled), "docs", "okf"));
 
-      const result = runCli(
-        ["init", path.join("..", "..", "docs", "okf")],
-        sub,
-      );
-
-      expect(result.status).toBe(2);
-      expect(result.stderr).toContain(path.join(repo, "docs"));
-      expect(listing(outside)).toEqual([]);
-    });
-
-    it.each(["docs-okf", "docs"])(
-      "refuses an absolute target inside the clone from a working directory outside it (%s is the link)",
-      (linked) => {
-        makeClone();
-        if (linked === "docs") {
-          fs.symlinkSync(outside, path.join(repo, "docs"));
-        } else {
-          fs.mkdirSync(path.join(repo, "docs"));
-          fs.symlinkSync(outside, path.join(repo, "docs", "okf"));
-        }
-        const elsewhere = path.join(base, "elsewhere");
-        fs.mkdirSync(elsewhere);
-
-        const result = runCli(
-          ["init", path.join(repo, "docs", "okf"), "--force"],
-          elsewhere,
-        );
-
-        expect(result.status).toBe(2);
-        expect(result.stderr).toMatch(NOTHING_WRITTEN);
+        // A link below the root link is still refused.
+        fs.symlinkSync(outside, path.join(spelled, "linked"));
+        refusal(() => runInit(path.join(spelled, "linked", "okf")));
         expect(listing(outside)).toEqual([]);
-      },
-    );
-
-    it("matches the working directory by identity when it is spelled differently from the target", () => {
-      const spelledAsAlias = path.join(base, "alias");
-      fs.symlinkSync(repo, spelledAsAlias);
-      fs.symlinkSync(outside, path.join(repo, "docs"));
-
-      const error = refusal(() =>
-        runInit(path.join(repo, "docs", "okf"), { cwd: spelledAsAlias }),
-      );
-
-      expect(error.message).toContain(path.join(repo, "docs"));
-      expect(listing(outside)).toEqual([]);
-    });
-
-    it("scaffolds ../../docs/okf from a subdirectory when nothing is linked", () => {
-      const { sub } = makeClone();
-
-      const result = runCli(
-        ["init", path.join("..", "..", "docs", "okf")],
-        sub,
-      );
-
-      expect(result.status).toBe(0);
-      expect(fs.existsSync(path.join(repo, "docs", "okf", "index.md"))).toBe(
-        true,
-      );
-    });
-
-    it("refuses a target that is itself a link when it lies outside any repository, and says to pass the real path", () => {
-      const linkedTarget = path.join(base, "linked-target");
-      fs.symlinkSync(outside, linkedTarget);
-      const elsewhere = path.join(base, "elsewhere");
-      fs.mkdirSync(elsewhere);
-
-      const error = refusal(() => runInit(linkedTarget, { cwd: elsewhere }));
-
-      expect(error.message).toContain(linkedTarget);
-      expect(error.message).toContain(outside);
-      expect(error.message).toMatch(/real path/);
-      expect(listing(outside)).toEqual([]);
-    });
-
-    it.each([false, true])(
-      "refuses docs -> . and writes nothing through it (clone with .git: %s)",
-      (withGit) => {
-        if (withGit) fs.mkdirSync(path.join(repo, ".git"));
-        fs.symlinkSync(".", path.join(repo, "docs"));
-
-        const error = refusal(() =>
-          runInit(path.join(repo, "docs", "okf"), { cwd: repo }),
-        );
-
-        expect(error.message).toContain(path.join(repo, "docs"));
-        expect(listing(repo).filter((n) => n !== ".git")).toEqual(["docs"]);
-      },
-    );
-  });
+      } finally {
+        fs.rmSync(spelled, { recursive: true, force: true });
+      }
+    },
+  );
 
   describe("hard links", () => {
     it("refuses --force over a scaffold file that is a hard link to an outside file, before writing anything", () => {
@@ -393,7 +351,7 @@ describe("init never writes through a symbolic link", () => {
       fs.writeFileSync(path.join(target, "index.md"), "old\n");
       fs.linkSync(victim, path.join(target, "benchmark-template.md"));
 
-      const error = refusal(() => runInit(target, { force: true, cwd: repo }));
+      const error = refusal(() => runInit(target, { force: true }));
 
       expect(error.message).toContain(
         path.join(target, "benchmark-template.md"),
@@ -411,7 +369,7 @@ describe("init never writes through a symbolic link", () => {
       fs.mkdirSync(target);
       fs.writeFileSync(path.join(target, "index.md"), "old\n");
 
-      runInit(target, { force: true, cwd: repo });
+      runInit(target, { force: true });
 
       expect(fs.readFileSync(path.join(target, "index.md"), "utf8")).not.toBe(
         "old\n",
@@ -547,55 +505,825 @@ describe("init never writes through a symbolic link", () => {
       expect(fs.readFileSync(file, "utf8")).toBe("new\n");
     });
 
-    it("findWalkRoot prefers the nearest .git ancestor over the working directory", () => {
-      fs.mkdirSync(path.join(repo, ".git"));
-      const sub = path.join(repo, "packages", "x");
-      fs.mkdirSync(sub, { recursive: true });
-      expect(findWalkRoot(path.join(repo, "docs", "okf"), sub)).toBe(repo);
-      expect(findWalkRoot(path.join(sub, "docs"), sub)).toBe(repo);
+    it("createDirectories creates each missing level, outermost first", () => {
+      const levels = [
+        path.join(repo, "a"),
+        path.join(repo, "a", "b"),
+        path.join(repo, "a", "b", "c"),
+      ];
+      createDirectories(levels);
+      expect(fs.lstatSync(levels[2]).isDirectory()).toBe(true);
     });
 
-    it("findWalkRoot accepts a .git file (worktree or submodule) and the target itself as the repository root", () => {
-      fs.writeFileSync(path.join(repo, ".git"), "gitdir: elsewhere\n");
-      expect(findWalkRoot(path.join(repo, "a", "b"), outside)).toBe(repo);
-      expect(findWalkRoot(repo, outside)).toBe(repo);
+    it("createDirectories refuses a link to a directory that appeared at a level after the walk, and creates nothing below it", () => {
+      const planted = path.join(repo, "docs");
+      fs.symlinkSync(outside, planted);
+
+      const error = refusal(() =>
+        createDirectories([planted, path.join(planted, "okf")]),
+      );
+
+      expect(error.message).toContain(planted);
+      expect(listing(outside)).toEqual([]);
     });
 
-    it("findWalkRoot takes the nearest of several .git ancestors", () => {
-      fs.mkdirSync(path.join(repo, ".git"));
-      const inner = path.join(repo, "vendor", "inner");
-      fs.mkdirSync(path.join(inner, ".git"), { recursive: true });
-      expect(findWalkRoot(path.join(inner, "docs"), repo)).toBe(inner);
+    it("createDirectories refuses a level that exists by now, a real directory included", () => {
+      fs.mkdirSync(path.join(repo, "docs"));
+      refusal(() => createDirectories([path.join(repo, "docs")]));
+    });
+  });
+
+  describe("the walk (resolvePhysicalTarget) under an injected filesystem root", () => {
+    let fsRoot: string;
+    const followed = (): { root: string; followLinksInRoot: boolean } => ({
+      root: fsRoot,
+      followLinksInRoot: true,
     });
 
-    it("findWalkRoot falls back to the working directory when no ancestor holds .git and the target is under it", () => {
-      const inside = path.join(repo, "a", "b");
-      expect(findWalkRoot(inside, repo)).toBe(repo);
-      expect(findWalkRoot(repo, repo)).toBe(repo);
+    beforeEach(() => {
+      fsRoot = path.join(base, "fsroot");
+      fs.mkdirSync(fsRoot);
     });
 
-    it("findWalkRoot falls back to the target's parent when there is no .git ancestor and the target is outside the working directory", () => {
-      const elsewhere = path.join(outside, "c");
-      expect(findWalkRoot(elsewhere, repo)).toBe(outside);
+    it("returns an existing link-free directory as itself", () => {
+      const target = path.join(fsRoot, "home", "repo", "docs");
+      fs.mkdirSync(target, { recursive: true });
+
+      expect(resolvePhysicalTarget(target, followed())).toEqual({
+        physical: target,
+        kind: "directory",
+        missing: [],
+      });
     });
 
-    it("findWalkRoot never takes a link as the root, even one that points at the working directory or at a repository", () => {
-      const self = path.join(repo, "docs");
-      fs.symlinkSync(".", self);
-      expect(findWalkRoot(path.join(self, "okf"), repo)).toBe(repo);
-      fs.mkdirSync(path.join(outside, ".git"));
-      const toRepo = path.join(base, "to-outside");
-      fs.symlinkSync(outside, toRepo);
-      expect(findWalkRoot(path.join(toRepo, "okf"), repo)).toBe(toRepo);
+    it("returns the walk root itself as a directory", () => {
+      expect(resolvePhysicalTarget(fsRoot, followed())).toEqual({
+        physical: fsRoot,
+        kind: "directory",
+        missing: [],
+      });
     });
 
-    it("assertNoSymlinkBelow does not examine the root itself", () => {
-      const rootLink = path.join(base, "root-link");
-      fs.symlinkSync(repo, rootLink);
-      fs.mkdirSync(path.join(repo, "d"));
+    it("reports the missing levels outermost first and stops looking below the first one", () => {
+      fs.mkdirSync(path.join(fsRoot, "home"));
+      const target = path.join(fsRoot, "home", "a", "b", "c");
+
+      expect(resolvePhysicalTarget(target, followed())).toEqual({
+        physical: target,
+        kind: "missing",
+        missing: [
+          path.join(fsRoot, "home", "a"),
+          path.join(fsRoot, "home", "a", "b"),
+          target,
+        ],
+      });
+    });
+
+    it("reports an existing file at the last component as `other` and refuses one above it", () => {
+      fs.mkdirSync(path.join(fsRoot, "home"));
+      const file = path.join(fsRoot, "home", "f");
+      fs.writeFileSync(file, "x\n");
+
+      expect(resolvePhysicalTarget(file, followed())).toEqual({
+        physical: file,
+        kind: "other",
+        missing: [],
+      });
+      const error = refusal(() =>
+        resolvePhysicalTarget(path.join(file, "okf"), followed()),
+      );
+      expect(error.message).toContain(`${file} exists and is not a directory`);
+    });
+
+    it("refuses a component it cannot examine instead of treating it as missing", () => {
+      if (process.platform === "win32" || process.getuid?.() === 0) return;
+      const locked = path.join(fsRoot, "locked");
+      fs.mkdirSync(path.join(locked, "inner"), { recursive: true });
+      fs.chmodSync(locked, 0o000);
+      try {
+        const error = refusal(() =>
+          resolvePhysicalTarget(path.join(locked, "inner", "okf"), followed()),
+        );
+        expect(error.message).toContain(path.join(locked, "inner"));
+        expect(error.message).toMatch(/cannot be examined \(EACCES\)/);
+        expect(error.message).toMatch(NOTHING_WRITTEN);
+      } finally {
+        fs.chmodSync(locked, 0o700);
+      }
+    });
+
+    it("follows a link in the root with a relative text (macOS /tmp -> private/tmp) in front of a real repository path", () => {
+      const physicalRepo = path.join(fsRoot, "private", "tmp", "repo");
+      fs.mkdirSync(path.join(physicalRepo, ".git"), { recursive: true });
+      fs.symlinkSync(path.join("private", "tmp"), path.join(fsRoot, "tmp"));
+
+      expect(
+        resolvePhysicalTarget(
+          path.join(fsRoot, "tmp", "repo", "docs", "okf"),
+          followed(),
+        ),
+      ).toEqual({
+        physical: path.join(physicalRepo, "docs", "okf"),
+        kind: "missing",
+        missing: [
+          path.join(physicalRepo, "docs"),
+          path.join(physicalRepo, "docs", "okf"),
+        ],
+      });
+    });
+
+    it("refuses the same root link when the root is one where links are not followed (a Windows drive or share root)", () => {
+      fs.mkdirSync(path.join(fsRoot, "private", "tmp", "repo"), {
+        recursive: true,
+      });
+      const link = path.join(fsRoot, "tmp");
+      fs.symlinkSync(path.join("private", "tmp"), link);
+
+      const error = refusal(() =>
+        resolvePhysicalTarget(path.join(fsRoot, "tmp", "repo"), {
+          root: fsRoot,
+          followLinksInRoot: false,
+        }),
+      );
+      expect(error.message).toContain(link);
+    });
+
+    it("still refuses a link below a followed root link", () => {
+      fs.mkdirSync(path.join(fsRoot, "private", "tmp", "repo"), {
+        recursive: true,
+      });
+      fs.symlinkSync(path.join("private", "tmp"), path.join(fsRoot, "tmp"));
+      const hostile = path.join(fsRoot, "private", "tmp", "repo", "docs");
+      fs.symlinkSync(outside, hostile);
+
+      const error = refusal(() =>
+        resolvePhysicalTarget(
+          path.join(fsRoot, "tmp", "repo", "docs", "okf"),
+          followed(),
+        ),
+      );
+      expect(error.message).toContain(`${hostile} is a symbolic link`);
+      expect(error.message).toContain(outside);
+    });
+
+    it("follows a root link whose text leads through another root link", () => {
+      fs.mkdirSync(path.join(fsRoot, "private", "var", "home"), {
+        recursive: true,
+      });
+      fs.symlinkSync(path.join("private", "var"), path.join(fsRoot, "var"));
+      fs.symlinkSync(path.join("var", "home"), path.join(fsRoot, "home"));
+
+      expect(
+        resolvePhysicalTarget(path.join(fsRoot, "home", "u"), followed())
+          .physical,
+      ).toBe(path.join(fsRoot, "private", "var", "home", "u"));
+    });
+
+    function chainOfRootLinks(count: number): string {
+      fs.mkdirSync(path.join(fsRoot, "end"));
+      for (let i = count; i >= 1; i--) {
+        fs.symlinkSync(
+          i === count ? "end" : `l${i + 1}`,
+          path.join(fsRoot, `l${i}`),
+        );
+      }
+      return path.join(fsRoot, "l1", "okf");
+    }
+
+    it("follows exactly the allowed number of root links in a row", () => {
+      const target = chainOfRootLinks(MAX_ROOT_LINK_HOPS);
+      expect(resolvePhysicalTarget(target, followed()).physical).toBe(
+        path.join(fsRoot, "end", "okf"),
+      );
+    });
+
+    it("refuses one root link more than the allowed number", () => {
+      const target = chainOfRootLinks(MAX_ROOT_LINK_HOPS + 1);
+      const error = refusal(() => resolvePhysicalTarget(target, followed()));
+      expect(error.message).toMatch(/cannot be followed/);
+      expect(error.message).toMatch(NOTHING_WRITTEN);
+    });
+
+    it("refuses root links that point at each other", () => {
+      fs.symlinkSync("b", path.join(fsRoot, "a"));
+      fs.symlinkSync("a", path.join(fsRoot, "b"));
+
+      const error = refusal(() =>
+        resolvePhysicalTarget(path.join(fsRoot, "a", "okf"), followed()),
+      );
+      expect(error.message).toMatch(/cannot be followed/);
+    });
+
+    it("refuses a root link that leads to a file", () => {
+      fs.writeFileSync(path.join(fsRoot, "file"), "x\n");
+      fs.symlinkSync("file", path.join(fsRoot, "tmp"));
+
+      const error = refusal(() =>
+        resolvePhysicalTarget(path.join(fsRoot, "tmp"), followed()),
+      );
+      expect(error.message).toMatch(/cannot be followed/);
+    });
+
+    it("rejects a target, or a root link text, that is not below the walk root", () => {
+      expect(() => resolvePhysicalTarget(outside, followed())).toThrow(
+        /not below the walk root/,
+      );
+      expect(() => resolvePhysicalTarget(base, followed())).toThrow(
+        /not below the walk root/,
+      );
+      fs.symlinkSync(outside, path.join(fsRoot, "away"));
       expect(() =>
-        assertNoSymlinkBelow(rootLink, path.join(rootLink, "d")),
-      ).not.toThrow();
+        resolvePhysicalTarget(path.join(fsRoot, "away", "okf"), followed()),
+      ).toThrow(/not below the walk root/);
     });
+
+    // One row per combination. A link is followed only when it is a direct
+    // entry of the walk root and leads to an existing directory; where `.git`
+    // sits and where the link points never turn a refusal into an acceptance.
+    const POSITIONS = ["root", "above", "parent", "target"] as const;
+    const GIT_POSITIONS = [
+      "none",
+      "repo",
+      "beside-link",
+      "at-resolution",
+    ] as const;
+    const RESOLUTIONS = [
+      "twin",
+      "outside",
+      "git-root-elsewhere",
+      "dangling",
+    ] as const;
+    const ROWS = POSITIONS.flatMap((position) =>
+      GIT_POSITIONS.flatMap((git) =>
+        RESOLUTIONS.map((resolution) => ({ position, git, resolution })),
+      ),
+    );
+
+    it.each(ROWS)(
+      "link at $position, .git $git, pointing at $resolution",
+      ({ position, git, resolution }) => {
+        // The path as typed is <root>/a/ws/repo/docs/okf.
+        const typed = ["a", "ws", "repo", "docs", "okf"];
+        const index = { root: 0, above: 1, parent: 3, target: 4 }[position];
+        const link = path.join(fsRoot, ...typed.slice(0, index + 1));
+        const rest = typed.slice(index + 1);
+        fs.mkdirSync(path.dirname(link), { recursive: true });
+
+        // "twin" holds what the typed path names below the link, the way a
+        // user's own alias does; above the repository it holds the repository.
+        const twin = `${link}.real`;
+        fs.mkdirSync(path.join(twin, ...rest), { recursive: true });
+        const elsewhere = path.join(fsRoot, "elsewhere");
+        fs.mkdirSync(path.join(elsewhere, "outside"), { recursive: true });
+        fs.mkdirSync(path.join(elsewhere, "victim", ".git"), {
+          recursive: true,
+        });
+        const destination = {
+          twin,
+          outside: path.join(elsewhere, "outside"),
+          "git-root-elsewhere": path.join(elsewhere, "victim"),
+          dangling: path.join(elsewhere, "nothing-here"),
+        }[resolution];
+        fs.symlinkSync(destination, link);
+
+        const repoIndex = typed.indexOf("repo");
+        const physicalRepo =
+          index < repoIndex
+            ? path.join(twin, ...typed.slice(index + 1, repoIndex + 1))
+            : path.join(fsRoot, ...typed.slice(0, repoIndex + 1));
+        if (git === "repo") {
+          fs.mkdirSync(path.join(physicalRepo, ".git"), { recursive: true });
+        } else if (git === "beside-link") {
+          fs.mkdirSync(path.join(path.dirname(link), ".git"), {
+            recursive: true,
+          });
+        } else if (git === "at-resolution" && resolution !== "dangling") {
+          fs.mkdirSync(path.join(destination, ".git"), { recursive: true });
+        }
+
+        const target = path.join(fsRoot, ...typed);
+        const before = snapshot(fsRoot);
+        if (position === "root" && resolution !== "dangling") {
+          expect(resolvePhysicalTarget(target, followed()).physical).toBe(
+            path.join(destination, ...rest),
+          );
+        } else {
+          const error = refusal(() =>
+            resolvePhysicalTarget(target, followed()),
+          );
+          expect(error.message).toContain(`${link} is a symbolic link`);
+          expect(error.message).toContain(destination);
+          expect(error.message).toMatch(NOTHING_WRITTEN);
+        }
+        // Where links in the root are not followed, every row is a refusal.
+        refusal(() =>
+          resolvePhysicalTarget(target, {
+            root: fsRoot,
+            followLinksInRoot: false,
+          }),
+        );
+        expect(snapshot(fsRoot)).toEqual(before);
+      },
+    );
+  });
+
+  describe("systemWalkStart", () => {
+    it("follows links in the POSIX root only", () => {
+      expect(systemWalkStart("/repo/docs/okf", path.posix.parse)).toEqual({
+        root: "/",
+        followLinksInRoot: true,
+      });
+    });
+
+    it("follows no link in a Windows drive root", () => {
+      expect(systemWalkStart("C:\\repo\\docs\\okf", path.win32.parse)).toEqual({
+        root: "C:\\",
+        followLinksInRoot: false,
+      });
+    });
+
+    it("follows no link in a Windows share root", () => {
+      expect(
+        systemWalkStart("\\\\server\\share\\repo\\docs", path.win32.parse),
+      ).toEqual({ root: "\\\\server\\share\\", followLinksInRoot: false });
+    });
+
+    it("uses the platform's own path rules by default", () => {
+      expect(systemWalkStart(repo).root).toBe(path.parse(repo).root);
+    });
+  });
+});
+
+/**
+ * The attack matrix, run through the built CLI as a hostile
+ * checkout would be: once as an unpacked tarball (no `.git`) and once as a
+ * clone (`.git` directory in the repository). The expected result of every
+ * scenario is the same in both, because the rule does not look at `.git`.
+ */
+describe.each([
+  { git: false, label: "no .git (unpacked tarball)" },
+  { git: true, label: ".git directory (clone)" },
+])("init attack matrix through the CLI: $label", ({ git }) => {
+  interface Sandbox {
+    root: string;
+    repo: string;
+    outside: string;
+  }
+  interface Run {
+    cwd: string;
+    args: string[];
+  }
+  interface Scenario {
+    id: number;
+    name: string;
+    setup: (s: Sandbox) => Run;
+    /** The directory the scaffold must land in; absent when the run must be refused. */
+    landsIn?: (s: Sandbox) => string;
+    /** Refused only where names compare case-insensitively; elsewhere the typed name is a new directory in the repository. */
+    refusedOnCaseInsensitiveVolume?: boolean;
+    posixOnly?: boolean;
+  }
+
+  let s: Sandbox;
+
+  beforeEach(() => {
+    const root = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-init-matrix-")),
+    );
+    s = {
+      root,
+      repo: path.join(root, "repo"),
+      outside: path.join(root, "outside"),
+    };
+    fs.mkdirSync(s.repo);
+    fs.mkdirSync(s.outside);
+    if (git) fs.mkdirSync(path.join(s.repo, ".git"));
+    fs.writeFileSync(path.join(s.outside, "index.md"), "precious\n");
+  });
+
+  afterEach(() => {
+    fs.rmSync(s.root, { recursive: true, force: true });
+  });
+
+  const dir = (...parts: string[]): string => {
+    const full = path.join(...parts);
+    fs.mkdirSync(full, { recursive: true });
+    return full;
+  };
+  const link = (text: string, ...at: string[]): void =>
+    fs.symlinkSync(text, path.join(...at));
+  const okf = path.join("docs", "okf");
+  const up = path.join("..", "outside");
+  const upUp = path.join("..", "..", "outside");
+
+  const SCENARIOS: Scenario[] = [
+    {
+      id: 1,
+      name: "docs -> ../outside, relative target, cwd = repo",
+      setup: (s) => {
+        link(up, s.repo, "docs");
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 2,
+      name: "docs/okf -> ../../outside, cwd = repo",
+      setup: (s) => {
+        dir(s.repo, "docs");
+        link(upUp, s.repo, "docs", "okf");
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 3,
+      name: "docs/okf -> ../../outside, cwd = parent of repo",
+      setup: (s) => {
+        dir(s.repo, "docs");
+        link(upUp, s.repo, "docs", "okf");
+        return { cwd: s.root, args: [path.join("repo", okf), "--force"] };
+      },
+    },
+    {
+      id: 4,
+      name: "docs/okf -> ../../outside, cwd outside the repo, absolute target",
+      setup: (s) => {
+        dir(s.repo, "docs");
+        link(upUp, s.repo, "docs", "okf");
+        return {
+          cwd: dir(s.root, "elsewhere"),
+          args: [path.join(s.repo, okf), "--force"],
+        };
+      },
+    },
+    {
+      id: 5,
+      name: "docs -> ../outside, cwd outside the repo, absolute target",
+      setup: (s) => {
+        link(up, s.repo, "docs");
+        return {
+          cwd: dir(s.root, "elsewhere"),
+          args: [path.join(s.repo, okf), "--force"],
+        };
+      },
+    },
+    {
+      id: 6,
+      name: "docs -> ../outside, cwd = repo/packages/x, target ../../docs/okf",
+      setup: (s) => {
+        link(up, s.repo, "docs");
+        return {
+          cwd: dir(s.repo, "packages", "x"),
+          args: [path.join("..", "..", okf), "--force"],
+        };
+      },
+    },
+    {
+      id: 7,
+      name: "docs/okf -> ../../outside, cwd = repo/packages/x",
+      setup: (s) => {
+        dir(s.repo, "docs");
+        link(upUp, s.repo, "docs", "okf");
+        return {
+          cwd: dir(s.repo, "packages", "x"),
+          args: [path.join("..", "..", okf), "--force"],
+        };
+      },
+    },
+    {
+      id: 8,
+      name: "link named DOCS, target docs/okf",
+      setup: (s) => {
+        link(up, s.repo, "DOCS");
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+      refusedOnCaseInsensitiveVolume: true,
+      landsIn: (s) => path.join(s.repo, "docs", "okf"),
+    },
+    {
+      id: 9,
+      name: "link named docs, target DOCS/okf",
+      setup: (s) => {
+        link(up, s.repo, "docs");
+        return { cwd: s.repo, args: [path.join("DOCS", "okf"), "--force"] };
+      },
+      refusedOnCaseInsensitiveVolume: true,
+      landsIn: (s) => path.join(s.repo, "DOCS", "okf"),
+    },
+    {
+      id: 10,
+      name: "l/../docs/okf with l -> ../outside: `..` is removed textually, the link is never entered",
+      setup: (s) => {
+        dir(s.repo, "docs");
+        link(up, s.repo, "l");
+        return {
+          cwd: s.repo,
+          args: [path.join("l", "..", okf), "--force"],
+        };
+      },
+      landsIn: (s) => path.join(s.repo, "docs", "okf"),
+    },
+    {
+      id: 11,
+      name: "index.md is a hard link to the outside file, --force",
+      setup: (s) => {
+        fs.linkSync(
+          path.join(s.outside, "index.md"),
+          path.join(dir(s.repo, "docs", "okf"), "index.md"),
+        );
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 12,
+      name: "index.md is a link to the outside file (absolute text), --force",
+      setup: (s) => {
+        link(
+          path.join(s.outside, "index.md"),
+          dir(s.repo, "docs", "okf"),
+          "index.md",
+        );
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 13,
+      name: "log.md is a dangling link, no --force",
+      setup: (s) => {
+        link(
+          path.join(s.outside, "new.md"),
+          dir(s.repo, "docs", "okf"),
+          "log.md",
+        );
+        return { cwd: s.repo, args: [okf] };
+      },
+    },
+    {
+      id: 14,
+      name: "index.md is a FIFO, --force",
+      posixOnly: true,
+      setup: (s) => {
+        execFileSync("mkfifo", [
+          path.join(dir(s.repo, "docs", "okf"), "index.md"),
+        ]);
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 15,
+      name: "log.md is a socket, --force",
+      posixOnly: true,
+      setup: (s) => {
+        const target = dir(s.repo, "docs", "okf");
+        // Bound by a relative name: a socket path has a short length limit.
+        execFileSync(
+          process.execPath,
+          [
+            "-e",
+            "require('node:net').createServer().listen('log.md', () => process.exit(0))",
+          ],
+          { cwd: target, timeout: 15000 },
+        );
+        expect(fs.lstatSync(path.join(target, "log.md")).isSocket()).toBe(true);
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 16,
+      name: "docs -> . and the target is docs",
+      setup: (s) => {
+        link(".", s.repo, "docs");
+        return { cwd: s.repo, args: ["docs", "--force"] };
+      },
+    },
+    {
+      id: 17,
+      name: "docs -> .. and the target is docs/okf",
+      setup: (s) => {
+        link("..", s.repo, "docs");
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 18,
+      name: "target spelled through alias -> repo, docs/okf is a link, cwd = repo",
+      setup: (s) => {
+        dir(s.repo, "docs");
+        link(upUp, s.repo, "docs", "okf");
+        link("repo", s.root, "alias");
+        return {
+          cwd: s.repo,
+          args: [path.join(s.root, "alias", okf), "--force"],
+        };
+      },
+    },
+    {
+      id: 19,
+      name: "cwd entered through a link to the repo, docs/okf is a link",
+      setup: (s) => {
+        link("repo", s.root, "cwdlink");
+        dir(s.repo, "docs");
+        link(upUp, s.repo, "docs", "okf");
+        return { cwd: path.join(s.root, "cwdlink"), args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 20,
+      name: "index.md -> /dev/null, --force",
+      posixOnly: true,
+      setup: (s) => {
+        link("/dev/null", dir(s.repo, "docs", "okf"), "index.md");
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 21,
+      name: "a directory at the scaffold name index.md, --force",
+      setup: (s) => {
+        dir(s.repo, "docs", "okf", "index.md");
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 22,
+      name: "a file where a directory is needed (f/okf)",
+      setup: (s) => {
+        fs.writeFileSync(path.join(s.repo, "f"), "x\n");
+        return { cwd: s.repo, args: [path.join("f", "okf"), "--force"] };
+      },
+    },
+    {
+      id: 23,
+      name: "alias -> repo, docs -> ../outside, cwd = repo, absolute target through the alias",
+      setup: (s) => {
+        link("repo", s.root, "alias");
+        link(up, s.repo, "docs");
+        return {
+          cwd: s.repo,
+          args: [path.join(s.root, "alias", okf), "--force"],
+        };
+      },
+    },
+    {
+      id: 24,
+      name: "alias -> repo, docs -> ../outside, cwd elsewhere, absolute target through the alias",
+      setup: (s) => {
+        link("repo", s.root, "alias");
+        link(up, s.repo, "docs");
+        return {
+          cwd: dir(s.root, "el"),
+          args: [path.join(s.root, "alias", okf), "--force"],
+        };
+      },
+    },
+    {
+      id: 25,
+      name: "docs -> ../other where other/okf is another git repository, --force",
+      setup: (s) => {
+        dir(s.root, "other", "okf", ".git");
+        fs.writeFileSync(
+          path.join(s.root, "other", "okf", "index.md"),
+          "precious\n",
+        );
+        link(path.join("..", "other"), s.repo, "docs");
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 26,
+      name: ".git is a file (worktree or submodule), docs -> ../outside, cwd elsewhere",
+      setup: (s) => {
+        fs.rmSync(path.join(s.repo, ".git"), { recursive: true, force: true });
+        fs.writeFileSync(path.join(s.repo, ".git"), "gitdir: x\n");
+        link(up, s.repo, "docs");
+        return {
+          cwd: dir(s.root, "el"),
+          args: [path.join(s.repo, okf), "--force"],
+        };
+      },
+    },
+    {
+      id: 27,
+      name: "the target itself is alias -> repo",
+      setup: (s) => {
+        link("repo", s.root, "alias");
+        return { cwd: s.root, args: ["alias", "--force"] };
+      },
+    },
+    {
+      id: 28,
+      name: "log.md is a hard link to the outside file, --force",
+      setup: (s) => {
+        fs.linkSync(
+          path.join(s.outside, "index.md"),
+          path.join(dir(s.repo, "docs", "okf"), "log.md"),
+        );
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 29,
+      name: "control: an existing regular index.md is overwritten with --force",
+      setup: (s) => {
+        fs.writeFileSync(
+          path.join(dir(s.repo, "docs", "okf"), "index.md"),
+          "old\n",
+        );
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+      landsIn: (s) => path.join(s.repo, "docs", "okf"),
+    },
+    {
+      id: 30,
+      name: "control: clean ../../docs/okf from a subdirectory",
+      setup: (s) => ({
+        cwd: dir(s.repo, "packages", "x"),
+        args: [path.join("..", "..", okf)],
+      }),
+      landsIn: (s) => path.join(s.repo, "docs", "okf"),
+    },
+    {
+      id: 31,
+      name: "control: clean absolute target from a cwd outside the repo",
+      setup: (s) => ({
+        cwd: dir(s.root, "el"),
+        args: [path.join(s.repo, okf)],
+      }),
+      landsIn: (s) => path.join(s.repo, "docs", "okf"),
+    },
+    {
+      id: 32,
+      name: "control: clean docs/okf in the repo",
+      setup: (s) => ({ cwd: s.repo, args: [okf] }),
+      landsIn: (s) => path.join(s.repo, "docs", "okf"),
+    },
+    {
+      id: 33,
+      name: "control: cwd entered through a link to the repo, clean relative target",
+      setup: (s) => {
+        link("repo", s.root, "cwdlink");
+        return { cwd: path.join(s.root, "cwdlink"), args: [okf] };
+      },
+      landsIn: (s) => path.join(s.repo, "docs", "okf"),
+    },
+    {
+      id: 34,
+      name: "docs -> ../victim where victim is the root of another git repository",
+      setup: (s) => {
+        dir(s.root, "victim", ".git");
+        link(path.join("..", "victim"), s.repo, "docs");
+        return { cwd: s.repo, args: [okf, "--force"] };
+      },
+    },
+    {
+      id: 35,
+      name: "docs -> ../victim-parent where victim-parent/okf is the root of another git repository, cwd elsewhere",
+      setup: (s) => {
+        dir(s.root, "victim-parent", "okf", ".git");
+        fs.writeFileSync(
+          path.join(s.root, "victim-parent", "okf", "log.md"),
+          "precious\n",
+        );
+        link(path.join("..", "victim-parent"), s.repo, "docs");
+        return {
+          cwd: dir(s.root, "el"),
+          args: [path.join(s.repo, okf), "--force"],
+        };
+      },
+    },
+  ];
+
+  it.each(SCENARIOS)("[$id] $name", { timeout: 60000 }, (scenario) => {
+    if (scenario.posixOnly === true && process.platform === "win32") return;
+    const run = scenario.setup(s);
+    const caseInsensitive = fs.existsSync(path.join(s.root, "REPO"));
+    const refused =
+      scenario.landsIn === undefined ||
+      (scenario.refusedOnCaseInsensitiveVolume === true && caseInsensitive);
+    const before = snapshot(s.root);
+    const outsideBefore = snapshot(s.outside);
+
+    const result = spawnSync(
+      process.execPath,
+      [CLI_PATH, "init", ...run.args],
+      {
+        cwd: run.cwd,
+        encoding: "utf8",
+        timeout: 30000,
+        killSignal: "SIGKILL",
+      },
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.signal).toBeNull();
+    // Whatever the verdict, nothing outside the repository changed.
+    expect(snapshot(s.outside)).toEqual(outsideBefore);
+    if (refused) {
+      expect(result.status).toBe(2);
+      expect(result.stderr).toMatch(NOTHING_WRITTEN);
+      expect(snapshot(s.root)).toEqual(before);
+    } else {
+      expect(result.status).toBe(0);
+      expectScaffoldIn((scenario.landsIn as (s: Sandbox) => string)(s));
+    }
   });
 });

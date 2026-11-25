@@ -7,149 +7,177 @@ const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 /** Keeps an open of a FIFO from blocking when something else swapped one in after the check. */
 const NONBLOCK = fs.constants.O_NONBLOCK ?? 0;
 
-/**
- * lstat failures that mean "nothing reachable here": a missing component, a
- * file where a directory was expected, or a directory the process may not
- * search (nothing can be followed through it either).
- */
-function isUnreachable(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | undefined)?.code;
-  return (
-    code === "ENOENT" ||
-    code === "ENOTDIR" ||
-    code === "EACCES" ||
-    code === "EPERM"
-  );
+/** How many links in the filesystem root one walk follows before it refuses. */
+export const MAX_ROOT_LINK_HOPS = 8;
+
+const NOTHING_WRITTEN = "Nothing was written.";
+
+/** Where the walk starts and whether links that are direct entries of that directory are followed. */
+export interface WalkStart {
+  root: string;
+  followLinksInRoot: boolean;
 }
 
-function lstatOrUndefined(p: string): fs.Stats | undefined {
+/**
+ * The walk start for a real run: the filesystem root of the target. Links in
+ * it are followed only when that root is the POSIX `/`, where creating an
+ * entry needs administrator rights (macOS `/tmp`, `/var`, `/etc`). A Windows
+ * drive or share root can be writable by anyone, so nothing is followed there.
+ */
+export function systemWalkStart(
+  target: string,
+  parse: (p: string) => { root: string } = path.parse,
+): WalkStart {
+  const root = parse(target).root;
+  return { root, followLinksInRoot: root === "/" };
+}
+
+export interface PhysicalTarget {
+  /** The target's location; no component of it was a symbolic link when it was checked. */
+  physical: string;
+  /** What exists at `physical`. */
+  kind: "missing" | "directory" | "other";
+  /** The directories that do not exist yet, outermost first; empty unless `kind` is `missing`. */
+  missing: string[];
+}
+
+/** lstat that tells "nothing there" (`undefined`) apart from "cannot tell", which is refused. */
+function lstatOrRefuse(p: string, requested: string): fs.Stats | undefined {
   try {
     return fs.lstatSync(p);
   } catch (error) {
-    if (isUnreachable(error)) return undefined;
-    throw error;
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") return undefined;
+    throw new UsageError(
+      `Refusing to write to ${requested}: ${p} cannot be examined (${code ?? "unknown error"}), so it cannot be shown to be free of symbolic links. ${NOTHING_WRITTEN}`,
+    );
   }
 }
 
-function sameEntry(a: string, b: string): boolean {
+function pointsTo(link: string): string {
   try {
-    const sa = fs.statSync(a);
-    const sb = fs.statSync(b);
-    return sa.ino !== 0 && sa.ino === sb.ino && sa.dev === sb.dev;
+    return ` (it points to ${fs.readlinkSync(link)})`;
+  } catch {
+    // Unreadable link text: the refusal still names the link.
+    return "";
+  }
+}
+
+function refuseLink(link: string, requested: string): never {
+  throw new UsageError(
+    `Refusing to write to ${requested}: ${link} is a symbolic link${pointsTo(link)}, and okf-kit init never creates, truncates or writes a file through one. ${NOTHING_WRITTEN} ` +
+      "If the link is yours and you mean the directory it leads to, pass that directory's real path instead (for example the output of `realpath`); otherwise remove the link or replace it with a real directory.",
+  );
+}
+
+function refuseRootLink(link: string, requested: string, root: string): never {
+  throw new UsageError(
+    `Refusing to write to ${requested}: ${link} is a symbolic link in ${root}${pointsTo(link)} that cannot be followed: it must lead to an existing directory, through at most ${MAX_ROOT_LINK_HOPS} such links. ${NOTHING_WRITTEN} ` +
+      "Pass the real path of the directory instead (for example the output of `realpath`).",
+  );
+}
+
+function leadsToDirectory(link: string): boolean {
+  try {
+    return fs.statSync(link).isDirectory();
   } catch {
     return false;
   }
 }
 
-function isRealDirectory(p: string): boolean {
-  return lstatOrUndefined(p)?.isDirectory() === true;
-}
-
-function hasGitEntry(dir: string): boolean {
-  return lstatOrUndefined(path.join(dir, ".git")) !== undefined;
-}
-
-/**
- * The directory the symlink walk starts from; it and everything above it is
- * trusted, everything below it down to the target is checked. In order:
- *
- * 1. The nearest ancestor of the target (the target itself included) that
- *    holds a `.git` entry, file or directory. When one exists it is always
- *    used, whatever `cwd` is, so a deeper working directory cannot shorten
- *    the walk.
- * 2. Otherwise `cwd`, when the target lies under it. The match is by identity
- *    (device and inode) of an ancestor of the target, so a differently cased
- *    spelling on a case-insensitive volume still matches.
- * 3. Otherwise the target's parent directory, so the target itself is checked.
- *
- * A candidate for 1 or 2 must itself be a real directory (`lstat`), never a
- * link, so `docs -> .` is walked and refused, not taken as the root.
- */
-export function findWalkRoot(resolvedTarget: string, cwd: string): string {
-  const ancestors: string[] = [];
-  for (let current = resolvedTarget; ;) {
-    ancestors.push(current);
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
+function componentsBelow(root: string, p: string): string[] {
+  const rel = path.relative(root, p);
+  if (rel === "") return [];
+  if (rel === ".." || rel.startsWith(`..${path.sep}`)) {
+    throw new Error(`${p} is not below the walk root ${root}`);
   }
-  for (const candidate of ancestors) {
-    if (isRealDirectory(candidate) && hasGitEntry(candidate)) return candidate;
-  }
-  for (const candidate of ancestors) {
-    if (
-      isRealDirectory(candidate) &&
-      (candidate === cwd || sameEntry(candidate, cwd))
-    ) {
-      return candidate;
-    }
-  }
-  return path.dirname(resolvedTarget);
-}
-
-function refuseLink(
-  linkPath: string,
-  requestedPath: string,
-  ruleRoot: string,
-  targetIsDirectory: boolean,
-): never {
-  let pointsTo = "";
-  try {
-    pointsTo = ` (it points to ${fs.readlinkSync(linkPath)})`;
-  } catch {
-    // Unreadable link text: the refusal still names the link.
-  }
-  const via =
-    linkPath === requestedPath ? "" : `, and ${requestedPath} lies below it`;
-  const hint =
-    targetIsDirectory && linkPath === requestedPath
-      ? " The target directory itself is a link; pass its real path instead."
-      : "";
-  throw new UsageError(
-    `Refusing to write through the symbolic link ${linkPath}${pointsTo}${via}. ` +
-      `okf-kit init never creates, truncates or writes a file through a symlink below ${ruleRoot}; nothing was written.${hint} ` +
-      "Replace the link with a regular file or directory, or remove it, and run the command again.",
-  );
+  return rel.split(path.sep);
 }
 
 /**
- * Throws a UsageError when `target`, or any directory between `root` and
- * `target`, is a symbolic link (a dangling link included). Components that do
- * not exist yet end the walk: nothing below a missing component can be a link.
+ * Walks the absolute path `target` from the filesystem root down, one
+ * component at a time with `lstat`, and returns where it physically is.
+ *
+ * The rule has no trusted directory to guess. Every existing component must be
+ * a real directory; the last one may be missing or, for the caller to refuse,
+ * something else. A missing component ends the walk, because nothing below it
+ * exists. A symbolic link is refused wherever it sits and whatever it points
+ * to, with one exception: a link that is a direct entry of the POSIX root `/`
+ * and leads to an existing directory is followed. Its text is resolved against
+ * `/` and walked under this same rule, so the only links ever followed are
+ * entries of `/`. A component that cannot be examined, or an existing
+ * non-directory above the last component, is refused as well.
+ *
+ * `start` exists for tests, which cannot create entries in the real root.
  */
-export function assertNoSymlinkBelow(
-  root: string,
+export function resolvePhysicalTarget(
   target: string,
-  targetIsDirectory = false,
-): void {
-  const rel = path.relative(root, target);
-  if (rel === "") return;
-  if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
-    throw new Error(`${target} is outside the walk root ${root}`);
-  }
-  let current = root;
-  for (const part of rel.split(path.sep)) {
-    current = path.join(current, part);
-    const stat = lstatOrUndefined(current);
-    if (stat === undefined) return;
-    if (stat.isSymbolicLink()) {
-      refuseLink(current, target, root, targetIsDirectory);
+  start: WalkStart = systemWalkStart(target),
+): PhysicalTarget {
+  const root = start.root;
+  let pending = componentsBelow(root, target);
+  let physical = root;
+  let hops = 0;
+  while (pending.length > 0) {
+    const candidate = path.join(physical, pending[0]);
+    const rest = pending.slice(1);
+    const stat = lstatOrRefuse(candidate, target);
+    if (stat === undefined) {
+      const missing = [candidate];
+      for (const part of rest) {
+        missing.push(path.join(missing[missing.length - 1], part));
+      }
+      return {
+        physical: missing[missing.length - 1],
+        kind: "missing",
+        missing,
+      };
     }
+    if (stat.isSymbolicLink()) {
+      if (!start.followLinksInRoot || physical !== root) {
+        refuseLink(candidate, target);
+      }
+      hops += 1;
+      if (hops > MAX_ROOT_LINK_HOPS || !leadsToDirectory(candidate)) {
+        refuseRootLink(candidate, target, root);
+      }
+      const destination = path.resolve(root, fs.readlinkSync(candidate));
+      pending = [...componentsBelow(root, destination), ...rest];
+      continue;
+    }
+    if (!stat.isDirectory()) {
+      if (rest.length > 0) {
+        throw new UsageError(
+          `Refusing to write to ${target}: ${candidate} exists and is not a directory. ${NOTHING_WRITTEN}`,
+        );
+      }
+      return { physical: candidate, kind: "other", missing: [] };
+    }
+    physical = candidate;
+    pending = rest;
   }
+  return { physical, kind: "directory", missing: [] };
 }
 
 /**
- * Refuses an existing scaffold target that is not a regular file (a
- * directory, FIFO, socket or device); a link is refused by
- * {@link assertNoSymlinkBelow}. Returns normally when nothing exists there.
+ * Refuses an existing scaffold target that is anything but a regular file
+ * with a single name: a symbolic link (dangling ones included), a directory,
+ * FIFO, socket or device, or a file with more than one hard link. Returns
+ * normally when nothing exists there.
  */
-export function assertRegularOrMissing(file: string): void {
-  const stat = lstatOrUndefined(file);
+export function assertScaffoldFileWritable(file: string): void {
+  const stat = lstatOrRefuse(file, file);
   if (stat === undefined) return;
+  if (stat.isSymbolicLink()) {
+    throw new UsageError(
+      `Refusing to write ${file}: it is a symbolic link${pointsTo(file)}, and okf-kit init never creates, truncates or writes a file through one. ${NOTHING_WRITTEN} ` +
+        "Remove the link or replace it with a regular file, and run the command again.",
+    );
+  }
   if (stat.isFile()) {
     if (stat.nlink > 1) {
       throw new UsageError(
-        `Refusing to write ${file}: it is a regular file with ${stat.nlink} hard links, so writing it would also change the other names. Nothing was written. ` +
+        `Refusing to write ${file}: it is a regular file with ${stat.nlink} hard links, so writing it would also change the other names. ${NOTHING_WRITTEN} ` +
           "Remove it and run the command again.",
       );
     }
@@ -163,26 +191,28 @@ export function assertRegularOrMissing(file: string): void {
         ? "a socket"
         : "not a regular file";
   throw new UsageError(
-    `Refusing to write ${file}: it exists and is ${kind}, not a regular file. Nothing was written. ` +
+    `Refusing to write ${file}: it exists and is ${kind}, not a regular file. ${NOTHING_WRITTEN} ` +
       "Remove it and run the command again.",
   );
 }
 
 /**
- * Creates `dir` and every missing ancestor, one level at a time, so no
- * `recursive` call walks through a component planted after the symlink check.
+ * Creates the directories the walk reported missing, outermost first, one
+ * level per call and never `recursive`: a recursive call accepts a link to a
+ * directory that appeared at a level after the walk and creates below it.
  */
-export function ensureDirectories(dir: string): void {
-  const missing: string[] = [];
-  let current = dir;
-  while (lstatOrUndefined(current) === undefined) {
-    missing.push(current);
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  for (const level of missing.reverse()) {
-    fs.mkdirSync(level);
+export function createDirectories(missing: readonly string[]): void {
+  for (const level of missing) {
+    try {
+      fs.mkdirSync(level);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new UsageError(
+          `Refusing to continue: ${level} did not exist when the path was checked and exists now. No file was written; directories created before it were left in place.`,
+        );
+      }
+      throw error;
+    }
   }
 }
 

@@ -2,10 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "./errors.js";
 import {
-  assertNoSymlinkBelow,
-  assertRegularOrMissing,
-  ensureDirectories,
-  findWalkRoot,
+  assertScaffoldFileWritable,
+  createDirectories,
+  resolvePhysicalTarget,
   writeFileNoFollow,
 } from "./safe-fs.js";
 import type { SpecVersion } from "./types.js";
@@ -33,8 +32,6 @@ export interface InitOptions {
   spec?: SpecVersion;
   /** Test-only override for "now"; production code uses the real clock. */
   now?: () => Date;
-  /** Test-only override for the working directory the symlink walk starts from; production code uses `process.cwd()`. */
-  cwd?: string;
 }
 
 export interface InitResult {
@@ -63,29 +60,24 @@ export function runInit(
   const timestamp = now().toISOString();
   const spec: SpecVersion = options.spec ?? "v0.1";
 
-  // Nothing below is written until every check has passed. The walk refuses a
-  // symbolic link at the target or any component below the walk root (the
-  // nearest .git ancestor, else the working directory when the target lies
-  // under it, else the target's parent), and at every scaffold file; see
+  // Nothing below is written until every check has passed. The walk goes
+  // from the filesystem root down to the target and refuses a symbolic link at
+  // any component (only a link directly in the POSIX root is followed); it
+  // returns the physical location, which every later check and write uses. See
   // docs/init.md.
-  const walkRoot = findWalkRoot(
-    resolvedDir,
-    path.resolve(options.cwd ?? process.cwd()),
-  );
-  assertNoSymlinkBelow(walkRoot, resolvedDir, true);
+  const located = resolvePhysicalTarget(resolvedDir);
+  const physicalDir = located.physical;
 
-  if (fs.existsSync(resolvedDir)) {
-    if (!fs.statSync(resolvedDir).isDirectory()) {
-      throw new UsageError(
-        `Target path exists and is not a directory: ${resolvedDir}`,
-      );
-    }
+  if (located.kind === "other") {
+    throw new UsageError(
+      `Target path exists and is not a directory: ${resolvedDir}`,
+    );
+  }
+  if (located.kind === "directory") {
     for (const filename of SCAFFOLD_FILENAMES) {
-      const file = path.join(resolvedDir, filename);
-      assertNoSymlinkBelow(walkRoot, file);
-      assertRegularOrMissing(file);
+      assertScaffoldFileWritable(path.join(physicalDir, filename));
     }
-    const isNonEmpty = fs.readdirSync(resolvedDir).length > 0;
+    const isNonEmpty = fs.readdirSync(physicalDir).length > 0;
     if (isNonEmpty && !options.force) {
       throw new UsageError(
         `Target directory is not empty: ${resolvedDir}. Re-run with --force to overwrite the scaffold ` +
@@ -95,7 +87,7 @@ export function runInit(
     }
   }
 
-  ensureDirectories(resolvedDir);
+  createDirectories(located.missing);
 
   const contentByFilename: Record<(typeof SCAFFOLD_FILENAMES)[number], string> =
     {
@@ -112,7 +104,7 @@ export function runInit(
   const filesWritten: string[] = [];
   for (const filename of SCAFFOLD_FILENAMES) {
     writeFileNoFollow(
-      path.join(resolvedDir, filename),
+      path.join(physicalDir, filename),
       contentByFilename[filename],
       options.force === true,
     );
