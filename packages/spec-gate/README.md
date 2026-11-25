@@ -3,7 +3,7 @@
 `spec-gate` turns a ticket or intent into a checked, reviewable spec and
 test plan before implementation starts. The package is young: the CLI
 answers `--help` and `--version` and runs the `intake file`, `triage`,
-`digest`, `lint` and `lint-ack` verbs described below, and further
+`digest`, `lint`, `lint-ack`, `propose` and `bind` verbs described below, and further
 capabilities land as subcommands on top of this entry point as they are
 built.
 
@@ -35,6 +35,18 @@ the run. `spec-gate lint-ack <spec-dir>
 <rule> <id> --reason <text>` acknowledges one warning in `acks.yaml`. The
 rules, the report, profiles and exit codes are described in
 [docs/lint.md](docs/lint.md); the code lives in `src/lint/`.
+
+`spec-gate propose <spec-dir> --repo <dir> (--default-ref <ref> | --base
+<commit>)` runs the final lint with those git inputs and, when it is clean,
+sets the frontmatter `status` to `proposed` and creates `bindings.log` with the
+commit it ran at; it exits 0 when written, 1 when the final lint has findings
+and 2 on any refusal. `spec-gate bind <spec-dir> <tp-id> --status
+<new|existing> [--selector <s>] [--file <path>] [--fixtures <path>]...
+[--notes <text>]` changes one binding of a proposed spec, appending the full
+new binding to `bindings.log` and rewriting `bindings.yaml`; it exits 0 when
+written and 2 on any refusal. Both are described in
+[docs/lint.md](docs/lint.md), the log format in
+[docs/formats.md](docs/formats.md); the code lives in `src/state/`.
 
 ## Formats
 

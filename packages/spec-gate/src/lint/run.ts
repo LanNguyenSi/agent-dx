@@ -139,6 +139,7 @@ export function lintSpecDir(
     status: spec?.frontmatter.status ?? null,
     profile: choice.profile,
     mode,
+    specDir,
     ...(git !== undefined ? { git } : {}),
     ...(config?.state === "ok" ? { config: config.value } : {}),
   };

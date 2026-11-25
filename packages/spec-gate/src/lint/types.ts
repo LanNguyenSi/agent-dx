@@ -129,6 +129,13 @@ export interface RuleContext {
   mode: Mode;
   git?: GitInputs;
   /**
+   * The spec directory as the caller named it. A rule reads the spec
+   * directory through `inputs`; only a rule that reads a file the loader
+   * does not load (`bindings.log`) or must name the directory in the
+   * repository uses this.
+   */
+  specDir?: string;
+  /**
    * The parsed `.spec-gate/config.yaml` given to `--config`, or `undefined`
    * when none was given or it did not parse or could not be read. It is not
    * one of the spec directory inputs: a rule that reads it falls back to

@@ -14,6 +14,14 @@ import {
   skipReasonOf,
   specFiles,
 } from "./git-helpers.js";
+import {
+  BIND_BINDINGS,
+  bindOk,
+  commitSpec,
+  lintGit,
+  proposedRepo,
+  writeSpec,
+} from "../state/helpers.js";
 
 const DEFAULT = { defaultRef: REMOTE_MAIN };
 
@@ -708,7 +716,11 @@ describe("a valid spec on a plain history passes every rule", () => {
       const report = lintIn(repo, request);
       expect(report.errors).toEqual([]);
       expect(report.warnings).toEqual([]);
-      expect(report.skipped.map((s) => s.reason)).toEqual(["gate", "gate"]);
+      expect(report.skipped.map((s) => s.reason)).toEqual([
+        "gate",
+        "gate",
+        "gate",
+      ]);
     }
   });
 
@@ -776,6 +788,36 @@ describe("meta-frontmatter-mismatch", () => {
       ofRule(report, "meta-frontmatter-mismatch").map((f) => f.path),
     ).toEqual(["commands_ref"]);
   });
+});
+
+describe("bindings-log", { timeout: 60_000 }, () => {
+  gitCase(
+    "bindings-log",
+    "pass",
+    "a proposed spec whose bindings.yaml is the replay of its log",
+    async () => {
+      const { repo } = await proposedRepo();
+      bindOk(repo, "TP-2", { status: "existing", selector: "renamed" });
+      await commitSpec(repo, "bind");
+      return lintGit(repo);
+    },
+  );
+
+  gitCase(
+    "bindings-log",
+    "fail",
+    "bindings.yaml edited by hand after propose",
+    async () => {
+      const { repo } = await proposedRepo();
+      writeSpec(
+        repo,
+        "bindings.yaml",
+        BIND_BINDINGS.replace("login works", "something else"),
+      );
+      await commitSpec(repo, "hand edit");
+      return lintGit(repo);
+    },
+  );
 });
 
 describe("rule coverage guard", () => {
