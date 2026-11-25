@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "./errors.js";
+import {
+  assertNoSymlinkBelow,
+  assertRegularOrMissing,
+  ensureDirectories,
+  findWalkRoot,
+  writeFileNoFollow,
+} from "./safe-fs.js";
 import type { SpecVersion } from "./types.js";
 import {
   benchmarkTemplate,
@@ -26,6 +33,8 @@ export interface InitOptions {
   spec?: SpecVersion;
   /** Test-only override for "now"; production code uses the real clock. */
   now?: () => Date;
+  /** Test-only override for the working directory the symlink walk starts from; production code uses `process.cwd()`. */
+  cwd?: string;
 }
 
 export interface InitResult {
@@ -54,11 +63,26 @@ export function runInit(
   const timestamp = now().toISOString();
   const spec: SpecVersion = options.spec ?? "v0.1";
 
+  // Nothing below is written until every check has passed. The walk refuses a
+  // symbolic link at the target or any component below the walk root (the
+  // working directory when the target lies under it, the target otherwise),
+  // and at every scaffold file; see docs/init.md.
+  const walkRoot = findWalkRoot(
+    resolvedDir,
+    path.resolve(options.cwd ?? process.cwd()),
+  );
+  assertNoSymlinkBelow(walkRoot, resolvedDir);
+
   if (fs.existsSync(resolvedDir)) {
     if (!fs.statSync(resolvedDir).isDirectory()) {
       throw new UsageError(
         `Target path exists and is not a directory: ${resolvedDir}`,
       );
+    }
+    for (const filename of SCAFFOLD_FILENAMES) {
+      const file = path.join(resolvedDir, filename);
+      assertNoSymlinkBelow(walkRoot, file);
+      assertRegularOrMissing(file);
     }
     const isNonEmpty = fs.readdirSync(resolvedDir).length > 0;
     if (isNonEmpty && !options.force) {
@@ -70,7 +94,7 @@ export function runInit(
     }
   }
 
-  fs.mkdirSync(resolvedDir, { recursive: true });
+  ensureDirectories(resolvedDir);
 
   const contentByFilename: Record<(typeof SCAFFOLD_FILENAMES)[number], string> =
     {
@@ -86,9 +110,10 @@ export function runInit(
 
   const filesWritten: string[] = [];
   for (const filename of SCAFFOLD_FILENAMES) {
-    fs.writeFileSync(
+    writeFileNoFollow(
       path.join(resolvedDir, filename),
       contentByFilename[filename],
+      options.force === true,
     );
     filesWritten.push(filename);
   }

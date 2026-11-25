@@ -65,6 +65,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   two sibling subtests at the same indent inside one range straddle, while a
   subtest nested deeper than the range's start does not.
 
+### Security
+
+- `okf-kit init` no longer creates, truncates or writes a file through a
+  symbolic link. A repository can ship a link such as `docs -> ~/somewhere`
+  or `docs/okf/index.md -> ~/.zshrc` (git keeps symlinks), and the scaffold
+  followed it to a path outside the repository. Before the first write,
+  `init` now walks the target path with `lstat` and refuses (exit `2`,
+  nothing written) when the target, a directory between the walk root and
+  the target, or any of the eight scaffold files is a link, a dangling link
+  included. The walk root is the working directory when the target lies
+  under it, so a link such as `docs` above `docs/okf` is caught, and the
+  target itself otherwise; links the user placed above that root are
+  accepted. An existing scaffold file that is not a regular file (a
+  directory, FIFO or socket) is refused too, all eight are checked before
+  any is written so a refusal leaves no partial scaffold, missing
+  directories are created one level at a time, and files are opened with
+  `O_NOFOLLOW` (`O_EXCL` without `--force`) so a link planted after the
+  check fails instead of being followed. Scaffold bytes are unchanged.
+
 ## [0.22.0] - 2026-11-17
 
 ### Added
