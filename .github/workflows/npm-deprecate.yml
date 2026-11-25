@@ -37,6 +37,18 @@ name: Deprecate an npm version
 # UN-deprecate signal; that is a deliberate act, not something to reach by
 # leaving a form field blank, so it is refused here too.
 #
+# Serialisation: the job shares the concurrency group of publish-npm.yml for
+# the same package (publish-npm-<package>), queued with `queue: max` and never
+# cancelled, so a deprecation cannot interleave with a publish of that package.
+# GitHub's default keeps one waiting run per group and lets a newer run
+# replace it; `queue: max` instead keeps up to 100 waiting runs in
+# first-in-first-out order, and only a run arriving at a full queue is
+# cancelled. A dispatch of this workflow therefore waits its turn behind
+# running and waiting publishes and cannot drop one. The group name is built
+# from the raw `package` input and is case insensitive; a package value that
+# fails validation still waits in the queue before the validation step
+# rejects it.
+#
 # Evidence comes from the registry, never from npm's exit code: `npm deprecate`
 # masks an unauthorized write as a 404 and can exit non-zero after the write
 # landed. The Deprecate step therefore does not gate the job (continue-on-error)
@@ -72,6 +84,10 @@ jobs:
   deprecate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: publish-npm-${{ inputs.package }}
+      cancel-in-progress: false
+      queue: max
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 

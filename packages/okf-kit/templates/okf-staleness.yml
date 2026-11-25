@@ -17,6 +17,11 @@ name: OKF staleness
 # by design (tool-error posture, exit 2), and warn-only must stay
 # non-blocking. The same file ships in every repo that carries a docs/okf
 # bundle (find them by this workflow's file name).
+#
+# Actions are pinned by commit SHA with the release in a trailing comment.
+# Take new SHAs from LanNguyenSi/agent-dx's own
+# .github/workflows/okf-staleness.yml, where Renovate keeps them current,
+# rather than from a floating tag.
 
 on:
   pull_request:
@@ -39,7 +44,7 @@ jobs:
       BUNDLE_PATH: docs/okf
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # sources-fresh derives per-path change times from `git log %ct`;
           # a shallow clone silently reports wrong staleness verdicts.
@@ -49,7 +54,7 @@ jobs:
           # just a different commit than a naive local run.
           fetch-depth: 0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           # 22 = active LTS.
           node-version: 22

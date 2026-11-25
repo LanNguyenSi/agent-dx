@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `templates/okf-staleness.yml` pins `actions/checkout` and `actions/setup-node`
+  by commit SHA with the release in a trailing comment, instead of floating
+  major tags.
+
 ### Added
 
 - `okf-kit restamp <bundleDir>`: sets the stamp of every doc `check`

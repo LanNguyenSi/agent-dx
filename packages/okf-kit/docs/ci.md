@@ -10,6 +10,8 @@
   run: npx okf-kit@<version> check path/to/bundle  # the exact version, see the README's "Use in CI" example
 ```
 
+The shipped `templates/okf-staleness.yml` pins its actions by commit SHA, not by tag.
+
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
 
 The pin in `templates/okf-staleness.yml` (install line and header) is rewritten to the release version when each okf-kit release is cut, so the template in a given okf-kit version pins that version. Maintainers: the release-time bump of this repository's own pins is described in the repository's `CONTRIBUTING.md`, section "Releasing okf-kit".

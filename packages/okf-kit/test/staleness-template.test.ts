@@ -9,6 +9,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -83,6 +84,24 @@ const steps = (
 ).jobs["okf-staleness"].steps;
 
 const checkStep = steps.find((s) => s.name === "Check bundle (warn-only)");
+
+describe("shipped templates pin actions by commit", () => {
+  const dir = new URL("../templates/", import.meta.url);
+  it("every uses: line is a 40-hex SHA with a version comment", () => {
+    const files = readdirSync(dir);
+    expect(files.length).toBeGreaterThan(0);
+    let seen = 0;
+    for (const f of files) {
+      const lines = readFileSync(new URL(f, dir), "utf8").split("\n");
+      for (const line of lines) {
+        if (!/^\s*-?\s*uses:/.test(line)) continue;
+        seen += 1;
+        expect(line).toMatch(/@[0-9a-f]{40} # v\d/);
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+});
 
 describe("templates/okf-staleness.yml pin", () => {
   it("states the same version in the header as the install line pins", () => {
