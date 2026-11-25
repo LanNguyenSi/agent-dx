@@ -49,14 +49,30 @@ function lstatOrRefuse(p: string, requested: string): fs.Stats | undefined {
     const code = (error as NodeJS.ErrnoException | undefined)?.code;
     if (code === "ENOENT") return undefined;
     throw new UsageError(
-      `Refusing to write to ${requested}: ${p} cannot be examined (${code ?? "unknown error"}), so it cannot be shown to be free of symbolic links. ${NOTHING_WRITTEN}`,
+      `Refusing to write to ${visible(requested)}: ${visible(p)} cannot be examined (${code ?? "unknown error"}), so it cannot be shown to be free of symbolic links. ${NOTHING_WRITTEN}`,
     );
   }
 }
 
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/**
+ * A path or a link text as it is safe to print: every control character (C0,
+ * DEL, C1) becomes a visible `\xNN`. A tree chooses the names and the link
+ * texts a refusal quotes, and a raw escape sequence or newline in one could
+ * redraw the terminal line the refusal is printed on.
+ */
+function visible(text: string): string {
+  return text.replace(
+    CONTROL_CHARACTERS,
+    (character) =>
+      `\\x${character.charCodeAt(0).toString(16).padStart(2, "0")}`,
+  );
+}
+
 function pointsTo(link: string): string {
   try {
-    return ` (it points to ${fs.readlinkSync(link)})`;
+    return ` (it points to ${visible(fs.readlinkSync(link))})`;
   } catch {
     // Unreadable link text: the refusal still names the link.
     return "";
@@ -65,14 +81,14 @@ function pointsTo(link: string): string {
 
 function refuseLink(link: string, requested: string): never {
   throw new UsageError(
-    `Refusing to write to ${requested}: ${link} is a symbolic link${pointsTo(link)}, and okf-kit init never creates, truncates or writes a file through one. ${NOTHING_WRITTEN} ` +
+    `Refusing to write to ${visible(requested)}: ${visible(link)} is a symbolic link${pointsTo(link)}, and okf-kit init never creates, truncates or writes a file through one. ${NOTHING_WRITTEN} ` +
       "If the link is yours and you mean the directory it leads to, pass that directory's real path instead (for example the output of `realpath`); otherwise remove the link or replace it with a real directory.",
   );
 }
 
 function refuseRootLink(link: string, requested: string, root: string): never {
   throw new UsageError(
-    `Refusing to write to ${requested}: ${link} is a symbolic link in ${root}${pointsTo(link)} that cannot be followed: it must lead to an existing directory, through at most ${MAX_ROOT_LINK_HOPS} such links. ${NOTHING_WRITTEN} ` +
+    `Refusing to write to ${visible(requested)}: ${visible(link)} is a symbolic link in ${root}${pointsTo(link)} that cannot be followed: it must lead to an existing directory, through at most ${MAX_ROOT_LINK_HOPS} such links. ${NOTHING_WRITTEN} ` +
       "Pass the real path of the directory instead (for example the output of `realpath`).",
   );
 }
@@ -148,7 +164,7 @@ export function resolvePhysicalTarget(
     if (!stat.isDirectory()) {
       if (rest.length > 0) {
         throw new UsageError(
-          `Refusing to write to ${target}: ${candidate} exists and is not a directory. ${NOTHING_WRITTEN}`,
+          `Refusing to write to ${visible(target)}: ${visible(candidate)} exists and is not a directory. ${NOTHING_WRITTEN}`,
         );
       }
       return { physical: candidate, kind: "other", missing: [] };
@@ -168,16 +184,17 @@ export function resolvePhysicalTarget(
 export function assertScaffoldFileWritable(file: string): void {
   const stat = lstatOrRefuse(file, file);
   if (stat === undefined) return;
+  const shown = visible(file);
   if (stat.isSymbolicLink()) {
     throw new UsageError(
-      `Refusing to write ${file}: it is a symbolic link${pointsTo(file)}, and okf-kit init never creates, truncates or writes a file through one. ${NOTHING_WRITTEN} ` +
+      `Refusing to write ${shown}: it is a symbolic link${pointsTo(file)}, and okf-kit init never creates, truncates or writes a file through one. ${NOTHING_WRITTEN} ` +
         "Remove the link or replace it with a regular file, and run the command again.",
     );
   }
   if (stat.isFile()) {
     if (stat.nlink > 1) {
       throw new UsageError(
-        `Refusing to write ${file}: it is a regular file with ${stat.nlink} hard links, so writing it would also change the other names. ${NOTHING_WRITTEN} ` +
+        `Refusing to write ${shown}: it is a regular file with ${stat.nlink} hard links, so writing it would also change the other names. ${NOTHING_WRITTEN} ` +
           "Remove it and run the command again.",
       );
     }
@@ -189,9 +206,9 @@ export function assertScaffoldFileWritable(file: string): void {
       ? "a FIFO"
       : stat.isSocket()
         ? "a socket"
-        : "not a regular file";
+        : "a device or other special file";
   throw new UsageError(
-    `Refusing to write ${file}: it exists and is ${kind}, not a regular file. ${NOTHING_WRITTEN} ` +
+    `Refusing to write ${shown}: it exists and is ${kind}, not a regular file. ${NOTHING_WRITTEN} ` +
       "Remove it and run the command again.",
   );
 }
@@ -200,19 +217,30 @@ export function assertScaffoldFileWritable(file: string): void {
  * Creates the directories the walk reported missing, outermost first, one
  * level per call and never `recursive`: a recursive call accepts a link to a
  * directory that appeared at a level after the walk and creates below it.
+ * When a level cannot be created, the levels this call created are removed
+ * again, innermost first, so a failed run leaves no directories behind.
  */
 export function createDirectories(missing: readonly string[]): void {
+  const created: string[] = [];
   for (const level of missing) {
     try {
       fs.mkdirSync(level);
     } catch (error) {
+      for (const made of created.reverse()) {
+        try {
+          fs.rmdirSync(made);
+        } catch {
+          // No longer empty, or gone: left as it is.
+        }
+      }
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
         throw new UsageError(
-          `Refusing to continue: ${level} did not exist when the path was checked and exists now. No file was written; directories created before it were left in place.`,
+          `Refusing to continue: ${visible(level)} did not exist when the path was checked and exists now. No file was written, and the directories this run created were removed again.`,
         );
       }
       throw error;
     }
+    created.push(level);
   }
 }
 
@@ -241,7 +269,7 @@ export function writeFileNoFollow(
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ELOOP" || code === "EEXIST" || code === "ENXIO") {
       throw new UsageError(
-        `Refusing to write ${file}: it is a symbolic link, a non-regular file or already exists (${code}). ` +
+        `Refusing to write ${visible(file)}: it is a symbolic link, a non-regular file or already exists (${code}). ` +
           "Remove it and run the command again.",
       );
     }
@@ -250,7 +278,7 @@ export function writeFileNoFollow(
   try {
     if (!fs.fstatSync(fd).isFile()) {
       throw new UsageError(
-        `Refusing to write ${file}: it is not a regular file.`,
+        `Refusing to write ${visible(file)}: it is not a regular file.`,
       );
     }
     fs.writeFileSync(fd, content);

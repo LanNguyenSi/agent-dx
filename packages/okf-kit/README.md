@@ -145,7 +145,7 @@ Modules under `src/`:
 - `companions.ts`: `--companion` parsing (`parseCompanions`).
 - `docs-for.ts`: `runDocsFor` and its text and JSON output.
 - `citation-drift.ts`: the diff-hunk line mapping and the per-citation verdicts behind `check --base` (rule `rules/citation-drift.ts`) and `repoint`; `repoint.ts`: `runRepoint` and its text and JSON output; `restamp.ts`: `runRestamp` (the stale set is `sources-fresh`'s own verdict) and its text and JSON output; `log-entry.ts`: `addLogEntry`, the `log.md` entry placement.
-- `init.ts` and `templates.ts`: `runInit` and the scaffolded file bodies.
+- `init.ts` and `templates.ts`: `runInit` and the scaffolded file bodies; `safe-fs.ts`: the link-free walk of the target path and the no-follow writes `init` uses.
 - `types.ts`: the shared types (`Finding`, `Rule`, `BundleContext`, `RunGit`); `errors.ts`: `UsageError`.
 
 The diagram shows how `check` and `docs-for` share repo-root detection, bundle loading and path resolution, where the rule registry and the exit code sit, and that `init` (registered in `cli.ts` like the other two commands) stands apart: it only writes the `templates.ts` bodies.

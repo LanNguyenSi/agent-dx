@@ -8,6 +8,7 @@ import { UsageError } from "../src/errors.js";
 import { runInit } from "../src/init.js";
 import {
   MAX_ROOT_LINK_HOPS,
+  assertScaffoldFileWritable,
   createDirectories,
   resolvePhysicalTarget,
   systemWalkStart,
@@ -825,6 +826,196 @@ describe("init never writes through a symbolic link", () => {
         expect(snapshot(fsRoot)).toEqual(before);
       },
     );
+  });
+
+  describe("changes between the checks and the writes, simulated by hooking fs", () => {
+    type AnyFunction = (...args: unknown[]) => unknown;
+    const hooked = fs as unknown as Record<string, AnyFunction>;
+    const restore: Array<() => void> = [];
+
+    /** Replaces `fs[name]` until the test ends; `around` gets the real function and the call's arguments. */
+    function intercept(
+      name: "readdirSync" | "mkdirSync" | "fstatSync",
+      around: (real: AnyFunction, args: unknown[]) => unknown,
+    ): void {
+      const real = hooked[name];
+      hooked[name] = function (this: unknown, ...args: unknown[]) {
+        return around((...realArgs) => real.apply(this, realArgs), args);
+      };
+      restore.push(() => {
+        hooked[name] = real;
+      });
+    }
+
+    afterEach(() => {
+      while (restore.length > 0) restore.pop()?.();
+    });
+
+    it("without --force, does not truncate a file that appears at a scaffold name after the emptiness check", () => {
+      const target = path.join(repo, "okf");
+      fs.mkdirSync(target);
+      const planted = path.join(target, "index.md");
+      let done = false;
+      intercept("readdirSync", (real, args) => {
+        const entries = real(...args);
+        if (!done && args[0] === target) {
+          done = true;
+          fs.writeFileSync(planted, "planted\n");
+        }
+        return entries;
+      });
+
+      const error = refusal(() => runInit(target));
+
+      expect(done).toBe(true);
+      expect(error.message).toContain(planted);
+      expect(fs.readFileSync(planted, "utf8")).toBe("planted\n");
+      expect(listing(target)).toEqual(["index.md"]);
+    });
+
+    it("refuses a link planted at a missing level after the walk and writes nothing at its destination", () => {
+      const target = path.join(repo, "docs", "okf");
+      let done = false;
+      intercept("mkdirSync", (real, args) => {
+        if (!done) {
+          done = true;
+          fs.symlinkSync(outside, path.join(repo, "docs"));
+        }
+        return real(...args);
+      });
+
+      const error = refusal(() => runInit(target));
+
+      expect(done).toBe(true);
+      expect(error.message).toContain(path.join(repo, "docs"));
+      expect(listing(outside)).toEqual([]);
+    });
+
+    it.each([false, true])(
+      "writes through the open descriptor: a link swapped in at the leaf after the open is not followed (overwrite=%s)",
+      (overwrite) => {
+        const victim = path.join(outside, "victim.txt");
+        fs.writeFileSync(victim, "precious\n");
+        const file = path.join(repo, "index.md");
+        if (overwrite) fs.writeFileSync(file, "old\n");
+        let done = false;
+        intercept("fstatSync", (real, args) => {
+          const stat = real(...args);
+          if (!done) {
+            done = true;
+            fs.unlinkSync(file);
+            fs.symlinkSync(victim, file);
+          }
+          return stat;
+        });
+
+        writeFileNoFollow(file, "new\n", overwrite);
+
+        expect(done).toBe(true);
+        expect(fs.readFileSync(victim, "utf8")).toBe("precious\n");
+      },
+    );
+  });
+
+  describe("a directory that cannot be created", () => {
+    it("removes the directories it created when a deeper one cannot be created (path too long)", () => {
+      const parts = Array.from(
+        { length: 30 },
+        (_, i) => `${String(i).padStart(2, "0")}${"d".repeat(198)}`,
+      );
+      const before = snapshot(base);
+
+      expect(() => runInit(path.join(repo, ...parts))).toThrow(/ENAMETOOLONG/);
+
+      expect(snapshot(base)).toEqual(before);
+    });
+
+    it("createDirectories removes the levels it created, innermost first, when a later level fails", () => {
+      const levels = [
+        path.join(repo, "a"),
+        path.join(repo, "a", "b"),
+        path.join(repo, "no-such-parent", "c"),
+      ];
+
+      expect(() => createDirectories(levels)).toThrow(/ENOENT/);
+
+      expect(listing(repo)).toEqual([]);
+    });
+
+    it("refuses a component whose name is too long to examine instead of treating it as missing", () => {
+      const before = snapshot(base);
+
+      const error = refusal(() =>
+        runInit(path.join(repo, "x".repeat(300), "okf")),
+      );
+
+      expect(error.message).toMatch(/cannot be examined \(ENAMETOOLONG\)/);
+      expect(error.message).toMatch(NOTHING_WRITTEN);
+      expect(snapshot(base)).toEqual(before);
+    });
+  });
+
+  describe("refusal messages show control characters instead of printing them", () => {
+    // A link text that would clear the terminal line and print a forged
+    // success message below the refusal.
+    const HOSTILE_TEXT =
+      "x\u001b[2K\rokf-kit: Scaffolded OKF bundle\nNext: run ./setup.sh";
+    const SHOWN_TEXT =
+      "x\\x1b[2K\\x0dokf-kit: Scaffolded OKF bundle\\x0aNext: run ./setup.sh";
+    const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
+
+    it("escapes the text of a link on the target path", () => {
+      fs.symlinkSync(HOSTILE_TEXT, path.join(repo, "docs"));
+
+      const error = refusal(() => runInit(path.join(repo, "docs", "okf")));
+
+      expect(error.message).not.toMatch(CONTROL_CHARACTER);
+      expect(error.message).toContain(`(it points to ${SHOWN_TEXT})`);
+    });
+
+    it("escapes the text of a link at a scaffold name", () => {
+      const target = path.join(repo, "okf");
+      fs.mkdirSync(target);
+      fs.symlinkSync(HOSTILE_TEXT, path.join(target, "index.md"));
+
+      const error = refusal(() => runInit(target, { force: true }));
+
+      expect(error.message).not.toMatch(CONTROL_CHARACTER);
+      expect(error.message).toContain(`(it points to ${SHOWN_TEXT})`);
+    });
+
+    it("escapes the name of a link, in the link's path and in the requested path", () => {
+      const name = "do\u001b[2Kcs\nx\u0085";
+      fs.symlinkSync(outside, path.join(repo, name));
+
+      const error = refusal(() => runInit(path.join(repo, name, "okf")));
+
+      expect(error.message).not.toMatch(CONTROL_CHARACTER);
+      expect(error.message).toContain(
+        `${path.join(repo, "do\\x1b[2Kcs\\x0ax\\x85")} is a symbolic link`,
+      );
+    });
+
+    it("the CLI prints the refusal as a single line without control characters", () => {
+      fs.symlinkSync(HOSTILE_TEXT, path.join(repo, "docs"));
+
+      const result = runCli(["init", path.join("docs", "okf")], repo);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr.endsWith("\n")).toBe(true);
+      expect(result.stderr.slice(0, -1)).not.toMatch(CONTROL_CHARACTER);
+      expect(result.stderr).toContain(SHOWN_TEXT);
+    });
+
+    it("names a device at a scaffold name as a device, without repeating itself", () => {
+      if (process.platform === "win32") return;
+
+      const error = refusal(() => assertScaffoldFileWritable("/dev/null"));
+
+      expect(error.message).toContain(
+        "it exists and is a device or other special file, not a regular file",
+      );
+    });
   });
 
   describe("systemWalkStart", () => {

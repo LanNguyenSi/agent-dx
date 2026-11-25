@@ -36,8 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `O_NOFOLLOW` (`O_EXCL` without `--force`), so a link planted at a scaffold
   name after the check fails the open. Not covered: a link swapped into a
   parent directory, or a hard link created, between the check and the write
-  (Node has no `openat`); on Windows only the `lstat` checks apply. Scaffold
-  bytes are unchanged. See
+  (Node has no `openat`); on Windows only the `lstat` checks apply. Direct
+  entries of `/` are trusted, so do not run `init` on content unpacked into
+  the filesystem root. Scaffold bytes are unchanged. See
   [Scaffold a bundle](docs/init.md#symbolic-links-are-refused).
 
 ### Added
