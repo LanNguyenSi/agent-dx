@@ -17,7 +17,7 @@ describe("rule registry", () => {
     for (const id of ids) expect(id, id).toMatch(RULE_ID_RE);
   });
 
-  it("registers the engine, form, content and reference-state rules in the order of the docs", () => {
+  it("registers the engine, form, content, reference-state and bindings-log rules in the order of the docs", () => {
     expect(RULES.map((r) => r.id)).toEqual([
       "file",
       "format",
@@ -50,11 +50,13 @@ describe("rule registry", () => {
       "commands-ref-not-ancestor",
       "spec-changes-config",
       "static-command-unknown",
+      "bindings-log",
     ]);
   });
 
-  it("the engine, form and reference-state rules run in both profiles; so does triage-stale, the rest of the content rules is full only", () => {
+  it("the engine, form, reference-state and bindings-log rules run in both profiles; so does triage-stale, the rest of the content rules is full only", () => {
     const REFS = new Set([
+      "bindings-log",
       "meta-frontmatter-mismatch",
       "base-commit-not-ancestor",
       "commands-ref-not-ancestor",
@@ -73,6 +75,7 @@ describe("rule registry", () => {
     expect(RULES.filter((r) => r.gated).map((r) => r.id)).toEqual([
       "binding-status",
       "residual-open",
+      "bindings-log",
     ]);
   });
 
@@ -112,16 +115,20 @@ describe("rule registry", () => {
       "commands-ref-not-ancestor",
       "spec-changes-config",
       "static-command-unknown",
+      "bindings-log",
     ]);
   });
 
-  it("exactly the four repository rules need git, and every reference-state rule is an error that cannot be acknowledged", () => {
+  it("exactly the four repository rules and bindings-log need git, and every reference-state rule is an error that cannot be acknowledged", () => {
     expect(RULES.filter((r) => r.needsGit === true).map((r) => r.id)).toEqual([
       "base-commit-not-ancestor",
       "commands-ref-not-ancestor",
       "spec-changes-config",
       "static-command-unknown",
+      "bindings-log",
     ]);
+    const log = RULES.find((r) => r.id === "bindings-log")!;
+    expect([log.level, log.ackable, log.gated]).toEqual(["error", false, true]);
     for (const id of [
       "rule-skipped",
       "meta-frontmatter-mismatch",
@@ -262,9 +269,9 @@ describe("the engine applies the registry", () => {
     const final = run({}, true);
     expect(final.mode).toBe("final");
     expect(final.status).toBe("draft");
-    // the four rules that need a repository did not run: that is a final error
+    // the five rules that need a repository did not run: that is a final error
     expect(final.errors.map((f) => f.rule)).toEqual([
-      ...Array(4).fill("rule-skipped"),
+      ...Array(5).fill("rule-skipped"),
       "gated-test",
     ]);
   });

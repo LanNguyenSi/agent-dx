@@ -14,6 +14,13 @@
       "rule": "rule-skipped",
       "file": "$",
       "path": "$",
+      "id": "bindings-log",
+      "code": "no-git"
+    },
+    {
+      "rule": "rule-skipped",
+      "file": "$",
+      "path": "$",
       "id": "commands-ref-not-ancestor",
       "code": "no-git"
     },

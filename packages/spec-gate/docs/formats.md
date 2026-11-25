@@ -12,8 +12,13 @@ oriented formats, a 1-based `line`.
 
 ## Layout
 
-A spec lives in `specs/<id>/` of the target repository. Repo-wide settings
-live in `.spec-gate/`.
+A spec lives in `specs/<id>/` of the target repository, a directory exactly
+one level below the top-level `specs/`. `propose` refuses a spec directory
+anywhere else (the top level, another directory, one deeper inside `specs/`),
+and the `bindings-log` lint rule reports one as `spec-off-layout` at
+`proposed` and under `--final` (see [lint.md](lint.md)); the name of the
+directory is not compared with the `id`. Repo-wide settings live in
+`.spec-gate/`.
 
 | File | Content |
 |---|---|
@@ -23,6 +28,7 @@ live in `.spec-gate/`.
 | `specs/<id>/spec.md` | goal, acceptance, non-goals, defaults, decisions, residuals, source ledger |
 | `specs/<id>/testplan.yaml` | the normative checks |
 | `specs/<id>/bindings.yaml` | the binding of each check to a concrete test |
+| `specs/<id>/bindings.log` | the record of every binding change after `proposed`, written by `propose` and `bind` |
 | `specs/<id>/questions.json` | questions and their answers |
 | `specs/<id>/evidence/` | evidence envelopes written by a runner |
 | `.spec-gate/config.yaml` | repo-wide settings |
@@ -469,6 +475,46 @@ later passed to a test runner as one argument, never through a shell, so the
 parser rejects an empty selector (`empty-value`), one with a forbidden
 character (`forbidden-character`) and one that starts with `-`
 (`invalid-selector`).
+
+## bindings.log
+
+Written by `propose` (its first line) and `bind` (every later line), never by
+hand. It records every binding change after the spec became `proposed`, and the
+`bindings-log` lint rule (see [lint.md](lint.md)) checks that `bindings.yaml`
+at the head is what the log says it is. It lies outside the digest.
+
+The file is JSON lines: one JSON object per line, every line ending in a line
+feed (a carriage return anywhere, a blank line or a missing final line feed is
+an error), each line strict JSON without duplicate keys. A byte order mark at
+the start is removed by the reader, as for every file of a spec directory.
+
+Line 1 is the propose entry, and there is exactly one:
+
+```json
+{"seq":1,"kind":"propose","commit":"<40 or 64 hex>","bindings":"sha256:<64 hex>"}
+```
+
+`commit` is the full id of the commit `propose` ran at (its `HEAD`), and
+`bindings` the SHA-256 of the raw bytes of `bindings.yaml` in that commit: the
+binding reference of the reference-state table above. Every later line is a
+bind entry:
+
+```json
+{"seq":2,"kind":"bind","tp":"TP-1","binding":{"status":"existing","selector":"...","fixtures":[]},"prev":"sha256:<64 hex>"}
+```
+
+- `seq` is the line number: it starts at 1 and grows by exactly 1 per line.
+- `tp` is one `TP-<n>` ID; `binding` is its full new binding, not a change to
+  the old one, in canonical form: the bindings format above, its keys in the
+  order `status`, `selector`, `file`, `fixtures`, `notes`, an absent optional
+  key left out and `fixtures` always there.
+- `prev` is the SHA-256 of the UTF-8 bytes of the line before, without its
+  line feed. A line that is changed, removed, inserted or moved breaks the
+  chain at the line after it.
+
+Each entry has exactly these keys. The replay of a log is `bindings.yaml` at the
+propose commit with the binding of every bind entry put in place in order; a
+bind entry never adds an ID.
 
 ## triage.json
 

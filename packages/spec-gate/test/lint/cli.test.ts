@@ -50,6 +50,7 @@ describe("spec-gate lint", () => {
       skipped: [
         { rule: "base-commit-not-ancestor", reason: "no-git" },
         { rule: "binding-status", reason: "gate" },
+        { rule: "bindings-log", reason: "gate" },
         { rule: "commands-ref-not-ancestor", reason: "no-git" },
         { rule: "residual-open", reason: "gate" },
         { rule: "spec-changes-config", reason: "no-git" },
@@ -136,7 +137,7 @@ describe("spec-gate lint", () => {
     expect(parsed.profile).toBe("full");
   });
 
-  it("--final sets the mode in the report; without git inputs the four repository rules fail it", async () => {
+  it("--final sets the mode in the report; without git inputs the five rules that need a repository fail it", async () => {
     const run = await runCli(["lint", specDir(), "--final"]);
     expect(run.code).toBe(1);
     const parsed = report(run.stdout) as {
@@ -145,6 +146,7 @@ describe("spec-gate lint", () => {
     expect(parsed).toMatchObject({ mode: "final", status: "draft", ok: false });
     expect(parsed.errors.map((f) => [f.rule, f.id, f.code])).toEqual([
       ["rule-skipped", "base-commit-not-ancestor", "no-git"],
+      ["rule-skipped", "bindings-log", "no-git"],
       ["rule-skipped", "commands-ref-not-ancestor", "no-git"],
       ["rule-skipped", "spec-changes-config", "no-git"],
       ["rule-skipped", "static-command-unknown", "no-git"],

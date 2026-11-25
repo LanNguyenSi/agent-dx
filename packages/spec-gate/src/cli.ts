@@ -10,6 +10,7 @@ import {
 } from "./canonical/index.js";
 import { IntakeError } from "./intake/index.js";
 import { ACKS_FILE, lintSpecDir, writeAck } from "./lint/index.js";
+import { bindSpecDir, proposeSpecDir } from "./state/index.js";
 import { runTriage } from "./triage/index.js";
 
 function readVersion(): string {
@@ -277,13 +278,115 @@ program
     },
   );
 
+// `propose` and `bind` follow the exit codes of `lint` and `lint-ack`: 0 for
+// a result that was written, 1 for a final lint with findings (propose only;
+// the report goes to stdout and nothing is written), 2 for a usage error, a
+// refusal or an unexpected exception.
+program
+  .command("propose")
+  .description(
+    "move a draft spec to proposed: run the final lint with the git inputs, then set status: proposed " +
+      "and create bindings.log; exits 0 when written, 1 when the final lint has findings, 2 on any refusal",
+  )
+  .argument(
+    "<spec-dir>",
+    "directory with spec.md, testplan.yaml and bindings.yaml",
+  )
+  .option(
+    "--repo <dir>",
+    "the trusted checkout root, as for lint; required with --default-ref and --base",
+  )
+  .option(
+    "--default-ref <ref>",
+    "full ref name of the fetched target branch, as for lint",
+  )
+  .option(
+    "--base <commit>",
+    "full commit id of the pull request base, as for lint",
+  )
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action(
+    (
+      specDir: string,
+      options: { repo?: string; defaultRef?: string; base?: string },
+    ) => {
+      const result = proposeSpecDir(specDir, {
+        repo: options.repo,
+        defaultRef: options.defaultRef,
+        base: options.base,
+      });
+      if (result.kind === "refused") {
+        process.stderr.write(`spec-gate: ${result.message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      if (result.kind === "findings") {
+        process.stdout.write(`${JSON.stringify(result.report)}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      process.stdout.write(`proposed ${result.spec} at ${result.commit}\n`);
+    },
+  );
+
+program
+  .command("bind")
+  .description(
+    "change the binding of one test-plan row of a proposed spec: append the full new binding to " +
+      "bindings.log and rewrite bindings.yaml; exits 0 when written, 2 on any refusal",
+  )
+  .argument(
+    "<spec-dir>",
+    "directory with spec.md, testplan.yaml, bindings.yaml and bindings.log",
+  )
+  .argument(
+    "<tp-id>",
+    "the TP ID whose binding changes; it must exist in testplan.yaml and bindings.yaml",
+  )
+  .requiredOption("--status <status>", "the binding status, new or existing")
+  .option("--selector <selector>", "the test selector")
+  .option("--file <path>", "the repo-relative test file")
+  .option(
+    "--fixtures <path>",
+    "a repo-relative fixture path; repeatable",
+    collectPath,
+    [],
+  )
+  .option("--notes <text>", "a free note on the binding")
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action(
+    (
+      specDir: string,
+      tp: string,
+      options: {
+        status: string;
+        selector?: string;
+        file?: string;
+        fixtures: string[];
+        notes?: string;
+      },
+    ) => {
+      const result = bindSpecDir(specDir, tp, options);
+      if (!result.ok) {
+        process.stderr.write(`spec-gate: ${result.message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      process.stdout.write(`bound ${result.tp} (entry ${result.seq})\n`);
+    },
+  );
+
 try {
   await program.parseAsync();
 } catch (err) {
-  // Only `intake file`, `lint` and `lint-ack` have exitOverride, so every
-  // CommanderError comes from one of them: help and version keep their exit
-  // code 0, a usage error exits 2; anything else is an unexpected exception
-  // and also exits 2.
+  // Only `intake file`, `lint`, `lint-ack`, `propose` and `bind` have
+  // exitOverride, so every CommanderError comes from one of them: help and
+  // version keep their exit code 0, a usage error exits 2; anything else is
+  // an unexpected exception and also exits 2.
   if (err instanceof CommanderError) {
     // commander has already written the usage message to stderr.
     process.exitCode = err.exitCode === 0 ? 0 : 2;

@@ -15,3 +15,4 @@ export * from "./evidence.js";
 export * from "./refstates.js";
 export * from "./markdown.js";
 export * from "./chars.js";
+export * from "./bindings-log.js";

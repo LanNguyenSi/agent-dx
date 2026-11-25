@@ -351,7 +351,11 @@ describe("the built CLI", () => {
       expect(run.stderr).toBe("");
       const parsed = JSON.parse(run.stdout) as LintReport;
       expect(parsed.errors).toEqual([]);
-      expect(parsed.skipped.map((s) => s.reason)).toEqual(["gate", "gate"]);
+      expect(parsed.skipped.map((s) => s.reason)).toEqual([
+        "gate",
+        "gate",
+        "gate",
+      ]);
       // nothing machine-local in the report
       expect(run.stdout).not.toContain(repo.dir);
       expect(run.stdout).not.toContain(fs.realpathSync(repo.dir));
@@ -596,12 +600,14 @@ describe("rule-skipped under --final", () => {
     const final = lintIn(repo, undefined, { final: true });
     expect(skipped(final)).toEqual([
       ["base-commit-not-ancestor", "no-git"],
+      ["bindings-log", "no-git"],
       ["commands-ref-not-ancestor", "no-git"],
       ["spec-changes-config", "no-git"],
       ["static-command-unknown", "no-git"],
     ]);
     expect(final.ok).toBe(false);
     expect(final.skipped.map((s) => s.reason)).toEqual([
+      "no-git",
       "no-git",
       "no-git",
       "no-git",

@@ -107,16 +107,22 @@ describe("an ackable rule must name its target", () => {
   });
 });
 
-/** The rules the registry itself skips in a plain run: two gated at `draft`, four that need a repository. */
+/**
+ * The rules the registry itself skips in a plain run: three gated at
+ * `draft` (one of them, bindings-log, also needs a repository and runs in
+ * both profiles) and four that need a repository.
+ */
 const NEEDS_GIT = new Set([
   "base-commit-not-ancestor",
   "commands-ref-not-ancestor",
   "spec-changes-config",
   "static-command-unknown",
 ]);
+const GATED_IN_BOTH_PROFILES = new Set(["bindings-log"]);
 const REGISTRY_SKIPS = new Set([
   "binding-status",
   "residual-open",
+  ...GATED_IN_BOTH_PROFILES,
   ...NEEDS_GIT,
 ]);
 
@@ -170,6 +176,7 @@ describe("ack-unused only for a rule that was evaluated", () => {
     expect(final.acked.map((f) => f.rule)).toEqual(["custom-rule"]);
     // only the rules that need a repository are left skipped under --final
     expect(final.skipped.map((s) => s.reason)).toEqual([
+      "no-git",
       "no-git",
       "no-git",
       "no-git",
@@ -234,7 +241,11 @@ describe("ack-unused only for a rule that was evaluated", () => {
     });
     expect(withGit.acked.map((f) => f.rule)).toEqual(["custom-rule"]);
     expect(otherSkips(withGit)).toEqual([]);
-    expect(withGit.skipped.map((s) => s.reason)).toEqual(["gate", "gate"]);
+    expect(withGit.skipped.map((s) => s.reason)).toEqual([
+      "gate",
+      "gate",
+      "gate",
+    ]);
   });
 
   it("an engine rule whose input failed: profile-default with an unparsable triage.json", () => {
@@ -275,7 +286,11 @@ describe("ack-unused only for a rule that was evaluated", () => {
     expect(skippedReason(report, "triage-stale")).toBe("input-absent");
     for (const s of report.skipped.filter((x) => x.rule !== "triage-stale")) {
       expect(s.reason, s.rule).toBe(
-        NEEDS_GIT.has(s.rule) ? "no-git" : "profile",
+        NEEDS_GIT.has(s.rule)
+          ? "no-git"
+          : GATED_IN_BOTH_PROFILES.has(s.rule)
+            ? "gate"
+            : "profile",
       );
     }
   });
@@ -302,8 +317,14 @@ describe("ack-unused only for a rule that was evaluated", () => {
     const fullOnly = RULES.filter((r) => !r.profiles.includes("light")).map(
       (r) => r.id,
     );
-    // the rules that need a repository are not skipped for the profile
-    const profileSkips = report.skipped.filter((s) => s.reason !== "no-git");
+    // the rules that need a repository and the gated rules of both
+    // profiles are not skipped for the profile
+    const profileSkips = report.skipped.filter(
+      (s) => s.reason !== "no-git" && s.reason !== "gate",
+    );
+    expect(
+      report.skipped.filter((s) => s.reason === "gate").map((s) => s.rule),
+    ).toEqual([...GATED_IN_BOTH_PROFILES]);
     expect(profileSkips.every((s) => s.reason === "profile")).toBe(true);
     expect(profileSkips.map((s) => s.rule).sort()).toEqual(
       [...fullOnly].sort(),
@@ -337,6 +358,7 @@ describe("the skipped list", () => {
     expect(lint(specDir(), RULES).skipped).toEqual([
       { rule: "base-commit-not-ancestor", reason: "no-git" },
       { rule: "binding-status", reason: "gate" },
+      { rule: "bindings-log", reason: "gate" },
       { rule: "commands-ref-not-ancestor", reason: "no-git" },
       { rule: "residual-open", reason: "gate" },
       { rule: "spec-changes-config", reason: "no-git" },

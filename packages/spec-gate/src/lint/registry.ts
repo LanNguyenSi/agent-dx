@@ -9,6 +9,7 @@
 import { markdownCell } from "../formats/markdown.js";
 import { CONTENT_RULES } from "./rules/content.js";
 import { FORM_RULES } from "./rules/form.js";
+import { BINDINGS_LOG_RULES } from "./rules/bindings-log.js";
 import { REF_RULES } from "./rules/refs.js";
 import type { RuleContext, RuleDef, SkipReason, SkippedRule } from "./types.js";
 
@@ -106,6 +107,7 @@ export const RULES: readonly RuleDef[] = [
   ...FORM_RULES,
   ...CONTENT_RULES,
   ...REF_RULES,
+  ...BINDINGS_LOG_RULES,
 ];
 
 export function findRule(

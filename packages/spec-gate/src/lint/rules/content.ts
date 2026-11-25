@@ -6,11 +6,16 @@
  * retired spec IDs, missing attributes) arrives as a `format` finding and
  * is not re-checked here.
  */
+import {
+  BINDINGS_LOG_FILE,
+  parseBindingsLog,
+} from "../../formats/bindings-log.js";
 import { DEFAULT_QUESTIONS_WARN_ABOVE } from "../../formats/config.js";
 import { KIND_SPECS } from "../../formats/layers.js";
 import { OWNER_NONE } from "../../formats/spec.js";
 import { deriveTriageClass, TRIAGE_RULE_VERSION } from "../../triage/index.js";
 import type { Questions, TestPlan } from "../../formats/index.js";
+import { readSpecFile } from "../files.js";
 import { valueOf } from "../inputs.js";
 import { TRIAGE_FILE } from "../profile.js";
 import { findProseWords } from "../prose.js";
@@ -82,16 +87,32 @@ export function checkBindingUnknown(ctx: RuleContext): RuleFinding[] {
     }));
 }
 
+/** The TP IDs with a bind entry in the spec directory's parsed `bindings.log`. */
+function boundInLog(specDir: string | undefined): Set<string> {
+  if (specDir === undefined) return new Set();
+  const read = readSpecFile(specDir, BINDINGS_LOG_FILE);
+  if (!read.ok) return new Set();
+  const parsed = parseBindingsLog(read.text);
+  if (!parsed.ok) return new Set();
+  return new Set(parsed.value.binds.map((entry) => entry.tp));
+}
+
 /**
  * At `proposed` the binding of each row matches what its kind requires in
  * `KIND_SPECS`: `new` or `existing` demand that very status, `none` allows
  * no entry at all, and `any` is unchecked. A missing binding for a kind
  * that needs one is an error of its own.
+ *
+ * One exception, because `spec-gate bind` may move a `new` row (red-first) on
+ * to `existing` once its test exists: such a row may be `existing` when the
+ * spec directory's `bindings.log` parses and holds a bind entry for it. That
+ * the log is authentic is the `bindings-log` rule's question, not this one's.
  */
 export function checkBindingStatus(ctx: RuleContext): RuleFinding[] {
   const plan = valueOf(ctx.inputs.testplan);
   const bindings = used(ctx.inputs.bindings) ?? {};
   const findings: RuleFinding[] = [];
+  const bound = boundInLog(ctx.specDir);
   for (const row of plan) {
     const want = KIND_SPECS[row.kind].bindingStatusAtProposed;
     const binding = bindings[row.id];
@@ -114,7 +135,10 @@ export function checkBindingStatus(ctx: RuleContext): RuleFinding[] {
         id: row.id,
         message: `kind ${row.kind} needs a binding with status ${want} at proposed; bindings.yaml has none for ${row.id}`,
       });
-    } else if (binding.status !== want) {
+    } else if (
+      binding.status !== want &&
+      !(want === "new" && binding.status === "existing" && bound.has(row.id))
+    ) {
       findings.push({
         file: BINDINGS,
         path: `${row.id}.status`,
@@ -472,7 +496,7 @@ export const CONTENT_RULES: readonly RuleDef[] = [
     gated: true,
     ackable: false,
     summary:
-      "At proposed every binding has the status its row's kind requires, a kind needing one has one, and kind manual has none.",
+      "At proposed every binding has the status its row's kind requires, a kind needing one has one, and kind manual has none; a red-first row may be existing once bindings.log holds a bind entry for it.",
     needs: ["testplan"],
     uses: ["bindings"],
     check: checkBindingStatus,
