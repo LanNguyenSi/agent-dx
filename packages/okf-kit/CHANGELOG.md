@@ -12,6 +12,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `templates/okf-staleness.yml` pins `actions/checkout` and `actions/setup-node`
   by commit SHA with the release in a trailing comment, instead of floating
   major tags.
+- `okf-kit init` no longer creates, truncates or writes a file through a
+  symbolic link. A repository or an unpacked archive can ship a link such as
+  `docs -> ~/somewhere` or `docs/okf/index.md -> ~/.zshrc` (git keeps
+  symlinks), and the scaffold followed it to a path outside the repository.
+  `init` now walks the absolute target from the filesystem root down with
+  `lstat` and refuses (exit `2`, nothing written) a symbolic link at any
+  component, a dangling link and the target itself included, wherever the
+  link points. No directory is trusted, and neither the working directory
+  nor a `.git` entry changes the verdict, so the same link is refused from a
+  subdirectory, from outside the checkout and through any spelling of the
+  path. This also refuses a link of your own above the checkout when the
+  target is spelled through it: pass the real path (`realpath`) instead; a
+  relative target from a checkout you entered through a link is unaffected.
+  The one exception is a link that is a direct entry of `/` on macOS and
+  Linux (`/tmp`, `/var`), which is followed when it leads to an existing
+  directory; nothing is exempt on Windows. A component that is not a
+  directory, or that cannot be examined, is refused. Each of the eight
+  scaffold files must be missing or a regular file with a single hard link
+  (a link, directory, FIFO, socket, or a file with more hard links is
+  refused), and all eight are checked before any is written. Missing
+  directories are created one level at a time and files are opened with
+  `O_NOFOLLOW` (`O_EXCL` without `--force`), so a link planted at a scaffold
+  name after the check fails the open. Not covered: a link swapped into a
+  parent directory, or a hard link created, between the check and the write
+  (Node has no `openat`); on Windows only the `lstat` checks apply. Direct
+  entries of `/` are trusted, so do not run `init` on content unpacked into
+  the filesystem root. Scaffold bytes are unchanged. See
+  [Scaffold a bundle](docs/init.md#symbolic-links-are-refused).
 
 ### Added
 

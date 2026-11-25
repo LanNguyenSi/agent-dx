@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "./errors.js";
+import {
+  assertScaffoldFileWritable,
+  createDirectories,
+  resolvePhysicalTarget,
+  writeFileNoFollow,
+} from "./safe-fs.js";
 import type { SpecVersion } from "./types.js";
 import {
   benchmarkTemplate,
@@ -54,13 +60,24 @@ export function runInit(
   const timestamp = now().toISOString();
   const spec: SpecVersion = options.spec ?? "v0.1";
 
-  if (fs.existsSync(resolvedDir)) {
-    if (!fs.statSync(resolvedDir).isDirectory()) {
-      throw new UsageError(
-        `Target path exists and is not a directory: ${resolvedDir}`,
-      );
+  // Nothing below is written until every check has passed. The walk goes
+  // from the filesystem root down to the target and refuses a symbolic link at
+  // any component (only a link directly in the POSIX root is followed); it
+  // returns the physical location, which every later check and write uses. See
+  // docs/init.md.
+  const located = resolvePhysicalTarget(resolvedDir);
+  const physicalDir = located.physical;
+
+  if (located.kind === "other") {
+    throw new UsageError(
+      `Target path exists and is not a directory: ${resolvedDir}`,
+    );
+  }
+  if (located.kind === "directory") {
+    for (const filename of SCAFFOLD_FILENAMES) {
+      assertScaffoldFileWritable(path.join(physicalDir, filename));
     }
-    const isNonEmpty = fs.readdirSync(resolvedDir).length > 0;
+    const isNonEmpty = fs.readdirSync(physicalDir).length > 0;
     if (isNonEmpty && !options.force) {
       throw new UsageError(
         `Target directory is not empty: ${resolvedDir}. Re-run with --force to overwrite the scaffold ` +
@@ -70,7 +87,7 @@ export function runInit(
     }
   }
 
-  fs.mkdirSync(resolvedDir, { recursive: true });
+  createDirectories(located.missing);
 
   const contentByFilename: Record<(typeof SCAFFOLD_FILENAMES)[number], string> =
     {
@@ -86,9 +103,10 @@ export function runInit(
 
   const filesWritten: string[] = [];
   for (const filename of SCAFFOLD_FILENAMES) {
-    fs.writeFileSync(
-      path.join(resolvedDir, filename),
+    writeFileNoFollow(
+      path.join(physicalDir, filename),
       contentByFilename[filename],
+      options.force === true,
     );
     filesWritten.push(filename);
   }
