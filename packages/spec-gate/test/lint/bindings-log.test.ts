@@ -10,7 +10,12 @@ import {
   type Binding,
 } from "../../src/formats/index.js";
 import { lintSpecDir } from "../../src/lint/index.js";
-import { REMOTE_MAIN, skipReasonOf } from "./git-helpers.js";
+import {
+  REMOTE_MAIN,
+  SPEC_REL,
+  skipReasonOf,
+  type Repo,
+} from "./git-helpers.js";
 import {
   BIND_BINDINGS,
   bindOk,
@@ -37,6 +42,132 @@ function forgedLog(
     text += `${serializeNextBind(parsed.value, tp, binding)}\n`;
   }
   return text;
+}
+
+/** The bindings-log codes of a lint of the spec directory at `rel`, with the job's git inputs. */
+function codesAt(
+  repo: Repo,
+  rel: string,
+  final = false,
+): (string | undefined)[] {
+  const result = lintSpecDir(path.join(repo.dir, rel), {
+    final,
+    git: { repo: repo.dir, defaultRef: REMOTE_MAIN },
+  });
+  if (!result.ok) throw new Error(result.message);
+  return ofLogRule(result.report).map((f) => f.code);
+}
+
+/** `git mv` of a directory to a place whose parent may not exist yet. */
+async function moveDir(repo: Repo, from: string, to: string): Promise<void> {
+  fs.mkdirSync(path.dirname(path.join(repo.dir, to)), { recursive: true });
+  await repo.sh("mv", from, to);
+}
+
+const setStatus = (dir: string, from: string, to: string): void => {
+  const file = path.join(dir, "spec.md");
+  fs.writeFileSync(
+    file,
+    fs.readFileSync(file, "utf8").replace(`status: ${from}`, `status: ${to}`),
+  );
+};
+
+/**
+ * A repository whose default branch holds the spec at `at`, proposed with a
+ * log. The files are written by hand, as a merge that skipped the lint would
+ * leave them: propose refuses a place that is not `specs/<name>`.
+ */
+async function mergedAt(at: string): Promise<Repo> {
+  const { repo } = await draftRepo();
+  if (at !== SPEC_REL) await moveDir(repo, SPEC_REL, at);
+  const draft = await commitSpec(repo, "the draft in its place");
+  const dir = path.join(repo.dir, at);
+  setStatus(dir, "draft", "proposed");
+  fs.writeFileSync(
+    path.join(dir, "bindings.log"),
+    forgedLog(draft, sha256Tag(BIND_BINDINGS)),
+  );
+  const merged = await commitSpec(repo, "proposed");
+  await repo.setRef(REMOTE_MAIN, merged);
+  await repo.checkout("later", merged);
+  return repo;
+}
+
+/**
+ * Moves the merged spec from `from` to `to` on the branch, with a hand edit
+ * of bindings.yaml and a fresh log anchored at a draft commit after the move.
+ */
+async function moveWithFreshLog(
+  repo: Repo,
+  from: string,
+  to: string,
+): Promise<void> {
+  await moveDir(repo, from, to);
+  const dir = path.join(repo.dir, to);
+  const edited = BIND_BINDINGS.replace("rejects old token", "anything");
+  fs.writeFileSync(path.join(dir, "bindings.yaml"), edited);
+  fs.rmSync(path.join(dir, "bindings.log"));
+  setStatus(dir, "proposed", "draft");
+  const anchor = await commitSpec(repo, "move, edit, back to draft");
+  setStatus(dir, "draft", "proposed");
+  fs.writeFileSync(
+    path.join(dir, "bindings.log"),
+    forgedLog(anchor, sha256Tag(edited)),
+  );
+  await commitSpec(repo, "fresh log");
+}
+
+/** Git plumbing in `repo` with `input` on stdin; the trimmed output. */
+function plumb(repo: Repo, args: string[], input?: string): string {
+  return execFileSync("git", args, {
+    cwd: repo.dir,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@example.com",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@example.com",
+    },
+    input,
+    maxBuffer: 1 << 28,
+  })
+    .toString()
+    .trim();
+}
+
+/** A tree of 45000 long names: its listing is far over the 4 MiB git output cap. */
+function bigTree(repo: Repo): string {
+  const blob = plumb(repo, ["rev-parse", "HEAD:README.md"]);
+  const pad = "x".repeat(90);
+  const entries = Array.from(
+    { length: 45_000 },
+    (_, i) => `100644 blob ${blob}\t${pad}${String(i).padStart(6, "0")}\n`,
+  ).join("");
+  return plumb(repo, ["mktree"], entries);
+}
+
+/** The tree `treeish` with the entry `name` set to the tree `child`. */
+function graft(
+  repo: Repo,
+  treeish: string,
+  name: string,
+  child: string,
+): string {
+  const kept = plumb(repo, ["ls-tree", treeish])
+    .split("\n")
+    .filter((line) => line !== "" && !line.endsWith(`\t${name}`));
+  const lines = [...kept, `040000 tree ${child}\t${name}`];
+  return plumb(repo, ["mktree"], `${lines.join("\n")}\n`);
+}
+
+/**
+ * Makes `tree` the commit at HEAD and at the reference, so it is the diff
+ * base; the work tree keeps the spec directory as it is.
+ */
+async function commitTreeAsBase(repo: Repo, tree: string): Promise<void> {
+  const head = plumb(repo, ["commit-tree", tree, "-p", "HEAD", "-m", "big"]);
+  await repo.sh("update-ref", "HEAD", head);
+  await repo.setRef(REMOTE_MAIN, head);
 }
 
 describe("the bindings-log rule", { timeout: 60_000 }, () => {
@@ -413,39 +544,64 @@ describe("the bindings-log rule", { timeout: 60_000 }, () => {
 
   it("a large tree outside specs/ at the diff base does not fail the lint", async () => {
     const { repo } = await proposedRepo();
-    // One blob under 45000 long names: a whole-tree listing of this commit
-    // is far over the 4 MiB git output cap, built without a work tree.
-    const blob = await repo.sh("rev-parse", "HEAD:README.md");
-    const pad = "x".repeat(90);
-    const entries = Array.from(
-      { length: 45_000 },
-      (_, i) => `100644 blob ${blob}\t${pad}${String(i).padStart(6, "0")}\n`,
-    ).join("");
-    const env = {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@example.com",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@example.com",
-    };
-    const run = (args: string[], input?: string) =>
-      execFileSync("git", args, {
-        cwd: repo.dir,
-        env,
-        input,
-        maxBuffer: 1 << 28,
-      })
-        .toString()
-        .trim();
-    const big = run(["mktree"], entries);
-    const top = `${run(["ls-tree", "HEAD"])}\n040000 tree ${big}\tbig\n`;
-    const tree = run(["mktree"], top);
-    const head = run(["commit-tree", tree, "-p", "HEAD", "-m", "big"]);
-    // HEAD and the reference move there, so it is the diff base; the work
-    // tree keeps the spec directory as it is.
-    await repo.sh("update-ref", "HEAD", head);
-    await repo.setRef(REMOTE_MAIN, head);
+    // A whole-tree listing of this commit is far over the git output cap; it
+    // is built without a work tree.
+    const tree = graft(repo, "HEAD^{tree}", "big", bigTree(repo));
+    await commitTreeAsBase(repo, tree);
     expect(codesOf(lintGit(repo))).toEqual([]);
+  });
+
+  it("a large evidence tree inside a spec directory at the diff base does not fail the lint", async () => {
+    const { repo } = await proposedRepo();
+    // specs/s1/evidence/ holds the 45000 files: a listing of everything
+    // below specs/ is over the cap, the listing of specs/ itself is one line.
+    const s1 = graft(repo, `HEAD:${SPEC_REL}`, "evidence", bigTree(repo));
+    const specs = graft(repo, "HEAD:specs", "s1", s1);
+    await commitTreeAsBase(repo, graft(repo, "HEAD^{tree}", "specs", specs));
+    expect(codesOf(lintGit(repo))).toEqual([]);
+  });
+
+  it("a spec directory that is not specs/<name> is spec-off-layout, at proposed and at draft under --final", async () => {
+    for (const where of ["other/s1", "specs/group/s1", "s1top"]) {
+      const { repo } = await proposedRepo();
+      await moveDir(repo, SPEC_REL, where);
+      await commitSpec(repo, "move");
+      expect(codesAt(repo, where), where).toEqual(["spec-off-layout"]);
+      expect(codesAt(repo, where, true), where).toEqual(["spec-off-layout"]);
+    }
+    const { repo } = await draftRepo();
+    await moveDir(repo, SPEC_REL, "other/s1");
+    await commitSpec(repo, "a draft elsewhere");
+    expect(codesAt(repo, "other/s1", true)).toEqual(["spec-off-layout"]);
+    // without --final the gate skips the rule at draft
+    expect(codesAt(repo, "other/s1")).toEqual([]);
+  });
+
+  it("a proposed spec merged outside specs/ never passes, where it is or after a move to another such place", async () => {
+    // control: the same hand-written state in specs/<name> is clean
+    expect(codesAt(await mergedAt(SPEC_REL), SPEC_REL)).toEqual([]);
+
+    for (const [from, to] of [
+      ["s1top", "s2top"],
+      ["other/s1", "other/s2"],
+    ] as const) {
+      const repo = await mergedAt(from);
+      for (const final of [false, true]) {
+        expect(codesAt(repo, from, final), from).toEqual(["spec-off-layout"]);
+      }
+      await moveWithFreshLog(repo, from, to);
+      for (const final of [false, true]) {
+        expect(codesAt(repo, to, final), to).toEqual(["spec-off-layout"]);
+      }
+    }
+  });
+
+  it("a merged spec moved out of specs/ with a forged fresh log is spec-off-layout", async () => {
+    const repo = await mergedAt(SPEC_REL);
+    await moveWithFreshLog(repo, SPEC_REL, "other/s1");
+    for (const final of [false, true]) {
+      expect(codesAt(repo, "other/s1", final)).toEqual(["spec-off-layout"]);
+    }
   });
 
   it("without git inputs the rule is skipped (no-git), and under --final that is a rule-skipped error", async () => {

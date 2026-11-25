@@ -3,7 +3,9 @@
  *
  * It refuses, writing nothing, unless all of this holds: git inputs are
  * given (`--repo` and `--default-ref` or `--base`, resolved as for the lint),
- * the frontmatter status is `draft`, no `bindings.log` exists, and
+ * the spec directory is `specs/<name>`, one level below the top-level
+ * `specs/` of the repository, the frontmatter status is `draft`, no
+ * `bindings.log` exists, and
  * `spec.md` and `bindings.yaml` in the work tree are byte for byte the files
  * at `HEAD` (the propose entry hashes the committed `bindings.yaml`, so the
  * work tree must not hold another one). Then it runs the lint as
@@ -38,7 +40,14 @@ import { BINDINGS_FILE, SPEC_FILE } from "../lint/load.js";
 import { lintSpecDir } from "../lint/run.js";
 import { RULES } from "../lint/registry.js";
 import type { LintReport, RuleDef } from "../lint/types.js";
-import { isRepoPath, readBlobBytes, repoPathOf, specPathIn } from "./git.js";
+import {
+  SPECS_DIR,
+  isRepoPath,
+  isSpecLayoutPath,
+  readBlobBytes,
+  repoPathOf,
+  specPathIn,
+} from "./git.js";
 import { createFile, replaceFile } from "./write.js";
 
 export type ProposeResult =
@@ -140,6 +149,11 @@ export function proposeSpecDir(
   const specPath = specPathIn(git.repo, dir);
   if (specPath === null) {
     return refuse("the spec directory is not inside the repository");
+  }
+  if (!isSpecLayoutPath(specPath)) {
+    return refuse(
+      `the spec directory must be ${SPECS_DIR}/<name>, one level below ${SPECS_DIR}/ at the top level of the repository`,
+    );
   }
   if (
     !isRepoPath(repoPathOf(specPath, SPEC_FILE)) ||

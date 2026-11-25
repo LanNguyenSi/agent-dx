@@ -137,6 +137,8 @@ A refusal is one line on stderr and nothing on stdout. `digest`, `triage` and
 `spec-gate propose <spec-dir>` moves a draft to `proposed`. It needs git
 inputs, given and resolved as for the lint (see "Git inputs"), and refuses,
 writing nothing, when they are missing (`--repo` alone is not enough), when
+the spec directory is not `specs/<name>`, exactly one level below the
+top-level `specs/` of the repository, when
 the frontmatter `status` is not `draft`, when `bindings.log` already exists,
 or when `spec.md` or `bindings.yaml` in the work tree is missing, not a
 regular file, not committed at `HEAD` or not byte for byte the file at `HEAD`:
@@ -390,7 +392,7 @@ that they exist; the rules that need git are covered as described under
 | `commands-ref-not-ancestor` | error | light, full | no | no | The frontmatter commands_ref is the full id of a commit in the repository and an ancestor of the reference commit, checked like base_commit. |
 | `spec-changes-config` | error | light, full | no | no | No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count. |
 | `static-command-unknown` | error | light, full | no | no | Every static test-plan row's check_command_ref names a command of .spec-gate/commands.yaml at commands_ref; a missing or invalid command set there is an error, and the set is not read at a commands_ref that failed its ancestry check. |
-| `bindings-log` | error | light, full | yes | no | At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; every log the diff base holds for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory. |
+| `bindings-log` | error | light, full | yes | no | At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; the spec directory is specs/<name>, one level below the top-level specs/; every log the diff base holds there for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory. |
 <!-- END generated: rules -->
 
 The form rules:
@@ -524,7 +526,13 @@ without them.
   static row needs no command set.
 
 Bindings log. `bindings-log` needs git inputs and is gated; it runs in both
-profiles and cannot be acknowledged. It reads `bindings.log` in the spec
+profiles and cannot be acknowledged. A spec directory that is not
+`specs/<name>`, exactly one level below the top-level `specs/` of the
+repository (both compared as real paths), is one error with code
+`spec-off-layout`, at `proposed` and under `--final`, with or without a log:
+the top level, a directory elsewhere and one deeper inside `specs/` are all
+reported, nothing else is checked then, and `propose` refuses the same
+places. In `specs/<name>` the rule reads `bindings.log` in the spec
 directory (format in [formats.md](formats.md)). Without one it reports nothing
 at `draft` (so the final lint `propose` runs can pass) and one error with code
 `log-missing` at `proposed`. Otherwise it reports, as errors of the rule:
@@ -559,10 +567,13 @@ at `draft` (so the final lint `propose` runs can pass) and one error with code
   searched by the spec's identity, not only its path: every directory whose
   `spec.md` there carries the same frontmatter `id` counts, so a renamed or
   copied spec directory does not start a fresh log. The search covers the
-  documented layout, `specs/`, and the parent of the spec directory when it
-  lies outside it (for a spec directory at the top level, that directory and a
-  top-level `spec.md`); only a regular `spec.md` that parses counts, so a link
-  or an unrelated file elsewhere in the repository never fails the run;
+  layout and nothing else: the directories directly inside `specs/`, listed
+  one level deep, so what a spec directory holds (its evidence files, for
+  one) never grows the listing. A spec directory anywhere else never passes
+  this rule, so a log merged through the lint lives in `specs/`; a proposed
+  spec that reached the default branch elsewhere without a passing lint is
+  not followed when it later moves into `specs/`. Only a regular `spec.md`
+  that parses counts, so a link or a submodule entry never fails the run;
 - a directory that held this spec at the diff base with a `bindings.log` or a
   status other than `draft`, and that no longer holds a `spec.md` at `HEAD`
   (`spec-moved`): a proposed spec keeps its directory.

@@ -7,11 +7,12 @@
  * existed there, and replaying the bind entries over that file must give the
  * `bindings.yaml` of the spec directory, compared as parsed bindings; at
  * the propose commit the spec was a draft without a log, and every bind
- * entry keeps to the rule of its row's kind. The diff base is searched by
- * the spec's id, not only its path: every log merged there for this spec
- * must be extended by the log at HEAD (an entry that was merged is never
- * rewritten, even with a recomputed chain, nor removed), and a proposed spec
- * that left its directory is an error.
+ * entry keeps to the rule of its row's kind. The spec directory must be
+ * `specs/<name>`, one level below the top-level `specs/`: with that, the
+ * diff base is searched there by the spec's id, not only its path. Every log
+ * merged there for this spec must be extended by the log at HEAD (an entry
+ * that was merged is never rewritten, even with a recomputed chain, nor
+ * removed), and a proposed spec that left its directory is an error.
  *
  * The rule needs git and is gated: it runs at `proposed` and under
  * `--final`. Without a log it reports nothing at `draft`, so the final lint
@@ -29,10 +30,13 @@ import {
 } from "../../formats/index.js";
 import { bindStatusProblem } from "../../state/bind.js";
 import {
+  SPECS_DIR,
   decodeUtf8,
-  dirsHolding,
+  isSpecLayoutPath,
   readBlobBytes,
+  regularBlobBytes,
   repoPathOf,
+  specDirsAt,
   specPathIn,
 } from "../../state/git.js";
 import { readSpecFile } from "../files.js";
@@ -56,7 +60,7 @@ function at(code: string, message: string, line?: number): RuleFinding {
 
 /** A spec directory at the diff base that carries the same spec id. */
 interface Kin {
-  /** Its repository path (`""` for the top level). */
+  /** Its repository path, `specs/<name>`. */
   path: string;
   /** Its frontmatter status at the diff base. */
   status: string;
@@ -64,12 +68,8 @@ interface Kin {
   log: Buffer | null;
 }
 
-function statusAt(
-  repo: string,
-  commit: string,
-  specPath: string,
-): { id: string; status: string } | null {
-  const bytes = readBlobBytes(repo, commit, repoPathOf(specPath, SPEC));
+/** The id and status of a `spec.md` given as bytes; `null` when it is absent or does not parse. */
+function statusOf(bytes: Buffer | null): { id: string; status: string } | null {
   const text = bytes === null ? null : decodeUtf8(bytes);
   const parsed = text === null ? null : parseSpec(text);
   if (parsed === null || !parsed.ok) return null;
@@ -79,39 +79,30 @@ function statusAt(
   };
 }
 
-/** Where specs live: `specs/<id>/` (see the layout in docs/formats.md). */
-const SPECS_DIR = "specs";
-
-/** The parent directory of a repository path, `""` for a top-level one. */
-function parentOf(p: string): string {
-  const at = p.lastIndexOf("/");
-  return at < 0 ? "" : p.slice(0, at);
+/** The id and status of the spec at `specPath` in `commit`; its `spec.md` must be a regular file. */
+function statusAt(
+  repo: string,
+  commit: string,
+  specPath: string,
+): { id: string; status: string } | null {
+  return statusOf(readBlobBytes(repo, commit, repoPathOf(specPath, SPEC)));
 }
 
 /**
  * Every spec directory at the diff base whose `spec.md` carries the id `id`,
  * the current path included when it holds one: the log of a spec is found by
  * the spec's identity, so a directory that was renamed (or copied) after its
- * log was merged does not start a fresh history. The search covers the
- * documented layout, `specs/`, and the parent of the spec directory when it
- * lies outside it; only a regular `spec.md` that parses counts.
+ * log was merged does not start a fresh history. The search is the layout,
+ * the directories directly inside `specs/`: the rule passes no spec directory
+ * anywhere else, so no merged log can live anywhere else. Only a regular
+ * `spec.md` that parses counts.
  */
-function kinAtDiffBase(
-  repo: string,
-  diffBase: string,
-  id: string,
-  specPath: string,
-): Kin[] {
-  const scopes = [SPECS_DIR];
-  if (specPath !== SPECS_DIR && !specPath.startsWith(`${SPECS_DIR}/`)) {
-    // A top-level parent is not listed whole: the spec directory itself and
-    // a top-level spec.md stand for it.
-    const parent = specPath === "" ? "" : parentOf(specPath);
-    scopes.push(...(parent === "" ? ["", specPath] : [parent]));
-  }
+function kinAtDiffBase(repo: string, diffBase: string, id: string): Kin[] {
   const kin: Kin[] = [];
-  for (const dir of dirsHolding(repo, diffBase, scopes, SPEC)) {
-    const at = statusAt(repo, diffBase, dir);
+  for (const dir of specDirsAt(repo, diffBase)) {
+    const at = statusOf(
+      regularBlobBytes(repo, diffBase, repoPathOf(dir, SPEC)),
+    );
     if (at === null || at.id !== id) continue;
     kin.push({
       path: dir,
@@ -122,10 +113,6 @@ function kinAtDiffBase(
   return kin;
 }
 
-function shown(dir: string): string {
-  return dir === "" ? "the repository root" : dir;
-}
-
 /** What the diff base says about this spec: moved directories and merged logs. */
 function checkHistory(
   git: GitInputs,
@@ -134,7 +121,7 @@ function checkHistory(
   headLog: string | null,
 ): RuleFinding[] {
   const found: RuleFinding[] = [];
-  for (const kin of kinAtDiffBase(git.repo, git.diffBase, id, specPath)) {
+  for (const kin of kinAtDiffBase(git.repo, git.diffBase, id)) {
     if (
       kin.path !== specPath &&
       (kin.log !== null || kin.status !== "draft") &&
@@ -143,13 +130,13 @@ function checkHistory(
       found.push(
         at(
           "spec-moved",
-          `the spec ${id} was at ${shown(kin.path)} at the diff base, with a ${LOG} or a status other than draft, and is gone from there; a proposed spec keeps its directory`,
+          `the spec ${id} was at ${kin.path} at the diff base, with a ${LOG} or a status other than draft, and is gone from there; a proposed spec keeps its directory`,
         ),
       );
     }
     if (kin.log === null) continue;
     const where =
-      kin.path === specPath ? "" : ` (the spec ${id} at ${shown(kin.path)})`;
+      kin.path === specPath ? "" : ` (the spec ${id} at ${kin.path})`;
     if (headLog === null) {
       found.push(
         at(
@@ -184,6 +171,14 @@ function checkLog(ctx: RuleContext): RuleFinding[] {
   if (specPath === null) {
     return [
       at("spec-not-in-repo", "the spec directory is not inside the repository"),
+    ];
+  }
+  if (!isSpecLayoutPath(specPath)) {
+    return [
+      at(
+        "spec-off-layout",
+        `the spec directory is not ${SPECS_DIR}/<name>, one level below ${SPECS_DIR}/ at the top level of the repository; a spec is proposed and checked there only`,
+      ),
     ];
   }
   const id = valueOf(ctx.inputs.spec).frontmatter.id;
@@ -382,7 +377,7 @@ export const BINDINGS_LOG_RULES: readonly RuleDef[] = [
     ackable: false,
     needsGit: true,
     summary:
-      "At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; every log the diff base holds for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory.",
+      "At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; the spec directory is specs/<name>, one level below the top-level specs/; every log the diff base holds there for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory.",
     needs: ["spec"],
     uses: ["bindings", "testplan"],
     check: checkBindingsLog,

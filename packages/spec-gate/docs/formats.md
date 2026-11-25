@@ -12,8 +12,13 @@ oriented formats, a 1-based `line`.
 
 ## Layout
 
-A spec lives in `specs/<id>/` of the target repository. Repo-wide settings
-live in `.spec-gate/`.
+A spec lives in `specs/<id>/` of the target repository, a directory exactly
+one level below the top-level `specs/`. `propose` refuses a spec directory
+anywhere else (the top level, another directory, one deeper inside `specs/`),
+and the `bindings-log` lint rule reports one as `spec-off-layout` at
+`proposed` and under `--final` (see [lint.md](lint.md)); the name of the
+directory is not compared with the `id`. Repo-wide settings live in
+`.spec-gate/`.
 
 | File | Content |
 |---|---|

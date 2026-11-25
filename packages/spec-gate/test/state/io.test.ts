@@ -1,7 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { readBlobBytes, specPathIn } from "../../src/state/git.js";
+import {
+  isSpecLayoutPath,
+  readBlobBytes,
+  regularBlobBytes,
+  specDirsAt,
+  specPathIn,
+} from "../../src/state/git.js";
 import { createFile, replaceFile } from "../../src/state/write.js";
 import { LintGitError } from "../../src/lint/git/exec.js";
 import { Repo } from "../lint/git-helpers.js";
@@ -20,6 +26,94 @@ describe("specPathIn", () => {
       specPathIn(path.join(root, "a", "b"), path.join(root, "..x")),
     ).toBeNull();
     expect(specPathIn(root, path.join(root, "missing"))).toBeNull();
+  });
+});
+
+describe("isSpecLayoutPath", () => {
+  it("takes specs/<name> and nothing else", () => {
+    for (const p of ["specs/s1", "specs/a.b_c-d", "specs/s 1"]) {
+      expect(isSpecLayoutPath(p), p).toBe(true);
+    }
+    for (const p of [
+      "",
+      "specs",
+      "specs/",
+      "s1",
+      "other/s1",
+      "Specs/s1",
+      "specs/group/s1",
+      "other/specs/s1",
+    ]) {
+      expect(isSpecLayoutPath(p), JSON.stringify(p)).toBe(false);
+    }
+  });
+});
+
+/** The code of the git error `read` throws, or `undefined`. */
+function gitErrorOf(read: () => unknown): string | undefined {
+  try {
+    read();
+  } catch (err) {
+    if (err instanceof LintGitError) return err.code;
+    throw err;
+  }
+  return undefined;
+}
+
+describe("specDirsAt and regularBlobBytes", { timeout: 60_000 }, () => {
+  it("lists the directories directly inside specs/, not a file, a link, a submodule, an odd name or anything deeper", async () => {
+    const repo = await Repo.create();
+    const none = await repo.commit({ "README.md": "one\n" }, "init");
+    expect(specDirsAt(repo.dir, none)).toEqual([]);
+    await repo.commit(
+      {
+        "specs/b/spec.md": "b\n",
+        "specs/a/evidence/deep/spec.md": "deep\n",
+        "specs/s 1/spec.md": "odd\n",
+        "specs/file.txt": "x\n",
+        "specs/link": { linkTo: "a" },
+        "other/c/spec.md": "c\n",
+      },
+      "specs",
+    );
+    await repo.sh(
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `160000,${none},specs/sub`,
+    );
+    await repo.sh("commit", "-q", "-m", "a submodule entry");
+    const commit = await repo.head();
+    expect(specDirsAt(repo.dir, commit)).toEqual(["specs/a", "specs/b"]);
+    expect(gitErrorOf(() => specDirsAt(repo.dir, "HEAD"))).toBe("not-a-commit");
+    expect(gitErrorOf(() => specDirsAt(repo.dir, "f".repeat(40)))).toBe(
+      "object-unreadable",
+    );
+  });
+
+  it("regularBlobBytes reads a regular file and gives null for a link, a submodule entry and a missing path", async () => {
+    const repo = await Repo.create();
+    const first = await repo.commit(
+      { "a.txt": "bytes\n", link: { linkTo: "a.txt" } },
+      "files",
+    );
+    await repo.sh(
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `160000,${first},sub`,
+    );
+    await repo.sh("commit", "-q", "-m", "a submodule entry");
+    const commit = await repo.head();
+    expect(regularBlobBytes(repo.dir, commit, "a.txt")).toEqual(
+      Buffer.from("bytes\n"),
+    );
+    expect(regularBlobBytes(repo.dir, commit, "link")).toBeNull();
+    expect(regularBlobBytes(repo.dir, commit, "sub")).toBeNull();
+    expect(regularBlobBytes(repo.dir, commit, "nope.txt")).toBeNull();
+    expect(gitErrorOf(() => readBlobBytes(repo.dir, commit, "sub"))).toBe(
+      "path-not-regular",
+    );
   });
 });
 

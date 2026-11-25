@@ -231,6 +231,37 @@ describe("spec-gate propose", { timeout: 60_000 }, () => {
     }
   });
 
+  it("refuses a spec directory that is not specs/<name>, and writes nothing", async () => {
+    for (const where of ["other/s1", "specs/group/s1", "s1top"]) {
+      const { repo } = await draftRepo();
+      const dir = path.join(repo.dir, where);
+      fs.mkdirSync(path.dirname(dir), { recursive: true });
+      await repo.sh("mv", "specs/s1", where);
+      await commitSpec(repo, "the draft elsewhere");
+      const before = snapshot(dir);
+      const result = proposeSpecDir(dir, gitOf(repo));
+      expect(result, where).toMatchObject({ kind: "refused" });
+      if (result.kind === "refused")
+        expect(result.message, where).toContain("must be specs/<name>");
+      expect(snapshot(dir), where).toEqual(before);
+
+      const cli = await runCli([
+        "propose",
+        dir,
+        "--repo",
+        repo.dir,
+        "--default-ref",
+        REMOTE_MAIN,
+      ]);
+      expect(cli.code, where).toBe(2);
+      expect(cli.stdout, where).toBe("");
+      expect(cli.stderr, where).toMatch(
+        /^spec-gate: propose: the spec directory must be specs\/<name>/,
+      );
+      expect(snapshot(dir), where).toEqual(before);
+    }
+  });
+
   it("refuses when HEAD moves while the final lint runs, and writes nothing", async () => {
     const { repo } = await draftRepo();
     const before = snapshot(repo.spec);
