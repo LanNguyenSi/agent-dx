@@ -112,6 +112,12 @@ jobs:
           # tag with its packaged skill asset, so `npm test` below needs
           # history and tags rather than Actions' default shallow clone.
           fetch-depth: 0
+          # No git credential stays in the workspace of the job that holds
+          # id-token: write. Later steps need none: the master fetch below
+          # is anonymous (public repository), npm ci, build and test only
+          # read the local checkout and tags, and Publish talks to npm over
+          # OIDC.
+          persist-credentials: false
 
       - name: Verify tagged commit is on master
         # Runs before any repository code executes (npm ci, build, test).

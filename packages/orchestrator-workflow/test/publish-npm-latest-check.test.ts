@@ -23,7 +23,7 @@ interface Step {
   name?: string;
   uses?: string;
   run?: string;
-  with?: Record<string, string>;
+  with?: Record<string, string | boolean>;
 }
 
 const workflow = parse(
@@ -76,7 +76,7 @@ describe("publish-npm.yml latest check, wiring", () => {
       (s) => s.name === "Verify tagged commit is on master",
     );
     const own = steps.findIndex((s) =>
-      (s.with?.path ?? "").startsWith("_publish-scripts"),
+      String(s.with?.path ?? "").startsWith("_publish-scripts"),
     );
     expect(own).toBeGreaterThan(gate);
     // Right before Publish, so the package's npm ci, build and test never
@@ -91,6 +91,72 @@ describe("publish-npm.yml latest check, wiring", () => {
       '"${GITHUB_WORKSPACE}/_publish-scripts/.github/scripts"',
     );
     expect(body).not.toContain('"${GITHUB_WORKSPACE}/.github/scripts"');
+  });
+});
+
+describe("publish-npm.yml credentials", () => {
+  it("persists no git credential from any checkout of the OIDC job", () => {
+    const checkouts = steps.filter((s) =>
+      (s.uses ?? "").startsWith("actions/checkout@"),
+    );
+    expect(checkouts).toHaveLength(2);
+    for (const c of checkouts) {
+      expect(c.with?.["persist-credentials"]).toBe(false);
+    }
+  });
+});
+
+const operatorWorkflow = (file: string) =>
+  readFileSync(
+    new URL(`../../../.github/workflows/${file}`, import.meta.url),
+    "utf8",
+  );
+
+describe("operator workflows are serialised with publish", () => {
+  const publishGroup = job.concurrency?.group ?? "";
+  const cases: Array<[string, string]> = [
+    ["npm-dist-tag.yml", "dist-tag"],
+    ["npm-deprecate.yml", "deprecate"],
+  ];
+  for (const [file, jobName] of cases) {
+    it(`${file} shares the per-package publish group without cancelling`, () => {
+      const wf = parse(operatorWorkflow(file)) as {
+        jobs: Record<
+          string,
+          { concurrency?: { group?: string; "cancel-in-progress"?: boolean } }
+        >;
+      };
+      const c = wf.jobs[jobName]?.concurrency;
+      expect(c?.group).toBe(
+        publishGroup.replace("needs.parse.outputs.pkg", "inputs.package"),
+      );
+      expect(c?.group).toBe("publish-npm-${{ inputs.package }}");
+      expect(c?.["cancel-in-progress"]).toBe(false);
+    });
+  }
+});
+
+describe("npm-dist-tag.yml deprecated-latest guard", () => {
+  const wf = parse(operatorWorkflow("npm-dist-tag.yml")) as {
+    jobs: { "dist-tag": { steps: Step[] } };
+  };
+  const dsteps = wf.jobs["dist-tag"].steps;
+  const guardIdx = dsteps.findIndex(
+    (s) => s.name === "Refuse latest on a deprecated version",
+  );
+  const moveIdx = dsteps.findIndex((s) => s.name === "Move the dist-tag");
+
+  it("runs before the tag is moved", () => {
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(moveIdx).toBeGreaterThan(guardIdx);
+  });
+
+  it("reads the deprecation of the target version for the latest tag only", () => {
+    const run = dsteps[guardIdx]?.run ?? "";
+    expect(run).toContain('[ "$TAG" = "latest" ]');
+    expect(run).toContain('npm view "${PACKAGE}@${VERSION}" deprecated');
+    expect(run).toMatch(/::error::[^\n]*deprecated/);
+    expect(run).toContain("exit 1");
   });
 });
 

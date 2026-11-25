@@ -23,11 +23,23 @@ name: Move an npm dist-tag
 # repo already uses npm Trusted Publishing (OIDC) and is untouched by this.
 #
 # Why this exists: publish-npm.yml runs `npm publish` without a --tag pin, so
-# `latest` always follows the most recently FINISHED publish run. Two tags
-# pushed back-to-back can complete out of order (observed 2026-07-17:
-# orchestrator-workflow v0.12.0 finished before v0.11.0, leaving
-# latest=0.11.0), and re-running the publish workflow cannot repair it, since
-# its idempotency check exits before touching the registry.
+# `latest` follows the publish runs, which are serialised per package. A
+# publish that cannot leave `latest` on the highest stable version fails its
+# run, and re-running the publish workflow cannot repair it, since its
+# idempotency check exits before touching the registry. This workflow does.
+#
+# Serialisation: the job shares the concurrency group of publish-npm.yml for
+# the same package (publish-npm-<package>), queued and never cancelled, so a
+# tag move cannot interleave with a publish of that package. GitHub keeps at
+# most one waiting run per group: a newly queued run replaces the one that
+# is waiting. A dispatch of this workflow while a publish run is already
+# waiting behind a running one therefore replaces that waiting publish, and
+# the tag it would have published is not published. Wait for running and
+# waiting publishes of the package to finish before dispatching.
+#
+# `latest` is refused for a deprecated version (see the step "Refuse latest
+# on a deprecated version"), the same rule print-deprecations.mjs applies
+# when it asserts a deprecation.
 #
 # Why the inputs are validated rather than trusted:
 #
@@ -77,6 +89,9 @@ jobs:
   dist-tag:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: publish-npm-${{ inputs.package }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
@@ -154,6 +169,21 @@ jobs:
           if [ "$found" != "$VERSION" ]; then
             echo "::error::${PACKAGE}@${VERSION} is not on the registry (view returned '${found}'). Publish it first; this workflow only moves tags." >&2
             exit 1
+          fi
+
+      - name: Refuse latest on a deprecated version
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$TAG" = "latest" ]; then
+            deprecated=$(npm view "${PACKAGE}@${VERSION}" deprecated 2>/dev/null || true)
+            if [ -n "$deprecated" ]; then
+              echo "::error::${PACKAGE}@${VERSION} is deprecated ('${deprecated}'); latest must not point at a deprecated version. Un-deprecate it first or choose another version." >&2
+              exit 1
+            fi
           fi
 
       - name: Dist-tags BEFORE
