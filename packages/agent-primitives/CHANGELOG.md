@@ -219,6 +219,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The note now skips that notice and names the next warning (normally
   the refusal's message); a refusal with no derivation keeps the note it
   printed before.
+- `probe --summary` printed the `note:` of a refused run as a warning
+  pushed before the refusal, not as the refusal's own text: a worktree
+  link manifest warning (`ignoring the worktree link manifest ...`,
+  `not trusting recorded worktree link ...`) is pushed before a later
+  refusal appends its message, and it (or another early warning) then
+  outranked the refusal as the note. Every refusal that appends a message
+  now carries it alongside, at the site that appends it: the entry-point
+  refusals, the shared run setup's (a target outside the containment
+  root, a held lock, a stale in-flight marker, a baseline-gate refusal)
+  and the dry run's `mutant_not_applicable` alike, and the note follows
+  one precedence: an explicit message, the refusal's own text, the first
+  warning that is not a `-n/--line` derivation notice, then that notice
+  (single and `--plan` form alike). A refused plan that names its
+  never-run mutants counts them on the totals line and prints no note
+  line: the refusal text carried on a plan result is for the library
+  caller, not the summary. The envelope's `warnings` order and content
+  are unchanged.
 
 ## [0.22.1] - 2026-11-17
 

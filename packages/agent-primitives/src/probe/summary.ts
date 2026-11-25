@@ -142,6 +142,12 @@ export interface SummaryInput {
   status: string;
   reason?: string;
   message?: string;
+  /** The refusal's own message, carried explicitly from the refusal site
+   * (`ProbeResult.refusal` / `ProbePlanResult.refusal`) rather than picked
+   * out of `warnings` by position: a warning pushed before the refusal (a
+   * manifest-link warning, a defaults-file message) must not become the
+   * `--summary` note of a refused run. */
+  refusal?: string;
   warnings?: string[];
   expectation?: string;
   mutant?: SummaryMutantLike["mutant"];
@@ -190,10 +196,10 @@ function oneLine(value: string): string {
 /** The prefix of the `-n/--line` derivation notice `runProbePipeline`
  * pushes into `warnings` when a `-M/--match` run derives its line from a
  * unique occurrence. It is an informational note, not a refusal, and it
- * is always the first warning of such a run. `--summary`'s note skips it:
- * a refusal that happens after a derivation must print its own text, not
- * this notice, while a refusal with no derivation (no such warning) keeps
- * the first warning it has always printed. */
+ * is always the first warning of such a run. It is the last-ranked note
+ * source, so it never outranks anything else: the precedence is
+ * `message` > the refusal's own text (`refusal`) > the first warning
+ * that is not this notice > this notice. */
 export const MATCH_LINE_DERIVATION_NOTICE_PREFIX =
   "-n/--line derived from the unique -M/--match occurrence:";
 
@@ -473,16 +479,23 @@ export function renderProbeSummary(
     extras: string[],
   ): { text: string; intact: boolean; keptRows: number } => {
     const tail: string[] = [...extras, ...baselineLines, totals];
-    // A refusal's note is its own text. A `-M/--match` run that derived
-    // its line pushed the derivation notice as the first warning before
-    // any later refusal appended its own message, so the note must skip
-    // that notice and take the next warning; a run with no derivation has
-    // no such warning, so its first warning (what it always printed) is
-    // still the note. An explicit `message` outranks both.
-    const refusalNote = input.warnings?.find(
+    // The `note:` is chosen by one precedence rule (see
+    // `SummaryInput.refusal`): an explicit `message` first, then the
+    // refusal's own text (carried explicitly, not looked for in
+    // `warnings`), then the first warning that is not the `-n/--line`
+    // derivation notice, then the notice itself. A `-M/--match` run that
+    // derived its line pushed that notice as the first warning before any
+    // later refusal appended its own message, and a manifest-link
+    // warning can sit before a refusal too; none of those may become the
+    // note of a refused run. An explicit `message` outranks everything.
+    const firstPlainWarning = input.warnings?.find(
       (warning) => !warning.startsWith(MATCH_LINE_DERIVATION_NOTICE_PREFIX),
     );
-    const note = input.message ?? refusalNote ?? input.warnings?.[0];
+    const note =
+      input.message ??
+      input.refusal ??
+      firstPlainWarning ??
+      input.warnings?.[0];
     // The refused line's content rides on the note (the single form prints
     // no mutant line for a refusal, so this is where `line=` appears); a
     // note carrying it survives even with a mutant counted, unlike a bare

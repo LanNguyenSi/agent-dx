@@ -186,6 +186,14 @@ export interface ProbeOptions {
 export interface ProbeResult {
   status: ProbeStatus;
   reason?: string;
+  /** The refusal's own message, set alongside the refusal sites that
+   * append a message to `warnings` so the caller can carry it to
+   * `--summary` explicitly: a warning pushed before the refusal (the
+   * manifest-link warnings, a defaults-file message, the `-n/--line`
+   * derivation notice) must not become the note of a refused run.
+   * Not part of the envelope (the CLI never folds it into one); it
+   * exists for `cli.ts`'s `SummaryInput` assembly. */
+  refusal?: string;
   warnings: string[];
   mutant?: MutantField;
   mutation_probe?: MutationProbeField;
@@ -634,13 +642,12 @@ async function runProbePipeline(
   // still have to reject any patch whose own diff headers name a
   // different relative path.
   if (opts.form === "patch" && opts.allowOutside) {
+    const refusal = "-p/--patch cannot be combined with --allow-outside";
     return {
       status: "usage_error",
       reason: "patch_allow_outside_unsupported",
-      warnings: [
-        ...warnings,
-        "-p/--patch cannot be combined with --allow-outside",
-      ],
+      refusal,
+      warnings: [...warnings, refusal],
       isolation: isolationField,
     };
   }
@@ -727,6 +734,7 @@ async function runProbePipeline(
       return {
         status: "usage_error",
         reason: "patch_not_readable",
+        refusal: unusable,
         warnings: [...warnings, unusable],
         isolation: isolationField,
       };
@@ -743,20 +751,21 @@ async function runProbePipeline(
       return {
         status: "inconclusive",
         reason: listing.reasonCode ?? "mutant_not_applicable",
+        refusal: listing.reason,
         warnings: [...warnings, listing.reason],
         isolation: isolationField,
         dryRunLogPaths: derivationLogPaths,
       };
     }
     if (listing.paths.length !== 1) {
+      const refusal =
+        `-p/--patch touches ${listing.paths.length} paths and no --file ` +
+        `names which one to mutate: ${listing.paths.join(", ")}`;
       return {
         status: "usage_error",
         reason: "patch_file_ambiguous",
-        warnings: [
-          ...warnings,
-          `-p/--patch touches ${listing.paths.length} paths and no --file ` +
-            `names which one to mutate: ${listing.paths.join(", ")}`,
-        ],
+        refusal,
+        warnings: [...warnings, refusal],
         isolation: isolationField,
         dryRunLogPaths: derivationLogPaths,
       };
@@ -764,25 +773,24 @@ async function runProbePipeline(
     displayFile = path.resolve(root, listing.paths[0]);
     const baseHint = derivedFileBaseHint(listing.paths[0], root, cwd);
     if (baseHint !== undefined) {
+      const refusal = `--file (derived from the patch) not found: ${displayFile}; ${baseHint}`;
       return {
         status: "usage_error",
         reason: "file_not_found",
-        warnings: [
-          ...warnings,
-          `--file (derived from the patch) not found: ${displayFile}; ${baseHint}`,
-        ],
+        refusal,
+        warnings: [...warnings, refusal],
         isolation: isolationField,
         dryRunLogPaths: derivationLogPaths,
       };
     }
   } else {
+    const refusal =
+      "--file is required unless -p/--patch derives it from a single-path patch";
     return {
       status: "usage_error",
       reason: "file_required",
-      warnings: [
-        ...warnings,
-        "--file is required unless -p/--patch derives it from a single-path patch",
-      ],
+      refusal,
+      warnings: [...warnings, refusal],
       isolation: isolationField,
     };
   }
@@ -873,13 +881,12 @@ async function runProbePipeline(
       } else if (!derivationStat.isFile()) {
         derivationDeferred = true;
       } else if (derivationStat.size > MATCH_DERIVATION_MAX_BYTES) {
+        const refusal = `--file ${displayFile} is ${String(derivationStat.size)} bytes, over the ${String(MATCH_DERIVATION_MAX_BYTES)}-byte cap for the -n derivation: pass -n/--line to name the line to mutate`;
         return {
           status: "usage_error",
           reason: "line_required",
-          warnings: [
-            ...warnings,
-            `--file ${displayFile} is ${String(derivationStat.size)} bytes, over the ${String(MATCH_DERIVATION_MAX_BYTES)}-byte cap for the -n derivation: pass -n/--line to name the line to mutate`,
-          ],
+          refusal,
+          warnings: [...warnings, refusal],
           isolation: isolationField,
           dryRunLogPaths: derivationLogPaths,
         };
@@ -899,28 +906,26 @@ async function runProbePipeline(
           `${MATCH_LINE_DERIVATION_NOTICE_PREFIX} line ${String(line)} of ${displayFile}`,
         );
       } else if (hits.length === 0) {
+        const refusal = `-M/--match text ${JSON.stringify(opts.matchText)} occurs on no line of ${displayFile}`;
         return {
           status: "usage_error",
           reason: "match_not_found",
-          warnings: [
-            ...warnings,
-            `-M/--match text ${JSON.stringify(opts.matchText)} occurs on no line of ${displayFile}`,
-          ],
+          refusal,
+          warnings: [...warnings, refusal],
           isolation: isolationField,
           dryRunLogPaths: derivationLogPaths,
         };
       } else {
         const listed = hits.slice(0, MATCH_LINE_LIST_CAP);
         const more = hits.length - listed.length;
+        const refusal = `-M/--match text ${JSON.stringify(opts.matchText)} occurs on ${String(hits.length)} lines of ${displayFile}: ${listed.join(", ")}${
+          more > 0 ? `, and ${String(more)} more` : ""
+        }; pass -n/--line to name the line to mutate`;
         return {
           status: "usage_error",
           reason: "match_ambiguous",
-          warnings: [
-            ...warnings,
-            `-M/--match text ${JSON.stringify(opts.matchText)} occurs on ${String(hits.length)} lines of ${displayFile}: ${listed.join(", ")}${
-              more > 0 ? `, and ${String(more)} more` : ""
-            }; pass -n/--line to name the line to mutate`,
-          ],
+          refusal,
+          warnings: [...warnings, refusal],
           isolation: isolationField,
           dryRunLogPaths: derivationLogPaths,
         };
@@ -938,10 +943,12 @@ async function runProbePipeline(
   // `file_not_found`, the failed read -- is what answers, not a message
   // about the missing `-n`.
   if (line === undefined && opts.form !== "patch" && !derivationDeferred) {
+    const refusal = "-n/--line is required";
     return {
       status: "usage_error",
       reason: "line_required",
-      warnings: [...warnings, "-n/--line is required"],
+      refusal,
+      warnings: [...warnings, refusal],
       isolation: isolationField,
       dryRunLogPaths: derivationLogPaths,
     };
@@ -956,6 +963,7 @@ async function runProbePipeline(
     return {
       status: "usage_error",
       reason: defaultsFile.reason,
+      refusal: defaultsFile.message,
       warnings: [...warnings, defaultsFile.message],
       isolation: isolationField,
       dryRunLogPaths: derivationLogPaths,
@@ -1027,6 +1035,7 @@ async function runProbePipeline(
           ? "inconclusive"
           : "usage_error",
       reason: linkSourceRefusal.reason,
+      refusal: linkSourceRefusal.message,
       warnings: [...warnings, linkSourceRefusal.message],
       isolation: isolationField,
       dryRunLogPaths: derivationLogPaths,
@@ -1161,6 +1170,9 @@ async function runProbePipeline(
           return {
             ok: false,
             reason: computed.reason,
+            ...(computed.message === undefined
+              ? {}
+              : { message: computed.message }),
             logPaths: computed.logPaths,
           };
         }
@@ -1193,6 +1205,13 @@ async function runProbePipeline(
       return {
         status: refusal.status,
         reason: refusal.reason,
+        // The refusal's own text rides alongside the warning `refuse()`
+        // appended (`setup.ts`), the same carriage every other refusal
+        // site makes: `--summary`'s note stays the refusal even when the
+        // shared `warnings` array already carried a manifest-link
+        // warning, an isolation-fallback notice or the `-n/--line`
+        // derivation notice pushed before this refusal.
+        ...(refusal.message === undefined ? {} : { refusal: refusal.message }),
         warnings: refusal.warnings,
         ...(refusal.reportsMutant && mutantField !== undefined
           ? { mutant: mutantField }
@@ -1329,27 +1348,27 @@ async function runProbePipeline(
             : caughtError !== undefined
               ? String(caughtError)
               : undefined;
+        // `capturedRt` is set by this point whenever a mutation was
+        // genuinely armed for restore (both require `rt` from
+        // `openRunSetup`); the object literal fallback exists only
+        // for the type checker, not a path this reaches in
+        // practice, so every real caller reads the same runtime
+        // object rather than a hand-built duplicate of its fields.
+        const refusal =
+          `restore failed after an unexpected error${
+            causeMessage ? ` (${causeMessage})` : ""
+          }; the original content is preserved at backup path ${state.backupPath}` +
+          restoreFailedRebuildClause(
+            capturedRt ?? {
+              preCommand: opts.preCommand,
+              effectiveIsolation: isolationField.mode,
+            },
+          );
         emergencyResult = {
           status: "inconclusive",
           reason: "restore_failed",
-          warnings: [
-            ...warnings,
-            `restore failed after an unexpected error${
-              causeMessage ? ` (${causeMessage})` : ""
-            }; the original content is preserved at backup path ${state.backupPath}` +
-              // `capturedRt` is set by this point whenever a mutation was
-              // genuinely armed for restore (both require `rt` from
-              // `openRunSetup`); the object literal fallback exists only
-              // for the type checker, not a path this reaches in
-              // practice, so every real caller reads the same runtime
-              // object rather than a hand-built duplicate of its fields.
-              restoreFailedRebuildClause(
-                capturedRt ?? {
-                  preCommand: opts.preCommand,
-                  effectiveIsolation: isolationField.mode,
-                },
-              ),
-          ],
+          refusal,
+          warnings: [...warnings, refusal],
           ...(mutantField ? { mutant: mutantField } : {}),
           ...(mutantSummary && verifiedAppliedVia
             ? {
@@ -1430,10 +1449,12 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     result = await runProbePipeline(opts);
   } catch (err) {
     if (!(err instanceof UnresolvablePathError)) throw err;
+    const refusal = unresolvablePathMessage(err);
     result = {
       status: "inconclusive",
       reason: "file_outside_root",
-      warnings: [unresolvablePathMessage(err)],
+      refusal,
+      warnings: [refusal],
       isolation: emptyIsolationField(opts.isolation),
     };
   }
@@ -1637,6 +1658,12 @@ export interface PlanSummaryField {
 export interface ProbePlanResult {
   status: ProbeStatus;
   reason?: string;
+  /** The refusal's own message, set at every `refuse()` refusal that
+   * carries one (and the emergency-restore path), for the same reason as
+   * `ProbeResult.refusal`: the `--summary` note of a refused plan must
+   * be the refusal's text even when a warning pushed before it sits
+   * earlier in `warnings`. Not part of the envelope. */
+  refusal?: string;
   warnings: string[];
   /** The `--env NAME=VALUE` overrides this plan was given (redacted by
    * `redactEnvOverrides`), present whenever at least one was given --
@@ -1812,13 +1839,12 @@ async function runProbePlanPipeline(
   for (const [index, mutant] of opts.mutants.entries()) {
     const command = mutant.testCommand ?? opts.testCommand;
     if (command === undefined) {
+      const refusal = `plan.test must be a non-empty string unless every mutant has its own "test" (plan.mutants[${String(index)}] has none)`;
       return {
         status: "usage_error",
         reason: "plan_invalid",
-        warnings: [
-          ...warnings,
-          `plan.test must be a non-empty string unless every mutant has its own "test" (plan.mutants[${String(index)}] has none)`,
-        ],
+        refusal,
+        warnings: [...warnings, refusal],
         baselines: [],
         results: [],
         summary: summarize([]),
@@ -2014,6 +2040,11 @@ async function runProbePlanPipeline(
     return {
       status,
       reason,
+      // The refusal's own text rides alongside the warning it appends,
+      // so `--summary`'s note stays the refusal even when the shared
+      // `warnings` array already carries a manifest-link warning or a
+      // `-n/--line` derivation notice pushed before this refusal.
+      ...(message !== undefined ? { refusal: message } : {}),
       warnings: message === undefined ? warnings : [...warnings, message],
       baselines: baselinesSoFar(),
       results: entries,
@@ -2265,6 +2296,13 @@ async function runProbePlanPipeline(
       return {
         status: refusal.status,
         reason: refusal.reason,
+        // The same carriage as the single form's identical return and
+        // the plan's own `refuse()` helper: the refused run's note is
+        // the refusal's text, never a warning pushed before it. A
+        // refused plan whose mutants are all counted `not_run` prints no
+        // note line at all, so this field serves the library caller
+        // reading the result directly.
+        ...(refusal.message === undefined ? {} : { refusal: refusal.message }),
         warnings: refusal.warnings,
         ...(refusal.baseline !== undefined
           ? { baseline: refusal.baseline }
@@ -2683,24 +2721,24 @@ async function runProbePlanPipeline(
                 ...groupFields(inFlight.item),
               },
         );
+        // See the single probe's own identical comment above this
+        // same call: `capturedRt` is set by this point in practice,
+        // the fallback exists only for the type checker.
+        const refusal =
+          `restore failed after an unexpected error${
+            causeMessage ? ` (${causeMessage})` : ""
+          }; the original content is preserved at backup path ${state.backupPath}` +
+          restoreFailedRebuildClause(
+            capturedRt ?? {
+              preCommand: opts.preCommand,
+              effectiveIsolation: isolationField.mode,
+            },
+          );
         emergencyResult = {
           status: "inconclusive",
           reason: "restore_failed",
-          warnings: [
-            ...warnings,
-            `restore failed after an unexpected error${
-              causeMessage ? ` (${causeMessage})` : ""
-            }; the original content is preserved at backup path ${state.backupPath}` +
-              // See the single probe's own identical comment above this
-              // same call: `capturedRt` is set by this point in practice,
-              // the fallback exists only for the type checker.
-              restoreFailedRebuildClause(
-                capturedRt ?? {
-                  preCommand: opts.preCommand,
-                  effectiveIsolation: isolationField.mode,
-                },
-              ),
-          ],
+          refusal,
+          warnings: [...warnings, refusal],
           ...(baseline ? { baseline } : {}),
           baselines: baselinesSoFar(),
           results: entries,
@@ -2766,10 +2804,12 @@ export async function probePlan(
     result = await runProbePlanPipeline(opts);
   } catch (err) {
     if (!(err instanceof UnresolvablePathError)) throw err;
+    const refusal = unresolvablePathMessage(err);
     result = {
       status: "usage_error",
       reason: "file_outside_root",
-      warnings: [unresolvablePathMessage(err)],
+      refusal,
+      warnings: [refusal],
       baselines: [],
       results: [],
       summary: summarize([]),

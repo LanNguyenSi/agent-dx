@@ -2316,6 +2316,7 @@ async function runProbePlanCommand(
       {
         status: "usage_error",
         reason: parsed.reason,
+        refusal: parsed.message,
         warnings: [parsed.message],
       },
       refusalInput,
@@ -2477,6 +2478,7 @@ async function runProbePlanCommand(
       status: result.status,
       reason: result.reason,
       expectation: result.expectation,
+      refusal: result.refusal,
       warnings: result.warnings,
       plan: {
         baseline: result.baseline,
@@ -2755,6 +2757,7 @@ program
       {
         status: envelopeStatus,
         reason: result.reason,
+        refusal: result.refusal,
         warnings: result.warnings,
         mutant: result.mutant,
         mutation_probe: result.mutation_probe,

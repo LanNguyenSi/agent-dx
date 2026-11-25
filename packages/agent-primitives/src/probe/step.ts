@@ -97,6 +97,12 @@ export type PreparedMutant =
       reason: "mutant_not_applicable" | "git_apply_timeout" | "aborted";
       /** See `MutantNotApplicable.lineContent`. */
       lineContent?: string;
+      /** The refusal's own message (`MutantNotApplicable.reason`), the
+       * one this branch already pushed into `warnings`: carried so the
+       * dry-run refusal of `index.ts`'s single probe can set
+       * `ProbeResult.refusal` to it without appending it a second
+       * time. Absent exactly when nothing was pushed. */
+      message?: string;
       logPaths: string[];
     };
 
@@ -196,6 +202,7 @@ export async function prepareMutant(
       ...(computed.lineContent !== undefined
         ? { lineContent: computed.lineContent }
         : {}),
+      ...(computed.reason ? { message: computed.reason } : {}),
       logPaths: computed.logPaths,
     };
   }
