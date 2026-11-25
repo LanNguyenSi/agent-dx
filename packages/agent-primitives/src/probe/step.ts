@@ -382,6 +382,7 @@ export async function runMutantAttempt(
     writeMarker(target.absFile, {
       targetPath: target.displayFile,
       backupPath: target.session.backupPath,
+      targetMode: target.session.targetMode,
       preHash: target.preHash,
       mutatedHash: computed.mutatedHash,
       pid: process.pid,

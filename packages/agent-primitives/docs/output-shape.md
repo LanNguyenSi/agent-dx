@@ -112,7 +112,11 @@ those fixed fields)`, not `-m` unconditionally; when even that cannot be
   not a directory owned by the current user, or is group- or
   world-writable, the command refuses with an error that names `-l`
   (nothing is created inside it and nothing is `chmod`-ed); pass `-l <dir>`
-  to use a directory of your own.
+  to use a directory of your own. Under umask `002` (Debian and Ubuntu
+  user-private groups) an earlier run left that directory `0775`, so it is
+  refused too; remove it with `rm -rf "$(node -p
+  'require("os").tmpdir()')/agent-primitives"` (with `sudo` when another
+  user owns it) or pass `-l`.
 - `--json`: a no-op alias for `-f json` (already the default), for the
   common instinct to ask for JSON explicitly. Combined with an explicit
   `-f text` it is `status: "usage_error"`, `reason: "format_conflict"`,

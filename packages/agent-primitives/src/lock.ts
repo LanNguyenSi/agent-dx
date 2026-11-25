@@ -227,6 +227,12 @@ export interface MarkerData {
   mutatedHash: string;
   pid: number;
   timestamp: string;
+  /** Permission bits (`mode & 0o7777`) the target had when its backup was
+   * taken. Written by `inplace` probes so a stale-marker recovery can
+   * restore them: the backup copy is private (0600), and a copy would
+   * otherwise leave the recovered file 0600. Absent on markers written
+   * by an older version. */
+  targetMode?: number;
   /** Set on the repository-keyed `worktree` marker only: the `--log-dir`
    * the worktree named by `targetPath` was created under. Recorded for
    * whoever inspects the marker; never used to admit a deletion, since

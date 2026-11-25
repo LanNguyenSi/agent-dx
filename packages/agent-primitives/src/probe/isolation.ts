@@ -43,6 +43,10 @@ export const GIT_MIN_VERSION_WORKTREE_LIST_Z = "2.36";
 export interface InplaceSession {
   backupPath: string;
   targetPath: string;
+  /** The target's permission bits when the backup was taken, recorded in
+   * the in-flight marker so a later recovery can put them back (the
+   * backup itself is private, mode 0600). */
+  targetMode?: number;
   /**
    * Restores `targetPath` from the backup made at `beginInplace` time.
    * Synchronous and exception-safe (returns `false` instead of
@@ -346,6 +350,7 @@ export function beginInplace(
   return {
     backupPath,
     targetPath,
+    targetMode: targetMode & 0o7777,
     takeRestoreWarnings(): string[] {
       return modeWarnings.splice(0, modeWarnings.length);
     },
