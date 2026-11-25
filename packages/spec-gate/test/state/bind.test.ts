@@ -11,8 +11,11 @@ import {
   bindStatusProblem,
   serializeBindings,
 } from "../../src/state/index.js";
+import { lintSpecDir } from "../../src/lint/index.js";
 import { runCli } from "../lint/helpers.js";
 import {
+  BIND_BINDINGS,
+  bindOk,
   commitSpec,
   draftRepo,
   lintGit,
@@ -208,6 +211,74 @@ describe("spec-gate bind", { timeout: 60_000 }, () => {
     if (!missing.ok)
       expect(missing.message).toMatch(/bindings\.log does not exist/);
     expect(readSpec(repo, "bindings.yaml")).not.toContain("fixtures");
+  });
+
+  it("refuses a spec directory that is a symlink", async () => {
+    const { repo } = await proposedRepo();
+    const link = path.join(repo.dir, "specs", "link");
+    fs.symlinkSync("s1", link);
+    const result = bindSpecDir(link, "TP-1", { status: "new" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toMatch(/is a symlink/);
+  });
+
+  it("writes bindings.log before bindings.yaml: a failing second write leaves the log one entry ahead", async () => {
+    const { repo } = await proposedRepo();
+    const yaml = path.join(repo.spec, "bindings.yaml");
+    const before = readSpec(repo, "bindings.yaml");
+    fs.chmodSync(yaml, 0o444);
+    try {
+      const result = bindSpecDir(repo.spec, "TP-1", {
+        status: "new",
+        selector: "second name",
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok)
+        expect(result.message).toMatch(
+          /already holds the entry, run the same bind again/,
+        );
+      const log = parseBindingsLog(readSpec(repo, "bindings.log"));
+      expect(log.ok && log.value.binds.map((b) => b.binding.selector)).toEqual([
+        "second name",
+      ]);
+      expect(readSpec(repo, "bindings.yaml")).toBe(before);
+    } finally {
+      fs.chmodSync(yaml, 0o644);
+    }
+    // running the same bind again repairs the state
+    bindOk(repo, "TP-1", { status: "new", selector: "second name" });
+    await commitSpec(repo, "repaired");
+    expect(lintGit(repo).errors).toEqual([]);
+  });
+
+  it("binding-status takes a red-first row at existing only when bindings.log holds a bind entry for it", async () => {
+    const { repo } = await proposedRepo();
+    const statusErrors = () => {
+      const result = lintSpecDir(repo.spec, {});
+      if (!result.ok) throw new Error(result.message);
+      return result.report.errors.filter((f) => f.rule === "binding-status");
+    };
+    expect(statusErrors()).toEqual([]);
+    // a hand edit to existing, with no bind entry: an error
+    writeSpec(
+      repo,
+      "bindings.yaml",
+      readSpec(repo, "bindings.yaml").replace(
+        "TP-1:\n  status: new",
+        "TP-1:\n  status: existing",
+      ),
+    );
+    expect(statusErrors().map((f) => f.id)).toEqual(["TP-1"]);
+    writeSpec(repo, "bindings.yaml", BIND_BINDINGS);
+    // through bind: accepted
+    bindOk(repo, "TP-1", { status: "existing", selector: "rejects old token" });
+    expect(statusErrors()).toEqual([]);
+    // an entry for another row does not count for TP-1, and a broken log none
+    const log = readSpec(repo, "bindings.log");
+    writeSpec(repo, "bindings.log", log.replace('"tp":"TP-1"', '"tp":"TP-2"'));
+    expect(statusErrors().map((f) => f.id)).toEqual(["TP-1"]);
+    writeSpec(repo, "bindings.log", log.replace('"seq":2', '"seq":3'));
+    expect(statusErrors().map((f) => f.id)).toEqual(["TP-1"]);
   });
 
   it("the CLI: exit 0 when written, 2 on a refusal or a usage error", async () => {

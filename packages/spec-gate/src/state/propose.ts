@@ -36,7 +36,8 @@ import {
 } from "../lint/git/resolve.js";
 import { BINDINGS_FILE, SPEC_FILE } from "../lint/load.js";
 import { lintSpecDir } from "../lint/run.js";
-import type { LintReport } from "../lint/types.js";
+import { RULES } from "../lint/registry.js";
+import type { LintReport, RuleDef } from "../lint/types.js";
 import { isRepoPath, readBlobBytes, repoPathOf, specPathIn } from "./git.js";
 import { createFile, replaceFile } from "./write.js";
 
@@ -107,9 +108,14 @@ function onlyStatusChanged(before: Spec, after: Spec): boolean {
   return JSON.stringify(expected) === JSON.stringify(after);
 }
 
+/**
+ * Proposes one spec directory. `rules` is the rule list of the final lint;
+ * it defaults to the registry, and a test passes its own.
+ */
 export function proposeSpecDir(
   specDir: string,
   request: GitRequest | undefined,
+  rules: readonly RuleDef[] = RULES,
 ): ProposeResult {
   const dir = path.resolve(specDir);
   let dirStat: fs.Stats;
@@ -199,7 +205,7 @@ export function proposeSpecDir(
     );
   }
 
-  const lint = lintSpecDir(dir, { final: true, git: request });
+  const lint = lintSpecDir(dir, { final: true, git: request }, rules);
   if (!lint.ok) return refuse(lint.message);
   if (!lint.report.ok) return { kind: "findings", report: lint.report };
 

@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { computeSpecDigest } from "../../src/canonical/index.js";
 import { parseBindingsLog, sha256Tag } from "../../src/formats/index.js";
+import { RULES, type RuleDef } from "../../src/lint/index.js";
 import { proposeSpecDir, withStatusProposed } from "../../src/state/index.js";
 import { REMOTE_MAIN } from "../lint/git-helpers.js";
 import { runCli } from "../lint/helpers.js";
@@ -203,6 +205,72 @@ describe("spec-gate propose", { timeout: 60_000 }, () => {
 
     const usage = await runCli(["propose"]);
     expect(usage.code).toBe(2);
+  });
+
+  it("refuses a spec directory that is a symlink, and a spec.md or bindings.yaml that is not a regular file", async () => {
+    const { repo } = await draftRepo();
+    const link = path.join(repo.dir, "specs", "link");
+    fs.symlinkSync("s1", link);
+    const viaLink = proposeSpecDir(link, gitOf(repo));
+    expect(viaLink).toMatchObject({ kind: "refused" });
+    if (viaLink.kind === "refused")
+      expect(viaLink.message).toMatch(/is a symlink/);
+    fs.rmSync(link);
+    for (const name of ["spec.md", "bindings.yaml"]) {
+      const fresh = await draftRepo();
+      const file = path.join(fresh.repo.spec, name);
+      const text = fs.readFileSync(file, "utf8");
+      fs.writeFileSync(path.join(fresh.repo.dir, "real"), text);
+      fs.rmSync(file);
+      fs.symlinkSync(path.join(fresh.repo.dir, "real"), file);
+      const result = proposeSpecDir(fresh.repo.spec, gitOf(fresh.repo));
+      expect(result, name).toMatchObject({ kind: "refused" });
+      if (result.kind === "refused")
+        expect(result.message).toContain(`${name} must be a regular file`);
+      expect(specExists(fresh.repo, "bindings.log")).toBe(false);
+    }
+  });
+
+  it("refuses when HEAD moves while the final lint runs, and writes nothing", async () => {
+    const { repo } = await draftRepo();
+    const before = snapshot(repo.spec);
+    const mover: RuleDef = {
+      id: "head-mover",
+      level: "warning",
+      profiles: ["light", "full"],
+      gated: false,
+      ackable: true,
+      summary: "moves HEAD",
+      needs: [],
+      check: () => {
+        execFileSync(
+          "git",
+          [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "moved",
+          ],
+          {
+            cwd: repo.dir,
+            env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
+          },
+        );
+        return [];
+      },
+    };
+    const result = proposeSpecDir(repo.spec, gitOf(repo), [...RULES, mover]);
+    expect(result).toMatchObject({ kind: "refused" });
+    if (result.kind === "refused")
+      expect(result.message).toMatch(/HEAD moved while the lint ran/);
+    expect(snapshot(repo.spec)).toEqual(before);
   });
 
   it("after propose and a commit, the lint with git inputs passes", async () => {

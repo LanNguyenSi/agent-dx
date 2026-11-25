@@ -126,8 +126,8 @@ refusal. The two state verbs follow the same convention:
 |---|---|---|---|
 | `lint` | no error finding | findings | usage error, not a spec directory, unexpected exception |
 | `lint-ack` | entry written | never | usage error, any refusal, unexpected exception |
-| `propose` | `status: proposed` and `bindings.log` written | the final lint has an error finding (its report on stdout, nothing written) | usage error, any refusal (nothing written), unexpected exception |
-| `bind` | entry appended and `bindings.yaml` written | never | usage error, any refusal (nothing written), unexpected exception |
+| `propose` | `status: proposed` and `bindings.log` written | the final lint has an error finding (its report on stdout, nothing written) | usage error, any refusal (nothing written, except when the second write fails after the first: then `spec.md` is already proposed, see below), unexpected exception |
+| `bind` | entry appended and `bindings.yaml` written | never | usage error, any refusal (nothing written, except when the second write fails after the first: then `bindings.log` already holds the entry, see below), unexpected exception |
 
 A refusal is one line on stderr and nothing on stdout. `digest`, `triage` and
 `intake file` keep their own exit codes.
@@ -150,7 +150,8 @@ the digest stays the same) and creates `bindings.log` with the propose entry
 for the commit at `HEAD`; it prints `proposed <id> at <commit>`. Commit both
 files next. `spec.md` is written first and `bindings.log` second: a run
 stopped between the two leaves a proposed spec without a log, which
-`bindings-log` reports.
+`bindings-log` reports. To recover, restore `spec.md` from `HEAD` (for example
+`git checkout -- <spec-dir>/spec.md`) and run `propose` again.
 
 `spec-gate bind <spec-dir> <tp-id> --status <new|existing>` is the one way a
 binding changes after `proposed`. It refuses, writing nothing, unless the
@@ -169,6 +170,7 @@ first: a run stopped between the two leaves a log one entry ahead of
 `bindings.yaml`, which `bindings-log` reports as a replay mismatch, and
 running the same bind again repairs it. `bind` reads no git; the lint checks
 the log against the propose commit.
+
 ## Git inputs
 
 The reference-state rules compare what a spec names (`base_commit`,
@@ -371,7 +373,7 @@ that they exist; the rules that need git are covered as described under
 | `df-coverage` | error | full | no | no | Every DF with affects_behavior true is covered by at least one test-plan row. |
 | `tp-covers-unknown` | error | full | no | no | Every ID in a test-plan row's covers is an AC, DF or NG ID of spec.md. |
 | `binding-unknown` | error | full | no | no | Every key of bindings.yaml is a test-plan row ID; the file may be absent. |
-| `binding-status` | error | full | yes | no | At proposed every binding has the status its row's kind requires, a kind needing one has one, and kind manual has none. |
+| `binding-status` | error | full | yes | no | At proposed every binding has the status its row's kind requires, a kind needing one has one, and kind manual has none; a red-first row may be existing once bindings.log holds a bind entry for it. |
 | `ledger-complete` | error | full | no | no | The ledger's source line IDs are exactly the IDs in the lines of source/meta.json; a missing source/meta.json is one error, not a skip. |
 | `ledger-target-unknown` | error | full | no | no | Every target ID of a source-ledger entry is a live ID of spec.md. |
 | `ac-source-unknown` | error | full | no | no | Every SL ID in an AC's source is the ID of a source-ledger entry. |
@@ -388,7 +390,7 @@ that they exist; the rules that need git are covered as described under
 | `commands-ref-not-ancestor` | error | light, full | no | no | The frontmatter commands_ref is the full id of a commit in the repository and an ancestor of the reference commit, checked like base_commit. |
 | `spec-changes-config` | error | light, full | no | no | No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count. |
 | `static-command-unknown` | error | light, full | no | no | Every static test-plan row's check_command_ref names a command of .spec-gate/commands.yaml at commands_ref; a missing or invalid command set there is an error, and the set is not read at a commands_ref that failed its ancestry check. |
-| `bindings-log` | error | light, full | yes | no | At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; and the log extends the log at the diff base, if one is there. |
+| `bindings-log` | error | light, full | yes | no | At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; every log the diff base holds for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory. |
 <!-- END generated: rules -->
 
 The form rules:
@@ -414,7 +416,11 @@ nothing then. `binding-status` (gated): for each row, the
 `bindingStatusAtProposed` of its kind says what the binding must look like:
 `new` and `existing` demand a `bindings.yaml` entry with exactly that
 status (a missing entry is an error of its own), `none` (kind manual)
-allows no entry at all, and `any` is unchecked.
+allows no entry at all, and `any` is unchecked. One exception: a row whose
+kind needs `new` (red-first) may have status `existing` once
+`spec-gate bind` moved it there, that is when `bindings.log` in the spec
+directory parses and holds a bind entry for that TP ID. Whether the log is
+authentic is checked by `bindings-log`.
 
 Ledger. `ledger-complete`: the `sourceLine` IDs of the ledger equal the IDs
 of `lines[]` in `source/meta.json`, one error per meta line that no ledger
@@ -534,8 +540,13 @@ at `draft` (so the final lint `propose` runs can pass) and one error with code
   tree: missing there (`propose-bindings-missing`), its raw bytes not hashing
   to the propose entry (`propose-hash-mismatch`), or not parsing
   (`propose-bindings-invalid`);
+- a propose commit at which `spec.md` was not a draft (`propose-not-draft`) or
+  `bindings.log` already existed (`propose-log-present`): a propose entry that
+  names a later commit would re-anchor the bindings there;
 - a bind entry for a TP ID that `bindings.yaml` did not have at the propose
-  commit (`bind-unknown-id`, at the entry's line);
+  commit (`bind-unknown-id`, at the entry's line), and one whose status breaks
+  the rule of its row's kind given the status before it, the rule `bind`
+  applies (`bind-kind`, at the entry's line);
 - a replay that differs from `bindings.yaml` in the spec directory, compared as
   parsed bindings: one error per TP ID that differs or only one side has
   (`replay-mismatch`, file `bindings.yaml`), so a hand edit after `proposed`
@@ -544,10 +555,21 @@ at `draft` (so the final lint `propose` runs can pass) and one error with code
   log in the spec directory does not extend byte for byte (`log-rewritten`): a
   merged entry is never changed, removed or reordered, even with a recomputed
   chain; a log at the diff base that is gone from the spec directory is
-  `log-removed`, at `proposed` and under `--final` alike.
+  `log-removed`, at `proposed` and under `--final` alike. The diff base is
+  searched by the spec's identity, not only its path: every directory whose
+  `spec.md` there carries the same frontmatter `id` counts, so a renamed or
+  copied spec directory does not start a fresh log;
+- a directory that held this spec at the diff base with a `bindings.log` or a
+  status other than `draft`, and that no longer holds a `spec.md` at `HEAD`
+  (`spec-moved`): a proposed spec keeps its directory.
 
 A git read that cannot run is an error with its code, as for the
 reference-state rules.
+
+Limitation: after a squash or rebase merge the propose commit is not an
+ancestor of the default branch, so on the default branch and in later pull
+requests the rule reports `propose-not-ancestor` for such a spec. Re-anchoring
+the log after such a merge is not supported yet.
 
 Triage. `triage-stale`: a `triage.json` that stores a `class` must store
 the very class its own fields derive and the current `rule_version`; one

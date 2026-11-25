@@ -160,7 +160,10 @@ describe("the bindings-log rule", { timeout: 60_000 }, () => {
     const before = await repo.sh("rev-parse", `${draft}~1`);
     writeSpec(repo, "bindings.log", forgedLog(before, sha256Tag("x")));
     await commitSpec(repo, "commit without the spec");
-    expect(codesOf(lintGit(repo))).toEqual(["propose-bindings-missing"]);
+    expect(codesOf(lintGit(repo))).toEqual([
+      "propose-bindings-missing",
+      "propose-not-draft",
+    ]);
   });
 
   it("a bind entry for a TP ID that bindings.yaml did not have at the propose commit", async () => {
@@ -220,7 +223,144 @@ describe("the bindings-log rule", { timeout: 60_000 }, () => {
     await repo.checkout("next", merged);
     bindOk(repo, "TP-1", { status: "existing", selector: "now it exists" });
     await commitSpec(repo, "append");
-    expect(codesOf(lintGit(repo))).toEqual([]);
+    // every error of the report, not only this rule's: binding-status takes
+    // the red-first row at existing because the log holds its bind entry
+    expect(lintGit(repo).errors).toEqual([]);
+  });
+
+  it("a spec directory renamed after its log was merged, with a forged fresh log, fails", async () => {
+    const { repo } = await proposedRepo();
+    bindOk(repo, "TP-1", { status: "new", selector: "merged name" });
+    const merged = await commitSpec(repo, "bind");
+    await repo.setRef(REMOTE_MAIN, merged);
+    await repo.checkout("rename", merged);
+    await repo.sh("mv", "specs/s1", "specs/s2");
+    const moved = path.join(repo.dir, "specs", "s2");
+    const edited = BIND_BINDINGS.replace("rejects old token", "anything");
+    fs.writeFileSync(path.join(moved, "bindings.yaml"), edited);
+    fs.rmSync(path.join(moved, "bindings.log"));
+    const c1 = await commitSpec(repo, "rename and edit");
+    fs.writeFileSync(
+      path.join(moved, "bindings.log"),
+      forgedLog(c1, sha256Tag(edited)),
+    );
+    await commitSpec(repo, "fresh log");
+    for (const final of [false, true]) {
+      const result = lintSpecDir(moved, {
+        final,
+        git: { repo: repo.dir, defaultRef: REMOTE_MAIN },
+      });
+      if (!result.ok) throw new Error(result.message);
+      const codes = ofLogRule(result.report).map((f) => f.code);
+      expect(codes, `final ${final}`).toContain("spec-moved");
+      expect(codes, `final ${final}`).toContain("log-rewritten");
+    }
+  });
+
+  it("a bind entry that breaks its row's kind rule: stays-green to new, red-first back from existing to new", async () => {
+    const { repo, draft } = await proposedRepo();
+    const tp1 = {
+      selector: "rejects old token",
+      file: "test/auth.test.ts",
+      fixtures: [],
+    };
+    const tp2: Binding = {
+      status: "new",
+      selector: "login works",
+      fixtures: [],
+    };
+    writeSpec(
+      repo,
+      "bindings.log",
+      forgedLog(draft, sha256Tag(BIND_BINDINGS), [
+        ["TP-2", tp2],
+        ["TP-1", { status: "existing", ...tp1 }],
+        ["TP-1", { status: "new", ...tp1 }],
+      ]),
+    );
+    writeSpec(
+      repo,
+      "bindings.yaml",
+      BIND_BINDINGS.replace(
+        "TP-2:\n  status: existing",
+        "TP-2:\n  status: new",
+      ),
+    );
+    await commitSpec(repo, "forged kind changes");
+    expect(ofLogRule(lintGit(repo)).map((f) => [f.code, f.line])).toEqual([
+      ["bind-kind", 2],
+      ["bind-kind", 4],
+    ]);
+  });
+
+  it("a propose entry that names a commit where the spec was no longer a draft or already had a log", async () => {
+    const { repo, proposed } = await proposedRepo();
+    writeSpec(
+      repo,
+      "bindings.log",
+      forgedLog(proposed, sha256Tag(BIND_BINDINGS)),
+    );
+    await commitSpec(repo, "re-anchor");
+    expect(codesOf(lintGit(repo))).toEqual([
+      "propose-log-present",
+      "propose-not-draft",
+    ]);
+  });
+
+  it("a log that is not a regular file at proposed is an error", async () => {
+    const { repo } = await proposedRepo();
+    fs.rmSync(path.join(repo.spec, "bindings.log"));
+    fs.mkdirSync(path.join(repo.spec, "bindings.log"));
+    expect(codesOf(lintGit(repo))).toEqual(["input-not-regular"]);
+  });
+
+  it("bindings.yaml that does not parse at the propose commit", async () => {
+    const { repo } = await draftRepo();
+    const broken = "- not a mapping\n";
+    writeSpec(repo, "bindings.yaml", broken);
+    const anchor = await commitSpec(repo, "broken bindings");
+    writeSpec(repo, "bindings.yaml", BIND_BINDINGS);
+    writeSpec(
+      repo,
+      "spec.md",
+      readSpec(repo, "spec.md").replace("status: draft", "status: proposed"),
+    );
+    writeSpec(repo, "bindings.log", forgedLog(anchor, sha256Tag(broken)));
+    await commitSpec(repo, "proposed on a broken file");
+    expect(codesOf(lintGit(repo))).toEqual(["propose-bindings-invalid"]);
+  });
+
+  it("bindings.yaml deleted after propose is a replay mismatch", async () => {
+    const { repo } = await proposedRepo();
+    fs.rmSync(path.join(repo.spec, "bindings.yaml"));
+    await commitSpec(repo, "delete bindings");
+    expect(ofLogRule(lintGit(repo))).toEqual([
+      expect.objectContaining({
+        file: "bindings.yaml",
+        path: "$",
+        code: "replay-mismatch",
+      }),
+    ]);
+  });
+
+  it("a git read that cannot run is a finding with its code, not an exception", async () => {
+    const { repo, draft } = await proposedRepo();
+    // A directory name the git reads refuse: the files are written by hand,
+    // as propose refuses such a path.
+    const odd = path.join(repo.dir, "specs", "s 1");
+    fs.cpSync(repo.spec, odd, { recursive: true });
+    fs.writeFileSync(
+      path.join(odd, "bindings.log"),
+      forgedLog(draft, sha256Tag(BIND_BINDINGS)),
+    );
+    await commitSpec(repo, "odd path");
+    const result = lintSpecDir(odd, {
+      git: { repo: repo.dir, defaultRef: REMOTE_MAIN },
+    });
+    if (!result.ok) throw new Error(result.message);
+    expect(ofLogRule(result.report).map((f) => f.code)).toEqual([
+      "path-invalid",
+    ]);
   });
 
   it("without git inputs the rule is skipped (no-git), and under --final that is a rule-skipped error", async () => {
