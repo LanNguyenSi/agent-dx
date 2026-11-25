@@ -29,7 +29,7 @@ Try one of the published CLIs directly:
 
 ```bash
 npx orchestrator-workflow@0.53.0 init
-npx okf-kit@0.22.0 check path/to/bundle
+npx okf-kit@0.23.0 check path/to/bundle
 ```
 
 Both pins are the current releases at the time of writing; each package's changelog or `npm view <package> version` shows newer ones.
