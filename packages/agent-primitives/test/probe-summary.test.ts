@@ -2347,10 +2347,13 @@ describe(
       expect(result.warnings[result.warnings.length - 1]).toBe(refusal);
     });
 
-    it("plan form with no mutants: the note is the plan_empty refusal, not the manifest warning", async () => {
+    it("plan form with no mutants: the note is the plan_empty refusal (parse path), not the manifest warning", async () => {
       // The one refused-plan shape whose summary names no mutant: the
-      // totals line reads `total=0`, so the note line exists and the
-      // CLI's plan-form carry is what puts the refusal in it.
+      // totals line reads `total=0`, so the note line exists. The
+      // message comes from plan parsing (the parsed usage-error path),
+      // where it is the only warning; the plan-form carry into the
+      // summary input is equivalent here and is pinned on the library
+      // result instead.
       const { base, wt, logs } = makeManifestLinkRepo();
       const plan = path.join(base, "plan-empty.json");
       fs.writeFileSync(plan, JSON.stringify({ test: "true", mutants: [] }));
@@ -2807,7 +2810,9 @@ describe("probe/probePlan refusal carry (table)", { timeout: 60000 }, () => {
         makeLockDir(0o700);
         const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"])
           .pid as number;
-        const target = path.resolve(repo, "fixture.js");
+        // setup looks the marker up under the resolved path; macOS
+        // os.tmpdir() sits behind the /var -> /private/var symlink.
+        const target = fs.realpathSync(path.resolve(repo, "fixture.js"));
         writeMarker(target, {
           targetPath: target,
           backupPath: path.join(repo, "fixture.js.ap-backup"),
