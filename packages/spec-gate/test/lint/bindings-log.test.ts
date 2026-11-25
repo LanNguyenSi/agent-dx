@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -361,6 +362,90 @@ describe("the bindings-log rule", { timeout: 60_000 }, () => {
     expect(ofLogRule(result.report).map((f) => f.code)).toEqual([
       "path-invalid",
     ]);
+  });
+
+  it("a proposed spec without a log that the pull request moves is spec-moved", async () => {
+    const { repo } = await draftRepo();
+    writeSpec(
+      repo,
+      "spec.md",
+      readSpec(repo, "spec.md").replace("status: draft", "status: proposed"),
+    );
+    const merged = await commitSpec(repo, "proposed without a log");
+    await repo.setRef(REMOTE_MAIN, merged);
+    await repo.checkout("move", merged);
+    await repo.sh("mv", "specs/s1", "specs/s2");
+    await commitSpec(repo, "move");
+    const result = lintSpecDir(path.join(repo.dir, "specs", "s2"), {
+      git: { repo: repo.dir, defaultRef: REMOTE_MAIN },
+    });
+    if (!result.ok) throw new Error(result.message);
+    expect(ofLogRule(result.report).map((f) => f.code)).toContain("spec-moved");
+  });
+
+  it("a merged log that is not UTF-8 is never extended", async () => {
+    const { repo } = await proposedRepo();
+    const good = readSpec(repo, "bindings.log");
+    fs.writeFileSync(
+      path.join(repo.spec, "bindings.log"),
+      Buffer.concat([Buffer.from(good), Buffer.from([0xff, 0x0a])]),
+    );
+    const merged = await commitSpec(repo, "broken bytes");
+    await repo.setRef(REMOTE_MAIN, merged);
+    await repo.checkout("later", merged);
+    writeSpec(repo, "bindings.log", good);
+    await commitSpec(repo, "valid again");
+    expect(codesOf(lintGit(repo))).toContain("log-rewritten");
+  });
+
+  it("a symlinked spec.md at the diff base, outside or inside specs/, does not fail the lint", async () => {
+    const { repo } = await proposedRepo();
+    const merged = await repo.commit(
+      {
+        "docs/spec.md": { linkTo: "../README.md" },
+        "specs/other/spec.md": { linkTo: "../../README.md" },
+      },
+      "links named spec.md",
+    );
+    await repo.setRef(REMOTE_MAIN, merged);
+    expect(codesOf(lintGit(repo))).toEqual([]);
+  });
+
+  it("a large tree outside specs/ at the diff base does not fail the lint", async () => {
+    const { repo } = await proposedRepo();
+    // One blob under 45000 long names: a whole-tree listing of this commit
+    // is far over the 4 MiB git output cap, built without a work tree.
+    const blob = await repo.sh("rev-parse", "HEAD:README.md");
+    const pad = "x".repeat(90);
+    const entries = Array.from(
+      { length: 45_000 },
+      (_, i) => `100644 blob ${blob}\t${pad}${String(i).padStart(6, "0")}\n`,
+    ).join("");
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@example.com",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@example.com",
+    };
+    const run = (args: string[], input?: string) =>
+      execFileSync("git", args, {
+        cwd: repo.dir,
+        env,
+        input,
+        maxBuffer: 1 << 28,
+      })
+        .toString()
+        .trim();
+    const big = run(["mktree"], entries);
+    const top = `${run(["ls-tree", "HEAD"])}\n040000 tree ${big}\tbig\n`;
+    const tree = run(["mktree"], top);
+    const head = run(["commit-tree", tree, "-p", "HEAD", "-m", "big"]);
+    // HEAD and the reference move there, so it is the diff base; the work
+    // tree keeps the spec directory as it is.
+    await repo.sh("update-ref", "HEAD", head);
+    await repo.setRef(REMOTE_MAIN, head);
+    expect(codesOf(lintGit(repo))).toEqual([]);
   });
 
   it("without git inputs the rule is skipped (no-git), and under --final that is a rule-skipped error", async () => {

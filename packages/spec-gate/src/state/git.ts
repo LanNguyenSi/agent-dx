@@ -120,24 +120,38 @@ export function readBlobBytes(
 }
 
 /**
- * The repository paths of every file in the tree of `commit`, from the
- * object database; a path that the git reads would not accept is left out.
+ * The directories below `scopes` (repository paths, `""` for the top level
+ * alone) that hold a regular file named `name` in the tree of `commit`, read
+ * from the object database. `ls-tree` is narrowed to the scopes, so the
+ * listing stays small whatever else the repository holds; an entry that is a
+ * link, a submodule or a directory, or whose path the git reads would not
+ * accept, is left out.
  */
-export function listPaths(repo: string, commit: string): string[] {
+export function dirsHolding(
+  repo: string,
+  commit: string,
+  scopes: readonly string[],
+  name: string,
+): string[] {
   if (!COMMIT_RE.test(commit)) {
     throw new LintGitError(
       "not-a-commit",
       "a value is not a full commit id (40 or 64 lower-case hex digits)",
     );
   }
+  const specs = [...new Set(scopes)]
+    .filter((scope) => scope === "" || isRepoPath(scope))
+    .map((scope) => (scope === "" ? name : `${scope}/`));
+  if (specs.length === 0) return [];
   const run = runGit(repo, [
     "ls-tree",
     "-r",
     "-z",
-    "--name-only",
     "--full-tree",
     "--end-of-options",
     commit,
+    "--",
+    ...specs,
   ]);
   if (run.status !== 0) {
     throw new LintGitError(
@@ -145,10 +159,15 @@ export function listPaths(repo: string, commit: string): string[] {
       "the tree of a commit could not be read",
     );
   }
-  return run.stdout
-    .toString("utf8")
-    .split("\0")
-    .filter((p) => p !== "" && isRepoPath(p));
+  const dirs = new Set<string>();
+  for (const entry of run.stdout.toString("utf8").split("\0")) {
+    const m = /^([0-7]{6}) [a-z]+ [0-9a-f]+\t(.+)$/s.exec(entry);
+    if (m === null || !FILE_MODES.has(m[1]!) || !isRepoPath(m[2]!)) continue;
+    const p = m[2]!;
+    if (p === name) dirs.add("");
+    else if (p.endsWith(`/${name}`)) dirs.add(p.slice(0, -name.length - 1));
+  }
+  return [...dirs].sort();
 }
 
 /** Decodes bytes as UTF-8, fatally; `null` for bytes that are not UTF-8. */

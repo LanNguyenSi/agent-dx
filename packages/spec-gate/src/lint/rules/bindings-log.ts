@@ -30,7 +30,7 @@ import {
 import { bindStatusProblem } from "../../state/bind.js";
 import {
   decodeUtf8,
-  listPaths,
+  dirsHolding,
   readBlobBytes,
   repoPathOf,
   specPathIn,
@@ -79,20 +79,38 @@ function statusAt(
   };
 }
 
+/** Where specs live: `specs/<id>/` (see the layout in docs/formats.md). */
+const SPECS_DIR = "specs";
+
+/** The parent directory of a repository path, `""` for a top-level one. */
+function parentOf(p: string): string {
+  const at = p.lastIndexOf("/");
+  return at < 0 ? "" : p.slice(0, at);
+}
+
 /**
  * Every spec directory at the diff base whose `spec.md` carries the id `id`,
  * the current path included when it holds one: the log of a spec is found by
  * the spec's identity, so a directory that was renamed (or copied) after its
- * log was merged does not start a fresh history.
+ * log was merged does not start a fresh history. The search covers the
+ * documented layout, `specs/`, and the parent of the spec directory when it
+ * lies outside it; only a regular `spec.md` that parses counts.
  */
-function kinAtDiffBase(repo: string, diffBase: string, id: string): Kin[] {
-  const dirs = new Set<string>();
-  for (const p of listPaths(repo, diffBase)) {
-    if (p === SPEC) dirs.add("");
-    else if (p.endsWith(`/${SPEC}`)) dirs.add(p.slice(0, -SPEC.length - 1));
+function kinAtDiffBase(
+  repo: string,
+  diffBase: string,
+  id: string,
+  specPath: string,
+): Kin[] {
+  const scopes = [SPECS_DIR];
+  if (specPath !== SPECS_DIR && !specPath.startsWith(`${SPECS_DIR}/`)) {
+    // A top-level parent is not listed whole: the spec directory itself and
+    // a top-level spec.md stand for it.
+    const parent = specPath === "" ? "" : parentOf(specPath);
+    scopes.push(...(parent === "" ? ["", specPath] : [parent]));
   }
   const kin: Kin[] = [];
-  for (const dir of [...dirs].sort()) {
+  for (const dir of dirsHolding(repo, diffBase, scopes, SPEC)) {
     const at = statusAt(repo, diffBase, dir);
     if (at === null || at.id !== id) continue;
     kin.push({
@@ -116,7 +134,7 @@ function checkHistory(
   headLog: string | null,
 ): RuleFinding[] {
   const found: RuleFinding[] = [];
-  for (const kin of kinAtDiffBase(git.repo, git.diffBase, id)) {
+  for (const kin of kinAtDiffBase(git.repo, git.diffBase, id, specPath)) {
     if (
       kin.path !== specPath &&
       (kin.log !== null || kin.status !== "draft") &&

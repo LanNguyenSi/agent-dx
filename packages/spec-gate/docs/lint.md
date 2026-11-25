@@ -558,7 +558,11 @@ at `draft` (so the final lint `propose` runs can pass) and one error with code
   `log-removed`, at `proposed` and under `--final` alike. The diff base is
   searched by the spec's identity, not only its path: every directory whose
   `spec.md` there carries the same frontmatter `id` counts, so a renamed or
-  copied spec directory does not start a fresh log;
+  copied spec directory does not start a fresh log. The search covers the
+  documented layout, `specs/`, and the parent of the spec directory when it
+  lies outside it (for a spec directory at the top level, that directory and a
+  top-level `spec.md`); only a regular `spec.md` that parses counts, so a link
+  or an unrelated file elsewhere in the repository never fails the run;
 - a directory that held this spec at the diff base with a `bindings.log` or a
   status other than `draft`, and that no longer holds a `spec.md` at `HEAD`
   (`spec-moved`): a proposed spec keeps its directory.
