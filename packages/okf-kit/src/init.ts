@@ -65,13 +65,14 @@ export function runInit(
 
   // Nothing below is written until every check has passed. The walk refuses a
   // symbolic link at the target or any component below the walk root (the
-  // working directory when the target lies under it, the target otherwise),
-  // and at every scaffold file; see docs/init.md.
+  // nearest .git ancestor, else the working directory when the target lies
+  // under it, else the target's parent), and at every scaffold file; see
+  // docs/init.md.
   const walkRoot = findWalkRoot(
     resolvedDir,
     path.resolve(options.cwd ?? process.cwd()),
   );
-  assertNoSymlinkBelow(walkRoot, resolvedDir);
+  assertNoSymlinkBelow(walkRoot, resolvedDir, true);
 
   if (fs.existsSync(resolvedDir)) {
     if (!fs.statSync(resolvedDir).isDirectory()) {

@@ -71,18 +71,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   symbolic link. A repository can ship a link such as `docs -> ~/somewhere`
   or `docs/okf/index.md -> ~/.zshrc` (git keeps symlinks), and the scaffold
   followed it to a path outside the repository. Before the first write,
-  `init` now walks the target path with `lstat` and refuses (exit `2`,
-  nothing written) when the target, a directory between the walk root and
-  the target, or any of the eight scaffold files is a link, a dangling link
-  included. The walk root is the working directory when the target lies
-  under it, so a link such as `docs` above `docs/okf` is caught, and the
-  target itself otherwise; links the user placed above that root are
-  accepted. An existing scaffold file that is not a regular file (a
-  directory, FIFO or socket) is refused too, all eight are checked before
-  any is written so a refusal leaves no partial scaffold, missing
-  directories are created one level at a time, and files are opened with
-  `O_NOFOLLOW` (`O_EXCL` without `--force`) so a link planted after the
-  check fails instead of being followed. Scaffold bytes are unchanged.
+  `init` now checks with `lstat` and refuses (exit `2`, nothing written)
+  when the target directory, a component between the walk root and the
+  target, or any of the eight scaffold files is a link, a dangling link
+  included; a target that is itself a link is refused (pass its real path).
+  The walk root is the nearest ancestor of the target holding a `.git`
+  entry, whatever the working directory is, so a relative target from a
+  subdirectory and an absolute target from outside the clone are walked the
+  same way; without one it is the working directory when the target lies
+  under it, else the target's parent. The root and everything above it are
+  trusted, and a link is never taken as the root. An existing scaffold file
+  that is a directory, FIFO or socket, or a regular file with more than one
+  hard link, is refused too; all eight are checked before any is written, so
+  a refusal leaves no partial scaffold. Missing directories are created one
+  level at a time and files are opened with `O_NOFOLLOW` (`O_EXCL` without
+  `--force`), so a link planted at a scaffold name after the check fails the
+  open. A link planted in a parent directory, or a hard link created,
+  between the check and the write is not covered, and on Windows only the
+  `lstat` checks apply. Scaffold bytes are unchanged.
 
 ## [0.22.0] - 2026-11-17
 

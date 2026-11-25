@@ -41,31 +41,57 @@ function sameEntry(a: string, b: string): boolean {
   }
 }
 
+function isRealDirectory(p: string): boolean {
+  return lstatOrUndefined(p)?.isDirectory() === true;
+}
+
+function hasGitEntry(dir: string): boolean {
+  return lstatOrUndefined(path.join(dir, ".git")) !== undefined;
+}
+
 /**
- * The directory the symlink walk starts from. When the target lies under
- * `cwd`, that is `cwd` itself: every component from there down to the target
- * is checked. The match is by identity (device and inode) of an ancestor of
- * the target, not by string prefix, so a differently spelled or differently
- * cased path to the same directory (an absolute path through an alias, a
- * case-insensitive volume) still counts as under `cwd`. A target outside
- * `cwd` is its own root: its directory and everything below it is checked,
- * the user's own links above it are accepted. The root itself is never
- * examined.
+ * The directory the symlink walk starts from; it and everything above it is
+ * trusted, everything below it down to the target is checked. In order:
+ *
+ * 1. The nearest ancestor of the target (the target itself included) that
+ *    holds a `.git` entry, file or directory. When one exists it is always
+ *    used, whatever `cwd` is, so a deeper working directory cannot shorten
+ *    the walk.
+ * 2. Otherwise `cwd`, when the target lies under it. The match is by identity
+ *    (device and inode) of an ancestor of the target, so a differently cased
+ *    spelling on a case-insensitive volume still matches.
+ * 3. Otherwise the target's parent directory, so the target itself is checked.
+ *
+ * A candidate for 1 or 2 must itself be a real directory (`lstat`), never a
+ * link, so `docs -> .` is walked and refused, not taken as the root.
  */
 export function findWalkRoot(resolvedTarget: string, cwd: string): string {
-  let current = resolvedTarget;
-  for (;;) {
-    if (current === cwd || sameEntry(current, cwd)) return current;
+  const ancestors: string[] = [];
+  for (let current = resolvedTarget; ;) {
+    ancestors.push(current);
     const parent = path.dirname(current);
-    if (parent === current) return resolvedTarget;
+    if (parent === current) break;
     current = parent;
   }
+  for (const candidate of ancestors) {
+    if (isRealDirectory(candidate) && hasGitEntry(candidate)) return candidate;
+  }
+  for (const candidate of ancestors) {
+    if (
+      isRealDirectory(candidate) &&
+      (candidate === cwd || sameEntry(candidate, cwd))
+    ) {
+      return candidate;
+    }
+  }
+  return path.dirname(resolvedTarget);
 }
 
 function refuseLink(
   linkPath: string,
   requestedPath: string,
   ruleRoot: string,
+  targetIsDirectory: boolean,
 ): never {
   let pointsTo = "";
   try {
@@ -75,9 +101,13 @@ function refuseLink(
   }
   const via =
     linkPath === requestedPath ? "" : `, and ${requestedPath} lies below it`;
+  const hint =
+    targetIsDirectory && linkPath === requestedPath
+      ? " The target directory itself is a link; pass its real path instead."
+      : "";
   throw new UsageError(
     `Refusing to write through the symbolic link ${linkPath}${pointsTo}${via}. ` +
-      `okf-kit init never creates, truncates or writes a file through a symlink below ${ruleRoot}; nothing was written. ` +
+      `okf-kit init never creates, truncates or writes a file through a symlink below ${ruleRoot}; nothing was written.${hint} ` +
       "Replace the link with a regular file or directory, or remove it, and run the command again.",
   );
 }
@@ -87,7 +117,11 @@ function refuseLink(
  * `target`, is a symbolic link (a dangling link included). Components that do
  * not exist yet end the walk: nothing below a missing component can be a link.
  */
-export function assertNoSymlinkBelow(root: string, target: string): void {
+export function assertNoSymlinkBelow(
+  root: string,
+  target: string,
+  targetIsDirectory = false,
+): void {
   const rel = path.relative(root, target);
   if (rel === "") return;
   if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
@@ -98,7 +132,9 @@ export function assertNoSymlinkBelow(root: string, target: string): void {
     current = path.join(current, part);
     const stat = lstatOrUndefined(current);
     if (stat === undefined) return;
-    if (stat.isSymbolicLink()) refuseLink(current, target, root);
+    if (stat.isSymbolicLink()) {
+      refuseLink(current, target, root, targetIsDirectory);
+    }
   }
 }
 
@@ -109,7 +145,16 @@ export function assertNoSymlinkBelow(root: string, target: string): void {
  */
 export function assertRegularOrMissing(file: string): void {
   const stat = lstatOrUndefined(file);
-  if (stat === undefined || stat.isFile()) return;
+  if (stat === undefined) return;
+  if (stat.isFile()) {
+    if (stat.nlink > 1) {
+      throw new UsageError(
+        `Refusing to write ${file}: it is a regular file with ${stat.nlink} hard links, so writing it would also change the other names. Nothing was written. ` +
+          "Remove it and run the command again.",
+      );
+    }
+    return;
+  }
   const kind = stat.isDirectory()
     ? "a directory"
     : stat.isFIFO()

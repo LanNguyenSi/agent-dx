@@ -1,7 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { UsageError } from "../src/errors.js";
 import { runInit } from "../src/init.js";
@@ -150,21 +151,6 @@ describe("init never writes through a symbolic link", () => {
     expect(listing(outside)).toEqual([]);
   });
 
-  it("refuses a link above the target when the working directory is spelled through an alias", () => {
-    const alias = path.join(base, "alias");
-    fs.symlinkSync(repo, alias);
-    fs.symlinkSync(outside, path.join(repo, "docs"));
-
-    // The target is spelled through the alias; the working directory is the
-    // real path. The walk still starts at the working directory.
-    const error = refusal(() =>
-      runInit(path.join(alias, "docs", "okf"), { cwd: repo }),
-    );
-
-    expect(error.message).toMatch(NOTHING_WRITTEN);
-    expect(listing(outside)).toEqual([]);
-  });
-
   it("does not let a `..` in the target argument hide a link", () => {
     fs.symlinkSync(outside, path.join(repo, "docs"));
 
@@ -278,6 +264,245 @@ describe("init never writes through a symbolic link", () => {
     );
   });
 
+  describe("walk root beyond the working directory", () => {
+    function makeClone(): { sub: string } {
+      fs.mkdirSync(path.join(repo, ".git"));
+      const sub = path.join(repo, "packages", "x");
+      fs.mkdirSync(sub, { recursive: true });
+      return { sub };
+    }
+
+    it("refuses ../../docs/okf from a subdirectory when docs/okf is a link", () => {
+      const { sub } = makeClone();
+      fs.mkdirSync(path.join(repo, "docs"));
+      fs.symlinkSync(outside, path.join(repo, "docs", "okf"));
+
+      const result = runCli(
+        ["init", path.join("..", "..", "docs", "okf")],
+        sub,
+      );
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain(path.join(repo, "docs", "okf"));
+      expect(result.stderr).toMatch(/real path/);
+      expect(result.stderr).toMatch(NOTHING_WRITTEN);
+      expect(listing(outside)).toEqual([]);
+    });
+
+    it("refuses ../../docs/okf from a subdirectory when docs is a link", () => {
+      const { sub } = makeClone();
+      fs.symlinkSync(outside, path.join(repo, "docs"));
+
+      const result = runCli(
+        ["init", path.join("..", "..", "docs", "okf")],
+        sub,
+      );
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain(path.join(repo, "docs"));
+      expect(listing(outside)).toEqual([]);
+    });
+
+    it.each(["docs-okf", "docs"])(
+      "refuses an absolute target inside the clone from a working directory outside it (%s is the link)",
+      (linked) => {
+        makeClone();
+        if (linked === "docs") {
+          fs.symlinkSync(outside, path.join(repo, "docs"));
+        } else {
+          fs.mkdirSync(path.join(repo, "docs"));
+          fs.symlinkSync(outside, path.join(repo, "docs", "okf"));
+        }
+        const elsewhere = path.join(base, "elsewhere");
+        fs.mkdirSync(elsewhere);
+
+        const result = runCli(
+          ["init", path.join(repo, "docs", "okf"), "--force"],
+          elsewhere,
+        );
+
+        expect(result.status).toBe(2);
+        expect(result.stderr).toMatch(NOTHING_WRITTEN);
+        expect(listing(outside)).toEqual([]);
+      },
+    );
+
+    it("matches the working directory by identity when it is spelled differently from the target", () => {
+      const spelledAsAlias = path.join(base, "alias");
+      fs.symlinkSync(repo, spelledAsAlias);
+      fs.symlinkSync(outside, path.join(repo, "docs"));
+
+      const error = refusal(() =>
+        runInit(path.join(repo, "docs", "okf"), { cwd: spelledAsAlias }),
+      );
+
+      expect(error.message).toContain(path.join(repo, "docs"));
+      expect(listing(outside)).toEqual([]);
+    });
+
+    it("scaffolds ../../docs/okf from a subdirectory when nothing is linked", () => {
+      const { sub } = makeClone();
+
+      const result = runCli(
+        ["init", path.join("..", "..", "docs", "okf")],
+        sub,
+      );
+
+      expect(result.status).toBe(0);
+      expect(fs.existsSync(path.join(repo, "docs", "okf", "index.md"))).toBe(
+        true,
+      );
+    });
+
+    it("refuses a target that is itself a link when it lies outside any repository, and says to pass the real path", () => {
+      const linkedTarget = path.join(base, "linked-target");
+      fs.symlinkSync(outside, linkedTarget);
+      const elsewhere = path.join(base, "elsewhere");
+      fs.mkdirSync(elsewhere);
+
+      const error = refusal(() => runInit(linkedTarget, { cwd: elsewhere }));
+
+      expect(error.message).toContain(linkedTarget);
+      expect(error.message).toContain(outside);
+      expect(error.message).toMatch(/real path/);
+      expect(listing(outside)).toEqual([]);
+    });
+
+    it.each([false, true])(
+      "refuses docs -> . and writes nothing through it (clone with .git: %s)",
+      (withGit) => {
+        if (withGit) fs.mkdirSync(path.join(repo, ".git"));
+        fs.symlinkSync(".", path.join(repo, "docs"));
+
+        const error = refusal(() =>
+          runInit(path.join(repo, "docs", "okf"), { cwd: repo }),
+        );
+
+        expect(error.message).toContain(path.join(repo, "docs"));
+        expect(listing(repo).filter((n) => n !== ".git")).toEqual(["docs"]);
+      },
+    );
+  });
+
+  describe("hard links", () => {
+    it("refuses --force over a scaffold file that is a hard link to an outside file, before writing anything", () => {
+      const victim = path.join(outside, "victim.txt");
+      fs.writeFileSync(victim, "precious\n");
+      const target = path.join(repo, "okf");
+      fs.mkdirSync(target);
+      fs.writeFileSync(path.join(target, "index.md"), "old\n");
+      fs.linkSync(victim, path.join(target, "benchmark-template.md"));
+
+      const error = refusal(() => runInit(target, { force: true, cwd: repo }));
+
+      expect(error.message).toContain(
+        path.join(target, "benchmark-template.md"),
+      );
+      expect(error.message).toMatch(/hard links/);
+      expect(error.message).toMatch(NOTHING_WRITTEN);
+      expect(fs.readFileSync(victim, "utf8")).toBe("precious\n");
+      expect(fs.readFileSync(path.join(target, "index.md"), "utf8")).toBe(
+        "old\n",
+      );
+    });
+
+    it("still overwrites a regular file with a single link under --force", () => {
+      const target = path.join(repo, "okf");
+      fs.mkdirSync(target);
+      fs.writeFileSync(path.join(target, "index.md"), "old\n");
+
+      runInit(target, { force: true, cwd: repo });
+
+      expect(fs.readFileSync(path.join(target, "index.md"), "utf8")).not.toBe(
+        "old\n",
+      );
+    });
+  });
+
+  describe("FIFO guard (run in a child process with a hard timeout)", () => {
+    const SAFE_FS = pathToFileURL(
+      path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        "..",
+        "dist",
+        "safe-fs.js",
+      ),
+    ).href;
+    const CHILD = `
+      const { writeFileNoFollow } = await import(process.env.SAFE_FS);
+      const fs = await import("node:fs");
+      let reader;
+      if (process.env.WITH_READER) {
+        reader = fs.openSync(process.env.FIFO, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      }
+      let outcome = "wrote";
+      try {
+        writeFileNoFollow(process.env.FIFO, "new\\n", true);
+      } catch (error) {
+        outcome = error.constructor.name + ": " + error.message;
+      }
+      const read = reader === undefined ? -1 : fs.readSync(reader, Buffer.alloc(16), 0, 16, null);
+      console.log(JSON.stringify({ outcome, read }));
+    `;
+
+    function runChild(withReader: boolean) {
+      const fifo = path.join(repo, "pipe.md");
+      execFileSync("mkfifo", [fifo]);
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "-e", CHILD],
+        {
+          encoding: "utf8",
+          timeout: 8000,
+          killSignal: "SIGKILL",
+          env: {
+            ...process.env,
+            SAFE_FS,
+            FIFO: fifo,
+            WITH_READER: withReader ? "1" : "",
+          },
+        },
+      );
+      return result;
+    }
+
+    it(
+      "refuses a FIFO with no reader instead of blocking in open",
+      { timeout: 20000 },
+      () => {
+        if (process.platform === "win32") return;
+        const result = runChild(false);
+
+        expect(result.error).toBeUndefined();
+        expect(result.signal).toBeNull();
+        expect(result.status).toBe(0);
+        const parsed = JSON.parse(result.stdout) as { outcome: string };
+        expect(parsed.outcome).toMatch(/^UsageError: Refusing to write/);
+      },
+    );
+
+    it(
+      "refuses a FIFO that has a reader and writes nothing to it",
+      { timeout: 20000 },
+      () => {
+        if (process.platform === "win32") return;
+        const result = runChild(true);
+
+        expect(result.error).toBeUndefined();
+        expect(result.signal).toBeNull();
+        expect(result.status).toBe(0);
+        const parsed = JSON.parse(result.stdout) as {
+          outcome: string;
+          read: number;
+        };
+        expect(parsed.outcome).toMatch(
+          /^UsageError: Refusing to write .*not a regular file/,
+        );
+        expect(parsed.read).toBe(0);
+      },
+    );
+  });
+
   describe("safe-fs primitives", () => {
     it("writeFileNoFollow refuses a link at the leaf even when no earlier check ran (overwrite)", () => {
       const victim = path.join(outside, "victim.txt");
@@ -322,38 +547,46 @@ describe("init never writes through a symbolic link", () => {
       expect(fs.readFileSync(file, "utf8")).toBe("new\n");
     });
 
-    it("writeFileNoFollow refuses a FIFO without blocking", () => {
-      if (process.platform === "win32") return;
-      const fifo = path.join(repo, "pipe.md");
-      execFileSync("mkfifo", [fifo]);
-      expect(() => writeFileNoFollow(fifo, "new\n", true)).toThrow(UsageError);
+    it("findWalkRoot prefers the nearest .git ancestor over the working directory", () => {
+      fs.mkdirSync(path.join(repo, ".git"));
+      const sub = path.join(repo, "packages", "x");
+      fs.mkdirSync(sub, { recursive: true });
+      expect(findWalkRoot(path.join(repo, "docs", "okf"), sub)).toBe(repo);
+      expect(findWalkRoot(path.join(sub, "docs"), sub)).toBe(repo);
     });
 
-    it("writeFileNoFollow refuses a FIFO that has a reader, so the open itself succeeds and the type check decides", () => {
-      if (process.platform === "win32") return;
-      const fifo = path.join(repo, "pipe.md");
-      execFileSync("mkfifo", [fifo]);
-      const reader = fs.openSync(
-        fifo,
-        fs.constants.O_RDONLY | fs.constants.O_NONBLOCK,
-      );
-      try {
-        expect(() => writeFileNoFollow(fifo, "new\n", true)).toThrow(
-          /not a regular file/,
-        );
-        const buffer = Buffer.alloc(16);
-        expect(fs.readSync(reader, buffer, 0, 16, null)).toBe(0);
-      } finally {
-        fs.closeSync(reader);
-      }
+    it("findWalkRoot accepts a .git file (worktree or submodule) and the target itself as the repository root", () => {
+      fs.writeFileSync(path.join(repo, ".git"), "gitdir: elsewhere\n");
+      expect(findWalkRoot(path.join(repo, "a", "b"), outside)).toBe(repo);
+      expect(findWalkRoot(repo, outside)).toBe(repo);
     });
 
-    it("findWalkRoot picks the working directory when the target is under it, the target otherwise", () => {
+    it("findWalkRoot takes the nearest of several .git ancestors", () => {
+      fs.mkdirSync(path.join(repo, ".git"));
+      const inner = path.join(repo, "vendor", "inner");
+      fs.mkdirSync(path.join(inner, ".git"), { recursive: true });
+      expect(findWalkRoot(path.join(inner, "docs"), repo)).toBe(inner);
+    });
+
+    it("findWalkRoot falls back to the working directory when no ancestor holds .git and the target is under it", () => {
       const inside = path.join(repo, "a", "b");
       expect(findWalkRoot(inside, repo)).toBe(repo);
       expect(findWalkRoot(repo, repo)).toBe(repo);
+    });
+
+    it("findWalkRoot falls back to the target's parent when there is no .git ancestor and the target is outside the working directory", () => {
       const elsewhere = path.join(outside, "c");
-      expect(findWalkRoot(elsewhere, repo)).toBe(elsewhere);
+      expect(findWalkRoot(elsewhere, repo)).toBe(outside);
+    });
+
+    it("findWalkRoot never takes a link as the root, even one that points at the working directory or at a repository", () => {
+      const self = path.join(repo, "docs");
+      fs.symlinkSync(".", self);
+      expect(findWalkRoot(path.join(self, "okf"), repo)).toBe(repo);
+      fs.mkdirSync(path.join(outside, ".git"));
+      const toRepo = path.join(base, "to-outside");
+      fs.symlinkSync(outside, toRepo);
+      expect(findWalkRoot(path.join(toRepo, "okf"), repo)).toBe(toRepo);
     });
 
     it("assertNoSymlinkBelow does not examine the root itself", () => {
