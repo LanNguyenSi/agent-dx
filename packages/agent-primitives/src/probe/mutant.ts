@@ -4,6 +4,7 @@ import { scratchGitEnv } from "../git-env.js";
 import { probeGitArgv } from "./git.js";
 import { createHash } from "node:crypto";
 import { runArgv } from "./run.js";
+import { ensurePrivateDir, PRIVATE_FILE_MODE } from "../private-dir.js";
 
 export type MutantForm = "replace" | "match" | "patch";
 
@@ -592,7 +593,7 @@ export async function listPatchTouchedPaths(
   logDir: string,
   gitApply: GitApplyOptions,
 ): Promise<PatchTouchedPathsResult> {
-  fs.mkdirSync(logDir, { recursive: true });
+  ensurePrivateDir(logDir);
   const scratchDir = fs.mkdtempSync(path.join(logDir, "patch-list-"));
   const absPatchPath = path.resolve(patchPath);
   const numstatResult = await runArgv(
@@ -755,8 +756,12 @@ async function computeAppliedDiffExcerpt(
   try {
     fs.mkdirSync(beforeDir, { recursive: true });
     fs.mkdirSync(afterDir, { recursive: true });
-    fs.writeFileSync(path.join(beforeDir, base), originalContent);
-    fs.writeFileSync(path.join(afterDir, base), newContent);
+    fs.writeFileSync(path.join(beforeDir, base), originalContent, {
+      mode: PRIVATE_FILE_MODE,
+    });
+    fs.writeFileSync(path.join(afterDir, base), newContent, {
+      mode: PRIVATE_FILE_MODE,
+    });
     const diffResult = await runArgv(
       "git",
       probeGitArgv([
@@ -830,7 +835,7 @@ async function computeAppliedDiffExcerpt(
     let patchWarning: string | undefined;
     try {
       const candidate = path.join(diffDir, "mutant-diff.patch");
-      fs.writeFileSync(candidate, fullDiffText);
+      fs.writeFileSync(candidate, fullDiffText, { mode: PRIVATE_FILE_MODE });
       patchPath = candidate;
     } catch (err) {
       patchWarning =
@@ -1182,11 +1187,11 @@ async function computePatch(
   gitApply: GitApplyOptions,
 ): Promise<MutantComputeResult> {
   const relPath = path.relative(root, absFile);
-  fs.mkdirSync(logDir, { recursive: true });
+  ensurePrivateDir(logDir);
   const scratchDir = fs.mkdtempSync(path.join(logDir, "mutant-dry-run-"));
   const scratchFile = path.join(scratchDir, relPath);
   fs.mkdirSync(path.dirname(scratchFile), { recursive: true });
-  fs.writeFileSync(scratchFile, originalContent);
+  fs.writeFileSync(scratchFile, originalContent, { mode: PRIVATE_FILE_MODE });
 
   const absPatchPath = path.resolve(patchPath);
   const runOptions = {

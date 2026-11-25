@@ -10,6 +10,7 @@ import {
   readProcesses,
   type ProcInfo,
 } from "./ps.js";
+import { ensurePrivateDir, PRIVATE_FILE_MODE } from "../private-dir.js";
 
 /**
  * `guard`: run one command under a wall-clock timeout and a resident-memory
@@ -763,8 +764,8 @@ export async function guard(options: GuardOptions): Promise<GuardResult> {
     );
   }
 
-  fs.mkdirSync(options.logDir, { recursive: true });
-  const logFd = fs.openSync(logPath, "a");
+  ensurePrivateDir(options.logDir);
+  const logFd = fs.openSync(logPath, "a", PRIVATE_FILE_MODE);
   const wrapped = boundedCommand(options.command, options.args);
   const child = spawn(wrapped.command, wrapped.args, {
     cwd: options.cwd,

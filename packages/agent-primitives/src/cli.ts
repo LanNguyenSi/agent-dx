@@ -113,6 +113,7 @@ import {
   type RemoveWorktreeResult,
   type SweepWorktreesResult,
 } from "./worktree/index.js";
+import { ensurePrivateDir, PRIVATE_FILE_MODE } from "./private-dir.js";
 
 function readVersion(): string {
   try {
@@ -1626,11 +1627,12 @@ export function writeFullVerifyResult(
   const capped = result.truncatedByMaxFailures;
   if (!capped && repeat <= 1) return;
   try {
-    fs.mkdirSync(logDir, { recursive: true });
+    ensurePrivateDir(logDir);
     const fullResultPath = path.join(logDir, `verify-full-${runId}.json`);
     fs.writeFileSync(
       fullResultPath,
       JSON.stringify({ checks: result.fullChecks }, null, 2),
+      { mode: PRIVATE_FILE_MODE },
     );
     logs.push(fullResultPath);
   } catch (err) {

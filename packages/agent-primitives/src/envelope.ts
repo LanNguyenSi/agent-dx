@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { ensurePrivateDir, PRIVATE_FILE_MODE } from "./private-dir.js";
 
 export const TOOL_NAME = "agent-primitives";
 
@@ -760,12 +761,14 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   let fullResultPath: string | undefined;
   if (input.logDir) {
     try {
-      fs.mkdirSync(input.logDir, { recursive: true });
+      ensurePrivateDir(input.logDir);
       const candidatePath = path.join(
         input.logDir,
         `result-full-${currentRunId()}.json`,
       );
-      fs.writeFileSync(candidatePath, fullResultJson);
+      fs.writeFileSync(candidatePath, fullResultJson, {
+        mode: PRIVATE_FILE_MODE,
+      });
       logs.push(candidatePath);
       fullResultPath = candidatePath;
     } catch (err) {

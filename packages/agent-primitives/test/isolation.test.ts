@@ -173,14 +173,14 @@ describe("beginInplace", () => {
     }
   });
 
-  /** The mode a freshly created file gets in `dir` under this process's
-   * own umask, measured rather than assumed: `beginInplace`'s backup is
-   * created exactly this way (`openSync(..., "wx")`), so a target set to
+  /** The mode a backup gets in `dir` under this process's own umask,
+   * measured rather than assumed: `beginInplace`'s backup is created
+   * exactly this way (`openSync(..., "wx", 0o600)`), so a target set to
    * this mode is a target whose mode a restore has nothing to correct,
    * whatever umask the machine running the test uses. */
   function defaultNewFileMode(dir: string): number {
     const probePath = path.join(dir, `mode-probe-${randomUUID()}`);
-    fs.closeSync(fs.openSync(probePath, "wx"));
+    fs.closeSync(fs.openSync(probePath, "wx", 0o600));
     const mode = fs.statSync(probePath).mode & 0o7777;
     fs.rmSync(probePath);
     return mode;

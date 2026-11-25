@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { levelsToCreate, untrustedLevelDetail } from "./private-dir.js";
 
 /** The current uid, or `0` on a platform without `process.getuid` (only
  * Windows; this package's tests and target platforms are POSIX). */
@@ -38,25 +39,6 @@ export interface LockDirDeps {
   stat?: (path: string) => fs.Stats;
 }
 
-/** Every directory `mkdirSync(dir, { recursive: true })` would have to
- * create on top of what already exists, from the outermost missing
- * level down to `dir` itself, in creation order. Returns just `[dir]`
- * when `dir` (or, for a nested override, its lowest missing ancestor)
- * already exists, so the leaf is still always checked. */
-function levelsToCreate(dir: string): string[] {
-  const missing: string[] = [];
-  let cur = dir;
-  for (;;) {
-    if (fs.existsSync(cur)) break;
-    missing.push(cur);
-    const parent = path.dirname(cur);
-    if (parent === cur) break; // filesystem root
-    cur = parent;
-  }
-  missing.reverse();
-  return missing.length > 0 ? missing : [dir];
-}
-
 /**
  * Creates `dir` (mode `0700`) if missing, then confirms every level
  * `mkdirSync(..., { recursive: true })` actually had to create (plus the
@@ -79,28 +61,8 @@ function ensureLockDir(dir: string, deps: LockDirDeps = {}): LockDirState {
     return { ok: false, detail: `could not create ${dir}: ${message}` };
   }
   for (const level of levels) {
-    let levelStat: fs.Stats;
-    try {
-      levelStat = stat(level);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, detail: `could not stat ${level}: ${message}` };
-    }
-    if (!levelStat.isDirectory()) {
-      return { ok: false, detail: `${level} exists and is not a directory` };
-    }
-    if (
-      typeof process.getuid === "function" &&
-      levelStat.uid !== process.getuid()
-    ) {
-      return { ok: false, detail: `${level} is not owned by the current user` };
-    }
-    if ((levelStat.mode & 0o022) !== 0) {
-      return {
-        ok: false,
-        detail: `${level} is group- or world-writable (mode ${(levelStat.mode & 0o777).toString(8)})`,
-      };
-    }
+    const detail = untrustedLevelDetail(level, stat);
+    if (detail !== undefined) return { ok: false, detail };
   }
   try {
     fs.accessSync(dir, fs.constants.W_OK);
@@ -265,6 +227,12 @@ export interface MarkerData {
   mutatedHash: string;
   pid: number;
   timestamp: string;
+  /** Permission bits (`mode & 0o7777`) the target had when its backup was
+   * taken. Written by `inplace` probes so a stale-marker recovery can
+   * restore them: the backup copy is private (0600), and a copy would
+   * otherwise leave the recovered file 0600. Absent on markers written
+   * by an older version. */
+  targetMode?: number;
   /** Set on the repository-keyed `worktree` marker only: the `--log-dir`
    * the worktree named by `targetPath` was created under. Recorded for
    * whoever inspects the marker; never used to admit a deletion, since

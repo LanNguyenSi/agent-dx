@@ -62,6 +62,51 @@ import {
  * are applied by `index.ts`'s own loop after this setup returns).
  */
 
+function currentFileMode(file: string): number | undefined {
+  try {
+    return fs.statSync(file).mode & 0o7777;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The mode a new file gets under this process's umask. */
+function defaultNewFileMode(): number {
+  let umask = 0o022;
+  try {
+    umask = process.umask();
+  } catch {
+    // process.umask() cannot be read in a worker thread; keep the usual one.
+  }
+  return 0o666 & ~umask;
+}
+
+/**
+ * Puts the target's permission bits back after a recovery copied the
+ * (private, 0600) backup over it: the mode the marker recorded, else the
+ * mode the target had before the copy, else the default for a new file.
+ * Never fails the recovery: the content is already back, so a chmod that
+ * cannot be done is reported as a warning.
+ */
+function restoreRecoveredMode(
+  file: string,
+  recorded: number | undefined,
+  prior: number | undefined,
+  warnings: string[],
+): void {
+  const wanted =
+    typeof recorded === "number" && Number.isInteger(recorded)
+      ? recorded & 0o7777
+      : (prior ?? defaultNewFileMode());
+  try {
+    fs.chmodSync(file, wanted);
+  } catch (err) {
+    warnings.push(
+      `could not restore mode ${wanted.toString(8)} on ${file} after recovering a stale probe marker (${(err as Error).message}); the content is restored`,
+    );
+  }
+}
+
 /**
  * Recovers (or refuses) an in-flight marker left for `displayFile` by a
  * previous invocation, under the lock: any marker found here is an
@@ -110,12 +155,11 @@ export async function recoverTargetMarker(
   // anywhere, for the same reason the branch below checks it: a corrupt
   // or mismatched backup must never silently become the recovered file.
   //
-  // This recovery restores CONTENT only, never modes: it runs in a
-  // later process than the one that took the backup, and the marker
-  // records hashes alone, so the mode the target (or a directory
-  // recreated here) had before the mutation is not knowable from
-  // anything on disk. `isolation.ts`'s in-process `restore()` does put
-  // modes back, because it captured them itself at `beginInplace` time.
+  // This recovery restores the target's content and its own permission
+  // bits, never the modes of a directory recreated here: the marker
+  // records the target's mode (`targetMode`), but not those of its
+  // ancestors. `isolation.ts`'s in-process `restore()` puts those back
+  // too, because it captured them itself at `beginInplace` time.
   if (currentHash === undefined && marker.mutatedHash === DELETED_FILE_HASH) {
     const backupHash = await sha256File(marker.backupPath).catch(
       () => undefined,
@@ -131,6 +175,7 @@ export async function recoverTargetMarker(
       fs.mkdirSync(path.dirname(displayFile), { recursive: true });
       fs.copyFileSync(marker.backupPath, displayFile);
       restored = true;
+      restoreRecoveredMode(displayFile, marker.targetMode, undefined, warnings);
     } catch {
       restored = false;
     }
@@ -165,9 +210,13 @@ export async function recoverTargetMarker(
       };
     }
     let restored = false;
+    // Read before the copy: for a marker without a recorded mode, the
+    // mode the mutated target has now is the best record of the original.
+    const priorMode = currentFileMode(displayFile);
     try {
       fs.copyFileSync(marker.backupPath, displayFile);
       restored = true;
+      restoreRecoveredMode(displayFile, marker.targetMode, priorMode, warnings);
     } catch {
       restored = false;
     }

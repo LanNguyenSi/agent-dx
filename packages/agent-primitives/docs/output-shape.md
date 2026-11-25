@@ -98,6 +98,25 @@ those fixed fields)`, not `-m` unconditionally; when even that cannot be
   environment variable, is treated as unset and falls back to the default;
   an empty `-l` with a non-empty `AGENT_PRIMITIVES_LOG_DIR` therefore uses the
   environment variable.
+
+  Everything the tool writes into the log directory is private to the
+  invoking user: directories it creates have mode `0700`, files it creates
+  (logs, full results, the backup copy of an `-i inplace` probe target)
+  have mode `0600`. A file that already exists and is appended to keeps the
+  mode it has. A directory you name with `-l` or
+  `AGENT_PRIMITIVES_LOG_DIR` that already exists is used as given, without
+  a check and without a `chmod`; only the levels the tool creates there are
+  `0700`. The default location is different, because its parent
+  `<tmpdir>/agent-primitives` sits in a temp directory other users can
+  write to: if that directory, or the run directory under it, exists and is
+  not a directory owned by the current user, or is group- or
+  world-writable, the command refuses with an error that names `-l`
+  (nothing is created inside it and nothing is `chmod`-ed); pass `-l <dir>`
+  to use a directory of your own. Under umask `002` (Debian and Ubuntu
+  user-private groups) an earlier run left that directory `0775`, so it is
+  refused too; remove it with `rm -rf "$(node -p
+  'require("os").tmpdir()')/agent-primitives"` (with `sudo` when another
+  user owns it) or pass `-l`.
 - `--json`: a no-op alias for `-f json` (already the default), for the
   common instinct to ask for JSON explicitly. Combined with an explicit
   `-f text` it is `status: "usage_error"`, `reason: "format_conflict"`,

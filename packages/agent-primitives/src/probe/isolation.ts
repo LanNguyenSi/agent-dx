@@ -27,6 +27,7 @@ import { withoutPathspecEnv } from "../git-env.js";
 import { probeGitArgv } from "./git.js";
 import { GIT_CONTENT_WRITE_CONFIG_ARGS } from "./mutant.js";
 import { runArgv, type RunArgvResult } from "./run.js";
+import { ensurePrivateDir, PRIVATE_FILE_MODE } from "../private-dir.js";
 
 /** The oldest git whose `git apply --allow-empty` the worktree sync
  * relies on. An older release rejects the option, so `beginWorktree`
@@ -42,6 +43,10 @@ export const GIT_MIN_VERSION_WORKTREE_LIST_Z = "2.36";
 export interface InplaceSession {
   backupPath: string;
   targetPath: string;
+  /** The target's permission bits when the backup was taken, recorded in
+   * the in-flight marker so a later recovery can put them back (the
+   * backup itself is private, mode 0600). */
+  targetMode?: number;
   /**
    * Restores `targetPath` from the backup made at `beginInplace` time.
    * Synchronous and exception-safe (returns `false` instead of
@@ -74,7 +79,7 @@ export interface InplaceSession {
  * close and which cannot be produced reliably from outside. Defaults to
  * the genuine `fs.openSync`. */
 export interface InplaceDeps {
-  open?: (filePath: string, flags: string) => number;
+  open?: (filePath: string, flags: string, mode?: number) => number;
 }
 
 /** One directory in `targetPath`'s ancestor chain whose mode was
@@ -321,14 +326,14 @@ export function beginInplace(
   deps: InplaceDeps = {},
 ): InplaceSession {
   const open = deps.open ?? fs.openSync;
-  fs.mkdirSync(logDir, { recursive: true });
+  ensurePrivateDir(logDir);
   const base = path.basename(targetPath);
   let backupPath = path.join(logDir, `backup-${base}`);
   let n = 0;
   let fd: number;
   for (;;) {
     try {
-      fd = open(backupPath, "wx");
+      fd = open(backupPath, "wx", PRIVATE_FILE_MODE);
       break;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
@@ -345,6 +350,7 @@ export function beginInplace(
   return {
     backupPath,
     targetPath,
+    targetMode: targetMode & 0o7777,
     takeRestoreWarnings(): string[] {
       return modeWarnings.splice(0, modeWarnings.length);
     },
@@ -1129,7 +1135,7 @@ export async function beginWorktree(
   const { root, cwd, logDir, links, signal } = opts;
   const track: TrackGitCall = opts.track ?? ((started) => started);
   const runDir = path.join(logDir, `wt-${randomUUID()}`);
-  fs.mkdirSync(runDir, { recursive: true });
+  ensurePrivateDir(runDir);
   const worktreePath = path.join(runDir, "wt");
   const logPaths: string[] = [];
   // Written before anything is registered with git: from the add
