@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { ensurePrivateDir } from "../private-dir.js";
 
 /**
  * CPython's own bytecode cache: a `__pycache__/*.pyc` file is loaded
@@ -89,7 +90,7 @@ export type PyCacheIsolationResult =
 export function beginPyCacheIsolation(logDir: string): PyCacheIsolationResult {
   let dir: string;
   try {
-    fs.mkdirSync(logDir, { recursive: true });
+    ensurePrivateDir(logDir);
     dir = fs.mkdtempSync(path.join(logDir, "pycache-"));
   } catch (err) {
     return {

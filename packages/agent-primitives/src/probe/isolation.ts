@@ -27,6 +27,7 @@ import { withoutPathspecEnv } from "../git-env.js";
 import { probeGitArgv } from "./git.js";
 import { GIT_CONTENT_WRITE_CONFIG_ARGS } from "./mutant.js";
 import { runArgv, type RunArgvResult } from "./run.js";
+import { ensurePrivateDir, PRIVATE_FILE_MODE } from "../private-dir.js";
 
 /** The oldest git whose `git apply --allow-empty` the worktree sync
  * relies on. An older release rejects the option, so `beginWorktree`
@@ -74,7 +75,7 @@ export interface InplaceSession {
  * close and which cannot be produced reliably from outside. Defaults to
  * the genuine `fs.openSync`. */
 export interface InplaceDeps {
-  open?: (filePath: string, flags: string) => number;
+  open?: (filePath: string, flags: string, mode?: number) => number;
 }
 
 /** One directory in `targetPath`'s ancestor chain whose mode was
@@ -321,14 +322,14 @@ export function beginInplace(
   deps: InplaceDeps = {},
 ): InplaceSession {
   const open = deps.open ?? fs.openSync;
-  fs.mkdirSync(logDir, { recursive: true });
+  ensurePrivateDir(logDir);
   const base = path.basename(targetPath);
   let backupPath = path.join(logDir, `backup-${base}`);
   let n = 0;
   let fd: number;
   for (;;) {
     try {
-      fd = open(backupPath, "wx");
+      fd = open(backupPath, "wx", PRIVATE_FILE_MODE);
       break;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
@@ -1129,7 +1130,7 @@ export async function beginWorktree(
   const { root, cwd, logDir, links, signal } = opts;
   const track: TrackGitCall = opts.track ?? ((started) => started);
   const runDir = path.join(logDir, `wt-${randomUUID()}`);
-  fs.mkdirSync(runDir, { recursive: true });
+  ensurePrivateDir(runDir);
   const worktreePath = path.join(runDir, "wt");
   const logPaths: string[] = [];
   // Written before anything is registered with git: from the add

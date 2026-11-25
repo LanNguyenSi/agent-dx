@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { ensurePrivateDir, PRIVATE_FILE_MODE } from "../private-dir.js";
 
 export interface RunArgvOptions {
   cwd?: string;
@@ -91,12 +92,15 @@ export function runArgv(
   options: RunArgvOptions,
 ): Promise<RunArgvResult> {
   return new Promise((resolve, reject) => {
-    fs.mkdirSync(options.logDir, { recursive: true });
+    ensurePrivateDir(options.logDir);
     const logFileName =
       options.logFileName ??
       `argv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.log`;
     const logPath = path.join(options.logDir, logFileName);
-    const logStream = fs.createWriteStream(logPath, { flags: "a" });
+    const logStream = fs.createWriteStream(logPath, {
+      flags: "a",
+      mode: PRIVATE_FILE_MODE,
+    });
 
     // A WriteStream with no 'error' listener crashes the process on a
     // write failure (an unhandled 'error' event) instead of surfacing it.

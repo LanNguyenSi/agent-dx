@@ -799,6 +799,18 @@ elsewhere does not silently swallow the non-exempt case too -- cannot
 rely on that precondition once it runs inside the copy; pointing
 `--log-dir` at a directory outside the OS temp directory avoids it.
 
+Everything a probe writes under `--log-dir` (the exec logs, the applied
+diff and its scratch copies, the Python bytecode cache, the `-i worktree`
+run directory, and the backup copy of the target that `-i inplace` takes
+before it mutates the file) is private to the invoking user: directories
+the tool creates are `0700`, files are `0600`, so a backup of a
+secrets file is not readable by other users. An existing file that is
+appended to keeps its mode. The default `--log-dir` is refused, with an
+error naming `-l`, when `<tmpdir>/agent-primitives` or the run directory
+exists and is owned by another user or is group- or world-writable; a
+directory given with `-l` that already exists is used as it is, never
+`chmod`-ed.
+
 Every untracked, non-ignored path (`git ls-files --others
 --exclude-standard`) is synced by its own type: a regular file is
 copied; a symlink (including a dangling one) is recreated as a symlink

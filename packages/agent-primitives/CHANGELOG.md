@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Logs, full-result files, scratch directories and the `-i inplace`
+  backup copy of a probe target are now private to the invoking user.
+  Every directory the tool creates for them has mode `0700` and every file
+  mode `0600` (before, they took the umask: `0755` and `0644`, so the
+  backup of an `.env` was readable by every user of a shared `/tmp`). The
+  default location `<tmpdir>/agent-primitives` is checked before anything
+  is created in it, and refused, with an error naming `-l`, when it or the
+  run directory is not owned by the current user or is group- or
+  world-writable; an existing directory is never `chmod`-ed, and a
+  directory given with `-l` that already exists is used as it is. Upgrade
+  note: a shared `/tmp/agent-primitives` that another user created, or that
+  an earlier run left group-writable (umask `002`), now refuses the default
+  location; remove it or pass `-l <dir>` (or set
+  `AGENT_PRIMITIVES_LOG_DIR`). Files that already exist keep their mode.
 - `probe` no longer treats a symlink whose own mode is 000 (`lchmod`,
   macOS only) as an in-repo file. `resolveDeepestExisting` caught every
   `realpath` failure and fell back to the parent's realpath plus the
