@@ -918,10 +918,9 @@ async function runProbePipeline(
       } else {
         const listed = hits.slice(0, MATCH_LINE_LIST_CAP);
         const more = hits.length - listed.length;
-        const refusal =
-          `-M/--match text ${JSON.stringify(opts.matchText)} occurs on ${String(hits.length)} lines of ${displayFile}: ${listed.join(", ")}${
-            more > 0 ? `, and ${String(more)} more` : ""
-          }; pass -n/--line to name the line to mutate`;
+        const refusal = `-M/--match text ${JSON.stringify(opts.matchText)} occurs on ${String(hits.length)} lines of ${displayFile}: ${listed.join(", ")}${
+          more > 0 ? `, and ${String(more)} more` : ""
+        }; pass -n/--line to name the line to mutate`;
         return {
           status: "usage_error",
           reason: "match_ambiguous",
@@ -1171,6 +1170,9 @@ async function runProbePipeline(
           return {
             ok: false,
             reason: computed.reason,
+            ...(computed.message === undefined
+              ? {}
+              : { message: computed.message }),
             logPaths: computed.logPaths,
           };
         }
@@ -1203,6 +1205,13 @@ async function runProbePipeline(
       return {
         status: refusal.status,
         reason: refusal.reason,
+        // The refusal's own text rides alongside the warning `refuse()`
+        // appended (`setup.ts`), the same carriage every other refusal
+        // site makes: `--summary`'s note stays the refusal even when the
+        // shared `warnings` array already carried a manifest-link
+        // warning, an isolation-fallback notice or the `-n/--line`
+        // derivation notice pushed before this refusal.
+        ...(refusal.message === undefined ? {} : { refusal: refusal.message }),
         warnings: refusal.warnings,
         ...(refusal.reportsMutant && mutantField !== undefined
           ? { mutant: mutantField }
@@ -1830,13 +1839,12 @@ async function runProbePlanPipeline(
   for (const [index, mutant] of opts.mutants.entries()) {
     const command = mutant.testCommand ?? opts.testCommand;
     if (command === undefined) {
+      const refusal = `plan.test must be a non-empty string unless every mutant has its own "test" (plan.mutants[${String(index)}] has none)`;
       return {
         status: "usage_error",
         reason: "plan_invalid",
-        warnings: [
-          ...warnings,
-          `plan.test must be a non-empty string unless every mutant has its own "test" (plan.mutants[${String(index)}] has none)`,
-        ],
+        refusal,
+        warnings: [...warnings, refusal],
         baselines: [],
         results: [],
         summary: summarize([]),
@@ -2288,6 +2296,13 @@ async function runProbePlanPipeline(
       return {
         status: refusal.status,
         reason: refusal.reason,
+        // The same carriage as the single form's identical return and
+        // the plan's own `refuse()` helper: the refused run's note is
+        // the refusal's text, never a warning pushed before it. A
+        // refused plan whose mutants are all counted `not_run` prints no
+        // note line at all, so this field serves the library caller
+        // reading the result directly.
+        ...(refusal.message === undefined ? {} : { refusal: refusal.message }),
         warnings: refusal.warnings,
         ...(refusal.baseline !== undefined
           ? { baseline: refusal.baseline }

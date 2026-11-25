@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,10 +15,16 @@ import {
 } from "../src/probe/summary.js";
 import { probe, probePlan } from "../src/probe/index.js";
 import { LINK_MANIFEST_FILE } from "../src/probe/link-manifest.js";
+import { writeMarker } from "../src/lock.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 
 const tmpDirs: string[] = [];
+const savedEnv: Array<[string, string | undefined]> = [];
 afterEach(() => {
+  for (const [key, value] of savedEnv.splice(0)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1881,10 +1887,22 @@ describe("renderProbeSummary note precedence (table)", () => {
      * prints no note line either (an input that outranks the others
      * still outranks). Anything else: the exact expected note. */
     expected: string | null;
+    /** The pipeline cannot produce this input today, so the row pins the
+     * precedence contract for direct callers of `renderProbeSummary`
+     * rather than a shipped run: `message` is the summary's own
+     * library-facing rank (no CLI path fills it), and a defaults-file
+     * refusal is itself the refusal its message names, so a defaults
+     * warning never sits alone or before a different refusal. */
+    defensive?: boolean;
   }
   const cases: NoteCase[] = [
     { name: "no message, no refusal, no warning", input: {}, expected: null },
-    { name: "message alone", input: { message }, expected: message },
+    {
+      name: "message alone",
+      input: { message },
+      expected: message,
+      defensive: true,
+    },
     {
       name: "refusal alone (carried beside its appended warning)",
       input: { refusal, warnings: [refusal] },
@@ -1899,6 +1917,7 @@ describe("renderProbeSummary note precedence (table)", () => {
       name: "defaults warning alone",
       input: { warnings: [defaultsWarning] },
       expected: defaultsWarning,
+      defensive: true,
     },
     {
       name: "derivation notice alone (the last-resort fallback)",
@@ -1909,6 +1928,7 @@ describe("renderProbeSummary note precedence (table)", () => {
       name: "message and refusal: the message wins",
       input: { message, refusal, warnings: [refusal] },
       expected: message,
+      defensive: true,
     },
     {
       name: "manifest-link warning before the refusal: the refusal wins",
@@ -1919,11 +1939,13 @@ describe("renderProbeSummary note precedence (table)", () => {
       name: "defaults warning before the refusal: the refusal wins",
       input: { refusal, warnings: [defaultsWarning, refusal] },
       expected: refusal,
+      defensive: true,
     },
     {
       name: "manifest-link and defaults warnings before the refusal: the refusal wins",
       input: { refusal, warnings: [manifestWarning, defaultsWarning, refusal] },
       expected: refusal,
+      defensive: true,
     },
     {
       name: "derivation notice before the refusal: the refusal wins",
@@ -1944,6 +1966,7 @@ describe("renderProbeSummary note precedence (table)", () => {
       name: "manifest and defaults warnings, no refusal: the earlier pushed wins",
       input: { warnings: [manifestWarning, defaultsWarning] },
       expected: manifestWarning,
+      defensive: true,
     },
     {
       name: "message outranks the refusal and every warning",
@@ -1953,11 +1976,13 @@ describe("renderProbeSummary note precedence (table)", () => {
         warnings: [notice, manifestWarning, defaultsWarning, refusal],
       },
       expected: message,
+      defensive: true,
     },
     {
       name: "an empty message still outranks (absent vs empty)",
       input: { message: "", refusal, warnings: [manifestWarning, refusal] },
       expected: "",
+      defensive: true,
     },
   ];
   for (const testCase of cases) {
@@ -2102,7 +2127,16 @@ describe(
         }),
       );
       const planArgs = ["--plan", plan, "--link", MISSING_LINK];
-      const json = await spawnCli(["-C", wt, "-l", logs, "-m", "100000", "probe", ...planArgs]);
+      const json = await spawnCli([
+        "-C",
+        wt,
+        "-l",
+        logs,
+        "-m",
+        "100000",
+        "probe",
+        ...planArgs,
+      ]);
       const view = await spawnCli([
         "-C",
         wt,
@@ -2161,7 +2195,868 @@ describe(
       expect(result.status).toBe("usage_error");
       expect(result.reason).toBe("link_source_not_found");
       expect(result.refusal).toBe(refusal);
-      expect(result.warnings[0]).toContain("ignoring the worktree link manifest");
+      expect(result.warnings[0]).toContain(
+        "ignoring the worktree link manifest",
+      );
     });
   },
 );
+
+describe(
+  "probe --summary: a manifest-link warning before a run-setup or dry-run refusal (end to end)",
+  { timeout: 60000 },
+  () => {
+    /** The manifest-link repo plus an `outside.js` one directory above
+     * the worktree root: a `--file ../outside.js` run then refuses at the
+     * shared setup's containment check (single form) or the plan's own
+     * (plan form) with the manifest warning already pushed ahead of the
+     * refusal's message. */
+    function withOutsideFile(base: string): void {
+      fs.writeFileSync(
+        path.join(base, "outside.js"),
+        "module.exports = true;\n",
+      );
+    }
+
+    it("single form: a containment refusal names itself as the note, not the manifest warning", async () => {
+      const { base, wt, logs } = makeManifestLinkRepo();
+      withOutsideFile(base);
+      const cliBase = ["-C", wt, "-l", logs, "-m", "100000", "probe"];
+      const args = [
+        "--file",
+        "../outside.js",
+        "-n",
+        "1",
+        "-r",
+        "x",
+        "-t",
+        "true",
+        "-i",
+        "inplace",
+      ];
+      const json = await spawnCli([...cliBase, ...args]);
+      const view = await spawnCli([...cliBase, "--summary", ...args]);
+      expect(json.code).toBe(2);
+      expect(view.code).toBe(2);
+      const envelope = JSON.parse(json.stdout) as {
+        status: string;
+        reason?: string;
+        warnings: string[];
+      };
+      expect(envelope.status).toBe("inconclusive");
+      expect(envelope.reason).toBe("file_outside_root");
+      expect(envelope.warnings[0]).toContain(
+        "ignoring the worktree link manifest",
+      );
+      const refusal = envelope.warnings[envelope.warnings.length - 1];
+      expect(refusal).toContain("outside the containment root");
+      expect(refusal).toContain("outside.js");
+      const lines = view.stdout.trimEnd().split("\n");
+      expect(lines[lines.length - 1]).toBe(`note: ${refusal}`);
+      expect(view.stdout).not.toContain("ignoring the worktree link manifest");
+
+      const result = await probe({
+        file: "../outside.js",
+        line: 1,
+        form: "replace",
+        replaceText: "x",
+        testCommand: "true",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: wt,
+        logDir: logs,
+      });
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("file_outside_root");
+      expect(result.refusal).toBe(refusal);
+      expect(result.warnings[result.warnings.length - 1]).toBe(refusal);
+    });
+
+    it("plan form: the carried refusal lands on the result; a refused plan prints no note line", async () => {
+      const { base, wt, logs } = makeManifestLinkRepo();
+      withOutsideFile(base);
+      const plan = path.join(base, "plan-outside.json");
+      fs.writeFileSync(
+        plan,
+        JSON.stringify({
+          test: "true",
+          mutants: [{ file: "../outside.js", line: 1, replace: "x" }],
+        }),
+      );
+      const planArgs = ["--plan", plan];
+      const json = await spawnCli([
+        "-C",
+        wt,
+        "-l",
+        logs,
+        "-m",
+        "100000",
+        "probe",
+        ...planArgs,
+      ]);
+      const view = await spawnCli([
+        "-C",
+        wt,
+        "-l",
+        logs,
+        "-m",
+        "100000",
+        "probe",
+        "--summary",
+        ...planArgs,
+      ]);
+      expect(json.code).toBe(2);
+      expect(view.code).toBe(2);
+      const envelope = JSON.parse(json.stdout) as {
+        status: string;
+        reason?: string;
+        warnings: string[];
+      };
+      expect(envelope.status).toBe("usage_error");
+      expect(envelope.reason).toBe("file_outside_root");
+      expect(envelope.warnings[0]).toContain(
+        "ignoring the worktree link manifest",
+      );
+      const refusal = envelope.warnings[envelope.warnings.length - 1];
+      expect(refusal).toContain("outside the containment root");
+      // Every never-run mutant is counted on the totals line, so this
+      // summary has no note line at all; what must not leak is the
+      // manifest warning, and the totals line names the refusal's reason.
+      const lines = view.stdout.trimEnd().split("\n");
+      expect(lines[lines.length - 1]).toContain(
+        "totals: status=usage_error reason=file_outside_root",
+      );
+      expect(view.stdout).not.toContain("note:");
+      expect(view.stdout).not.toContain("ignoring the worktree link manifest");
+
+      // The plan-side carry is for the library caller reading the
+      // result directly: the refusal's own text, last in `warnings`.
+      const result = await probePlan({
+        mutants: [
+          { file: "../outside.js", line: 1, form: "replace", replaceText: "x" },
+        ],
+        testCommand: "true",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: wt,
+        logDir: logs,
+      });
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("file_outside_root");
+      expect(result.refusal).toBe(refusal);
+      expect(result.warnings[result.warnings.length - 1]).toBe(refusal);
+    });
+
+    it("plan form with no mutants: the note is the plan_empty refusal, not the manifest warning", async () => {
+      // The one refused-plan shape whose summary names no mutant: the
+      // totals line reads `total=0`, so the note line exists and the
+      // CLI's plan-form carry is what puts the refusal in it.
+      const { base, wt, logs } = makeManifestLinkRepo();
+      const plan = path.join(base, "plan-empty.json");
+      fs.writeFileSync(plan, JSON.stringify({ test: "true", mutants: [] }));
+      const planArgs = ["--plan", plan];
+      const json = await spawnCli([
+        "-C",
+        wt,
+        "-l",
+        logs,
+        "-m",
+        "100000",
+        "probe",
+        ...planArgs,
+      ]);
+      const view = await spawnCli([
+        "-C",
+        wt,
+        "-l",
+        logs,
+        "-m",
+        "100000",
+        "probe",
+        "--summary",
+        ...planArgs,
+      ]);
+      expect(json.code).toBe(2);
+      expect(view.code).toBe(2);
+      const envelope = JSON.parse(json.stdout) as {
+        status: string;
+        reason?: string;
+        warnings: string[];
+      };
+      expect(envelope.status).toBe("usage_error");
+      expect(envelope.reason).toBe("plan_empty");
+      // The manifest push comes after this check, so this refusal runs
+      // with an empty `warnings` of its own; what must still hold is the
+      // CLI's plan-form carry: the note line exists and names it.
+      const refusal = envelope.warnings[envelope.warnings.length - 1];
+      expect(refusal).toContain("plan.mutants is empty");
+      const lines = view.stdout.trimEnd().split("\n");
+      expect(lines[lines.length - 1]).toBe(`note: ${refusal}`);
+      expect(view.stdout).not.toContain("ignoring the worktree link manifest");
+    });
+
+    it("dry-run mutant_not_applicable: the note is the dry run's message, not the manifest warning", async () => {
+      const { wt, logs } = makeManifestLinkRepo();
+      const cliBase = ["-C", wt, "-l", logs, "-m", "100000", "probe"];
+      const args = ["--file", "fixture.js", "-n", "5", "-r", "x", "-t", "true"];
+      const json = await spawnCli([...cliBase, ...args]);
+      const view = await spawnCli([...cliBase, "--summary", ...args]);
+      expect(json.code).toBe(2);
+      expect(view.code).toBe(2);
+      const envelope = JSON.parse(json.stdout) as {
+        status: string;
+        reason?: string;
+        warnings: string[];
+      };
+      expect(envelope.status).toBe("inconclusive");
+      expect(envelope.reason).toBe("mutant_not_applicable");
+      expect(envelope.warnings[0]).toContain(
+        "ignoring the worktree link manifest",
+      );
+      const refusal = envelope.warnings[envelope.warnings.length - 1];
+      expect(refusal).toContain("line 5 is out of range");
+      const lines = view.stdout.trimEnd().split("\n");
+      expect(lines[lines.length - 1]).toBe(`note: ${refusal}`);
+      expect(view.stdout).not.toContain("ignoring the worktree link manifest");
+
+      const result = await probe({
+        file: "fixture.js",
+        line: 5,
+        form: "replace",
+        replaceText: "x",
+        testCommand: "true",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: wt,
+        logDir: logs,
+      });
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("mutant_not_applicable");
+      expect(result.refusal).toBe(refusal);
+      expect(result.warnings[result.warnings.length - 1]).toBe(refusal);
+    });
+  },
+);
+
+describe("probe/probePlan refusal carry (table)", { timeout: 60000 }, () => {
+  /** Permission bits do not bind uid 0: the mode-`000` and mode-`500`
+   * fixtures below would not refuse there, so those rows skip. */
+  const unrootedOnly =
+    typeof process.getuid === "function" && process.getuid() !== 0;
+
+  /** A committed `fixture.js` with `const dup` on two lines (the
+   * `match_ambiguous` fixture) and three content lines (so `-n 5` is out
+   * of range for the dry-run row). */
+  function carryRepo(extra?: (repo: string) => void): {
+    repo: string;
+    logs: string;
+  } {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "ap-carry-repo-"));
+    const logs = fs.mkdtempSync(path.join(os.tmpdir(), "ap-carry-logs-"));
+    tmpDirs.push(repo, logs);
+    const git = (args: string[]) => execFileSync("git", args, { cwd: repo });
+    git(["init", "-q", "-b", "main"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "test"]);
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      'const dup = 1;\nmodule.exports = true;\nconst dup2 = "dup";\n',
+    );
+    git(["add", "."]);
+    git(["commit", "-qm", "fixture"]);
+    extra?.(repo);
+    return { repo, logs };
+  }
+
+  /** A real diff touching `fixture.js` and `extra.js`: the
+   * `patch_file_ambiguous` fixture (`git apply --numstat` parses its
+   * paths without ever touching disk). */
+  function twoPathPatch(repo: string): string {
+    fs.writeFileSync(path.join(repo, "extra.js"), "module.exports = 1;\n");
+    execFileSync("git", ["add", "extra.js"], { cwd: repo });
+    execFileSync("git", ["commit", "-qm", "extra"], { cwd: repo });
+    fs.appendFileSync(path.join(repo, "fixture.js"), "// touched\n");
+    fs.appendFileSync(path.join(repo, "extra.js"), "// touched\n");
+    const patch = path.join(repo, "two.patch");
+    fs.writeFileSync(
+      patch,
+      execFileSync("git", ["diff"], { cwd: repo, encoding: "utf8" }),
+    );
+    return patch;
+  }
+
+  /** A private lock directory with `mode`; the caller restores the bits
+   * it needs for removal. */
+  function makeLockDir(mode: number): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ap-carry-lock-"));
+    fs.chmodSync(dir, mode);
+    tmpDirs.push(dir);
+    const previous = process.env.AGENT_PRIMITIVES_LOCK_DIR;
+    savedEnv.push(["AGENT_PRIMITIVES_LOCK_DIR", previous]);
+    process.env.AGENT_PRIMITIVES_LOCK_DIR = dir;
+    return dir;
+  }
+
+  interface CarryCase {
+    name: string;
+    status: string;
+    reason: string;
+    /** Warnings pushed BEFORE the refusal appended its own message: the
+     * assertion pins that the refusal added exactly one entry at the end
+     * and left everything pushed before it alone. */
+    prior: number;
+    /** A substring the first warning must carry (the manifest row). */
+    firstWarningIncludes?: string;
+    /** Needs uid 0's permission model to be inert (see `unrootedOnly`). */
+    needsUnrooted?: boolean;
+    run: () => ReturnType<typeof probe> | ReturnType<typeof probePlan>;
+  }
+
+  const cases: CarryCase[] = [
+    {
+      name: "file_required",
+      status: "usage_error",
+      reason: "file_required",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probe({
+          form: "replace",
+          replaceText: "x",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "line_required",
+      status: "usage_error",
+      reason: "line_required",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probe({
+          file: "fixture.js",
+          form: "replace",
+          replaceText: "x",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "match_not_found",
+      status: "usage_error",
+      reason: "match_not_found",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probe({
+          file: "fixture.js",
+          form: "match",
+          matchText: "no-such-text",
+          withText: "y",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "match_ambiguous",
+      status: "usage_error",
+      reason: "match_ambiguous",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probe({
+          file: "fixture.js",
+          form: "match",
+          matchText: "dup",
+          withText: "y",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "patch_not_readable",
+      status: "usage_error",
+      reason: "patch_not_readable",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probe({
+          file: "fixture.js",
+          form: "patch",
+          patchPath: "no-such.patch",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "patch listing fails: mutant_not_applicable",
+      status: "inconclusive",
+      reason: "mutant_not_applicable",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo((dir) =>
+          fs.writeFileSync(path.join(dir, "bad.patch"), "not a patch at all\n"),
+        );
+        return probe({
+          form: "patch",
+          patchPath: "bad.patch",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "patch_file_ambiguous",
+      status: "usage_error",
+      reason: "patch_file_ambiguous",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        twoPathPatch(repo);
+        return probe({
+          form: "patch",
+          patchPath: "two.patch",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "defaults_file_invalid",
+      status: "usage_error",
+      reason: "defaults_file_invalid",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo((dir) =>
+          fs.writeFileSync(
+            path.join(dir, ".agent-primitives.json"),
+            "{ not json\n",
+          ),
+        );
+        return probe({
+          file: "fixture.js",
+          line: 1,
+          form: "replace",
+          replaceText: "x",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "file_outside_root via an unresolvable path (single)",
+      status: "inconclusive",
+      reason: "file_outside_root",
+      prior: 0,
+      needsUnrooted: true,
+      run: async () => {
+        const { repo, logs } = carryRepo((dir) =>
+          fs.mkdirSync(path.join(dir, "closed")),
+        );
+        fs.chmodSync(path.join(repo, "closed"), 0o000);
+        try {
+          return await probe({
+            file: "closed/two.js",
+            line: 1,
+            form: "replace",
+            replaceText: "x",
+            testCommand: "true",
+            isolation: "inplace",
+            expect: "fail",
+            cwd: repo,
+            logDir: logs,
+          });
+        } finally {
+          fs.chmodSync(path.join(repo, "closed"), 0o700);
+        }
+      },
+    },
+    {
+      name: "link_source_not_found",
+      status: "usage_error",
+      reason: "link_source_not_found",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probe({
+          file: "fixture.js",
+          line: 1,
+          form: "replace",
+          replaceText: "x",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          links: ["no-such-src"],
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "file_outside_root from the shared setup (single)",
+      status: "inconclusive",
+      reason: "file_outside_root",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), "ap-carry-out-"));
+        tmpDirs.push(outside);
+        const target = path.join(outside, "outside.js");
+        fs.writeFileSync(target, "module.exports = true;\n");
+        return probe({
+          file: target,
+          line: 1,
+          form: "replace",
+          replaceText: "x",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "file_outside_root behind a manifest-link warning (single)",
+      status: "inconclusive",
+      reason: "file_outside_root",
+      prior: 1,
+      firstWarningIncludes: "ignoring the worktree link manifest",
+      run: () => {
+        const { base, wt, logs } = makeManifestLinkRepo();
+        fs.writeFileSync(
+          path.join(base, "outside.js"),
+          "module.exports = true;\n",
+        );
+        return probe({
+          file: "../outside.js",
+          line: 1,
+          form: "replace",
+          replaceText: "x",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: wt,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "lock_unavailable",
+      status: "inconclusive",
+      reason: "lock_unavailable",
+      prior: 0,
+      needsUnrooted: true,
+      run: async () => {
+        const { repo, logs } = carryRepo();
+        const dir = makeLockDir(0o500);
+        try {
+          return await probe({
+            file: "fixture.js",
+            line: 1,
+            form: "replace",
+            replaceText: "x",
+            testCommand: "true",
+            isolation: "inplace",
+            expect: "fail",
+            cwd: repo,
+            logDir: logs,
+          });
+        } finally {
+          fs.chmodSync(dir, 0o700);
+        }
+      },
+    },
+    {
+      name: "stale_probe_marker",
+      status: "inconclusive",
+      reason: "stale_probe_marker",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        makeLockDir(0o700);
+        const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"])
+          .pid as number;
+        const target = path.resolve(repo, "fixture.js");
+        writeMarker(target, {
+          targetPath: target,
+          backupPath: path.join(repo, "fixture.js.ap-backup"),
+          preHash: "0".repeat(64),
+          mutatedHash: "1".repeat(64),
+          pid: deadPid,
+          timestamp: new Date().toISOString(),
+        });
+        return probe({
+          file: "fixture.js",
+          line: 1,
+          form: "replace",
+          replaceText: "x",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "pre_failed from the baseline gate",
+      status: "inconclusive",
+      reason: "pre_failed",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probe({
+          file: "fixture.js",
+          line: 1,
+          form: "replace",
+          replaceText: "x",
+          testCommand: "true",
+          preCommand: "exit 3",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "dry-run mutant_not_applicable",
+      status: "inconclusive",
+      reason: "mutant_not_applicable",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probe({
+          file: "fixture.js",
+          line: 5,
+          form: "replace",
+          replaceText: "x",
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "plan_empty",
+      status: "usage_error",
+      reason: "plan_empty",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probePlan({
+          mutants: [],
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "plan_invalid: no test command",
+      status: "usage_error",
+      reason: "plan_invalid",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probePlan({
+          mutants: [
+            { file: "fixture.js", line: 1, form: "replace", replaceText: "x" },
+          ],
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "plan_invalid: line required",
+      status: "usage_error",
+      reason: "plan_invalid",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probePlan({
+          mutants: [{ file: "fixture.js", form: "replace", replaceText: "x" }],
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "defaults_file_invalid (plan)",
+      status: "usage_error",
+      reason: "defaults_file_invalid",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo((dir) =>
+          fs.writeFileSync(
+            path.join(dir, ".agent-primitives.json"),
+            "{ not json\n",
+          ),
+        );
+        return probePlan({
+          mutants: [
+            { file: "fixture.js", line: 1, form: "replace", replaceText: "x" },
+          ],
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "link_source_not_found (plan)",
+      status: "usage_error",
+      reason: "link_source_not_found",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probePlan({
+          mutants: [
+            { file: "fixture.js", line: 1, form: "replace", replaceText: "x" },
+          ],
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          links: ["no-such-src"],
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "file_outside_root from the shared setup (plan)",
+      status: "usage_error",
+      reason: "file_outside_root",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), "ap-carry-out-"));
+        tmpDirs.push(outside);
+        const target = path.join(outside, "outside.js");
+        fs.writeFileSync(target, "module.exports = true;\n");
+        return probePlan({
+          mutants: [
+            { file: target, line: 1, form: "replace", replaceText: "x" },
+          ],
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+    {
+      name: "file_outside_root via an unresolvable path (plan)",
+      status: "usage_error",
+      reason: "file_outside_root",
+      prior: 0,
+      needsUnrooted: true,
+      run: async () => {
+        const { repo, logs } = carryRepo((dir) =>
+          fs.mkdirSync(path.join(dir, "closed")),
+        );
+        fs.chmodSync(path.join(repo, "closed"), 0o000);
+        try {
+          return await probePlan({
+            mutants: [
+              {
+                file: "closed/two.js",
+                line: 1,
+                form: "replace",
+                replaceText: "x",
+              },
+            ],
+            testCommand: "true",
+            isolation: "inplace",
+            expect: "fail",
+            cwd: repo,
+            logDir: logs,
+          });
+        } finally {
+          fs.chmodSync(path.join(repo, "closed"), 0o700);
+        }
+      },
+    },
+    {
+      name: "patch_not_readable (plan)",
+      status: "usage_error",
+      reason: "patch_not_readable",
+      prior: 0,
+      run: () => {
+        const { repo, logs } = carryRepo();
+        return probePlan({
+          mutants: [
+            { file: "fixture.js", form: "patch", patchPath: "no-such.patch" },
+          ],
+          testCommand: "true",
+          isolation: "inplace",
+          expect: "fail",
+          cwd: repo,
+          logDir: logs,
+        });
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const declare = testCase.needsUnrooted && !unrootedOnly ? it.skip : it;
+    declare(`refusal: ${testCase.name}`, async () => {
+      const result = await testCase.run();
+      expect(result.status).toBe(testCase.status);
+      expect(result.reason).toBe(testCase.reason);
+      // The refusal's own text is carried, and it is exactly the warning
+      // the refusal appended: last, added once, with nothing before it
+      // moved, dropped or doubled.
+      expect(typeof result.refusal).toBe("string");
+      expect(result.refusal).toBe(result.warnings[result.warnings.length - 1]);
+      expect(result.warnings).toHaveLength(testCase.prior + 1);
+      if (testCase.firstWarningIncludes !== undefined) {
+        expect(result.warnings[0]).toContain(testCase.firstWarningIncludes);
+      }
+    });
+  }
+});

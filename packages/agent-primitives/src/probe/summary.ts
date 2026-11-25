@@ -196,10 +196,10 @@ function oneLine(value: string): string {
 /** The prefix of the `-n/--line` derivation notice `runProbePipeline`
  * pushes into `warnings` when a `-M/--match` run derives its line from a
  * unique occurrence. It is an informational note, not a refusal, and it
- * is always the first warning of such a run. `--summary`'s note is the
- * last-ranked warning source, so it never outranks anything else: the
- * precedence is `message` > the refusal's own text (`refusal`) > the
- * first warning that is not this notice > this notice. */
+ * is always the first warning of such a run. It is the last-ranked note
+ * source, so it never outranks anything else: the precedence is
+ * `message` > the refusal's own text (`refusal`) > the first warning
+ * that is not this notice > this notice. */
 export const MATCH_LINE_DERIVATION_NOTICE_PREFIX =
   "-n/--line derived from the unique -M/--match occurrence:";
 
@@ -479,23 +479,23 @@ export function renderProbeSummary(
     extras: string[],
   ): { text: string; intact: boolean; keptRows: number } => {
     const tail: string[] = [...extras, ...baselineLines, totals];
-    // The whole printed summary with `extras` (the expected-survivors
-    // block, the build-failure-detection line) ahead of the baseline
-    // lines. The `note:` is chosen by one precedence rule (see
+    // The `note:` is chosen by one precedence rule (see
     // `SummaryInput.refusal`): an explicit `message` first, then the
     // refusal's own text (carried explicitly, not looked for in
     // `warnings`), then the first warning that is not the `-n/--line`
     // derivation notice, then the notice itself. A `-M/--match` run that
     // derived its line pushed that notice as the first warning before any
-    // later refusal appended its own message, and a manifest-link or
-    // defaults-file warning can sit before a refusal too; none of those
-    // may become the note of a refused run. An explicit `message`
-    // outranks everything.
+    // later refusal appended its own message, and a manifest-link
+    // warning can sit before a refusal too; none of those may become the
+    // note of a refused run. An explicit `message` outranks everything.
     const firstPlainWarning = input.warnings?.find(
       (warning) => !warning.startsWith(MATCH_LINE_DERIVATION_NOTICE_PREFIX),
     );
     const note =
-      input.message ?? input.refusal ?? firstPlainWarning ?? input.warnings?.[0];
+      input.message ??
+      input.refusal ??
+      firstPlainWarning ??
+      input.warnings?.[0];
     // The refused line's content rides on the note (the single form prints
     // no mutant line for a refusal, so this is where `line=` appears); a
     // note carrying it survives even with a mutant counted, unlike a bare

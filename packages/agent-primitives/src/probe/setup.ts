@@ -282,6 +282,16 @@ export interface RunSetupRefusal {
   /** The warnings to report, this refusal's own message already
    * appended. */
   warnings: string[];
+  /** The refusal's own message, set wherever one was appended to
+   * `warnings` (so it equals `warnings`' last entry there): the callers
+   * in `index.ts` copy it into `ProbeResult.refusal` /
+   * `ProbePlanResult.refusal` so a warning pushed before this refusal
+   * (a manifest-link warning, an isolation-fallback notice) cannot
+   * become the `--summary` note of the refused run. Absent where the
+   * refusing path has no message of its own to append (`aborted`,
+   * `probe_in_progress`, a gate refusal that only pushed a
+   * verdict-explaining warning). */
+  message?: string;
   /** Absent where the refusing path reports no exec logs at all, which
    * is the caller's cue to omit the field entirely rather than report an
    * empty one. */
@@ -431,7 +441,15 @@ export interface RunSetupInput {
     rt: MutantRuntime;
   }) => Promise<
     | { ok: true; logPaths: string[] }
-    | { ok: false; reason: RefusalReason; logPaths: string[] }
+    | {
+        ok: false;
+        reason: RefusalReason;
+        /** The refusal's own message, already pushed into the shared
+         * `warnings` by the hook; carried so the refusal can name it
+         * without appending it again. */
+        message?: string;
+        logPaths: string[];
+      }
   >;
   /** Whether the signal handler's one restore slot stays armed (to
    * whichever target `openTarget` opened last) while the baseline runs.
@@ -497,12 +515,22 @@ export async function openRunSetup(
       baseline?: ExecPhaseField;
       fromBaselineGate?: boolean;
       baselineNotStarted?: boolean;
+      /** The refusal's own message where the site producing this refusal
+       * already pushed it into the shared `warnings` itself (the
+       * `beforeBaseline` hook's dry-run refusal): it lands in
+       * `refusal.message` without being appended a second time. */
+      messageAlreadyInWarnings?: string;
     } = {},
   ): RunSetupOutcome => ({
     ok: false,
     refusal: {
       status,
       reason,
+      ...(message !== undefined
+        ? { message }
+        : extra.messageAlreadyInWarnings !== undefined
+          ? { message: extra.messageAlreadyInWarnings }
+          : {}),
       warnings: message === undefined ? [...warnings] : [...warnings, message],
       ...(extra.logPaths !== undefined ? { logPaths: extra.logPaths } : {}),
       ...(extra.baseline !== undefined ? { baseline: extra.baseline } : {}),
@@ -994,6 +1022,9 @@ export async function openRunSetup(
     discardOpened();
     return refuse("inconclusive", hook.reason, undefined, {
       logPaths: stepLogPaths,
+      ...(hook.message === undefined
+        ? {}
+        : { messageAlreadyInWarnings: hook.message }),
     });
   }
 
