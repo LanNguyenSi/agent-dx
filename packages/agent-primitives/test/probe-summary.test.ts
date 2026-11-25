@@ -13,6 +13,8 @@ import {
   renderPrint,
   renderProbeSummary,
 } from "../src/probe/summary.js";
+import { probe, probePlan } from "../src/probe/index.js";
+import { LINK_MANIFEST_FILE } from "../src/probe/link-manifest.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 
 const tmpDirs: string[] = [];
@@ -1860,6 +1862,306 @@ describe(
       expect(items[0].result).toBe("killed");
       expect(items[1].result).toBe("not_applicable");
       expect(items[1].reason).toBe("baseline_failed");
+    });
+  },
+);
+
+describe("renderProbeSummary note precedence (table)", () => {
+  const message = "plan file could not be read";
+  const refusal = 'link "no-such-src" does not exist; drop --link';
+  const manifestWarning =
+    "ignoring the worktree link manifest /repo/.git/worktrees/wt/agent-primitives-links.json: it is not valid JSON";
+  const defaultsWarning = "/repo/.agent-primitives.json: not valid JSON";
+  const notice = `${MATCH_LINE_DERIVATION_NOTICE_PREFIX} line 2 of fixture.js`;
+
+  interface NoteCase {
+    name: string;
+    input: { message?: string; refusal?: string; warnings?: string[] };
+    /** `null`: no note line at all. `""`: an empty note text, which
+     * prints no note line either (an input that outranks the others
+     * still outranks). Anything else: the exact expected note. */
+    expected: string | null;
+  }
+  const cases: NoteCase[] = [
+    { name: "no message, no refusal, no warning", input: {}, expected: null },
+    { name: "message alone", input: { message }, expected: message },
+    {
+      name: "refusal alone (carried beside its appended warning)",
+      input: { refusal, warnings: [refusal] },
+      expected: refusal,
+    },
+    {
+      name: "manifest-link warning alone",
+      input: { warnings: [manifestWarning] },
+      expected: manifestWarning,
+    },
+    {
+      name: "defaults warning alone",
+      input: { warnings: [defaultsWarning] },
+      expected: defaultsWarning,
+    },
+    {
+      name: "derivation notice alone (the last-resort fallback)",
+      input: { warnings: [notice] },
+      expected: notice,
+    },
+    {
+      name: "message and refusal: the message wins",
+      input: { message, refusal, warnings: [refusal] },
+      expected: message,
+    },
+    {
+      name: "manifest-link warning before the refusal: the refusal wins",
+      input: { refusal, warnings: [manifestWarning, refusal] },
+      expected: refusal,
+    },
+    {
+      name: "defaults warning before the refusal: the refusal wins",
+      input: { refusal, warnings: [defaultsWarning, refusal] },
+      expected: refusal,
+    },
+    {
+      name: "manifest-link and defaults warnings before the refusal: the refusal wins",
+      input: { refusal, warnings: [manifestWarning, defaultsWarning, refusal] },
+      expected: refusal,
+    },
+    {
+      name: "derivation notice before the refusal: the refusal wins",
+      input: { refusal, warnings: [notice, refusal] },
+      expected: refusal,
+    },
+    {
+      name: "all three warnings before the refusal: the refusal wins",
+      input: { refusal, warnings: [notice, manifestWarning, refusal] },
+      expected: refusal,
+    },
+    {
+      name: "no refusal: the first non-notice warning wins over the notice",
+      input: { warnings: [notice, manifestWarning] },
+      expected: manifestWarning,
+    },
+    {
+      name: "manifest and defaults warnings, no refusal: the earlier pushed wins",
+      input: { warnings: [manifestWarning, defaultsWarning] },
+      expected: manifestWarning,
+    },
+    {
+      name: "message outranks the refusal and every warning",
+      input: {
+        message,
+        refusal,
+        warnings: [notice, manifestWarning, defaultsWarning, refusal],
+      },
+      expected: message,
+    },
+    {
+      name: "an empty message still outranks (absent vs empty)",
+      input: { message: "", refusal, warnings: [manifestWarning, refusal] },
+      expected: "",
+    },
+  ];
+  for (const testCase of cases) {
+    it(`note: ${testCase.name}`, () => {
+      const text = renderProbeSummary({
+        status: "usage_error",
+        reason: "link_source_not_found",
+        ...testCase.input,
+      });
+      const lines = text.trimEnd().split("\n");
+      if (testCase.expected === null || testCase.expected === "") {
+        expect(text).not.toContain("note: ");
+      } else {
+        expect(lines[lines.length - 1]).toBe(`note: ${testCase.expected}`);
+      }
+    });
+  }
+});
+
+/** A linked worktree whose git administration directory carries a link
+ * manifest that cannot be read, so `trustedManifestLinks` pushes its
+ * warning before any link-source refusal, in the single and the plan
+ * form alike. */
+function makeManifestLinkRepo(): {
+  base: string;
+  repo: string;
+  wt: string;
+  logs: string;
+} {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ap-summary-manifest-"));
+  tmpDirs.push(base);
+  const repo = path.join(base, "repo");
+  fs.mkdirSync(repo, { recursive: true });
+  const git = (cwd: string, args: string[]) =>
+    execFileSync("git", args, { cwd });
+  git(base, ["init", "-q", "-b", "main", repo]);
+  for (const [key, value] of [
+    ["user.email", "test@example.com"],
+    ["user.name", "test"],
+  ] as const) {
+    git(repo, ["config", key, value]);
+  }
+  fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = true;\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "fixture"]);
+  const wt = path.join(base, "wt");
+  git(repo, ["worktree", "add", "-q", wt, "-b", "summary-wt", "main"]);
+  const admin = fs
+    .readFileSync(path.join(wt, ".git"), "utf8")
+    .trim()
+    .replace(/^gitdir:\s*/, "");
+  fs.writeFileSync(path.join(admin, LINK_MANIFEST_FILE), "{ not json", {
+    mode: 0o600,
+  });
+  const logs = path.join(base, "logs");
+  fs.mkdirSync(logs);
+  return { base, repo, wt, logs };
+}
+
+/** The refused link source: inside the containment root, so the refusal
+ * is `link_source_not_found` (one outside it answers `file_outside_root`). */
+const MISSING_LINK = "no-such-src";
+const REFUSAL_MARK = `"${MISSING_LINK}"`;
+
+describe(
+  "probe --summary: a manifest-link warning before a link-source refusal (end to end)",
+  { timeout: 60000 },
+  () => {
+    it("single form: the note is the refusal, the JSON warnings keep their order", async () => {
+      const { wt, logs } = makeManifestLinkRepo();
+      const base = ["-C", wt, "-l", logs, "-m", "100000", "probe"];
+      const args = [
+        "--file",
+        "fixture.js",
+        "-n",
+        "1",
+        "-r",
+        "module.exports = false;",
+        "-t",
+        TEST_CMD,
+        "--link",
+        MISSING_LINK,
+      ];
+      const json = await spawnCli([...base, ...args]);
+      const view = await spawnCli([...base, "--summary", ...args]);
+      expect(json.code).toBe(2);
+      expect(view.code).toBe(2);
+      const envelope = JSON.parse(json.stdout) as {
+        status: string;
+        reason?: string;
+        warnings: string[];
+      };
+      expect(envelope.status).toBe("usage_error");
+      expect(envelope.reason).toBe("link_source_not_found");
+      // The envelope is unchanged: the manifest warning stays first, the
+      // refusal's message last, exactly as they were pushed.
+      expect(envelope.warnings[0]).toContain(
+        "ignoring the worktree link manifest",
+      );
+      const refusal = envelope.warnings[envelope.warnings.length - 1];
+      expect(refusal).toContain(REFUSAL_MARK);
+      const lines = view.stdout.trimEnd().split("\n");
+      expect(lines[lines.length - 1]).toBe(`note: ${refusal}`);
+      expect(view.stdout).not.toContain("ignoring the worktree link manifest");
+
+      // The pipeline carries the refusal's own text on its result,
+      // beside the warning it appends (same as the plan form).
+      const result = await probe({
+        file: "fixture.js",
+        line: 1,
+        form: "replace",
+        replaceText: "module.exports = false;",
+        testCommand: TEST_CMD,
+        isolation: "inplace",
+        expect: "fail",
+        links: [MISSING_LINK],
+        cwd: wt,
+        logDir: logs,
+      });
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("link_source_not_found");
+      expect(result.refusal).toBe(refusal);
+      expect(result.warnings[0]).toContain(
+        "ignoring the worktree link manifest",
+      );
+    });
+
+    it("plan form: the refusal is carried explicitly, the summary never prints the manifest warning", async () => {
+      const { base, wt, logs } = makeManifestLinkRepo();
+      const plan = path.join(base, "plan.json");
+      fs.writeFileSync(
+        plan,
+        JSON.stringify({
+          test: TEST_CMD,
+          mutants: [
+            {
+              file: "fixture.js",
+              line: 1,
+              replace: "module.exports = false;",
+            },
+          ],
+        }),
+      );
+      const planArgs = ["--plan", plan, "--link", MISSING_LINK];
+      const json = await spawnCli(["-C", wt, "-l", logs, "-m", "100000", "probe", ...planArgs]);
+      const view = await spawnCli([
+        "-C",
+        wt,
+        "-l",
+        logs,
+        "-m",
+        "100000",
+        "probe",
+        "--summary",
+        ...planArgs,
+      ]);
+      expect(json.code).toBe(2);
+      expect(view.code).toBe(2);
+      const envelope = JSON.parse(json.stdout) as {
+        status: string;
+        reason?: string;
+        warnings: string[];
+      };
+      expect(envelope.status).toBe("usage_error");
+      expect(envelope.reason).toBe("link_source_not_found");
+      expect(envelope.warnings[0]).toContain(
+        "ignoring the worktree link manifest",
+      );
+      const refusal = envelope.warnings[envelope.warnings.length - 1];
+      expect(refusal).toContain(REFUSAL_MARK);
+      // A refused plan counts its never-run mutants, so its summary
+      // carries no note line at all (the note belongs to runs that name
+      // no mutant); what must not appear anywhere is the manifest
+      // warning, and the totals line names the refusal's reason.
+      const lines = view.stdout.trimEnd().split("\n");
+      expect(lines[lines.length - 1]).toContain(
+        "totals: status=usage_error reason=link_source_not_found",
+      );
+      expect(view.stdout).not.toContain("note:");
+      expect(view.stdout).not.toContain("ignoring the worktree link manifest");
+
+      // The pipeline carries the refusal's own text on its result,
+      // beside the warning it appends, so the summary input never has
+      // to pick it out of `warnings`.
+      const result = await probePlan({
+        mutants: [
+          {
+            file: "fixture.js",
+            line: 1,
+            form: "replace",
+            replaceText: "module.exports = false;",
+          },
+        ],
+        testCommand: TEST_CMD,
+        isolation: "inplace",
+        expect: "fail",
+        links: [MISSING_LINK],
+        cwd: wt,
+        logDir: logs,
+      });
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("link_source_not_found");
+      expect(result.refusal).toBe(refusal);
+      expect(result.warnings[0]).toContain("ignoring the worktree link manifest");
     });
   },
 );

@@ -2540,13 +2540,17 @@ What a run that stops early prints, by case:
   usage error given `--summary` alone; `patch` has no `--summary` and
   always gets the envelope.
 - A refusal that names no mutant prints the `totals:` line (`total=0`)
-  and a `note:` line with its own message or first warning: an unreadable
-  plan file, a single-probe `--file` outside the containment root. A
-  `-M/--match` run that derived its line recorded an informational
-  `-n/--line derived ...` notice as that run's first warning before any
-  later refusal appended its own message; the `note:` then names the
-  first warning that is not that derivation notice (normally the
-  refusal's message).
+  and a `note:` line. The note follows one precedence rule: an explicit
+  `message` first, then the refusal's own text (the pipeline carries it
+  explicitly rather than having the summary pick it out of `warnings` by
+  position), then the first warning that is not a `-n/--line` derivation
+  notice, then that notice itself. A `-M/--match` run that derived its
+  line pushed an informational `-n/--line derived ...` notice as that
+  run's first warning, and a worktree link manifest warning or a
+  defaults-file message can sit before a later refusal too; the `note:`
+  of a refused run names the refusal, not one of those. An unreadable
+  plan file, a manifest-link refusal and a single-probe `--file` outside
+  the containment root each print their own refusal text as the note.
 - A single-probe `mutant_not_applicable` refusal prints a `totals:` line
   that counts the mutant (`total=1 inconclusive=1`) and a `note:` line
   with its own warning (a derivation notice, if any preceded it, is not
