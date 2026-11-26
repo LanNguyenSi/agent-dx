@@ -13,6 +13,11 @@ import { ACKS_FILE, lintSpecDir, writeAck } from "./lint/index.js";
 import { repoCheck } from "./repo/index.js";
 import { bindSpecDir, proposeSpecDir } from "./state/index.js";
 import { runTriage } from "./triage/index.js";
+import {
+  ExportError,
+  checkSlicerReturn,
+  exportSpecDir,
+} from "./exporters/index.js";
 
 function readVersion(): string {
   const url = new URL("../package.json", import.meta.url);
@@ -421,6 +426,93 @@ program
     process.stdout.write(`${JSON.stringify(result.report)}\n`);
     process.exitCode = result.report.ok ? 0 : 1;
   });
+
+// `export` follows the exit codes of `lint`: 0 for a result (a printed
+// briefing, a return that names every id), 1 when a checked return is
+// missing ids, 2 for a usage error and every refusal (a spec that is not
+// merged unchanged on the default branch, a format or a file that cannot
+// be read).
+program
+  .command("export")
+  .description(
+    "--format ow: print the deterministic slicer briefing of a proposed spec merged unchanged " +
+      "on the default branch; --check: verify that a slicer return names every qualified AC and TP id " +
+      "of a spec; exits 0 on a complete result, 1 when a checked return misses ids, 2 on any refusal",
+  )
+  .argument(
+    "<spec-dir>",
+    "directory with spec.md, testplan.yaml and bindings.yaml",
+  )
+  .addOption(
+    new Option(
+      "--format <format>",
+      "print the briefing in this format; ow is the only format; needs --repo and --default-ref",
+    ).choices(["ow"]),
+  )
+  .option(
+    "--repo <dir>",
+    "the trusted checkout root, as for lint; required with --format",
+  )
+  .option(
+    "--default-ref <ref>",
+    "full ref name of the default branch (for example refs/remotes/origin/main): " +
+      "the spec.md, testplan.yaml and bindings.yaml of the work tree must be byte-equal to the copies " +
+      "at that commit and the status must be proposed; required with --format",
+  )
+  .option(
+    "--check <file>",
+    "the slicer return to check: exit 0 when every qualified AC and TP id of <spec-dir> appears as a " +
+      "whole token in a string field of at least one task, 1 with the missing ids listed; reads no git",
+  )
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action(
+    (
+      specDir: string,
+      options: {
+        format?: string;
+        repo?: string;
+        defaultRef?: string;
+        check?: string;
+      },
+    ) => {
+      try {
+        if (options.check !== undefined) {
+          if (
+            options.format !== undefined ||
+            options.repo !== undefined ||
+            options.defaultRef !== undefined
+          ) {
+            throw new ExportError(
+              "usage",
+              "--check reads no repository and prints no briefing: remove --format, --repo and --default-ref",
+            );
+          }
+          const outcome = checkSlicerReturn(specDir, options.check);
+          if (!outcome.ok) {
+            throw new ExportError(outcome.code, outcome.message);
+          }
+          for (const id of outcome.missing) {
+            process.stdout.write(`missing ${id}\n`);
+          }
+          process.exitCode = outcome.missing.length === 0 ? 0 : 1;
+          return;
+        }
+        const outcome = exportSpecDir(specDir, options);
+        if (!outcome.ok) {
+          throw new ExportError(outcome.code, outcome.message);
+        }
+        process.stdout.write(outcome.text);
+      } catch (err) {
+        if (!(err instanceof ExportError)) throw err;
+        process.stderr.write(
+          `spec-gate: export: ${err.code}: ${err.message}\n`,
+        );
+        process.exitCode = 2;
+      }
+    },
+  );
 
 try {
   await program.parseAsync();

@@ -58,6 +58,19 @@ every pull request, not only on spec pull requests; it is described in
 [docs/lint.md](docs/lint.md) ("Repository check"), the code lives in
 `src/repo/`.
 
+`spec-gate export <spec-dir> --format ow --repo <dir> --default-ref <ref>`
+prints the deterministic `ow` slicer briefing of a proposed spec whose
+`spec.md`, `testplan.yaml` and `bindings.yaml` are merged unchanged on the
+default branch (the work-tree copies must be byte-equal to the copies at
+the `--default-ref` commit, read offline through the same hardened git
+layer as `lint`; otherwise a named error exits 2), and
+`spec-gate export <spec-dir> --check <slicer-return.yaml>` exits 0 when
+every qualified AC and TP id of the spec appears as a whole token in a
+string field of at least one task of the slicer return, 1 with the missing
+ids listed, 2 on a usage or parse error; the briefing keys, the path
+conventions and the token rule are described in
+[docs/export.md](docs/export.md); the code lives in `src/exporters/`.
+
 ## Formats
 
 The files `spec-gate` reads and writes, their grammars, the field-to-layer

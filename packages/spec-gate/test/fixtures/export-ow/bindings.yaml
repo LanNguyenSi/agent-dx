@@ -1,0 +1,16 @@
+TP-4:
+  status: existing
+  file: test/typecheck.spec.ts
+TP-2:
+  status: existing
+  selector: login works
+  file: test/auth.test.ts
+  fixtures:
+    - test/fixtures/tokens.json
+    - test/fixtures/users.json
+TP-1:
+  status: new
+  selector: rejects old token
+  file: test/auth.test.ts
+  fixtures:
+    - test/fixtures/users.json
