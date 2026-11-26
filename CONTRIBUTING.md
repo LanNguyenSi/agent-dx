@@ -51,7 +51,20 @@ the scope is ever narrowed to named packages would a new allowlist entry
 need a re-scope by hand on npmjs.com in the same change. Without that
 re-scope the workflow accepts the package and then fails at the registry
 read-back assertion, whose error/warning message names the token as the
-likely cause. There is no working local
+likely cause. The token expires: the tracked expiry and its warning lead
+time live in the single data file `.github/npm-agent-dx-token.json`
+(`expires`, a `YYYY-MM-DD` date, and `warn_days`, the days before expiry at
+which checks start failing). `.github/workflows/npm-token-check.yml` runs
+the check weekly and on demand, and the preflight steps of both operator
+workflows run the same script (`.github/scripts/check-npm-token.mjs`)
+before any registry write, so an expired, revoked or soon-expiring token is
+reported weeks before it is needed. To rotate: create the new token on
+npmjs.com, update the `NPM_AGENT_DX_TOKEN` repository secret, and update
+the date in `.github/npm-agent-dx-token.json` in the same pull request, so
+the tracked date never describes an older token than the secret; dispatching
+the check job once confirms the new pair. Narrowing the token's package
+scope and turning off its 2FA-bypass are operator decisions made on
+npmjs.com, not changes this repository can make. There is no working local
 npm token; do not debug a local `E401`/`E404`, trigger the workflow
 instead.
 
