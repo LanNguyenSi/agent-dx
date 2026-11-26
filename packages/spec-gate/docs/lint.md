@@ -588,7 +588,8 @@ pull request, and a fresh clone may not hold it at all. The rule then takes
 the merged state as the anchor when the diff base holds a `bindings.log` for
 this spec at the same path whose propose entry (commit and hash) is the one
 of the log in the spec directory, and the diff base holds a `bindings.yaml`
-there that parses. The anchor is `bindings.yaml` read from git at the diff
+there that parses and gives, for every TP ID the merged log binds, the
+binding of its last bind entry. The anchor is `bindings.yaml` read from git at the diff
 base, never from the work tree. Only the bind entries after the last line of
 the merged log are checked: each must name a TP ID the anchor has
 (`bind-unknown-id`) and keep to its row's kind given the status before it,
@@ -599,11 +600,18 @@ a log whose propose entry was swapped reports `log-rewritten` and, as it
 anchors nothing, `propose-not-a-commit` or `propose-not-ancestor`. On the
 default branch itself the diff base is `HEAD`, so a merged spec there passes
 with nothing left to replay; the propose checks (draft at the propose commit,
-no log there, the hash) ran in the pull request that merged the log. A spec
+no log there, the hash) ran in the pull request that merged the log. The
+merged state is trusted: this holds only when the lint is a required check of
+every pull request and the default branch takes no direct pushes. A change to
+`bindings.yaml` on the default branch that skipped the lint is caught for a
+TP ID the merged log binds (that binding no longer matches its last bind
+entry, so the state anchors nothing); a TP ID that was never bound keeps its
+value from the propose commit, which cannot be verified without that commit.
+A spec
 whose log is not on the default branch yet (or not at the diff base of the
 pull request) still needs its propose commit as an ancestor of `HEAD`, as
 does one whose merged log does not parse or whose `bindings.yaml` at the
-diff base is missing or does not parse; a merge commit keeps the propose
+diff base is missing, does not parse or differs from a bound value; a merge commit keeps the propose
 commit an ancestor and takes the path above.
 
 Triage. `triage-stale`: a `triage.json` that stores a `class` must store

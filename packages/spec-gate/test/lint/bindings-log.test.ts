@@ -869,5 +869,78 @@ describe(
         ]);
       }
     });
+
+    it("after a squash merge a later pull request forked before the default branch merged another bind is clean", async () => {
+      const { repo } = await boundOnBranch();
+      const merged = await squashMerge(repo, "pr");
+      await repo.checkout("other", merged);
+      bindOk(repo, "TP-2", { status: "existing", selector: "login works 2" });
+      await commitSpec(repo, "another bind");
+      await repo.checkout("main");
+      await repo.sh("merge", "-q", "--squash", "other");
+      const moved = await repo.commit({}, "squash other");
+      await repo.setRef(REMOTE_MAIN, moved);
+      // the reference is past the diff base, which still is the first squash
+      await repo.checkout("later", merged);
+      bindOk(repo, "TP-1", { status: "existing", selector: "later name" });
+      await commitSpec(repo, "a later bind");
+      expect(codesOf(lintGit(repo))).toEqual([]);
+    });
+
+    it("after a squash merge a propose entry swapped in its hash only is rewritten and anchors nothing", async () => {
+      const { repo } = await squashedThenLater();
+      const lines = readSpec(repo, "bindings.log").trimEnd().split("\n");
+      const first = JSON.parse(lines[0]!) as { commit: string };
+      const binds = lines.slice(1).map((line) => {
+        const rec = JSON.parse(line) as { tp: string; binding: Binding };
+        return [rec.tp, rec.binding] as [string, Binding];
+      });
+      writeSpec(
+        repo,
+        "bindings.log",
+        forgedLog(first.commit, sha256Tag("other bytes\n"), binds),
+      );
+      await commitSpec(repo, "swap the hash");
+      expect(codesOf(lintGit(repo))).toEqual([
+        "log-rewritten",
+        "propose-not-ancestor",
+      ]);
+    });
+
+    it("after a squash merge a log the diff base holds only at another path of the same spec anchors nothing", async () => {
+      const { repo } = await boundOnBranch();
+      await squashMerge(repo, "pr");
+      const log = readSpec(repo, "bindings.log");
+      fs.cpSync(repo.spec, path.join(repo.dir, "specs", "zz"), {
+        recursive: true,
+      });
+      fs.rmSync(path.join(repo.spec, "bindings.log"));
+      const dropped = await commitSpec(repo, "copy, and drop the log");
+      await repo.setRef(REMOTE_MAIN, dropped);
+      await repo.checkout("later", dropped);
+      writeSpec(repo, "bindings.log", log);
+      await commitSpec(repo, "restore the log");
+      expect(codesOf(lintGit(repo))).toEqual(["propose-not-ancestor"]);
+    });
+
+    it("after a squash merge a bindings.yaml changed on the default branch without a bind entry anchors nothing", async () => {
+      const { repo } = await boundOnBranch();
+      await squashMerge(repo, "pr");
+      writeSpec(
+        repo,
+        "bindings.yaml",
+        readSpec(repo, "bindings.yaml").replace(
+          "second name",
+          "pushed by hand",
+        ),
+      );
+      const tampered = await commitSpec(repo, "a direct push");
+      await repo.setRef(REMOTE_MAIN, tampered);
+      expect(codesOf(lintGit(repo))).toEqual(["propose-not-ancestor"]);
+      await repo.checkout("later", tampered);
+      bindOk(repo, "TP-2", { status: "existing", selector: "login works 2" });
+      await commitSpec(repo, "a later bind");
+      expect(codesOf(lintGit(repo))).toEqual(["propose-not-ancestor"]);
+    });
   },
 );

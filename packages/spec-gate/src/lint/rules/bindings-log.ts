@@ -242,7 +242,8 @@ interface MergedAnchor {
  * The merged state as the anchor of `log`, or `null` when the diff base
  * holds no usable log for it: the log merged at the spec's own path must
  * parse and carry the propose entry of `log`, and `bindings.yaml` read from
- * git at the diff base must exist and parse. The bind entries to check are
+ * git at the diff base must exist, parse and hold, for every TP ID the merged
+ * log binds, the binding of its last bind entry. The bind entries to check are
  * those after the merged log's last line; that the log at HEAD extends the
  * merged one byte for byte is `log-rewritten`'s check.
  */
@@ -270,6 +271,17 @@ function mergedAnchor(
   const yaml = bytes === null ? null : decodeUtf8(bytes);
   const bindings = yaml === null ? null : parseBindings(yaml);
   if (bindings === null || !bindings.ok) return null;
+  // Every TP ID the merged log binds still holds its last bound value: a
+  // bindings.yaml changed on the default branch without a bind entry (a
+  // write that skipped the lint) anchors nothing.
+  if (
+    differingBindings(
+      replayBindings(bindings.value, base.binds),
+      bindings.value,
+    ).length > 0
+  ) {
+    return null;
+  }
   const last = base.lines.length;
   return {
     bindings: bindings.value,
