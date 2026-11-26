@@ -20,8 +20,23 @@ import {
 /** The only format name the CLI offers. */
 export const OW_FORMAT = "ow";
 
+/**
+ * The list as given, accepted by the compiler only when it names every
+ * field of a test-plan row: a field added to the row type and not listed
+ * here is a compile error, not a field missing from the briefing.
+ */
+function everyRowKey<K extends keyof TestPlanRow>(
+  keys: readonly K[],
+  ...complete: [keyof TestPlanRow] extends [K]
+    ? []
+    : [missing: Exclude<keyof TestPlanRow, K>]
+): readonly K[] {
+  void complete;
+  return keys;
+}
+
 /** The row fields in the key order `suggested_tests` objects use. */
-const ROW_KEYS = [
+const ROW_KEYS = everyRowKey([
   "id",
   "covers",
   "kind",
@@ -46,7 +61,7 @@ const ROW_KEYS = [
   "method",
   "probe_hint",
   "notes",
-] as const;
+]);
 
 /** The constraint every slicer return is checked against (`check.ts`). */
 export const QUALIFIED_ID_CONSTRAINT =
@@ -59,7 +74,7 @@ function sortedUnique(values: readonly string[]): string[] {
 function testRow(row: TestPlanRow): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const key of ROW_KEYS) {
-    const value = row[key as keyof TestPlanRow];
+    const value = row[key];
     if (value === undefined) continue;
     out[key] = Array.isArray(value) ? [...value] : value;
   }

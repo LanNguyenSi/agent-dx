@@ -16,6 +16,7 @@ import {
   REVERSED_BINDINGS,
   SPEC_REL,
   exportArgs,
+  fixtureText,
   makeMergedRepo,
   type MergedRepoOptions,
 } from "./repo.js";
@@ -111,38 +112,53 @@ describe("spec-gate export --format ow", () => {
     expect(dropRef(run.stdout)).toBe(dropRef(GOLDEN));
   });
 
-  it("refuses a work tree copy that only adds a byte order mark", async () => {
-    const repo = await mergedRepo();
-    const file = path.join(repo.spec, "spec.md");
-    const bytes = fs.readFileSync(file);
-    fs.writeFileSync(
-      file,
-      Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes]),
-    );
-    const run = await runCli(
-      ["export", ...exportArgs(repo)],
-      EXPORT_TIMEOUT_MS,
-    );
-    expect(run.code).toBe(2);
-    expect(run.stderr).toContain("export: not-merged");
-    expect(run.stderr).toContain("specs/s1/spec.md");
-    expect(run.stdout).toBe("");
-  });
+  // Each of the three files is compared on its own: a check that skips
+  // one of them would let that file differ from the default branch.
+  const CHANGES = [
+    [
+      "that only adds a byte order mark",
+      (file: string) => {
+        fs.writeFileSync(
+          file,
+          Buffer.concat([
+            Buffer.from([0xef, 0xbb, 0xbf]),
+            fs.readFileSync(file),
+          ]),
+        );
+      },
+    ],
+    [
+      "that only changes line endings",
+      (file: string) => {
+        const text = fs.readFileSync(file, "utf8");
+        fs.writeFileSync(file, text.split("\n").join("\r\n"));
+      },
+    ],
+    [
+      "changed after the merge",
+      (file: string) => {
+        fs.appendFileSync(file, "\n");
+      },
+    ],
+  ] as const;
 
-  it("refuses a work tree copy that only changes line endings", async () => {
-    const repo = await mergedRepo();
-    const file = path.join(repo.spec, "testplan.yaml");
-    const text = fs.readFileSync(file, "utf8");
-    fs.writeFileSync(file, text.split("\n").join("\r\n"));
-    const run = await runCli(
-      ["export", ...exportArgs(repo)],
-      EXPORT_TIMEOUT_MS,
-    );
-    expect(run.code).toBe(2);
-    expect(run.stderr).toContain("export: not-merged");
-    expect(run.stderr).toContain("specs/s1/testplan.yaml");
-    expect(run.stdout).toBe("");
-  });
+  for (const name of ["spec.md", "testplan.yaml", "bindings.yaml"]) {
+    for (const [what, change] of CHANGES) {
+      it(`refuses a work tree ${name} ${what}`, async () => {
+        const repo = await mergedRepo();
+        change(path.join(repo.spec, name));
+        const run = await runCli(
+          ["export", ...exportArgs(repo)],
+          EXPORT_TIMEOUT_MS,
+        );
+        expect(run.code).toBe(2);
+        expect(run.stderr).toContain(
+          `export: not-merged: specs/s1/${name} is not merged unchanged`,
+        );
+        expect(run.stdout).toBe("");
+      });
+    }
+  }
 
   it("exports a spec reached through a linked repository directory", async () => {
     const repo = await mergedRepo();
@@ -184,19 +200,6 @@ describe("spec-gate export --format ow", () => {
     expect(run.stdout).toBe("");
   });
 
-  it("refuses the work tree changed after the merge", async () => {
-    const repo = await mergedRepo();
-    fs.appendFileSync(path.join(repo.spec, "spec.md"), "\n");
-    const run = await runCli(
-      ["export", ...exportArgs(repo)],
-      EXPORT_TIMEOUT_MS,
-    );
-    expect(run.code).toBe(2);
-    expect(run.stderr).toContain("export: not-merged");
-    expect(run.stderr).toContain("specs/s1/spec.md");
-    expect(run.stdout).toBe("");
-  });
-
   it("refuses a spec directory file that is a symbolic link", async () => {
     const repo = await mergedRepo();
     const file = path.join(repo.spec, "testplan.yaml");
@@ -222,6 +225,24 @@ describe("spec-gate export --format ow", () => {
     expect(run.code).toBe(2);
     expect(run.stderr).toContain("export: not-proposed");
     expect(run.stderr).toContain("draft");
+    expect(run.stdout).toBe("");
+  });
+
+  it("refuses a superseded spec merged on the default branch", async () => {
+    const repo = await mergedRepo({
+      spec: fixtureText("spec.md").replace(
+        "status: proposed",
+        "status: superseded\nsuperseded_by: other-spec",
+      ),
+    });
+    const run = await runCli(
+      ["export", ...exportArgs(repo)],
+      EXPORT_TIMEOUT_MS,
+    );
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain(
+      "export: not-proposed: specs/s1/spec.md has status superseded",
+    );
     expect(run.stdout).toBe("");
   });
 });

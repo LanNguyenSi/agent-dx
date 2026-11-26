@@ -83,6 +83,19 @@ export interface MergedRepoOptions {
   bindings?: string;
   /** Replace `spec.md` (the commit id placeholder is still substituted). */
   spec?: string;
+  /** Replace `testplan.yaml`. */
+  testplan?: string;
+  /**
+   * Called with the repository directory after the spec files are written
+   * and before they are committed: what it leaves in the work tree is what
+   * the default branch holds.
+   */
+  beforeCommit?: typeof commitAsWritten;
+}
+
+/** The default `beforeCommit`: the spec files are committed as written. */
+export function commitAsWritten(dir: string): void {
+  void dir;
 }
 
 /**
@@ -120,10 +133,12 @@ export async function makeMergedRepo(
   }
   write({
     [`${SPEC_REL}/spec.md`]: spec,
-    [`${SPEC_REL}/testplan.yaml`]: fixtureText("testplan.yaml"),
+    [`${SPEC_REL}/testplan.yaml`]:
+      options.testplan ?? fixtureText("testplan.yaml"),
     [`${SPEC_REL}/bindings.yaml`]:
       options.bindings ?? fixtureText("bindings.yaml"),
   });
+  (options.beforeCommit ?? commitAsWritten)(dir);
   await git(dir, ["add", "-A"], day);
   await git(dir, ["commit", "-q", "-m", "spec"], day);
   const commit = await git(dir, ["rev-parse", "HEAD"], day);

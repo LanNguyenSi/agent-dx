@@ -5,7 +5,10 @@
 return against a spec. It writes nothing, fetches nothing and runs no
 commands. Exit codes: 0 for a result (a printed briefing, a complete
 return), 1 for a checked return with missing ids, 2 for a usage error and
-every refusal (`spec-gate: export: <code>: <message>` on stderr).
+every refusal (`spec-gate: export: <code>: <message>` on stderr). A usage
+error the option parser finds itself (an unknown option, a `--format` value
+other than `ow`, a missing argument) also exits 2, with the parser's own
+`error: ...` line instead.
 
 ## `export <spec-dir> --format ow --repo <dir> --default-ref <ref>`
 
@@ -60,7 +63,7 @@ identical across runs:
 | `digest` | `sha256:<hex>` of the normative layer |
 | `goal` | the text of the single `GOAL` line |
 | `acceptance_criteria` | one string per AC line (`<spec-id>#AC-<n>: <text>`) in spec order, then one per test-plan row (`<spec-id>#TP-<n>: <claim>`) in plan order |
-| `suggested_tests` | the test-plan rows, each with its fields in one fixed key order |
+| `suggested_tests` | the test-plan rows in plan order, each with the fields it carries in this key order: `id`, `covers`, `kind`, `claim`, `input`, `expected`, `oracle`, `level`, `seam`, `red_reason`, `fail_match`, `baseline`, `threshold`, `runs`, `check_command_ref`, `verifier`, `evidence_location`, `check`, `environment`, `steps`, `control`, `method`, `probe_hint`, `notes` |
 | `forbidden_changes` | the `paths` attributes of the Non-goals, plus the spec directory's `spec.md` and `testplan.yaml`, sorted and deduplicated |
 | `constraints` | one string per Non-goal line without `paths` (`<spec-id>#NG-<n>: <text>`), then the line that every qualified AC and TP id of the spec must appear literally in at least one task |
 | `relevant_docs` | the spec directory's `spec.md` and `testplan.yaml` |
@@ -96,7 +99,8 @@ are git paths: two spellings git tells apart (`src/Legacy` and
 `src/legacy`) are two paths here, also on a file system that folds case or
 Unicode normal forms.
 
-Sort is plain code point order, applied where the order of the source file
+Sort is UTF-16 code unit order (the default order of JavaScript strings,
+as in `docs/digest.md`), applied where the order of the source file
 carries no meaning (binding paths, Non-goal paths); a list that follows
 file order (`acceptance_criteria`, `constraints`) is never reordered. A
 sorted list must read the same whatever order its source file listed its

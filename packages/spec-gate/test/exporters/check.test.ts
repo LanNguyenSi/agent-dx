@@ -84,6 +84,64 @@ describe("spec-gate export --check", () => {
     expect(run.stderr).toContain("export: usage");
   });
 
+  /** Runs `--check` over a slicer return with this text. */
+  async function checkText(text: string) {
+    const file = path.join(scratch(), "return.yaml");
+    fs.writeFileSync(file, text);
+    return runCli(["export", checkDir(), "--check", file]);
+  }
+
+  const ALL_IDS = [
+    "tiny-valid#AC-1",
+    "tiny-valid#AC-2",
+    "tiny-valid#TP-1",
+    "tiny-valid#TP-2",
+    "tiny-valid#TP-3",
+    "tiny-valid#TP-4",
+  ];
+
+  it("finds ids that appear only inside a list field of a task", async () => {
+    const run = await checkText(
+      `tasks:\n  - id: T-1\n    acceptance_criteria:\n${ALL_IDS.map(
+        (id) => `      - "${id}: shown"\n`,
+      ).join("")}`,
+    );
+    expect(run.stderr).toBe("");
+    expect(run.stdout).toBe("");
+    expect(run.code).toBe(0);
+  });
+
+  it("finds ids in a list nested in a list and in a mapping inside a list", async () => {
+    const run = await checkText(
+      "tasks:\n" +
+        "  - id: T-1\n" +
+        "    groups:\n" +
+        `      - - "${ALL_IDS[0]}"\n` +
+        `        - - "${ALL_IDS[1]}"\n` +
+        `          - "${ALL_IDS[2]}"\n` +
+        `      - tests:\n` +
+        `          - name: "${ALL_IDS[3]}"\n` +
+        `          - "${ALL_IDS[4]}"\n`,
+    );
+    expect(run.stderr).toBe("");
+    expect(run.stdout).toBe(`missing ${ALL_IDS[5]}\n`);
+    expect(run.code).toBe(1);
+  });
+
+  it.each([
+    ["a string", `"${ALL_IDS.join(" ")}"`],
+    ["null", "null"],
+    ["a list", `["${ALL_IDS.join('", "')}"]`],
+    ["a number", "7"],
+  ])("exits 2 when a task is %s", async (_what, task) => {
+    const run = await checkText(`tasks:\n  - id: T-1\n  - ${task}\n`);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain(
+      "export: return-shape: task 1 of the slicer return must be a mapping",
+    );
+    expect(run.stdout).toBe("");
+  });
+
   it("refuses a --check option without a path", async () => {
     const run = await runCli(["export", checkDir(), "--check"]);
     expect(run.code).toBe(2);

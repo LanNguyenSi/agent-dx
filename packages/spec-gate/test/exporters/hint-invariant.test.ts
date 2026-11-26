@@ -747,4 +747,22 @@ describe("what the briefing prints around the rule", () => {
     if (dropped.refused !== null) return;
     expect(dropped.briefing.hint).not.toContain(path);
   });
+
+  it("reads a long path once, however many directories lie above it", () => {
+    // 4 KB of pattern against 4 KB of path with 1000 directories. Read
+    // once, that is some twenty million steps and a small fraction of the
+    // limit below. Matched again from the start for every directory above
+    // the path, it is hundreds of times that and several times the limit.
+    const nonGoal = `${"*/".repeat(999)}*a${"*a".repeat(1000)}`;
+    const candidate = `${"a/".repeat(1000)}${"a".repeat(2000)}b`;
+    expect(nonGoal.length).toBeGreaterThanOrEqual(4000);
+    expect(candidate.length).toBeGreaterThanOrEqual(4000);
+    const started = performance.now();
+    const run = exportOf(specWith(nonGoal), bindingsWith("file", candidate));
+    const elapsedMs = performance.now() - started;
+    expect(run.refused).toBeNull();
+    if (run.refused !== null) return;
+    expect(run.briefing.hint).toContain(candidate);
+    expect(elapsedMs).toBeLessThan(1_000);
+  });
 });

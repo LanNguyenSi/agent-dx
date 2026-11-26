@@ -153,33 +153,35 @@ function close(active: boolean[], compiled: Compiled): void {
   }
 }
 
-/**
- * True when the compiled pattern matches the whole of `text`. The states
- * are advanced together, one character at a time, so the work is bounded
- * by pattern length times text length whatever the pattern looks like.
- */
-function matches(compiled: Compiled, text: string): boolean {
-  const end = compiled.tokens.length;
-  let active: boolean[] = new Array<boolean>(end + 1).fill(false);
+/** The states a match is in before it has read anything. */
+function start(compiled: Compiled): boolean[] {
+  const active = new Array<boolean>(compiled.tokens.length + 1).fill(false);
   active[0] = true;
   close(active, compiled);
-  for (const char of Array.from(text)) {
-    const next: boolean[] = new Array<boolean>(end + 1).fill(false);
-    for (let i = 0; i < end; i++) {
-      if (!active[i]) continue;
-      const token = compiled.tokens[i]!;
-      if (token.kind === "literal") {
-        if (token.char === char) next[i + 1] = true;
-      } else if (token.kind === "globstar") {
-        next[i] = true;
-      } else if (token.kind === "star") {
-        if (char !== "/") next[i] = true;
-      }
+  return active;
+}
+
+/**
+ * The states after one more character. All states advance together, so a
+ * whole run over a text costs pattern length times text length whatever
+ * the pattern looks like.
+ */
+function step(compiled: Compiled, active: boolean[], char: string): boolean[] {
+  const end = compiled.tokens.length;
+  const next: boolean[] = new Array<boolean>(end + 1).fill(false);
+  for (let i = 0; i < end; i++) {
+    if (!active[i]) continue;
+    const token = compiled.tokens[i]!;
+    if (token.kind === "literal") {
+      if (token.char === char) next[i + 1] = true;
+    } else if (token.kind === "globstar") {
+      next[i] = true;
+    } else if (token.kind === "star") {
+      if (char !== "/") next[i] = true;
     }
-    close(next, compiled);
-    active = next;
   }
-  return active[end] === true;
+  close(next, compiled);
+  return next;
 }
 
 /** An entry of `forbidden_changes`, ready to be compared with a hint candidate. */
@@ -234,15 +236,20 @@ export function forbiddenNonGoalPath(
 
 /**
  * True when the forbidden entry covers the canonical candidate path: it
- * matches the candidate or one of its ancestor directories.
+ * matches the candidate or one of its ancestor directories. The candidate
+ * is read once; at every `/` what has been read so far is a directory
+ * above the candidate, and the entry covers the candidate when the match
+ * is complete there or at the end.
  */
 export function covers(forbidden: ForbiddenEntry, candidate: string): boolean {
-  const segments = candidate.split("/");
-  for (let depth = 1; depth <= segments.length; depth++) {
-    const path = segments.slice(0, depth).join("/");
-    if (matches(forbidden.compiled, path)) return true;
+  const { compiled } = forbidden;
+  const end = compiled.tokens.length;
+  let active = start(compiled);
+  for (const char of Array.from(candidate)) {
+    if (char === "/" && active[end]) return true;
+    active = step(compiled, active, char);
   }
-  return false;
+  return active[end] === true;
 }
 
 /**

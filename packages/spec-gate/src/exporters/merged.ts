@@ -36,7 +36,7 @@ import {
   readBlobAtCommit,
   resolveRef,
 } from "../lint/git/index.js";
-import { runGit } from "../lint/git/exec.js";
+import { MAX_OUTPUT_BYTES, runGit } from "../lint/git/exec.js";
 import { ExportError } from "./errors.js";
 import type { ExportErrorCode } from "./errors.js";
 import { assertCanonicalBindingPaths } from "./paths.js";
@@ -200,6 +200,12 @@ export function loadMergedSpecDir(
       }
       if (err.code === "path-not-utf8") {
         throw new ExportError("not-utf8", `${rel} ${at} is not valid UTF-8`);
+      }
+      if (err.code === "output-too-large") {
+        throw new ExportError(
+          "input-too-large",
+          `${rel} ${at} is larger than ${MAX_OUTPUT_BYTES} bytes, the limit of a spec file`,
+        );
       }
       if (err.code === "path-invalid") {
         throw new ExportError(
