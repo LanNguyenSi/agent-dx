@@ -19,8 +19,15 @@ name: Deprecate an npm version
 # the token as the likely cause.
 # The npm CLI cannot create granular tokens, so it was created by hand on
 # npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
-# The token has an expiry; its rotation date is tracked by the maintainer
-# outside this repository. This is a separate secret from the
+# The token has an expiry; the date is tracked in the repository data file
+# .github/npm-agent-dx-token.json (expires plus a warn_days lead time). The
+# weekly npm-token-check.yml job runs the validity and expiry check in
+# .github/scripts/check-npm-token.mjs, and the Preflight step below runs
+# the same check before this workflow touches the registry, so a missing,
+# revoked, expired or soon-expiring token fails the run up front instead of
+# at the write. Rotating the token: new token on npmjs.com, new secret
+# value, new date in the data file, all in the same pull request (see
+# CONTRIBUTING.md). This is a separate secret from the
 # shared classic NPM_TOKEN used elsewhere in the org; publish-npm.yml in this
 # repo already uses npm Trusted Publishing (OIDC) and is untouched by this.
 #
@@ -133,14 +140,17 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
-      - name: Preflight, verify NPM_AGENT_DX_TOKEN secret is set
+      - name: Preflight, check the NPM_AGENT_DX_TOKEN for validity and expiry
+        # Not a presence test: a revoked or expired token is set, so
+        # `[ -z ]` let it through and the failure surfaced later, at the
+        # registry write. The script authenticates with npm whoami (through
+        # setup-node's .npmrc and NODE_AUTH_TOKEN below) and refuses when
+        # the tracked expiry in .github/npm-agent-dx-token.json is past or
+        # inside its warn_days window. It prints the user and days left,
+        # never the token.
         env:
-          NPM_AGENT_DX_TOKEN: ${{ secrets.NPM_AGENT_DX_TOKEN }}
-        run: |
-          if [ -z "${NPM_AGENT_DX_TOKEN}" ]; then
-            echo "::error::NPM_AGENT_DX_TOKEN secret is not configured." >&2
-            exit 1
-          fi
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_AGENT_DX_TOKEN }}
+        run: node .github/scripts/check-npm-token.mjs
 
       - name: Self-test the assertion logic
         # The assertion below is the only thing standing between a typo and a
