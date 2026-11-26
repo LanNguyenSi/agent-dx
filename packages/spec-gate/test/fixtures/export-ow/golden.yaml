@@ -1,0 +1,58 @@
+spec_ref: specs/s1@2dc3fc3d30965d7cd636a53842483fb733978756
+digest: sha256:892fc84cc8dfc4fcd22fb15616b3d469b55e39fadca092b104e5dbb10a750ee8
+goal: Reject a token that was issued before a password change.
+acceptance_criteria:
+  - "tiny-valid#AC-1: A token issued before a password change is rejected with HTTP 401."
+  - "tiny-valid#AC-2: Logging out the other sessions is reported in the response body."
+  - "tiny-valid#TP-1: an old token is rejected after a password change"
+  - "tiny-valid#TP-2: login keeps working"
+  - "tiny-valid#TP-3: the message reads well"
+  - "tiny-valid#TP-4: the type check passes"
+suggested_tests:
+  - id: TP-1
+    covers:
+      - AC-1
+    kind: red-first
+    claim: an old token is rejected after a password change
+    input: old token after a password change
+    expected: HTTP 401
+    oracle: AC-1
+    red_reason: the endpoint does not invalidate tokens today
+  - id: TP-2
+    covers:
+      - AC-1
+    kind: stays-green
+    claim: login keeps working
+    probe_hint: break the login handler
+  - id: TP-3
+    covers:
+      - AC-2
+    kind: manual
+    claim: the message reads well
+    verifier: alice
+    evidence_location: the pull request
+  - id: TP-4
+    covers:
+      - NG-1
+    kind: static
+    claim: the type check passes
+    check_command_ref: typecheck
+forbidden_changes:
+  - specs/s1/spec.md
+  - specs/s1/testplan.yaml
+  - src/auth/**
+  - src/legacy.ts
+constraints:
+  - "tiny-valid#NG-2: Error messages keep their wording."
+  - Every qualified AC and TP id of this spec must appear literally in at least one task.
+relevant_docs:
+  - specs/s1/spec.md
+  - specs/s1/testplan.yaml
+allowed_changes_hint:
+  - specs/s1/bindings.log
+  - specs/s1/bindings.yaml
+  - specs/s1/evidence/
+  - test/auth.test.ts
+  - test/fixtures/tokens.json
+  - test/fixtures/users.json
+  - test/typecheck.spec.ts

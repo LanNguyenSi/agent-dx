@@ -1,0 +1,12 @@
+tasks:
+  - id: 1
+    title: invalidate old tokens on password change
+    files:
+      - test/auth.test.ts
+    notes: >-
+      Implements tiny-valid#AC-1 and tiny-valid#AC-2;
+      adds tiny-valid#TP-1 red first, keeps tiny-valid#TP-2 green,
+      runs the static check for tiny-valid#TP-4,
+      and never touches tiny-valid#AC-10.
+  - id: 2
+    manual: "manual pass for tiny-valid#TP-3 at the end"
