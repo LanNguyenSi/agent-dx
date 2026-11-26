@@ -40,10 +40,12 @@ interface Workflow {
   jobs: Record<string, { "timeout-minutes"?: number; steps: Step[] }>;
 }
 
-const rel = (p: string) => fileURLToPath(new URL(`../../../${p}`, import.meta.url));
+const rel = (p: string) =>
+  fileURLToPath(new URL(`../../../${p}`, import.meta.url));
 const SCRIPT = rel(".github/scripts/check-npm-token.mjs");
 const DATA_FILE = rel(".github/npm-agent-dx-token.json");
-const workflowText = (file: string) => readFileSync(rel(`.github/workflows/${file}`), "utf8");
+const workflowText = (file: string) =>
+  readFileSync(rel(`.github/workflows/${file}`), "utf8");
 const workflow = (file: string) => parse(workflowText(file)) as Workflow;
 const jobSteps = (wf: Workflow) => {
   const jobs = Object.values(wf.jobs);
@@ -85,7 +87,11 @@ function stubBin(dir: string): string {
   return bin;
 }
 
-function stubEnv(dir: string, bin: string, extra: Record<string, string>): NodeJS.ProcessEnv {
+function stubEnv(
+  dir: string,
+  bin: string,
+  extra: Record<string, string>,
+): NodeJS.ProcessEnv {
   return {
     ...process.env,
     PATH: `${bin}:${process.env.PATH ?? ""}`,
@@ -111,7 +117,11 @@ function runScript(
   return r;
 }
 
-const dateFileFixture = (dir: string, expires: string, warnDays: number | string): string => {
+const dateFileFixture = (
+  dir: string,
+  expires: string,
+  warnDays: number | string,
+): string => {
   const file = join(dir, "date.json");
   writeFileSync(file, JSON.stringify({ expires, warn_days: warnDays }));
   return file;
@@ -119,12 +129,19 @@ const dateFileFixture = (dir: string, expires: string, warnDays: number | string
 
 describe("tracked expiry data file", () => {
   it("carries a real YYYY-MM-DD expiry and a non-negative integer warn_days", () => {
-    const data = JSON.parse(readFileSync(DATA_FILE, "utf8")) as Record<string, unknown>;
+    const data = JSON.parse(readFileSync(DATA_FILE, "utf8")) as Record<
+      string,
+      unknown
+    >;
     expect(typeof data.expires).toBe("string");
     expect(data.expires).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     const [y, m, d] = (data.expires as string).split("-").map(Number);
     const back = new Date(Date.UTC(y, m - 1, d));
-    expect([back.getUTCFullYear(), back.getUTCMonth() + 1, back.getUTCDate()]).toEqual([y, m, d]);
+    expect([
+      back.getUTCFullYear(),
+      back.getUTCMonth() + 1,
+      back.getUTCDate(),
+    ]).toEqual([y, m, d]);
     expect(Number.isInteger(data.warn_days)).toBe(true);
     expect(data.warn_days as number).toBeGreaterThanOrEqual(0);
   });
@@ -135,9 +152,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-06-10", 7);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-01"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-01"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(r.status).toBe(0);
       expect(r.stdout).toContain("octocat");
       expect(r.stdout).toContain("expires 2026-06-10");
@@ -150,9 +172,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-06-10", 7);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-01"], {
-        STUB_NPM_EXIT: "1",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-01"],
+        {
+          STUB_NPM_EXIT: "1",
+        },
+      );
       expect(r.status).toBe(1);
       expect(r.stdout).toContain("::error::");
       expect(r.stdout).toContain("exited 1");
@@ -163,9 +190,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-06-10", 7);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-01"], {
-        STUB_NPM_OUT: "",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-01"],
+        {
+          STUB_NPM_OUT: "",
+        },
+      );
       expect(r.status).toBe(1);
       expect(r.stdout).toContain("printed no user");
     });
@@ -175,9 +207,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-06-10", 7);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-01"], {
-        STUB_NPM_OUT: "   ",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-01"],
+        {
+          STUB_NPM_OUT: "   ",
+        },
+      );
       expect(r.status).toBe(1);
       expect(r.stdout).toContain("printed no user");
     });
@@ -187,9 +224,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-05-18", 7);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-10"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-10"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(r.status).toBe(0);
       expect(r.stdout).toContain("8 day(s) left");
     });
@@ -199,9 +241,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-05-17", 7);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-10"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-10"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(r.status).toBe(1);
       expect(r.stdout).toContain("::error::");
       expect(r.stdout).toContain("warn window");
@@ -212,9 +259,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-05-11", 1);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-10"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-10"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(r.status).toBe(1);
       expect(r.stdout).toContain("warn window");
     });
@@ -224,9 +276,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-05-11", 0);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-10"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-10"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(r.status).toBe(0);
     });
   });
@@ -235,9 +292,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-05-10", 7);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-10"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-10"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(r.status).toBe(1);
       expect(r.stdout).toContain("expired");
       // The expiry verdict lands without touching the registry: the stub
@@ -250,9 +312,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-05-10", 7);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-11"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-11"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(r.status).toBe(1);
       expect(r.stdout).toContain("expired");
       expect(r.stdout).toContain("1 day(s) ago");
@@ -264,9 +331,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
       const bin = stubBin(dir);
       const file = join(dir, "date.json");
       writeFileSync(file, "not json {{{");
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-01"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-01"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(r.status).toBe(1);
       expect(r.stdout).toContain("not valid JSON");
     });
@@ -276,10 +348,18 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = join(dir, "date.json");
-      writeFileSync(file, JSON.stringify({ expires: "2026-02-31", warn_days: 7 }));
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-01"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      writeFileSync(
+        file,
+        JSON.stringify({ expires: "2026-02-31", warn_days: 7 }),
+      );
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-01"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(r.status).toBe(1);
       expect(r.stdout).toContain("not a real calendar date");
     });
@@ -316,10 +396,15 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-06-10", 7);
-      const r = runScript(dir, bin, ["--date-file", file, "--today", "2026-05-01"], {
-        STUB_NPM_EXIT: "1",
-        STUB_NPM_ECHO_TOKEN: "1",
-      });
+      const r = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-05-01"],
+        {
+          STUB_NPM_EXIT: "1",
+          STUB_NPM_ECHO_TOKEN: "1",
+        },
+      );
       expect(r.status).toBe(1);
       expect(`${r.stdout}${r.stderr}`).not.toContain(TOKEN);
       expect(r.stdout).toContain("[redacted]");
@@ -329,7 +414,9 @@ describe("check-npm-token.mjs against a stub npm", () => {
   it("without --date-file it reads the repository's own expiry file (--today far in the past)", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
-      const r = runScript(dir, bin, ["--today", "2026-05-01"], { STUB_NPM_OUT: "octocat" });
+      const r = runScript(dir, bin, ["--today", "2026-05-01"], {
+        STUB_NPM_OUT: "octocat",
+      });
       expect(r.status).toBe(0);
       expect(r.stdout).toContain("authenticated");
     });
@@ -341,7 +428,9 @@ describe("check-npm-token.mjs against a stub npm", () => {
       // No date override: the verdict comes from the real today, so it can
       // legitimately differ as the tracked expiry approaches; what must
       // never happen is a crash or a verdict that names neither outcome.
-      const r = runScript(dir, bin, ["--date-file", DATA_FILE], { STUB_NPM_OUT: "octocat" });
+      const r = runScript(dir, bin, ["--date-file", DATA_FILE], {
+        STUB_NPM_OUT: "octocat",
+      });
       expect([0, 1]).toContain(r.status);
       expect(`${r.stdout}${r.stderr}`).toContain("NPM_AGENT_DX_TOKEN");
     });
@@ -351,9 +440,14 @@ describe("check-npm-token.mjs against a stub npm", () => {
     withTemp((dir) => {
       const bin = stubBin(dir);
       const file = dateFileFixture(dir, "2026-06-10", 7);
-      const badToday = runScript(dir, bin, ["--date-file", file, "--today", "2026-5-1"], {
-        STUB_NPM_OUT: "octocat",
-      });
+      const badToday = runScript(
+        dir,
+        bin,
+        ["--date-file", file, "--today", "2026-5-1"],
+        {
+          STUB_NPM_OUT: "octocat",
+        },
+      );
       expect(badToday.status).toBe(2);
       expect(badToday.stderr).toContain("usage:");
       const unknownFlag = runScript(dir, bin, ["--date-filee", file], {
@@ -371,7 +465,10 @@ describe("npm-token-check.yml wiring", () => {
   const job = Object.values(wf.jobs)[0];
 
   it("runs weekly on a schedule and can be dispatched manually", () => {
-    const on = wf.on as { schedule?: Array<{ cron?: string }>; workflow_dispatch?: unknown };
+    const on = wf.on as {
+      schedule?: Array<{ cron?: string }>;
+      workflow_dispatch?: unknown;
+    };
     expect(Array.isArray(on.schedule)).toBe(true);
     const crons = (on.schedule ?? []).map((s) => s.cron);
     expect(crons.length).toBeGreaterThan(0);
@@ -385,7 +482,7 @@ describe("npm-token-check.yml wiring", () => {
   });
 
   it("holds only contents: read and shells with bash", () => {
-    expect(wf.permissions).toEqual({ "contents": "read" });
+    expect(wf.permissions).toEqual({ contents: "read" });
     expect(wf.defaults?.run?.shell).toBe("bash");
     expect(job["timeout-minutes"]).toBeGreaterThan(0);
   });
@@ -395,10 +492,14 @@ describe("npm-token-check.yml wiring", () => {
       const m = /^\s*(?:-\s+)?uses:\s*(.*)$/.exec(line);
       if (!m) continue;
       const [value, comment = ""] = m[1].split("#");
-      expect(value.trim()).toMatch(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+@[0-9a-f]{40}$/);
+      expect(value.trim()).toMatch(
+        /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+@[0-9a-f]{40}$/,
+      );
       expect(comment.trim()).toMatch(/^v\d/i);
     }
-    expect(steps.some((s) => (s.uses ?? "").startsWith("actions/checkout@"))).toBe(true);
+    expect(
+      steps.some((s) => (s.uses ?? "").startsWith("actions/checkout@")),
+    ).toBe(true);
   });
 
   it("self-tests the checker, then runs the check with the secret only via env", () => {
@@ -406,9 +507,15 @@ describe("npm-token-check.yml wiring", () => {
     const checkIdx = steps.findIndex((s) => s.name === "Check the token");
     expect(selfIdx).toBeGreaterThan(-1);
     expect(checkIdx).toBeGreaterThan(selfIdx);
-    expect(steps[selfIdx]?.run?.trim()).toBe("node .github/scripts/check-npm-token.mjs --self-test");
-    expect(steps[checkIdx]?.run?.trim()).toBe("node .github/scripts/check-npm-token.mjs");
-    expect(steps[checkIdx]?.env?.NODE_AUTH_TOKEN).toBe("${{ secrets.NPM_AGENT_DX_TOKEN }}");
+    expect(steps[selfIdx]?.run?.trim()).toBe(
+      "node .github/scripts/check-npm-token.mjs --self-test",
+    );
+    expect(steps[checkIdx]?.run?.trim()).toBe(
+      "node .github/scripts/check-npm-token.mjs",
+    );
+    expect(steps[checkIdx]?.env?.NODE_AUTH_TOKEN).toBe(
+      "${{ secrets.NPM_AGENT_DX_TOKEN }}",
+    );
   });
 
   it("carries no ${{ }} expression inside any run: body", () => {
@@ -426,7 +533,9 @@ describe("operator workflow preflights call the checker", () => {
   for (const [file, jobName] of cases) {
     describe(file, () => {
       const steps = workflow(file).jobs[jobName]?.steps ?? [];
-      const preflightIdx = steps.findIndex((s) => (s.run ?? "").includes("check-npm-token.mjs"));
+      const preflightIdx = steps.findIndex((s) =>
+        (s.run ?? "").includes("check-npm-token.mjs"),
+      );
       const preflightRun = steps[preflightIdx]?.run ?? "";
 
       it("has a preflight step that runs the checker, not a presence test", () => {
@@ -439,13 +548,19 @@ describe("operator workflow preflights call the checker", () => {
       });
 
       it("runs after setup-node (its .npmrc is what authenticates) and before the self-test and any registry step", () => {
-        const setupIdx = steps.findIndex((s) => (s.uses ?? "").includes("actions/setup-node@"));
-        const selfTestIdx = steps.findIndex(
-          (s) => (s.run ?? "").includes("--self-test"),
+        const setupIdx = steps.findIndex((s) =>
+          (s.uses ?? "").includes("actions/setup-node@"),
+        );
+        const selfTestIdx = steps.findIndex((s) =>
+          (s.run ?? "").includes("--self-test"),
         );
         const registryIdxs = steps
           .map((s, i) => [s, i] as const)
-          .filter(([s]) => /npm view|npm deprecate|npm dist-tag|print-deprecations\.mjs/.test(s.run ?? ""))
+          .filter(([s]) =>
+            /npm view|npm deprecate|npm dist-tag|print-deprecations\.mjs/.test(
+              s.run ?? "",
+            ),
+          )
           .map(([, i]) => i);
         expect(setupIdx).toBeGreaterThan(-1);
         expect(preflightIdx).toBeGreaterThan(setupIdx);
@@ -469,7 +584,9 @@ describe("CONTRIBUTING.md token paragraph", () => {
   const src = readFileSync(rel("CONTRIBUTING.md"), "utf8");
 
   it("keeps exactly one paragraph naming the secret, and it carries the expiry guidance", () => {
-    const paragraphs = src.split(/\r?\n[ \t]*\r?\n/).filter((p) => p.includes("NPM_AGENT_DX_TOKEN"));
+    const paragraphs = src
+      .split(/\r?\n[ \t]*\r?\n/)
+      .filter((p) => p.includes("NPM_AGENT_DX_TOKEN"));
     expect(paragraphs).toHaveLength(1);
     const [paragraph] = paragraphs;
     expect(paragraph).toContain(".github/npm-agent-dx-token.json");
@@ -493,12 +610,16 @@ describe("added and changed run: steps replay under the Actions bash invocation"
   // these bodies with bash --noprofile --norc -eo pipefail.
   const replay = (body: string, dir: string, extra: Record<string, string>) => {
     const bin = stubBin(dir);
-    const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", body], {
-      cwd: dir,
-      encoding: "utf8",
-      timeout: 60000,
-      env: stubEnv(dir, bin, extra),
-    });
+    const r = spawnSync(
+      "bash",
+      ["--noprofile", "--norc", "-eo", "pipefail", "-c", body],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        timeout: 60000,
+        env: stubEnv(dir, bin, extra),
+      },
+    );
     expect(r.error).toBeUndefined();
     return r;
   };
@@ -528,16 +649,24 @@ describe("added and changed run: steps replay under the Actions bash invocation"
     return (found[0]?.run ?? "").trim();
   };
   const checkBody = scriptBody(tokenCheckSteps);
-  const deprecateBody = scriptBody(workflow("npm-deprecate.yml").jobs["deprecate"]?.steps ?? []);
-  const distTagBody = scriptBody(workflow("npm-dist-tag.yml").jobs["dist-tag"]?.steps ?? []);
+  const deprecateBody = scriptBody(
+    workflow("npm-deprecate.yml").jobs["deprecate"]?.steps ?? [],
+  );
+  const distTagBody = scriptBody(
+    workflow("npm-dist-tag.yml").jobs["dist-tag"]?.steps ?? [],
+  );
   const selfTestBody =
-    tokenCheckSteps.find((s) => (s.run ?? "").includes("--self-test"))?.run?.trim() ?? "";
+    tokenCheckSteps
+      .find((s) => (s.run ?? "").includes("--self-test"))
+      ?.run?.trim() ?? "";
 
   it("replays every checker body identically across the three workflows", () => {
     expect(checkBody).toBe("node .github/scripts/check-npm-token.mjs");
     expect(deprecateBody).toBe(checkBody);
     expect(distTagBody).toBe(checkBody);
-    expect(selfTestBody).toBe("node .github/scripts/check-npm-token.mjs --self-test");
+    expect(selfTestBody).toBe(
+      "node .github/scripts/check-npm-token.mjs --self-test",
+    );
   });
 
   it(
@@ -589,7 +718,9 @@ describe("added and changed run: steps replay under the Actions bash invocation"
     });
 
     it(`${label}: expected failure (tracked expiry inside the warn window)`, () => {
-      const ws = makeWorkspace(new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10));
+      const ws = makeWorkspace(
+        new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+      );
       try {
         const r = replay(body, ws, { STUB_NPM_OUT: "octocat" });
         expect(r.status).not.toBe(0);
