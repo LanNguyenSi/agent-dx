@@ -460,7 +460,7 @@ that they exist; the rules that need git are covered as described under
 | `commands-ref-not-ancestor` | error | light, full | no | no | The frontmatter commands_ref is the full id of a commit in the repository and an ancestor of the reference commit, checked like base_commit. |
 | `spec-changes-config` | error | light, full | no | no | No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count. |
 | `static-command-unknown` | error | light, full | no | no | Every static test-plan row's check_command_ref names a command of .spec-gate/commands.yaml at commands_ref; a missing or invalid command set there is an error, and the set is not read at a commands_ref that failed its ancestry check. |
-| `bindings-log` | error | light, full | yes | no | At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; the spec directory is specs/<name>, one level below the top-level specs/; every log the diff base holds there for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory. |
+| `bindings-log` | error | light, full | yes | no | At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; when the propose commit is not a commit or not an ancestor of HEAD (after a squash or rebase merge) and the diff base holds the log of this spec at the same path with the same propose entry, bindings.yaml read from git at the diff base is the anchor instead and only the bind entries after that log are checked and replayed over it; the spec directory is specs/<name>, one level below the top-level specs/; every log the diff base holds there for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory. |
 <!-- END generated: rules -->
 
 The form rules:
@@ -611,7 +611,8 @@ at `draft` (so the final lint `propose` runs can pass) and one error with code
   then;
 - a propose commit that is not the full id of a commit (`propose-not-a-commit`)
   or not an ancestor of `HEAD` (`propose-not-ancestor`): a commit on a branch
-  of its own, or one a force push removed, binds nothing;
+  of its own, or one a force push removed, binds nothing, unless the merged
+  state is the anchor (see below);
 - `bindings.yaml` read from git at the propose commit, never from the work
   tree: missing there (`propose-bindings-missing`), its raw bytes not hashing
   to the propose entry (`propose-hash-mismatch`), or not parsing
@@ -649,10 +650,37 @@ at `draft` (so the final lint `propose` runs can pass) and one error with code
 A git read that cannot run is an error with its code, as for the
 reference-state rules.
 
-Limitation: after a squash or rebase merge the propose commit is not an
-ancestor of the default branch, so on the default branch and in later pull
-requests the rule reports `propose-not-ancestor` for such a spec. Re-anchoring
-the log after such a merge is not supported yet.
+After a squash or rebase merge. Such a merge leaves the propose commit off
+the default branch: it is not an ancestor of `HEAD` there and in every later
+pull request, and a fresh clone may not hold it at all. The rule then takes
+the merged state as the anchor when the diff base holds a `bindings.log` for
+this spec at the same path whose propose entry (commit and hash) is the one
+of the log in the spec directory, and the diff base holds a `bindings.yaml`
+there that parses and gives, for every TP ID the merged log binds, the
+binding of its last bind entry. The anchor is `bindings.yaml` read from git at the diff
+base, never from the work tree. Only the bind entries after the last line of
+the merged log are checked: each must name a TP ID the anchor has
+(`bind-unknown-id`) and keep to its row's kind given the status before it,
+taken from the anchor (`bind-kind`); their replay over the anchor must equal
+`bindings.yaml` in the spec directory (`replay-mismatch`). That the log
+extends the merged one byte for byte stays the check of `log-rewritten`, so
+a log whose propose entry was swapped reports `log-rewritten` and, as it
+anchors nothing, `propose-not-a-commit` or `propose-not-ancestor`. On the
+default branch itself the diff base is `HEAD`, so a merged spec there passes
+with nothing left to replay; the propose checks (draft at the propose commit,
+no log there, the hash) ran in the pull request that merged the log. The
+merged state is trusted: this holds only when the lint is a required check of
+every pull request and the default branch takes no direct pushes. A change to
+`bindings.yaml` on the default branch that skipped the lint is caught for a
+TP ID the merged log binds (that binding no longer matches its last bind
+entry, so the state anchors nothing); a TP ID that was never bound keeps its
+value from the propose commit, which cannot be verified without that commit.
+A spec
+whose log is not on the default branch yet (or not at the diff base of the
+pull request) still needs its propose commit as an ancestor of `HEAD`, as
+does one whose merged log does not parse or whose `bindings.yaml` at the
+diff base is missing, does not parse or differs from a bound value; a merge commit keeps the propose
+commit an ancestor and takes the path above.
 
 Triage. `triage-stale`: a `triage.json` that stores a `class` must store
 the very class its own fields derive and the current `rule_version`; one

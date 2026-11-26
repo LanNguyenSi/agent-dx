@@ -1,0 +1,69 @@
+name: npm token check
+
+# Watch NPM_AGENT_DX_TOKEN, the repository secret the operator workflows
+# (npm-deprecate.yml, npm-dist-tag.yml) write the npm registry with: is the
+# token still accepted by the registry, and is the expiry tracked in
+# .github/npm-agent-dx-token.json already past or inside its warn_days
+# window? .github/scripts/check-npm-token.mjs answers both; this job turns
+# the answer into a scheduled failure, so an expired, revoked or
+# soon-expiring token is reported weeks before anyone needs it for a
+# deprecation or a dist-tag move, instead of at the registry write.
+#
+# A scheduled workflow only ever runs the copy committed to the default
+# branch, and only for the repository's default branch: the tracked expiry
+# and the warn window this job reads are therefore always the default
+# branch's values, which is exactly the file the operator workflows read at
+# dispatch time. A run failure shows up in the Actions run list (and in the
+# default branch's scheduled-workflow badge); nothing here blocks a merge,
+# and nothing here writes to the registry: `npm whoami` is read-only, and
+# the job carries contents: read and nothing else.
+#
+# workflow_dispatch exists for the rotation PR itself: after updating the
+# date file and the secret on the branch, dispatch once from the branch to
+# confirm the new token and the new date agree before merging.
+#
+# The same script gates the operator workflows' preflight steps, so the
+# weekly report and the dispatch-time refusal can never disagree.
+
+on:
+  schedule:
+    # Weekly, Monday 06:00 UTC. Rotation warnings start warn_days before the
+    # tracked expiry, so a ~monthly rotation never races the expiry: the
+    # first in-window failure lands roughly a month out.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  token-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Self-test the checker
+        # The check below is the only thing reporting on the token, so prove
+        # it against its own fixtures first (same posture as the operator
+        # workflows' self-test steps): a broken checker must fail here, not
+        # report a healthy-looking verdict.
+        run: node .github/scripts/check-npm-token.mjs --self-test
+
+      - name: Check the token
+        # setup-node wrote ~/.npmrc with //registry.npmjs.org/:_authToken=
+        # ${NODE_AUTH_TOKEN}; exporting the secret under that name is what
+        # authenticates npm whoami. The script prints the user and the days
+        # left, never the token.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_AGENT_DX_TOKEN }}
+        run: node .github/scripts/check-npm-token.mjs
