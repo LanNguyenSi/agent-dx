@@ -51,6 +51,21 @@ export const REVERSED_BINDINGS =
   "  status: existing\n" +
   "  file: test/typecheck.spec.ts\n";
 
+/**
+ * The fixture bindings plus a `TP-3` binding that names the spec's own
+ * `spec.md` as its `file` and its `testplan.yaml` and a Non-goal path as
+ * fixtures: paths the briefing forbids to change, which must never reach
+ * `allowed_changes_hint`.
+ */
+export const POISONED_BINDINGS =
+  fixtureText("bindings.yaml") +
+  "TP-3:\n" +
+  "  status: existing\n" +
+  "  file: specs/s1/spec.md\n" +
+  "  fixtures:\n" +
+  "    - specs/s1/testplan.yaml\n" +
+  "    - src/legacy.ts\n";
+
 export interface MergedRepo {
   dir: string;
   spec: string;

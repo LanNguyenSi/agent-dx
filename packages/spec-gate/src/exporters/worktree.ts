@@ -1,8 +1,9 @@
 /**
  * Reading one file of the work tree: a regular file at the name itself (a
  * symbolic link is refused, so a spec pull request cannot point a name at
- * content it did not commit as that name), bounded, decoded fatally so two
- * different byte sequences never read as the same text.
+ * content it did not commit as that name), bounded; the bytes are compared
+ * as bytes and decoded fatally only for parsing, so two different byte
+ * sequences never pass as one.
  */
 import fs from "node:fs";
 import { ExportError } from "./errors.js";
@@ -11,11 +12,26 @@ import type { ExportErrorCode } from "./errors.js";
 /** The cap of the other readers of these files (`canonical/load.ts`). */
 export const MAX_WORKTREE_BYTES = 4 * 1024 * 1024;
 
-export function readWorktreeText(
+/** The text of bytes read by `readWorktreeBytes`, decoded fatally. */
+export function decodeWorktreeText(bytes: Buffer, what: string): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new ExportError("not-utf8", `${what} is not valid UTF-8`);
+  }
+}
+
+/**
+ * The bytes of one work tree file: a regular file at the name itself (a
+ * symbolic link is refused, so a spec pull request cannot point a name at
+ * content it did not commit as that name), bounded, and never decoded, so
+ * a comparison of two reads sees every byte, a byte order mark included.
+ */
+export function readWorktreeBytes(
   file: string,
   what: string,
   missingCode: ExportErrorCode,
-): string {
+): Buffer {
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(file);
@@ -44,9 +60,14 @@ export function readWorktreeText(
   } catch {
     throw new ExportError(missingCode, `${what} cannot be read`);
   }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new ExportError("not-utf8", `${what} is not valid UTF-8`);
-  }
+  return bytes;
+}
+
+/** The text of one work tree file: the bytes, decoded fatally. */
+export function readWorktreeText(
+  file: string,
+  what: string,
+  missingCode: ExportErrorCode,
+): string {
+  return decodeWorktreeText(readWorktreeBytes(file, what, missingCode), what);
 }

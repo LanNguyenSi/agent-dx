@@ -71,6 +71,11 @@ export function buildOwExport(inputs: MergedInputs, digest: string): string {
   const specId = spec.frontmatter.id;
   const specMdRel = `${specRel}/spec.md`;
   const testplanRel = `${specRel}/testplan.yaml`;
+  const forbiddenChanges = sortedUnique([
+    ...spec.nonGoals.flatMap((line) => line.paths),
+    specMdRel,
+    testplanRel,
+  ]);
   const testPaths: string[] = [];
   for (const binding of Object.values(bindings)) {
     if (binding.file !== undefined) testPaths.push(binding.file);
@@ -89,11 +94,7 @@ export function buildOwExport(inputs: MergedInputs, digest: string): string {
       ),
     ],
     suggested_tests: testPlan.map(testRow),
-    forbidden_changes: sortedUnique([
-      ...spec.nonGoals.flatMap((line) => line.paths),
-      specMdRel,
-      testplanRel,
-    ]),
+    forbidden_changes: forbiddenChanges,
     constraints: [
       ...spec.nonGoals
         .filter((line) => line.paths.length === 0)
@@ -101,12 +102,15 @@ export function buildOwExport(inputs: MergedInputs, digest: string): string {
       QUALIFIED_ID_CONSTRAINT,
     ],
     relevant_docs: [specMdRel, testplanRel],
+    // A binding is data an implementation workflow may edit, so it is not
+    // trusted to keep the hint clean: a path the briefing forbids to change
+    // never belongs in the list of changes the spec allows.
     allowed_changes_hint: sortedUnique([
       ...testPaths,
       `${specRel}/bindings.yaml`,
       `${specRel}/bindings.log`,
       `${specRel}/evidence/`,
-    ]),
+    ]).filter((candidate) => !forbiddenChanges.includes(candidate)),
   };
   return stringify(doc, {
     lineWidth: 0,

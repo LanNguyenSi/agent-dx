@@ -9,7 +9,9 @@
  * full ref resolved to one full commit id, regular file entries only),
  * and the work tree entries are regular files at their own names: a
  * symbolic link is refused on both sides, so no name can stand in for
- * content the reference commit does not hold under that name.
+ * content the reference commit does not hold under that name. The
+ * comparison is of raw bytes, taken before any decoding, so a byte order
+ * mark or a line ending that appears only on one side is a difference.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -34,9 +36,10 @@ import {
   readBlobAtCommit,
   resolveRef,
 } from "../lint/git/index.js";
+import { runGit } from "../lint/git/exec.js";
 import { ExportError } from "./errors.js";
 import type { ExportErrorCode } from "./errors.js";
-import { readWorktreeText } from "./worktree.js";
+import { decodeWorktreeText, readWorktreeBytes } from "./worktree.js";
 
 export const BINDINGS_FILE = "bindings.yaml";
 
@@ -158,9 +161,27 @@ export function loadMergedSpecDir(
   const workTexts: Record<string, string> = {};
   for (const name of SPEC_FILES) {
     const rel = `${specRel}/${name}`;
-    let blob: string;
+    let blobBytes: Buffer;
     try {
-      blob = readBlobAtCommit(toplevel, commit, rel);
+      // The hardened read classifies the entry (present, a regular file,
+      // valid UTF-8); the equality check itself needs the raw bytes,
+      // because the text that read decodes drops a leading byte order
+      // mark. `rel` has passed the read's path check and `commit` is a
+      // full id, so the rev `commit:rel` names exactly that entry.
+      readBlobAtCommit(toplevel, commit, rel);
+      const blob = runGit(toplevel, [
+        "cat-file",
+        "blob",
+        "--end-of-options",
+        `${commit}:${rel}`,
+      ]);
+      if (blob.status !== 0) {
+        throw new LintGitError(
+          "object-unreadable",
+          "a file of a commit could not be read",
+        );
+      }
+      blobBytes = blob.stdout;
     } catch (err) {
       if (!(err instanceof LintGitError)) throw err;
       const at = `at ${request.defaultRef} (${commit})`;
@@ -190,18 +211,19 @@ export function loadMergedSpecDir(
         `${rel} could not be read from ${at}`,
       );
     }
-    const work = readWorktreeText(
+    const work = readWorktreeBytes(
       path.join(specReal, name),
       `the work tree copy of ${rel}`,
       "not-merged",
     );
-    if (work !== blob) {
+    const text = decodeWorktreeText(work, `the work tree copy of ${rel}`);
+    if (!work.equals(blobBytes)) {
       throw new ExportError(
         "not-merged",
         `${rel} is not merged unchanged: the work tree copy differs from the copy at ${request.defaultRef} (${commit})`,
       );
     }
-    workTexts[name] = work;
+    workTexts[name] = text;
   }
 
   const spec = parseInput(

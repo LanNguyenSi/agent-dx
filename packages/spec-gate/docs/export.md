@@ -42,7 +42,7 @@ identical across runs:
 | `forbidden_changes` | the `paths` attributes of the Non-goals, plus the spec directory's `spec.md` and `testplan.yaml`, sorted and deduplicated |
 | `constraints` | one string per Non-goal line without `paths` (`<spec-id>#NG-<n>: <text>`), then the line that every qualified AC and TP id of the spec must appear literally in at least one task |
 | `relevant_docs` | the spec directory's `spec.md` and `testplan.yaml` |
-| `allowed_changes_hint` | the `file` and `fixtures` paths of the bindings, plus the spec directory's `bindings.yaml`, `bindings.log` and `evidence/` directory, sorted and deduplicated |
+| `allowed_changes_hint` | the `file` and `fixtures` paths of the bindings, plus the spec directory's `bindings.yaml`, `bindings.log` and `evidence/` directory, sorted and deduplicated, with every path the row above forbids dropped (a binding cannot move a forbidden path into the hint) |
 
 Sort is plain code point order, applied where the order of the source file
 carries no meaning (binding paths, Non-goal paths); a list that follows
