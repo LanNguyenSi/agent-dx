@@ -21,7 +21,7 @@ export const CONDITIONS = [
     condition: 2,
     name: "approver-allowed",
     summary:
-      "An approver of the head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the reference commit and the pull request targets the default branch.",
+      "An approver of the head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the tip of the default branch and the pull request targets the default branch.",
   },
   {
     condition: 3,
@@ -152,8 +152,10 @@ export interface ApproveReport {
   approve_reported: boolean;
   /** The commit that was checked: `HEAD` of the repository. */
   head: string;
-  /** The commit the settings were read at. */
+  /** The reference commit of the final lint and of the diff base: `base` when given, else `default_commit`. */
   reference: string;
+  /** The commit the default ref names: the settings were read there. */
+  default_commit: string;
   /** The digest of the spec at the head, or `null` when none exists. */
   digest: string | null;
   /** The pull request as the host reports it, or `null` when the host failed. */

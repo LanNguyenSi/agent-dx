@@ -6,8 +6,9 @@
  * It holds only when all seven conditions hold (see `CONDITIONS` and
  * `docs/approve.md`). The check never fetches, never writes and never reads
  * text a pull request author controls: the settings come from git at the
- * reference commit, the digests from git at the head and at the commit of a
- * review, and who reviewed what comes from the host.
+ * commit the default ref names (the tip of the default branch, with or
+ * without a base commit given), the digests from git at the head and at the
+ * commit of a review, and who reviewed what comes from the host.
  *
  * A condition that could not be evaluated does not hold. A host method that
  * throws or returns something else than its type is `host-failed`, a git
@@ -84,7 +85,7 @@ interface Subject {
   /** The commit `defaultRef` names. */
   defaultCommit: string;
   facts: HostFacts;
-  /** The settings at the reference commit; the format defaults when the file is absent. */
+  /** The settings at `defaultCommit`; the format defaults when the file is absent. */
   config: SpecGateConfig | null;
   /** The approvals that stand, or the host failure. */
   standing: Fact<StandingApproval[]>;
@@ -176,7 +177,7 @@ function approverAllowed(s: Subject): Outcome {
   if (config === null) {
     return fails(
       "config-invalid",
-      ".spec-gate/config.yaml at the reference commit cannot be read or does not parse",
+      ".spec-gate/config.yaml at the tip of the default branch cannot be read or does not parse",
     );
   }
   const pullRequest = s.facts.pullRequest.value;
@@ -202,14 +203,15 @@ function approverAllowed(s: Subject): Outcome {
       "the base commit the host reports is not on the default ref of the checkout; the default branch may need to be fetched by the job",
     );
   }
-  if (isAncestor(s.git.repo, s.git.head, s.git.reference)) {
+  if (isAncestor(s.git.repo, s.git.head, s.defaultCommit)) {
     // The settings are trusted because the pull request did not write the
-    // commit they are read at. A head the reference commit already contains
-    // (a merged pull request, a branch without a commit of its own) breaks
-    // that: its changes to the settings would be read as the settings.
+    // commit they are read at, the tip of the default branch. A head that
+    // commit already contains (a merged pull request, a branch without a
+    // commit of its own) breaks that: its changes to the settings would be
+    // read as the settings. A base commit given does not change this.
     return fails(
       "head-in-reference",
-      "the head commit is the reference commit or an ancestor of it: the settings read there may be the pull request's own, and a merged pull request is not judged by this check",
+      "the head commit is the tip of the default branch or an ancestor of it: the settings read there may be the pull request's own, and a merged pull request is not judged by this check",
     );
   }
   if (s.atHead.length === 0) {
@@ -331,14 +333,14 @@ function agentIdentitiesSeparate(s: Subject): Outcome {
   if (s.config === null) {
     return fails(
       "config-invalid",
-      ".spec-gate/config.yaml at the reference commit cannot be read or does not parse",
+      ".spec-gate/config.yaml at the tip of the default branch cannot be read or does not parse",
     );
   }
   const { agent_identities: agents, approvers } = s.config;
   if (agents.length === 0) {
     return fails(
       "approval-not-verifiable",
-      "agent_identities is empty at the reference commit: nothing tells an agent's approve from a person's",
+      "agent_identities is empty at the tip of the default branch: nothing tells an agent's approve from a person's",
     );
   }
   const both = agents.filter((agent) =>
@@ -347,7 +349,7 @@ function agentIdentitiesSeparate(s: Subject): Outcome {
   if (both.length > 0) {
     return fails(
       "approval-not-verifiable",
-      `an agent identity is also an approver at the reference commit: ${[...both].sort().join(", ")}`,
+      `an agent identity is also an approver at the tip of the default branch: ${[...both].sort().join(", ")}`,
     );
   }
   return holds(
@@ -498,7 +500,16 @@ export async function checkApproval(
   }
 
   const facts = await readHostFacts(request.host);
-  const config = configOf(loadConfigAtReference(git, { add: () => {} }));
+  // Who may approve is what the default branch says now, with or without a
+  // base commit: an approver revoked there after the pull request base, or
+  // an account made an agent identity there, must not count. The base only
+  // sets the diff base and the reference of the lint.
+  const config = configOf(
+    loadConfigAtReference(
+      { ...git, reference: defaultCommit },
+      { add: () => {} },
+    ),
+  );
   const standing: Fact<StandingApproval[]> = facts.reviews.ok
     ? { ok: true, value: standingApprovals(facts.reviews.value) }
     : { ok: false };
@@ -566,6 +577,7 @@ export async function checkApproval(
         code(6) === "approval-not-enforced"),
     head: git.head,
     reference: git.reference,
+    default_commit: defaultCommit,
     digest: headDigest,
     pull_request:
       pullRequest === null

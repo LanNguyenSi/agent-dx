@@ -243,6 +243,93 @@ describe("condition 2: the approver is allowed", { timeout: 60_000 }, () => {
     },
   );
 
+  describe("with the base commit given, the settings are still the default branch's", () => {
+    it("an approver removed on the default branch after the base: approver-not-qualified", async () => {
+      const s = await build();
+      const c2 = await configOnDefault(
+        s,
+        "approvers: [bob]\nagent_identities: [Spec-Bot]\n",
+      );
+      const report = await check(s, {}, { base: s.c1 });
+      expect(report.reference).toBe(s.c1);
+      expect(report.default_commit).toBe(c2);
+      expect(cond(report, 2)).toMatchObject({
+        ok: false,
+        code: "approver-not-qualified",
+      });
+      expect(report.approvals).toEqual([
+        {
+          login: "alice",
+          commit: s.head,
+          at_head: true,
+          problem: "not-allowlisted",
+        },
+      ]);
+      expect(report.approved).toBe(false);
+      expect(failing(report)).toEqual([2]);
+    });
+
+    it("an approver made an agent identity on the default branch after the base: conditions 2 and 5 fail", async () => {
+      const s = await build();
+      await configOnDefault(
+        s,
+        "approvers: [Alice, bob, dev]\nagent_identities: [Spec-Bot, alice]\n",
+      );
+      const report = await check(s, {}, { base: s.c1 });
+      expect(cond(report, 5)).toMatchObject({
+        ok: false,
+        code: "approval-not-verifiable",
+      });
+      expect(cond(report, 2)).toMatchObject({
+        ok: false,
+        code: "approver-not-qualified",
+      });
+      expect(report.approvals[0]!.problem).toBe("is-agent");
+      expect(report.approved).toBe(false);
+      expect(failing(report)).toEqual([2, 5]);
+    });
+
+    it("an approver added on the default branch after the base counts", async () => {
+      const s = await build();
+      await configOnDefault(
+        s,
+        "approvers: [Alice, carol]\nagent_identities: [Spec-Bot]\n",
+      );
+      const report = await check(
+        s,
+        { reviews: [review("carol", "APPROVED", s.head)] },
+        { base: s.c1 },
+      );
+      expect(failing(report)).toEqual([]);
+      expect(report.approved).toBe(true);
+    });
+
+    it("a merged pull request with its own change to the settings: head-in-reference", async () => {
+      const s = await build();
+      const head = await s.repo.commit(
+        {
+          ".spec-gate/config.yaml":
+            "approvers: [mallory]\nagent_identities: [Spec-Bot]\n",
+        },
+        "let me in",
+      );
+      await s.repo.setRef(REMOTE_MAIN, head);
+      const report = await check(
+        { ...s, head },
+        { reviews: [review("mallory", "APPROVED", head)] },
+        { base: s.c1 },
+      );
+      expect(report.reference).toBe(s.c1);
+      expect(report.default_commit).toBe(head);
+      expect(report.approvals[0]!.problem).toBeNull();
+      expect(cond(report, 2)).toMatchObject({
+        ok: false,
+        code: "head-in-reference",
+      });
+      expect(report.approved).toBe(false);
+    });
+  });
+
   it("the settings come from git at the reference commit, not from the pull request", async () => {
     const s = await build();
     // The pull request adds its own approver to the settings, in a commit
@@ -315,6 +402,9 @@ describe("targetsDefault", () => {
     ["refs/heads/main", "refs/remotes/origin/main"],
     ["refs/heads/main", "refs/remotes/upstream/main"],
     ["refs/heads/release/1.x", "refs/remotes/origin/release/1.x"],
+    // The documented limit: the first component after refs/remotes/ is read
+    // as the remote, so under a remote named a/b this is taken for b/main.
+    ["refs/heads/b/main", "refs/remotes/a/b/main"],
   ])("%s is the branch %s holds", (target, defaultRef) => {
     expect(targetsDefault(target, defaultRef)).toBe(true);
   });

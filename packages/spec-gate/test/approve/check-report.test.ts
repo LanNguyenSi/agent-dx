@@ -44,6 +44,7 @@ describe("checkApproval: approved", { timeout: 60_000 }, () => {
         approve_reported: false,
         head: S.head,
         reference: S.c1,
+        default_commit: S.c1,
         digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
         pull_request: {
           number: 7,

@@ -43,7 +43,40 @@ const TARGET_REF_RE = /^refs\/heads\/[A-Za-z0-9._+/-]+$/;
 
 /** An ISO 8601 date-time with seconds and a zone. */
 const TIME_RE =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * The instant `text` names, in milliseconds since the epoch, or `null` when
+ * it is not a date-time of the form above or names a date or time that does
+ * not exist. A parser rolls such a value over (31 February becomes 2 March,
+ * 24:00:00 the next day) and would so move a review in the order; here the
+ * fields must come back from the calendar as they were written.
+ */
+export function instantOf(text: string): number | null {
+  const m = TIME_RE.exec(text);
+  if (m === null) return null;
+  const written = m.slice(1, 7).map(Number);
+  const [year, month, day, hour, minute, second] = written as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const wall = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  const back = [
+    wall.getUTCFullYear(),
+    wall.getUTCMonth() + 1,
+    wall.getUTCDate(),
+    wall.getUTCHours(),
+    wall.getUTCMinutes(),
+    wall.getUTCSeconds(),
+  ];
+  if (back.some((value, i) => value !== written[i])) return null;
+  const at = Date.parse(text);
+  return Number.isFinite(at) ? at : null;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -95,13 +128,12 @@ function reviewsOf(value: unknown): Fact<TimedReview[]> {
       typeof state !== "string" ||
       !(REVIEW_STATES as readonly string[]).includes(state) ||
       !isCommitId(commit) ||
-      typeof submittedAt !== "string" ||
-      !TIME_RE.test(submittedAt)
+      typeof submittedAt !== "string"
     ) {
       return MISSING;
     }
-    const at = Date.parse(submittedAt);
-    if (!Number.isFinite(at)) return MISSING;
+    const at = instantOf(submittedAt);
+    if (at === null) return MISSING;
     out.push({
       login,
       state: state as HostReview["state"],

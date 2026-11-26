@@ -230,6 +230,22 @@ describe("readHostFacts: a value that is not of the type gives no fact", () => {
     ["a date without a time", [{ ...good, submittedAt: "2024-05-01" }]],
     ["a time as number", [{ ...good, submittedAt: 1714557600000 }]],
     ["a month 13", [{ ...good, submittedAt: "2024-13-01T10:00:00Z" }]],
+    ["31 February", [{ ...good, submittedAt: "2024-02-31T10:00:00Z" }]],
+    [
+      "30 February in a year that is no leap year",
+      [{ ...good, submittedAt: "2023-02-30T10:00:00Z" }],
+    ],
+    [
+      "29 February in a year that is no leap year",
+      [{ ...good, submittedAt: "2023-02-29T10:00:00Z" }],
+    ],
+    ["the hour 24", [{ ...good, submittedAt: "2024-05-01T24:00:00Z" }]],
+    ["the minute 60", [{ ...good, submittedAt: "2024-05-01T10:60:00Z" }]],
+    ["a day 0", [{ ...good, submittedAt: "2024-05-00T10:00:00Z" }]],
+    [
+      "an offset that is no offset",
+      [{ ...good, submittedAt: "2024-05-01T10:00:00+99:99" }],
+    ],
     ["one bad entry after good ones", [good, good, { ...good, state: 1 }]],
   ])("the reviews: %s", async (_what, value) => {
     const facts = await readHostFacts(hostFor(S, { reviews: value }));
@@ -277,6 +293,41 @@ describe("readHostFacts: a value that is not of the type gives no fact", () => {
       const facts = await readHostFacts(hostFor(S, { configCommit: value }));
       expect(facts.configCommit).toEqual({ ok: true, value });
     }
+  });
+
+  it("a leap day is a day, and the instant is the one written, offset and fraction included", async () => {
+    const facts = await readHostFacts(
+      hostFor(S, {
+        reviews: [
+          { ...good, submittedAt: "2024-02-29T10:00:00Z" },
+          { ...good, submittedAt: "2024-02-29T23:59:59.5-01:00" },
+          { ...good, submittedAt: "2024-12-31T23:59:59Z" },
+        ],
+      }),
+    );
+    expect(facts.reviews.ok && facts.reviews.value.map((r) => r.at)).toEqual([
+      Date.UTC(2024, 1, 29, 10),
+      Date.UTC(2024, 2, 1, 0, 59, 59, 500),
+      Date.UTC(2024, 11, 31, 23, 59, 59),
+    ]);
+  });
+
+  it("a review dated on a day that does not exist does not move in the order: the list is no fact", async () => {
+    // Rolled over, 31 February would land after the request for changes of
+    // 29 February and stand as the latest review.
+    const facts = await readHostFacts(
+      hostFor(S, {
+        reviews: [
+          {
+            ...good,
+            state: "CHANGES_REQUESTED",
+            submittedAt: "2024-02-29T10:00:00Z",
+          },
+          { ...good, submittedAt: "2024-02-31T10:00:00Z" },
+        ],
+      }),
+    );
+    expect(facts.reviews).toEqual({ ok: false });
   });
 
   it("a SHA-256 commit id is a commit id", async () => {

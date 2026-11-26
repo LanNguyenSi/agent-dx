@@ -36,9 +36,12 @@ tree.
 
 `repo`, `defaultRef` and `base` are resolved exactly as the lint resolves its
 git inputs, and are handed to the final lint unchanged. The reference commit
-is `base` when given, else the commit `defaultRef` names. The head is `HEAD`
-of `repo`: the checkout must be at the head commit of the pull request, not at
-a merge of it with the target branch.
+is `base` when given, else the commit `defaultRef` names; it is the reference
+of the lint and the start of the diff base, and nothing else. The settings
+(`approvers`, `agent_identities`) are always read at the commit `defaultRef`
+names, the tip of the default branch, whether `base` is given or not. The head
+is `HEAD` of `repo`: the checkout must be at the head commit of the pull
+request, not at a merge of it with the target branch.
 
 ## Result
 
@@ -64,7 +67,7 @@ holds) and a `message`.
 | # | Name | Holds when |
 |---|---|---|
 | 1 | `approval-at-head` | an approving review stands on the head commit of the pull request, and the checkout is at that commit |
-| 2 | `approver-allowed` | an approver of the head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the reference commit and the pull request targets the default branch |
+| 2 | `approver-allowed` | an approver of the head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the tip of the default branch and the pull request targets the default branch |
 | 3 | `digest-unchanged` | the digest of the spec at the head equals the digest at the commit of every approving review considered |
 | 4 | `proposed-and-clean` | the spec is `proposed` at the head, the spec directory of the work tree is the one the head holds, and the final lint has no error |
 | 5 | `agent-identities-separate` | `agent_identities` is not empty and shares no account with `approvers` |
@@ -124,7 +127,11 @@ Both err towards "not approved". An approver that could not be judged because
 the settings or the pull request are unavailable is `not-evaluated`.
 
 `approvers` and `agent_identities` come from `.spec-gate/config.yaml` read
-from git at the reference commit, through the reader the lint uses. A pull
+from git at the commit `defaultRef` names, the tip of the default branch,
+through the reader the lint uses. That holds with and without `base`: who may
+approve is what the default branch says now, not what it said at the base of
+the pull request, so an approver removed there since, or an account made an
+agent identity there since, does not count. A pull
 request that edits the file, in a commit or in the work tree, changes nothing
 about who may approve it. A repository without the file has empty lists; a
 file that cannot be read or does not parse is `config-invalid`.
@@ -134,18 +141,24 @@ The condition also ties the settings to the branch the spec is merged into:
 - `target-not-default`: the branch the host reports as the target
   (`refs/heads/<branch>`) is not the branch `defaultRef` holds. `defaultRef`
   holds it when it is that same name, or `refs/remotes/<remote>/<branch>` with
-  a remote name that has no `/`.
+  a remote name that has no `/`. The first component after `refs/remotes/` is
+  always read as the remote and the rest as the branch, so under a remote
+  named `a/b` the ref `refs/remotes/a/b/main` is taken for the branch `b/main`
+  of a remote `a`: a pull request that targets `refs/heads/b/main` is accepted
+  and one that targets `refs/heads/main` is refused. Name the default ref
+  under a remote without `/`, or as `refs/heads/<branch>`.
 - `base-mismatch`: `base` was given and the host reports another base commit.
 - `base-not-on-default`: `base` was not given and the base commit the host
   reports is not the commit `defaultRef` names or an ancestor of it (a stale
   local default ref gives this too; the job must fetch the default branch,
   the check does not).
-- `head-in-reference`: the head commit is the reference commit or an ancestor
-  of it. The settings are trusted because the pull request did not write the
-  commit they are read at; a head that the reference commit already contains
-  (a merged pull request, a branch without a commit of its own) breaks that,
-  since its own change to the settings would be read as the settings. This
-  check judges an open pull request; it does not judge a merged one.
+- `head-in-reference`: the head commit is the commit `defaultRef` names or an
+  ancestor of it. The settings are trusted because the pull request did not
+  write the commit they are read at; a head that the tip of the default branch
+  already contains (a merged pull request, a branch without a commit of its
+  own) breaks that, since its own change to the settings would be read as the
+  settings. This holds with and without `base`. The check judges an open pull
+  request; it does not judge a merged one.
 
 Codes: `host-failed`, `config-invalid`, `target-not-default`,
 `base-mismatch`, `base-not-on-default`, `head-in-reference`, `no-approval`,
@@ -193,7 +206,7 @@ Codes: `spec-unreadable`, `status-not-proposed`, `worktree-not-head`,
 
 ### 5. Agent identities are set apart
 
-`agent_identities` at the reference commit must not be empty, and no agent
+`agent_identities` at the tip of the default branch must not be empty, and no agent
 identity may be an approver (the wide comparison). Otherwise nothing tells an
 agent's approve from a person's: `approval-not-verifiable`.
 
@@ -238,7 +251,8 @@ time, no absolute path, and nothing a host adapter threw.
 | `approved` | true only when every condition holds |
 | `approve_reported` | true when an approving review stands on the head (condition 1 holds) and condition 5 is `approval-not-verifiable` or condition 6 is `approval-not-enforced`: an approve was seen, an approval is not claimed. Never true together with `approved` |
 | `head` | the commit that was checked |
-| `reference` | the commit the settings were read at |
+| `reference` | the reference commit of the final lint and of the diff base: `base` when given, else `default_commit` |
+| `default_commit` | the commit `defaultRef` names; the settings were read there |
 | `digest` | the digest of the spec at the head, or `null` |
 | `pull_request` | `number`, `author`, `head`, `base`, `target_ref` as the host reports them, or `null` when the host failed |
 | `conditions` | seven entries: `condition`, `name`, `ok`, `code`, `message` |
