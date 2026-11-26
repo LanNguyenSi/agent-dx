@@ -287,3 +287,54 @@ export function missingGitCases(
   }
   return missing;
 }
+
+/**
+ * Squash-merges `branch` into `main` the way a host does: `main` first moves
+ * on by an unrelated commit, then one new commit carries the tree of the
+ * branch; `refs/remotes/origin/main` is set there and `main` is checked
+ * out. The commits of the branch stay in the repository.
+ */
+export async function squashMerge(repo: Repo, branch: string): Promise<string> {
+  await repo.checkout("main");
+  await repo.commit({ "elsewhere.txt": "main moved on\n" }, "elsewhere");
+  await repo.sh("merge", "-q", "--squash", branch);
+  const merged = await repo.commit({}, `squash ${branch}`);
+  await repo.setRef(REMOTE_MAIN, merged);
+  return merged;
+}
+
+/**
+ * Rebase-merges `branch` into `main`: `main` moves on by an unrelated
+ * commit, the commits of the branch are replayed on top of it as new
+ * commits and `main` fast-forwards there; `refs/remotes/origin/main` is set
+ * there and `main` is checked out.
+ */
+export async function rebaseMerge(repo: Repo, branch: string): Promise<string> {
+  await repo.checkout("main");
+  await repo.commit({ "elsewhere.txt": "main moved on\n" }, "elsewhere");
+  await repo.sh("rebase", "-q", "main", branch);
+  await repo.checkout("main");
+  await repo.sh("merge", "-q", "--ff-only", branch);
+  const merged = await repo.head();
+  await repo.setRef(REMOTE_MAIN, merged);
+  return merged;
+}
+
+/**
+ * A fresh clone of `main` alone over the file protocol, so the objects only
+ * a pull request branch reached are not in it; its directory. Its
+ * `refs/remotes/origin/main` is the default branch.
+ */
+export async function cloneMain(repo: Repo): Promise<string> {
+  const dir = fs.mkdtempSync(path.join(scratch(), "clone-"));
+  await git(scratch(), [
+    "clone",
+    "-q",
+    "--single-branch",
+    "--branch",
+    "main",
+    `file://${repo.dir}`,
+    dir,
+  ]);
+  return dir;
+}

@@ -9,11 +9,17 @@ import {
   sha256Tag,
   type Binding,
 } from "../../src/formats/index.js";
-import { lintSpecDir } from "../../src/lint/index.js";
+import { isAncestor, isCommit } from "../../src/lint/git/index.js";
+import { lintSpecDir, type LintReport } from "../../src/lint/index.js";
+import { bindSpecDir } from "../../src/state/index.js";
+import { git } from "../canonical/helpers.js";
 import {
   REMOTE_MAIN,
   SPEC_REL,
+  cloneMain,
+  rebaseMerge,
   skipReasonOf,
+  squashMerge,
   type Repo,
 } from "./git-helpers.js";
 import {
@@ -621,3 +627,247 @@ describe("the bindings-log rule", { timeout: 60_000 }, () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * A spec proposed on the branch `pr` with two binds of TP-1 (new under a
+ * new name, then existing), clean there; the propose commit is returned.
+ */
+async function boundOnBranch(): Promise<{ repo: Repo; draft: string }> {
+  const { repo, draft } = await proposedRepo();
+  bindOk(repo, "TP-1", { status: "new", selector: "first name" });
+  bindOk(repo, "TP-1", { status: "existing", selector: "second name" });
+  await commitSpec(repo, "two binds");
+  expect(lintGit(repo).errors).toEqual([]);
+  return { repo, draft };
+}
+
+/** The spec squash-merged into the default branch, and a branch `later` checked out from there. */
+async function squashedThenLater(): Promise<{ repo: Repo; draft: string }> {
+  const bound = await boundOnBranch();
+  const merged = await squashMerge(bound.repo, "pr");
+  await bound.repo.checkout("later", merged);
+  return bound;
+}
+
+/** The current log of the spec directory with `binds` appended, chained correctly. */
+function appended(repo: Repo, binds: [string, Binding][]): string {
+  let text = readSpec(repo, "bindings.log");
+  for (const [tp, binding] of binds) {
+    const parsed = parseBindingsLog(text);
+    if (!parsed.ok) throw new Error(parsed.problem.message);
+    text += `${serializeNextBind(parsed.value, tp, binding)}\n`;
+  }
+  return text;
+}
+
+/** The lint report of the spec directory of the clone `dir`, with the job's git inputs. */
+function lintClone(dir: string, final = false): LintReport {
+  const result = lintSpecDir(path.join(dir, SPEC_REL), {
+    final,
+    git: { repo: dir, defaultRef: REMOTE_MAIN },
+  });
+  if (!result.ok) throw new Error(result.message);
+  return result.report;
+}
+
+describe(
+  "the bindings-log rule after a squash or rebase merge",
+  { timeout: 60_000 },
+  () => {
+    for (const [how, merge] of [
+      ["squash", squashMerge],
+      ["rebase", rebaseMerge],
+    ] as const) {
+      it(`${how} merge: the default branch and a later bind pull request are clean`, async () => {
+        const { repo, draft } = await boundOnBranch();
+        const merged = await merge(repo, "pr");
+        // the propose commit is still in the repository, off the default branch
+        expect(isCommit(repo.dir, draft)).toBe(true);
+        expect(isAncestor(repo.dir, draft, merged)).toBe(false);
+        expect(lintGit(repo).errors).toEqual([]);
+        expect(lintGit(repo, { final: true }).errors).toEqual([]);
+
+        await repo.checkout("later", merged);
+        bindOk(repo, "TP-1", { status: "existing", selector: "third name" });
+        await commitSpec(repo, "a later bind");
+        expect(lintGit(repo).errors).toEqual([]);
+        expect(lintGit(repo, { final: true }).errors).toEqual([]);
+      });
+    }
+
+    it("a merge commit keeps the propose commit an ancestor and stays clean", async () => {
+      const { repo, draft } = await boundOnBranch();
+      await repo.checkout("main");
+      await repo.commit({ "elsewhere.txt": "main moved on\n" }, "elsewhere");
+      await repo.sh("merge", "-q", "--no-ff", "-m", "merge pr", "pr");
+      const merged = await repo.head();
+      await repo.setRef(REMOTE_MAIN, merged);
+      expect(isAncestor(repo.dir, draft, merged)).toBe(true);
+      expect(lintGit(repo).errors).toEqual([]);
+      await repo.checkout("later", merged);
+      bindOk(repo, "TP-1", { status: "existing", selector: "third name" });
+      await commitSpec(repo, "a later bind");
+      expect(lintGit(repo).errors).toEqual([]);
+    });
+
+    it("a fresh clone of the default branch without the pull request objects is clean, and a hand edit there is caught", async () => {
+      const { repo, draft } = await boundOnBranch();
+      await squashMerge(repo, "pr");
+      const dir = await cloneMain(repo);
+      // the propose commit did not reach the clone: the propose-not-a-commit path
+      expect(isCommit(dir, draft)).toBe(false);
+      expect(lintClone(dir).errors).toEqual([]);
+      expect(lintClone(dir, true).errors).toEqual([]);
+
+      await git(dir, ["checkout", "-q", "-b", "later"]);
+      const spec = path.join(dir, SPEC_REL);
+      const bound = bindSpecDir(spec, "TP-1", {
+        status: "existing",
+        selector: "third name",
+      });
+      if (!bound.ok) throw new Error(bound.message);
+      await git(dir, ["add", "-A"]);
+      await git(dir, ["commit", "-q", "-m", "a later bind"]);
+      expect(lintClone(dir).errors).toEqual([]);
+
+      const file = path.join(spec, "bindings.yaml");
+      fs.writeFileSync(
+        file,
+        fs.readFileSync(file, "utf8").replace("third name", "by hand"),
+      );
+      await git(dir, ["commit", "-q", "-am", "hand edit"]);
+      expect(ofLogRule(lintClone(dir)).map((f) => [f.code, f.id])).toEqual([
+        ["replay-mismatch", "TP-1"],
+      ]);
+    });
+
+    it("a spec whose log is not at the diff base still needs its propose commit as an ancestor", async () => {
+      // the default branch holds the spec as a draft, with bindings.yaml
+      const { repo, draft } = await draftRepo();
+      await repo.setRef(REMOTE_MAIN, draft);
+      await repo.checkout("side", draft);
+      const side = await repo.commit({ "side.txt": "x\n" }, "side");
+      await repo.checkout("later", draft);
+      writeSpec(
+        repo,
+        "spec.md",
+        readSpec(repo, "spec.md").replace("status: draft", "status: proposed"),
+      );
+      writeSpec(
+        repo,
+        "bindings.log",
+        forgedLog(side, sha256Tag(BIND_BINDINGS)),
+      );
+      await commitSpec(repo, "proposed on a foreign commit");
+      expect(codesOf(lintGit(repo))).toEqual(["propose-not-ancestor"]);
+
+      writeSpec(
+        repo,
+        "bindings.log",
+        forgedLog("f".repeat(40), sha256Tag(BIND_BINDINGS)),
+      );
+      await commitSpec(repo, "proposed on no commit");
+      expect(codesOf(lintGit(repo))).toEqual(["propose-not-a-commit"]);
+    });
+
+    it("after a squash merge a hand edit of bindings.yaml without a bind entry is a replay mismatch", async () => {
+      const { repo } = await squashedThenLater();
+      writeSpec(
+        repo,
+        "bindings.yaml",
+        readSpec(repo, "bindings.yaml").replace("second name", "by hand"),
+      );
+      await commitSpec(repo, "hand edit");
+      expect(ofLogRule(lintGit(repo))).toEqual([
+        expect.objectContaining({
+          file: "bindings.yaml",
+          id: "TP-1",
+          code: "replay-mismatch",
+        }),
+      ]);
+    });
+
+    it("after a squash merge a bind entry that breaks its row's kind rule, or adds an ID, is reported at its line", async () => {
+      const { repo } = await squashedThenLater();
+      const start = await repo.head();
+      // TP-2 is stays-green and existing at the diff base: new is refused
+      const tp2: Binding = {
+        status: "new",
+        selector: "login works",
+        fixtures: [],
+      };
+      writeSpec(repo, "bindings.log", appended(repo, [["TP-2", tp2]]));
+      writeSpec(
+        repo,
+        "bindings.yaml",
+        readSpec(repo, "bindings.yaml").replace(
+          "TP-2:\n  status: existing",
+          "TP-2:\n  status: new",
+        ),
+      );
+      await commitSpec(repo, "forged kind change");
+      expect(ofLogRule(lintGit(repo)).map((f) => [f.code, f.line])).toEqual([
+        ["bind-kind", 4],
+      ]);
+
+      await repo.checkout("extra", start);
+      const extra: Binding = { status: "new", fixtures: [] };
+      writeSpec(repo, "bindings.log", appended(repo, [["TP-7", extra]]));
+      writeSpec(
+        repo,
+        "bindings.yaml",
+        `${readSpec(repo, "bindings.yaml")}TP-7:\n  status: new\n`,
+      );
+      await commitSpec(repo, "a new id through the log");
+      expect(ofLogRule(lintGit(repo)).map((f) => [f.code, f.line])).toEqual([
+        ["bind-unknown-id", 4],
+      ]);
+    });
+
+    it("after a squash merge a log whose propose entry is swapped is rewritten and anchors nothing", async () => {
+      const { repo, draft } = await squashedThenLater();
+      const start = await repo.head();
+      const lines = readSpec(repo, "bindings.log").trimEnd().split("\n");
+      const binds = lines.slice(1).map((line) => {
+        const rec = JSON.parse(line) as { tp: string; binding: Binding };
+        return [rec.tp, rec.binding] as [string, Binding];
+      });
+      await repo.checkout("side", draft);
+      const side = await repo.commit({ "side.txt": "x\n" }, "side");
+      for (const [commit, code] of [
+        [side, "propose-not-ancestor"],
+        ["f".repeat(40), "propose-not-a-commit"],
+      ] as const) {
+        await repo.checkout(`swap-${code}`, start);
+        writeSpec(
+          repo,
+          "bindings.log",
+          forgedLog(commit, sha256Tag(BIND_BINDINGS), binds),
+        );
+        await commitSpec(repo, "swap the propose entry");
+        expect(codesOf(lintGit(repo)), code).toEqual(["log-rewritten", code]);
+      }
+    });
+
+    it("after a squash merge a diff base whose bindings.yaml is missing or does not parse anchors nothing", async () => {
+      for (const change of [null, "- not a mapping\n"]) {
+        const bound = await boundOnBranch();
+        await squashMerge(bound.repo, "pr");
+        const good = readSpec(bound.repo, "bindings.yaml");
+        const broken = await bound.repo.commit(
+          { [`${SPEC_REL}/bindings.yaml`]: change },
+          "bindings.yaml broken on the default branch",
+        );
+        await bound.repo.setRef(REMOTE_MAIN, broken);
+        // a later pull request restores the file: the head is what the
+        // replay gives, the diff base is no anchor
+        await bound.repo.checkout("later", broken);
+        writeSpec(bound.repo, "bindings.yaml", good);
+        await commitSpec(bound.repo, "restore bindings.yaml");
+        expect(codesOf(lintGit(bound.repo)), String(change)).toEqual([
+          "propose-not-ancestor",
+        ]);
+      }
+    });
+  },
+);

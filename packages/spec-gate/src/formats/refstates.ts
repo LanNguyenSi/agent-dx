@@ -167,14 +167,14 @@ export const REFERENCE_STATES: readonly ReferenceState[] = [
     input: "binding reference",
     kind: "reference",
     revisionRead:
-      "`bindings.yaml` at the commit `propose` ran at; after the merge, `bindings.yaml` on the default branch",
+      "`bindings.yaml` at the commit `propose` ran at; once the log is on the default branch and the propose commit is no ancestor of the head (a squash or rebase merge), `bindings.yaml` at the diff base, read from git",
     setBy:
       "`propose`, as the hash of `bindings.yaml` in the first `bindings.log` entry",
     setByCode: true,
     step: "propose",
     storedIn: "`specs/<id>/bindings.log` (outside the digest)",
     ancestryCheck:
-      "the propose commit must be an ancestor of the pull request head, and after the merge of the default branch",
+      "the propose commit must be an ancestor of the head; after a squash or rebase merge it may not be, and then the diff base must hold the log of the spec at the same path with the same propose entry, the log at the head must extend it, and only the bind entries after it are checked and replayed; otherwise a lint error",
   },
   {
     id: "start-commit",

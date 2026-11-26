@@ -14,6 +14,14 @@
  * that was merged is never rewritten, even with a recomputed chain, nor
  * removed), and a proposed spec that left its directory is an error.
  *
+ * After a squash or rebase merge the propose commit is not in the history
+ * of the default branch. When the diff base holds the log of this spec at
+ * the same path with the same propose entry, that merged state is the
+ * anchor instead: `bindings.yaml` read from git at the diff base, and only
+ * the bind entries after the merged log's last line are checked and
+ * replayed over it. Without such a log the propose commit must be an
+ * ancestor of HEAD.
+ *
  * The rule needs git and is gated: it runs at `proposed` and under
  * `--final`. Without a log it reports nothing at `draft`, so the final lint
  * that `propose` runs before it writes the log can pass.
@@ -26,6 +34,8 @@ import {
   parseSpec,
   replayBindings,
   sha256Tag,
+  type BindEntry,
+  type Bindings,
   type BindingsLog,
 } from "../../formats/index.js";
 import { bindStatusProblem } from "../../state/bind.js";
@@ -113,15 +123,24 @@ function kinAtDiffBase(repo: string, diffBase: string, id: string): Kin[] {
   return kin;
 }
 
+/** The findings of the diff-base search, and the log merged at the spec's own path. */
+interface History {
+  found: RuleFinding[];
+  /** The `bindings.log` the diff base holds for this spec at its own path, or `null`. */
+  merged: Buffer | null;
+}
+
 /** What the diff base says about this spec: moved directories and merged logs. */
 function checkHistory(
   git: GitInputs,
   specPath: string,
   id: string,
   headLog: string | null,
-): RuleFinding[] {
+): History {
   const found: RuleFinding[] = [];
+  let merged: Buffer | null = null;
   for (const kin of kinAtDiffBase(git.repo, git.diffBase, id)) {
+    if (kin.path === specPath) merged = kin.log;
     if (
       kin.path !== specPath &&
       (kin.log !== null || kin.status !== "draft") &&
@@ -156,7 +175,7 @@ function checkHistory(
       );
     }
   }
-  return found;
+  return { found, merged };
 }
 
 function checkLog(ctx: RuleContext): RuleFinding[] {
@@ -186,7 +205,12 @@ function checkLog(ctx: RuleContext): RuleFinding[] {
   if (!read.ok && read.code !== "input-missing") {
     return [at(read.code, read.message)];
   }
-  const history = checkHistory(git, specPath, id, read.ok ? read.text : null);
+  const { found: history, merged } = checkHistory(
+    git,
+    specPath,
+    id,
+    read.ok ? read.text : null,
+  );
   if (!read.ok) {
     if (history.length > 0) return history;
     return ctx.status === "proposed"
@@ -205,7 +229,52 @@ function checkLog(ctx: RuleContext): RuleFinding[] {
       at(parsed.problem.code, parsed.problem.message, parsed.problem.line),
     ];
   }
-  return [...history, ...checkReplay(ctx, git, specPath, parsed.value)];
+  return [...history, ...checkReplay(ctx, git, specPath, parsed.value, merged)];
+}
+
+/** The anchor of a log merged at the diff base: its bindings and the bind entries after it. */
+interface MergedAnchor {
+  bindings: Bindings;
+  binds: BindEntry[];
+}
+
+/**
+ * The merged state as the anchor of `log`, or `null` when the diff base
+ * holds no usable log for it: the log merged at the spec's own path must
+ * parse and carry the propose entry of `log`, and `bindings.yaml` read from
+ * git at the diff base must exist and parse. The bind entries to check are
+ * those after the merged log's last line; that the log at HEAD extends the
+ * merged one byte for byte is `log-rewritten`'s check.
+ */
+function mergedAnchor(
+  git: GitInputs,
+  specPath: string,
+  log: BindingsLog,
+  merged: Buffer | null,
+): MergedAnchor | null {
+  const text = merged === null ? null : decodeUtf8(merged);
+  const parsed = text === null ? null : parseBindingsLog(text);
+  if (parsed === null || !parsed.ok) return null;
+  const base = parsed.value;
+  if (
+    base.propose.commit !== log.propose.commit ||
+    base.propose.bindings !== log.propose.bindings
+  ) {
+    return null;
+  }
+  const bytes = readBlobBytes(
+    git.repo,
+    git.diffBase,
+    repoPathOf(specPath, BINDINGS),
+  );
+  const yaml = bytes === null ? null : decodeUtf8(bytes);
+  const bindings = yaml === null ? null : parseBindings(yaml);
+  if (bindings === null || !bindings.ok) return null;
+  const last = base.lines.length;
+  return {
+    bindings: bindings.value,
+    binds: log.binds.filter((entry) => entry.seq > last),
+  };
 }
 
 function checkReplay(
@@ -213,25 +282,34 @@ function checkReplay(
   git: GitInputs,
   specPath: string,
   log: BindingsLog,
+  merged: Buffer | null,
 ): RuleFinding[] {
   const commit = log.propose.commit;
-  if (!isCommit(git.repo, commit)) {
-    return [
-      at(
+  const unreachable = !isCommit(git.repo, commit)
+    ? at(
         "propose-not-a-commit",
         `the propose commit ${commit} is not the full id of a commit in the repository`,
         1,
-      ),
-    ];
-  }
-  if (!isAncestor(git.repo, commit, git.head)) {
-    return [
-      at(
-        "propose-not-ancestor",
-        `the propose commit ${commit} is not an ancestor of HEAD; a log whose propose commit is not in the history of the change binds nothing`,
-        1,
-      ),
-    ];
+      )
+    : !isAncestor(git.repo, commit, git.head)
+      ? at(
+          "propose-not-ancestor",
+          `the propose commit ${commit} is not an ancestor of HEAD; a log whose propose commit is not in the history of the change binds nothing`,
+          1,
+        )
+      : null;
+  if (unreachable !== null) {
+    // After a squash or rebase merge the log the default branch holds is
+    // the anchor; without one the log binds nothing.
+    const anchor = mergedAnchor(git, specPath, log, merged);
+    if (anchor === null) return [unreachable];
+    return checkBinds(
+      ctx,
+      anchor.bindings,
+      anchor.binds,
+      "at the diff base",
+      "from the diff base",
+    );
   }
   const found: RuleFinding[] = [];
   // At the propose commit the spec was a draft and had no log yet: a log that
@@ -292,21 +370,47 @@ function checkReplay(
     ];
   }
 
+  return [
+    ...found,
+    ...checkBinds(
+      ctx,
+      proposed.value,
+      log.binds,
+      "at the propose commit",
+      "from the propose commit",
+    ),
+  ];
+}
+
+/**
+ * The bind entries `binds` over the anchor `anchor`: each names a TP ID the
+ * anchor had and keeps to its row's kind, and their replay over the anchor
+ * equals `bindings.yaml` of the spec directory. `atAnchor` and `fromAnchor`
+ * name the anchor in the messages.
+ */
+function checkBinds(
+  ctx: RuleContext,
+  anchor: Bindings,
+  binds: readonly BindEntry[],
+  atAnchor: string,
+  fromAnchor: string,
+): RuleFinding[] {
+  const found: RuleFinding[] = [];
   const kinds = new Map(
     (ctx.inputs.testplan.state === "ok" ? ctx.inputs.testplan.value : []).map(
       (row) => [row.id, row.kind] as const,
     ),
   );
   const statuses = new Map(
-    Object.entries(proposed.value).map(([tp, b]) => [tp, b.status] as const),
+    Object.entries(anchor).map(([tp, b]) => [tp, b.status] as const),
   );
-  for (const entry of log.binds) {
+  for (const entry of binds) {
     const previous = statuses.get(entry.tp);
     if (previous === undefined) {
       found.push(
         at(
           "bind-unknown-id",
-          `the bind entry for ${entry.tp} names a TP ID that ${BINDINGS} did not have at the propose commit; bind adds and renames no ID`,
+          `the bind entry for ${entry.tp} names a TP ID that ${BINDINGS} did not have ${atAnchor}; bind adds and renames no ID`,
           entry.seq,
         ),
       );
@@ -329,7 +433,7 @@ function checkReplay(
     statuses.set(entry.tp, entry.binding.status);
   }
 
-  const replay = replayBindings(proposed.value, log.binds);
+  const replay = replayBindings(anchor, binds);
   const head =
     ctx.inputs.bindings.state === "ok" ? ctx.inputs.bindings.value : null;
   if (head === null) {
@@ -346,7 +450,7 @@ function checkReplay(
         path: tp,
         id: tp,
         code: "replay-mismatch",
-        message: `the binding of ${tp} in ${BINDINGS} is not the one the replay of ${LOG} from the propose commit gives; change a binding with spec-gate bind only`,
+        message: `the binding of ${tp} in ${BINDINGS} is not the one the replay of ${LOG} ${fromAnchor} gives; change a binding with spec-gate bind only`,
       });
     }
   }
@@ -377,7 +481,7 @@ export const BINDINGS_LOG_RULES: readonly RuleDef[] = [
     ackable: false,
     needsGit: true,
     summary:
-      "At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; the spec directory is specs/<name>, one level below the top-level specs/; every log the diff base holds there for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory.",
+      "At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; when the propose commit is not a commit or not an ancestor of HEAD (after a squash or rebase merge) and the diff base holds the log of this spec at the same path with the same propose entry, bindings.yaml read from git at the diff base is the anchor instead and only the bind entries after that log are checked and replayed over it; the spec directory is specs/<name>, one level below the top-level specs/; every log the diff base holds there for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory.",
     needs: ["spec"],
     uses: ["bindings", "testplan"],
     check: checkBindingsLog,
