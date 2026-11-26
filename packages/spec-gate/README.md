@@ -3,7 +3,7 @@
 `spec-gate` turns a ticket or intent into a checked, reviewable spec and
 test plan before implementation starts. The package is young: the CLI
 answers `--help` and `--version` and runs the `intake file`, `triage`,
-`digest`, `lint`, `lint-ack`, `propose`, `bind` and `repo-check` verbs described below, and further
+`digest`, `lint`, `lint-ack`, `propose`, `bind`, `repo-check` and `export` verbs described below, and further
 capabilities land as subcommands on top of this entry point as they are
 built.
 

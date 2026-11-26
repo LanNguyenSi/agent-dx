@@ -517,8 +517,8 @@ program
 try {
   await program.parseAsync();
 } catch (err) {
-  // Only `intake file`, `lint`, `lint-ack`, `propose`, `bind` and
-  // `repo-check` have exitOverride, so every CommanderError comes from one
+  // Only `intake file`, `lint`, `lint-ack`, `propose`, `bind`,
+  // `repo-check` and `export` have exitOverride, so every CommanderError comes from one
   // of them: help and version keep their exit code 0, a usage error exits 2;
   // anything else is an unexpected exception and also exits 2.
   if (err instanceof CommanderError) {
