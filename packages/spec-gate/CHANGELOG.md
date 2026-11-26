@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `export --format ow`: `allowed_changes_hint` never lists the spec's `spec.md`, `testplan.yaml` or a Non-goal path even when a binding's `file` or `fixtures` names one, and the merged check compares the raw bytes of the three spec files with the ones at the reference commit before decoding, so a work-tree copy that differs only by a leading byte order mark or by line endings is refused as `not-merged` like any other change.
+- `export --format ow`: every `file` and `fixtures` entry of `bindings.yaml` must be a canonical repo-relative path (no leading `./`, no `.` or `..` segment, no `//`, no leading or trailing `/`, no backslash, unchanged by POSIX normalisation) or the export is refused as `binding-path-not-canonical` naming the TP id and the path, and `allowed_changes_hint` drops every candidate that is the spec's `spec.md` or `testplan.yaml` or that a Non-goal path covers by equality, by being its prefix followed by `/`, or by matching it as a glob (`*` any characters except `/`, `**` any characters), so no spelling of a forbidden path reaches the hint; the merged check compares the raw bytes of the three spec files with the ones at the reference commit before decoding, so a work-tree copy that differs only by a leading byte order mark or by line endings is refused as `not-merged` like any other change.
 
 ### Security
 

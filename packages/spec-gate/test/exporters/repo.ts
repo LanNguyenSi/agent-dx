@@ -81,6 +81,8 @@ export interface MergedRepoOptions {
   merge?: boolean;
   /** Replace `bindings.yaml`. */
   bindings?: string;
+  /** Replace `spec.md` (the commit id placeholder is still substituted). */
+  spec?: string;
 }
 
 /**
@@ -110,7 +112,9 @@ export async function makeMergedRepo(
   await git(dir, ["commit", "-q", "-m", "commands"], day);
   const c1 = await git(dir, ["rev-parse", "HEAD"], day);
   day = 3;
-  let spec = fixtureText("spec.md").split(PLACEHOLDER).join(c1);
+  let spec = (options.spec ?? fixtureText("spec.md"))
+    .split(PLACEHOLDER)
+    .join(c1);
   if (options.draft === true) {
     spec = spec.replace("status: proposed", "status: draft");
   }

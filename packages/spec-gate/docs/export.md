@@ -28,6 +28,17 @@ repository (`spec-dir-invalid`). The briefing then carries `digest`, the
 digest of the normative layer as `digest` prints it (read at the
 `commands_ref` commit of `--repo`).
 
+Every `file` and every `fixtures` entry of `bindings.yaml` must be in
+canonical repo-relative form before the briefing is built: no leading
+`./`, no `.` or `..` segment, no empty segment (so no `//`, no leading
+`/` and no trailing `/`), no backslash, and unchanged by POSIX path
+normalisation. An entry that is not is refused as
+`binding-path-not-canonical` (exit 2), naming the TP id and the path.
+The check reads the decoded document before `bindings.yaml` is validated
+as a format, so the refusal names the spelling and not some other
+problem the file may also have. The hint is built from these canonical
+paths and from nothing else.
+
 All file paths in the document are relative to the repository root, `/`
 separated, `<spec-dir>` included. Fixed key order, fixed list order, byte
 identical across runs:
@@ -42,7 +53,16 @@ identical across runs:
 | `forbidden_changes` | the `paths` attributes of the Non-goals, plus the spec directory's `spec.md` and `testplan.yaml`, sorted and deduplicated |
 | `constraints` | one string per Non-goal line without `paths` (`<spec-id>#NG-<n>: <text>`), then the line that every qualified AC and TP id of the spec must appear literally in at least one task |
 | `relevant_docs` | the spec directory's `spec.md` and `testplan.yaml` |
-| `allowed_changes_hint` | the `file` and `fixtures` paths of the bindings, plus the spec directory's `bindings.yaml`, `bindings.log` and `evidence/` directory, sorted and deduplicated, with every path the row above forbids dropped (a binding cannot move a forbidden path into the hint) |
+| `allowed_changes_hint` | the `file` and `fixtures` paths of the bindings, plus the spec directory's `bindings.yaml`, `bindings.log` and `evidence/` directory, sorted and deduplicated, with every candidate the row above forbids dropped: a candidate is dropped when it is the spec directory's `spec.md` or `testplan.yaml` or when a Non-goal path covers it, meaning the candidate equals the Non-goal path, lies below it (the path is its prefix followed by `/`, which makes `dir/` a directory), or matches it when the Non-goal path holds a glob (a binding cannot move a forbidden path into the hint, in any spelling) |
+
+The Non-goal `paths` that enter this document as globs (kept verbatim
+in `forbidden_changes`, matched in the drop rule above) use one
+semantics: `*` matches any characters except `/`, `**` matches any
+characters including `/`, and every other character matches itself (`?`
+is literal). A path covered by a Non-goal path is dropped from the hint
+even when the binding spells it exactly; a glob that does not match the
+path leaves it in (`src/*.gen.ts` covers `src/a.gen.ts` and not
+`src/sub/a.gen.ts`).
 
 Sort is plain code point order, applied where the order of the source file
 carries no meaning (binding paths, Non-goal paths); a list that follows

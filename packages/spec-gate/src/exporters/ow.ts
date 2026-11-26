@@ -9,6 +9,7 @@ import { stringify } from "yaml";
 import { formatQualifiedId, type TestPlanRow } from "../formats/index.js";
 import { ExportError } from "./errors.js";
 import type { MergedInputs } from "./merged.js";
+import { isDroppedHintPath } from "./paths.js";
 
 /** The only format name the CLI offers. */
 export const OW_FORMAT = "ow";
@@ -71,8 +72,9 @@ export function buildOwExport(inputs: MergedInputs, digest: string): string {
   const specId = spec.frontmatter.id;
   const specMdRel = `${specRel}/spec.md`;
   const testplanRel = `${specRel}/testplan.yaml`;
+  const nonGoalPaths = spec.nonGoals.flatMap((line) => line.paths);
   const forbiddenChanges = sortedUnique([
-    ...spec.nonGoals.flatMap((line) => line.paths),
+    ...nonGoalPaths,
     specMdRel,
     testplanRel,
   ]);
@@ -103,14 +105,20 @@ export function buildOwExport(inputs: MergedInputs, digest: string): string {
     ],
     relevant_docs: [specMdRel, testplanRel],
     // A binding is data an implementation workflow may edit, so it is not
-    // trusted to keep the hint clean: a path the briefing forbids to change
-    // never belongs in the list of changes the spec allows.
+    // trusted to keep the hint clean: every binding path is canonical
+    // (merged.ts refused any other spelling) and a candidate the briefing
+    // forbids to change never belongs in the list of changes the spec
+    // allows, neither by spelling its own name nor by spelling its way
+    // under a Non-goal path or into a Non-goal glob.
     allowed_changes_hint: sortedUnique([
       ...testPaths,
       `${specRel}/bindings.yaml`,
       `${specRel}/bindings.log`,
       `${specRel}/evidence/`,
-    ]).filter((candidate) => !forbiddenChanges.includes(candidate)),
+    ]).filter(
+      (candidate) =>
+        !isDroppedHintPath(candidate, specMdRel, testplanRel, nonGoalPaths),
+    ),
   };
   return stringify(doc, {
     lineWidth: 0,

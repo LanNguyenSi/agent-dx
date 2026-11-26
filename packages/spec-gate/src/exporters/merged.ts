@@ -39,6 +39,7 @@ import {
 import { runGit } from "../lint/git/exec.js";
 import { ExportError } from "./errors.js";
 import type { ExportErrorCode } from "./errors.js";
+import { assertCanonicalBindingPaths } from "./paths.js";
 import { decodeWorktreeText, readWorktreeBytes } from "./worktree.js";
 
 export const BINDINGS_FILE = "bindings.yaml";
@@ -242,6 +243,12 @@ export function loadMergedSpecDir(
     "testplan-invalid",
     TESTPLAN_FILE,
   );
+  // Rule one of `docs/export.md`: the briefing is built from canonical
+  // paths only, so a binding that spells its path any other way is
+  // refused before the briefing exists. The check runs on the decoded
+  // document, before the format parser, so the refusal is about the
+  // spelling and not about anything else the file may also get wrong.
+  assertCanonicalBindingPaths(workTexts[BINDINGS_FILE]!);
   const bindings = parseInput(
     parseBindings(workTexts[BINDINGS_FILE]!),
     "bindings-invalid",

@@ -20,6 +20,7 @@ export type ExportErrorCode =
   | "spec-invalid"
   | "testplan-invalid"
   | "bindings-invalid"
+  | "binding-path-not-canonical"
   | "digest-failed"
   | "return-unreadable"
   | "return-parse"
