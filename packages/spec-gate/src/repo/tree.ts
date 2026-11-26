@@ -65,7 +65,8 @@ function requireCommit(commit: string): void {
  * themselves are not listed, a link is listed as a link and never followed,
  * and a submodule is one entry whose content is not listed. More than
  * `MAX_TREE_ENTRIES` entries or more than `MAX_LISTING_BYTES` of output is a
- * `TreeTooLargeError`.
+ * `TreeTooLargeError`; a path listed twice (a tree object with duplicate
+ * entries) is a `LintGitError`.
  */
 export function listTree(repo: string, commit: string): TreeListing {
   requireCommit(commit);
@@ -102,6 +103,15 @@ export function listTree(repo: string, commit: string): TreeListing {
       throw new LintGitError(
         "object-unreadable",
         "the tree of a commit could not be read",
+      );
+    }
+    // A tree object can name one path twice (git mktree accepts it, only
+    // fsck objects). git's own path lookup takes the first entry and a
+    // checkout the last, so neither can stand for the path: refuse it.
+    if (entries.has(m[4]!)) {
+      throw new LintGitError(
+        "object-unreadable",
+        "the tree of a commit names the same path twice",
       );
     }
     entries.set(m[4]!, { mode: m[1]!, oid: m[3]! });

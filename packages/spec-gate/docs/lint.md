@@ -221,7 +221,12 @@ Caps: the tree listing of the diff base and of `HEAD` may hold at most 50000
 entries and 4 MiB of output (the output cap of every git call), and the diff
 base at most 1000 files named `spec.md`. Past any cap the report holds the
 single finding `tree-too-large` with path `.` and the check stops: it never
-passes a tree it did not read in full.
+passes a tree it did not read in full. A tree that names the same path twice
+(a tree object with duplicate entries, which `git fsck` reports and some
+hosts reject on push) is refused with exit 2: git's path lookup takes the
+first of the entries and a checkout the last, so the check cannot tell which
+one the path holds. A git read that fails, such as a tree or a blob missing
+from the object database of a partial clone, also exits 2 and never passes.
 
 The report is one JSON line:
 

@@ -425,10 +425,10 @@ program
 try {
   await program.parseAsync();
 } catch (err) {
-  // Only `intake file`, `lint`, `lint-ack`, `propose` and `bind` have
-  // exitOverride, so every CommanderError comes from one of them: help and
-  // version keep their exit code 0, a usage error exits 2; anything else is
-  // an unexpected exception and also exits 2.
+  // Only `intake file`, `lint`, `lint-ack`, `propose`, `bind` and
+  // `repo-check` have exitOverride, so every CommanderError comes from one
+  // of them: help and version keep their exit code 0, a usage error exits 2;
+  // anything else is an unexpected exception and also exits 2.
   if (err instanceof CommanderError) {
     // commander has already written the usage message to stderr.
     process.exitCode = err.exitCode === 0 ? 0 : 2;
