@@ -238,12 +238,19 @@ interface MergedAnchor {
   binds: BindEntry[];
 }
 
+/** A merged log the diff base holds, refused because `bindings.yaml` there no longer matches it. */
+interface MergedMismatch {
+  /** The TP IDs whose binding differs from their last merged bind entry. */
+  mismatch: string[];
+}
+
 /**
  * The merged state as the anchor of `log`, or `null` when the diff base
  * holds no usable log for it: the log merged at the spec's own path must
  * parse and carry the propose entry of `log`, and `bindings.yaml` read from
  * git at the diff base must exist, parse and hold, for every TP ID the merged
- * log binds, the binding of its last bind entry. The bind entries to check are
+ * log binds, the binding of its last bind entry (otherwise the TP IDs that
+ * differ are returned, for the message). The bind entries to check are
  * those after the merged log's last line; that the log at HEAD extends the
  * merged one byte for byte is `log-rewritten`'s check.
  */
@@ -252,7 +259,7 @@ function mergedAnchor(
   specPath: string,
   log: BindingsLog,
   merged: Buffer | null,
-): MergedAnchor | null {
+): MergedAnchor | MergedMismatch | null {
   const text = merged === null ? null : decodeUtf8(merged);
   const parsed = text === null ? null : parseBindingsLog(text);
   if (parsed === null || !parsed.ok) return null;
@@ -274,14 +281,11 @@ function mergedAnchor(
   // Every TP ID the merged log binds still holds its last bound value: a
   // bindings.yaml changed on the default branch without a bind entry (a
   // write that skipped the lint) anchors nothing.
-  if (
-    differingBindings(
-      replayBindings(bindings.value, base.binds),
-      bindings.value,
-    ).length > 0
-  ) {
-    return null;
-  }
+  const mismatch = differingBindings(
+    replayBindings(bindings.value, base.binds),
+    bindings.value,
+  );
+  if (mismatch.length > 0) return { mismatch };
   const last = base.lines.length;
   return {
     bindings: bindings.value,
@@ -315,6 +319,14 @@ function checkReplay(
     // the anchor; without one the log binds nothing.
     const anchor = mergedAnchor(git, specPath, log, merged);
     if (anchor === null) return [unreachable];
+    if ("mismatch" in anchor) {
+      return [
+        {
+          ...unreachable,
+          message: `${unreachable.message}; ${BINDINGS} at the diff base does not match the merged ${LOG} for ${anchor.mismatch.join(", ")}`,
+        },
+      ];
+    }
     return checkBinds(
       ctx,
       anchor.bindings,

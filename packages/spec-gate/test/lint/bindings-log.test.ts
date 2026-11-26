@@ -24,6 +24,7 @@ import {
 } from "./git-helpers.js";
 import {
   BIND_BINDINGS,
+  BIND_PLAN,
   bindOk,
   codesOf,
   commitSpec,
@@ -641,6 +642,28 @@ async function boundOnBranch(): Promise<{ repo: Repo; draft: string }> {
   return { repo, draft };
 }
 
+/** BIND_PLAN with a second stays-green row, TP-4. */
+const PLAN_4 = `${BIND_PLAN}- id: TP-4\n  covers: [AC-1]\n  kind: stays-green\n  claim: "logout keeps working"\n  probe_hint: "break the logout handler"\n`;
+const BINDINGS_4 = `${BIND_BINDINGS}TP-4:\n  status: existing\n  selector: logout works\n`;
+
+/**
+ * A spec whose log binds three TP IDs, each once: TP-2 first, TP-4 in the
+ * middle, TP-1 last; squash-merged, with `main` checked out.
+ */
+async function threeBoundSquashed(): Promise<Repo> {
+  const { repo } = await proposedRepo({
+    "testplan.yaml": PLAN_4,
+    "bindings.yaml": BINDINGS_4,
+  });
+  bindOk(repo, "TP-2", { status: "existing", selector: "login first" });
+  bindOk(repo, "TP-4", { status: "existing", selector: "logout middle" });
+  bindOk(repo, "TP-1", { status: "new", selector: "token last" });
+  await commitSpec(repo, "three binds");
+  expect(lintGit(repo).errors).toEqual([]);
+  await squashMerge(repo, "pr");
+  return repo;
+}
+
 /** The spec squash-merged into the default branch, and a branch `later` checked out from there. */
 async function squashedThenLater(): Promise<{ repo: Repo; draft: string }> {
   const bound = await boundOnBranch();
@@ -941,6 +964,195 @@ describe(
       bindOk(repo, "TP-2", { status: "existing", selector: "login works 2" });
       await commitSpec(repo, "a later bind");
       expect(codesOf(lintGit(repo))).toEqual(["propose-not-ancestor"]);
+    });
+
+    /**
+     * Every condition the squash fallback requires, each with the test that
+     * violates exactly that one condition and its expected codes. A test
+     * whose title is built from a template is named by its fixed tail.
+     */
+    const CONJUNCTS: readonly {
+      condition: string;
+      test: string;
+      expect: string;
+    }[] = [
+      {
+        condition: "the fallback is taken on propose-not-a-commit",
+        test: "a fresh clone of the default branch without the pull request objects is clean, and a hand edit there is caught",
+        expect: "[] (clean)",
+      },
+      {
+        condition: "the fallback is taken on propose-not-ancestor",
+        test: "merge: the default branch and a later bind pull request are clean",
+        expect: "[] (clean)",
+      },
+      {
+        condition:
+          "the fallback is never taken while the propose commit is an ancestor",
+        test: "an ancestor propose commit takes the propose checks even when the diff base holds the same log",
+        expect: "propose-log-present, propose-not-draft",
+      },
+      {
+        condition: "the diff base holds the log at the spec's own path",
+        test: "after a squash merge a log the diff base holds only at another path of the same spec anchors nothing",
+        expect: "propose-not-ancestor",
+      },
+      {
+        condition: "the merged log parses",
+        test: "after a squash merge a merged log that does not parse anchors nothing",
+        expect: "propose-not-ancestor",
+      },
+      {
+        condition: "the merged propose commit equals the head's",
+        test: "after a squash merge a log whose propose entry is swapped is rewritten and anchors nothing",
+        expect: "log-rewritten, propose-not-ancestor | propose-not-a-commit",
+      },
+      {
+        condition: "the merged propose hash equals the head's",
+        test: "after a squash merge a propose entry swapped in its hash only is rewritten and anchors nothing",
+        expect: "log-rewritten, propose-not-ancestor",
+      },
+      {
+        condition: "bindings.yaml exists at the diff base",
+        test: "after a squash merge without bind entries a diff base without bindings.yaml anchors nothing",
+        expect: "propose-not-ancestor",
+      },
+      {
+        condition: "bindings.yaml parses at the diff base",
+        test: "after a squash merge without bind entries a diff base whose bindings.yaml does not parse anchors nothing",
+        expect: "propose-not-ancestor",
+      },
+      {
+        condition: "the guard covers the TP bound at the first merged entry",
+        test: "the guard: an unlinted change of the TP bound at the first merged entry anchors nothing",
+        expect: "propose-not-ancestor naming TP-2",
+      },
+      {
+        condition: "the guard covers the TP bound at a middle merged entry",
+        test: "the guard: an unlinted change of the TP bound at the middle merged entry anchors nothing",
+        expect: "propose-not-ancestor naming TP-4",
+      },
+      {
+        condition: "the guard covers the TP bound at the last merged entry",
+        test: "the guard: an unlinted change of the TP bound at the last merged entry anchors nothing",
+        expect: "propose-not-ancestor naming TP-1",
+      },
+      {
+        condition:
+          "only head entries with seq above the merged line count are checked",
+        test: "merge: the default branch and a later bind pull request are clean",
+        expect: "[] (a re-check of the merged entries would be bind-kind)",
+      },
+    ];
+
+    it("every condition of the fallback names a test of this block", ({
+      task,
+    }) => {
+      const names = (task.suite?.tasks ?? []).map((t) => t.name);
+      for (const row of CONJUNCTS) {
+        // a template title is named by its fixed tail
+        expect(
+          names.some(
+            (name) => name === row.test || name.endsWith(` ${row.test}`),
+          ),
+          row.condition,
+        ).toBe(true);
+      }
+    });
+
+    it("an ancestor propose commit takes the propose checks even when the diff base holds the same log", async () => {
+      // a log anchored at the proposed commit, merged by hand without the lint
+      const { repo, proposed } = await proposedRepo();
+      writeSpec(
+        repo,
+        "bindings.log",
+        forgedLog(proposed, sha256Tag(BIND_BINDINGS)),
+      );
+      const merged = await commitSpec(repo, "re-anchor, merged by hand");
+      await repo.setRef(REMOTE_MAIN, merged);
+      expect(codesOf(lintGit(repo))).toEqual([
+        "propose-log-present",
+        "propose-not-draft",
+      ]);
+    });
+
+    it("after a squash merge a merged log that does not parse anchors nothing", async () => {
+      const { repo } = await boundOnBranch();
+      await squashMerge(repo, "pr");
+      const log = readSpec(repo, "bindings.log");
+      // the merged log lost its last line feed; the pull request restores it
+      writeSpec(repo, "bindings.log", log.slice(0, -1));
+      const cut = await commitSpec(repo, "a log without its last line feed");
+      await repo.setRef(REMOTE_MAIN, cut);
+      await repo.checkout("later", cut);
+      writeSpec(repo, "bindings.log", log);
+      await commitSpec(repo, "restore the line feed");
+      expect(codesOf(lintGit(repo))).toEqual(["propose-not-ancestor"]);
+    });
+
+    for (const [what, change] of [
+      ["without bindings.yaml", null],
+      ["whose bindings.yaml does not parse", "- not a mapping\n"],
+    ] as const) {
+      it(`after a squash merge without bind entries a diff base ${what} anchors nothing`, async () => {
+        // no bind entry: the guard has nothing to compare, the file check alone refuses
+        const { repo } = await proposedRepo();
+        await squashMerge(repo, "pr");
+        const broken = await repo.commit(
+          { [`${SPEC_REL}/bindings.yaml`]: change },
+          "bindings.yaml broken on the default branch",
+        );
+        await repo.setRef(REMOTE_MAIN, broken);
+        await repo.checkout("later", broken);
+        writeSpec(repo, "bindings.yaml", BIND_BINDINGS);
+        await commitSpec(repo, "restore bindings.yaml");
+        expect(codesOf(lintGit(repo))).toEqual(["propose-not-ancestor"]);
+      });
+    }
+
+    for (const [position, tp, from] of [
+      ["first", "TP-2", "login first"],
+      ["middle", "TP-4", "logout middle"],
+      ["last", "TP-1", "token last"],
+    ] as const) {
+      it(`the guard: an unlinted change of the TP bound at the ${position} merged entry anchors nothing`, async () => {
+        const repo = await threeBoundSquashed();
+        writeSpec(
+          repo,
+          "bindings.yaml",
+          readSpec(repo, "bindings.yaml").replace(from, "pushed by hand"),
+        );
+        const tampered = await commitSpec(repo, "a direct push");
+        await repo.setRef(REMOTE_MAIN, tampered);
+        const found = ofLogRule(lintGit(repo));
+        expect(found.map((f) => f.code)).toEqual(["propose-not-ancestor"]);
+        expect(found[0]!.message).toContain(
+          `bindings.yaml at the diff base does not match the merged bindings.log for ${tp}`,
+        );
+      });
+    }
+
+    it("the guard without tampering: the three-bind merge is clean on the default branch", async () => {
+      const repo = await threeBoundSquashed();
+      expect(lintGit(repo).errors).toEqual([]);
+    });
+
+    it("documents a limitation: an unlinted change of a TP that was never bound stays undetected", async () => {
+      // TP-2 has no bind entry; its value comes from the propose commit,
+      // which cannot be verified after a squash merge
+      const { repo } = await boundOnBranch();
+      await squashMerge(repo, "pr");
+      writeSpec(
+        repo,
+        "bindings.yaml",
+        readSpec(repo, "bindings.yaml").replace(
+          "login works",
+          "pushed by hand",
+        ),
+      );
+      const tampered = await commitSpec(repo, "a direct push");
+      await repo.setRef(REMOTE_MAIN, tampered);
+      expect(codesOf(lintGit(repo))).toEqual([]);
     });
   },
 );
