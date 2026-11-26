@@ -3,7 +3,7 @@
 `spec-gate` turns a ticket or intent into a checked, reviewable spec and
 test plan before implementation starts. The package is young: the CLI
 answers `--help` and `--version` and runs the `intake file`, `triage`,
-`digest`, `lint`, `lint-ack`, `propose` and `bind` verbs described below, and further
+`digest`, `lint`, `lint-ack`, `propose`, `bind` and `repo-check` verbs described below, and further
 capabilities land as subcommands on top of this entry point as they are
 built.
 
@@ -47,6 +47,16 @@ new binding to `bindings.log` and rewriting `bindings.yaml`; it exits 0 when
 written and 2 on any refusal. Both are described in
 [docs/lint.md](docs/lint.md), the log format in
 [docs/formats.md](docs/formats.md); the code lives in `src/state/`.
+
+`spec-gate repo-check --repo <dir> (--default-ref <ref> | --base <commit>)`
+checks the whole repository rather than one spec directory: every `spec.md`
+at the diff base that is not a draft or has a `bindings.log` must still be
+at its path at `HEAD`, parse, keep its id, not go back to `draft` and keep
+its log. It prints one JSON report line (`spec-gate-repo-check/1`) and exits
+0 without findings, 1 with findings and 2 on a usage error. CI runs it on
+every pull request, not only on spec pull requests; it is described in
+[docs/lint.md](docs/lint.md) ("Repository check"), the code lives in
+`src/repo/`.
 
 ## Formats
 

@@ -10,6 +10,7 @@ import {
 } from "./canonical/index.js";
 import { IntakeError } from "./intake/index.js";
 import { ACKS_FILE, lintSpecDir, writeAck } from "./lint/index.js";
+import { repoCheck } from "./repo/index.js";
 import { bindSpecDir, proposeSpecDir } from "./state/index.js";
 import { runTriage } from "./triage/index.js";
 
@@ -380,13 +381,54 @@ program
     },
   );
 
+// `repo-check` follows the exit codes of `lint`: 0 for a clean report, 1 for
+// a report with findings, 2 for a usage error, a git failure or an
+// unexpected exception.
+program
+  .command("repo-check")
+  .description(
+    "check that no protected spec at the diff base (a spec.md anywhere in the tree that is not a draft or has a " +
+      "bindings.log) disappears, changes its id, goes back to draft or loses its log at HEAD; prints one JSON " +
+      "report line (spec-gate-repo-check/1); exits 0 without findings, 1 with findings, 2 on usage errors. " +
+      "Run it on every pull request, not only on spec pull requests",
+  )
+  .requiredOption(
+    "--repo <dir>",
+    "the trusted checkout root, as for lint; never discovered",
+  )
+  .option(
+    "--default-ref <ref>",
+    "full ref name of the fetched target branch, as for lint",
+  )
+  .option(
+    "--base <commit>",
+    "full commit id of the pull request base, as for lint; wins over --default-ref and must lie on it",
+  )
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action((options: { repo: string; defaultRef?: string; base?: string }) => {
+    const result = repoCheck({
+      repo: options.repo,
+      defaultRef: options.defaultRef,
+      base: options.base,
+    });
+    if (!result.ok) {
+      process.stderr.write(`spec-gate: ${result.message}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    process.stdout.write(`${JSON.stringify(result.report)}\n`);
+    process.exitCode = result.report.ok ? 0 : 1;
+  });
+
 try {
   await program.parseAsync();
 } catch (err) {
-  // Only `intake file`, `lint`, `lint-ack`, `propose` and `bind` have
-  // exitOverride, so every CommanderError comes from one of them: help and
-  // version keep their exit code 0, a usage error exits 2; anything else is
-  // an unexpected exception and also exits 2.
+  // Only `intake file`, `lint`, `lint-ack`, `propose`, `bind` and
+  // `repo-check` have exitOverride, so every CommanderError comes from one
+  // of them: help and version keep their exit code 0, a usage error exits 2;
+  // anything else is an unexpected exception and also exits 2.
   if (err instanceof CommanderError) {
     // commander has already written the usage message to stderr.
     process.exitCode = err.exitCode === 0 ? 0 : 2;
