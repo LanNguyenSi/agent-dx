@@ -72,3 +72,7 @@ tree whose git directory is the one a checkout has (a pull request cannot
 commit one of its own). What goes in, what stays out, the
 canonical form and the errors are described in [docs/digest.md](docs/digest.md).
 The code lives in `src/canonical/`.
+
+## Approval
+
+Whether a proposed spec counts as approved is derived by `checkApproval` in `src/approve/` from the facts a host adapter (`src/host/`) supplies and from git, without a CLI verb so far; the conditions, the report and the limits are described in [docs/approve.md](docs/approve.md).
