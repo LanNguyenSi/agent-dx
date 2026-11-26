@@ -48,6 +48,16 @@ written and 2 on any refusal. Both are described in
 [docs/lint.md](docs/lint.md), the log format in
 [docs/formats.md](docs/formats.md); the code lives in `src/state/`.
 
+`spec-gate repo-check --repo <dir> (--default-ref <ref> | --base <commit>)`
+checks the whole repository rather than one spec directory: every `spec.md`
+at the diff base that is not a draft or has a `bindings.log` must still be
+at its path at `HEAD`, parse, keep its id, not go back to `draft` and keep
+its log. It prints one JSON report line (`spec-gate-repo-check/1`) and exits
+0 without findings, 1 with findings and 2 on a usage error. CI runs it on
+every pull request, not only on spec pull requests; it is described in
+[docs/lint.md](docs/lint.md) ("Repository check"), the code lives in
+`src/repo/`.
+
 ## Formats
 
 The files `spec-gate` reads and writes, their grammars, the field-to-layer

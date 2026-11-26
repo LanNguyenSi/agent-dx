@@ -173,6 +173,69 @@ first: a run stopped between the two leaves a log one entry ahead of
 running the same bind again repairs it. `bind` reads no git; the lint checks
 the log against the propose commit.
 
+## Repository check
+
+The lint looks at one spec directory, the one it is run on. It cannot see a
+spec that no longer has a directory at `HEAD`: a deleted spec directory, a
+rename together with a new id, or a spec moved from anywhere into `specs/`
+with a fresh `bindings.log` all leave no directory to lint under the old id.
+`spec-gate repo-check --repo <dir> (--default-ref <ref> | --base <commit>)`
+closes that gap from the other side: it starts at the diff base and walks its
+whole tree.
+
+CI must run it on every pull request, not only on pull requests that touch a
+spec: the pull request that deletes a spec is exactly the one a spec-only
+trigger would skip. Give it the same git inputs as the lint; they are
+resolved the same way (see "Git inputs"): `--repo` is the trusted checkout
+root and never discovered, `--default-ref` is a full ref name, `--base` a
+full commit id that must lie on `--default-ref` when both are given, and the
+diff base is the merge base of `HEAD` and the reference commit. Every git
+call goes through the lint's hardened runner; nothing is fetched or written,
+and both trees are read from the object database, never from the work tree,
+so a file restored in the work tree but not committed does not count.
+
+Protected is every regular file named `spec.md` anywhere in the tree of the
+diff base (ASCII case ignored, so `Specs/x/SPEC.md` counts; not only under
+`specs/`) that parses as a spec and either has a status other than `draft`
+or a regular sibling file named `bindings.log` (ASCII case ignored). A
+symbolic link, a submodule or a directory named `spec.md` is not a spec and
+protects nothing, and neither does a `spec.md` that does not parse at the
+diff base. For each protected spec, the tree of `HEAD` must hold:
+
+| Code | Condition at `HEAD` |
+|---|---|
+| `spec-removed` | a regular file at the same path that parses as a spec; a missing file, a link, a directory, a submodule in its place or a file that stops parsing are all this finding |
+| `spec-id-changed` | the same `id` as at the diff base |
+| `spec-status-reverted` | a status other than `draft`, when the status at the diff base was not `draft` |
+| `log-removed` | a regular file at the path of every sibling `bindings.log` of the diff base |
+
+A protected spec that turns up at `HEAD` under another path is still
+`spec-removed` for its old path: a proposed spec keeps its directory. A
+superseded spec is protected as well; there is no deletion path for a spec
+that left `draft`, it keeps its directory with `status: superseded`. A draft
+without a log can be deleted, renamed or changed freely. A spec merged on the
+default branch after the pull request branched off is not checked, because
+the diff base does not hold it.
+
+Caps: the tree listing of the diff base and of `HEAD` may hold at most 50000
+entries and 4 MiB of output (the output cap of every git call), and the diff
+base at most 1000 files named `spec.md`. Past any cap the report holds the
+single finding `tree-too-large` with path `.` and the check stops: it never
+passes a tree it did not read in full.
+
+The report is one JSON line:
+
+```json
+{"format":"spec-gate-repo-check/1","ok":false,"reference":"<commit>","diff_base":"<commit>","head":"<commit>","spec_files":3,"findings":[{"path":"specs/a/spec.md","code":"spec-removed","message":"..."}]}
+```
+
+`spec_files` counts the regular files named `spec.md` at the diff base.
+Findings are sorted by `path`, then `code`, then `message`; a path is
+repository-relative and the report holds no absolute path. Exit codes: 0
+without findings, 1 with findings, 2 on a usage error (a missing `--repo`, no
+`--default-ref` and no `--base`, a git input that does not resolve) or a git
+read that fails. The code lives in `src/repo/`.
+
 ## Git inputs
 
 The reference-state rules compare what a spec names (`base_commit`,
