@@ -75,4 +75,4 @@ The code lives in `src/canonical/`.
 
 ## Approval
 
-Whether a proposed spec counts as approved is derived by `checkApproval` in `src/approve/` from the facts a host adapter (`src/host/`) supplies and from git, without a CLI verb so far; the conditions, the report and the limits are described in [docs/approve.md](docs/approve.md).
+Whether a proposed spec counts as approved is derived by `checkApproval` in `src/approve/` from the facts a host adapter (`src/host/`) supplies and from git (a library entry point, no CLI verb); the conditions, the report and the limits are described in [docs/approve.md](docs/approve.md).
