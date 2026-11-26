@@ -314,6 +314,33 @@ describe("spec-gate repo-check", { timeout: 60_000 }, () => {
     expect(found(repo)).toEqual(["specs/a/spec.md spec-removed"]);
   });
 
+  it("a link entry at HEAD whose blob is the same valid spec is spec-removed", async () => {
+    const repo = await merged({ "specs/a/spec.md": spec("a", "proposed") });
+    const blob = plumb(repo, ["rev-parse", "HEAD:specs/a/spec.md"]);
+    plumb(repo, [
+      "update-index",
+      "--cacheinfo",
+      `120000,${blob},specs/a/spec.md`,
+    ]);
+    plumb(repo, ["commit", "-q", "-m", "same blob, link mode"]);
+    expect(found(repo)).toEqual(["specs/a/spec.md spec-removed"]);
+  });
+
+  it("a log entry at HEAD with the same blob in link mode is log-removed", async () => {
+    const repo = await merged({
+      "specs/a/spec.md": spec("a", "proposed"),
+      "specs/a/bindings.log": LOG,
+    });
+    const blob = plumb(repo, ["rev-parse", "HEAD:specs/a/bindings.log"]);
+    plumb(repo, [
+      "update-index",
+      "--cacheinfo",
+      `120000,${blob},specs/a/bindings.log`,
+    ]);
+    plumb(repo, ["commit", "-q", "-m", "same blob, link mode"]);
+    expect(found(repo)).toEqual(["specs/a/bindings.log log-removed"]);
+  });
+
   it("a spec.md that becomes a directory is spec-removed", async () => {
     const repo = await merged({ "specs/a/spec.md": spec("a", "proposed") });
     await repo.commit(
@@ -405,19 +432,57 @@ describe("spec-gate repo-check", { timeout: 60_000 }, () => {
     expect(found(repo)).toEqual(["specs/a/Bindings.LOG log-removed"]);
   });
 
-  it("a symbolic link named spec.md at the diff base protects nothing", async () => {
-    const repo = await merged({
-      "copy.md": spec("a", "proposed"),
-      "specs/a/spec.md": "placeholder\n",
-    });
-    await repo.commit(
-      { "specs/a/spec.md": { linkTo: "../../copy.md" } },
-      "link",
+  it("a link entry named spec.md at the diff base protects nothing, even when its blob parses", async () => {
+    const repo = await merged({ "README.md": "x\n" });
+    const blob = plumb(
+      repo,
+      ["hash-object", "-w", "--stdin"],
+      spec("a", "proposed"),
     );
-    const main = await repo.head();
-    await repo.setRef(REMOTE_MAIN, main);
-    await repo.commit({ "specs/a/spec.md": null }, "delete the link");
+    plumb(repo, [
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `120000,${blob},specs/a/spec.md`,
+    ]);
+    plumb(repo, ["commit", "-q", "-m", "link entry"]);
+    await repo.setRef(REMOTE_MAIN, await repo.head());
+    plumb(repo, ["rm", "-q", "--cached", "specs/a/spec.md"]);
+    plumb(repo, ["commit", "-q", "-m", "delete the link"]);
     expect(found(repo)).toEqual([]);
+  });
+
+  it("a link entry named bindings.log beside a draft at the diff base protects nothing", async () => {
+    const repo = await merged({ "specs/d/spec.md": spec("d", "draft") });
+    const blob = plumb(repo, ["hash-object", "-w", "--stdin"], LOG);
+    plumb(repo, [
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `120000,${blob},specs/d/bindings.log`,
+    ]);
+    plumb(repo, ["commit", "-q", "-m", "link log"]);
+    await repo.setRef(REMOTE_MAIN, await repo.head());
+    plumb(repo, [
+      "rm",
+      "-q",
+      "--cached",
+      "specs/d/spec.md",
+      "specs/d/bindings.log",
+    ]);
+    plumb(repo, ["commit", "-q", "-m", "delete"]);
+    expect(found(repo)).toEqual([]);
+  });
+
+  it("a spec.md over 4 MiB at HEAD is spec-removed", async () => {
+    const repo = await merged({ "specs/a/spec.md": spec("a", "proposed") });
+    await repo.commit(
+      {
+        "specs/a/spec.md": `${spec("a", "proposed")}${"x".repeat(5 * 1024 * 1024)}\n`,
+      },
+      "huge",
+    );
+    expect(found(repo)).toEqual(["specs/a/spec.md spec-removed"]);
   });
 
   it("a spec that did not parse at the diff base protects nothing", async () => {
