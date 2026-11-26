@@ -9,7 +9,13 @@ import { stringify } from "yaml";
 import { formatQualifiedId, type TestPlanRow } from "../formats/index.js";
 import { ExportError } from "./errors.js";
 import type { MergedInputs } from "./merged.js";
-import { isDroppedHintPath } from "./paths.js";
+import {
+  assertBindingPaths,
+  forbiddenNonGoalPath,
+  forbiddenSpecFile,
+  isDroppedHintPath,
+  isLiteralRepoPath,
+} from "./paths.js";
 
 /** The only format name the CLI offers. */
 export const OW_FORMAT = "ow";
@@ -69,15 +75,28 @@ export function buildOwExport(inputs: MergedInputs, digest: string): string {
       "spec.md states no goal; a spec needs exactly one GOAL line before it can be exported",
     );
   }
+  // The path rules of `docs/export.md` are enforced here and not left to
+  // the caller: whatever built the inputs, a briefing is printed only when
+  // every path in it can be judged, and the hint is filtered against the
+  // very entries `forbidden_changes` prints.
+  if (!isLiteralRepoPath(specRel)) {
+    throw new ExportError(
+      "spec-dir-invalid",
+      `the spec directory ${JSON.stringify(specRel)} is not a canonical repo-relative path`,
+    );
+  }
   const specId = spec.frontmatter.id;
   const specMdRel = `${specRel}/spec.md`;
   const testplanRel = `${specRel}/testplan.yaml`;
-  const nonGoalPaths = spec.nonGoals.flatMap((line) => line.paths);
-  const forbiddenChanges = sortedUnique([
-    ...nonGoalPaths,
-    specMdRel,
-    testplanRel,
-  ]);
+  const forbidden = [
+    ...spec.nonGoals.flatMap((line) =>
+      line.paths.map((entry) => forbiddenNonGoalPath(line.id, entry)),
+    ),
+    forbiddenSpecFile(specMdRel),
+    forbiddenSpecFile(testplanRel),
+  ];
+  const forbiddenChanges = sortedUnique(forbidden.map((entry) => entry.text));
+  assertBindingPaths(Object.entries(bindings));
   const testPaths: string[] = [];
   for (const binding of Object.values(bindings)) {
     if (binding.file !== undefined) testPaths.push(binding.file);
@@ -105,20 +124,16 @@ export function buildOwExport(inputs: MergedInputs, digest: string): string {
     ],
     relevant_docs: [specMdRel, testplanRel],
     // A binding is data an implementation workflow may edit, so it is not
-    // trusted to keep the hint clean: every binding path is canonical
-    // (merged.ts refused any other spelling) and a candidate the briefing
-    // forbids to change never belongs in the list of changes the spec
-    // allows, neither by spelling its own name nor by spelling its way
-    // under a Non-goal path or into a Non-goal glob.
+    // trusted to keep the hint clean: a candidate that an entry of
+    // `forbidden_changes` covers never belongs in the list of changes the
+    // spec allows, neither by naming a forbidden path nor by lying below
+    // one or below a directory a Non-goal glob matches.
     allowed_changes_hint: sortedUnique([
       ...testPaths,
       `${specRel}/bindings.yaml`,
       `${specRel}/bindings.log`,
       `${specRel}/evidence/`,
-    ]).filter(
-      (candidate) =>
-        !isDroppedHintPath(candidate, specMdRel, testplanRel, nonGoalPaths),
-    ),
+    ]).filter((candidate) => !isDroppedHintPath(candidate, forbidden)),
   };
   return stringify(doc, {
     lineWidth: 0,

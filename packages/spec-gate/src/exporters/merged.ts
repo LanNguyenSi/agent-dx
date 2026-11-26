@@ -243,11 +243,12 @@ export function loadMergedSpecDir(
     "testplan-invalid",
     TESTPLAN_FILE,
   );
-  // Rule one of `docs/export.md`: the briefing is built from canonical
-  // paths only, so a binding that spells its path any other way is
+  // The path rules of `docs/export.md`: the briefing is built from paths
+  // export can judge, so a binding that spells its path any other way is
   // refused before the briefing exists. The check runs on the decoded
   // document, before the format parser, so the refusal is about the
   // spelling and not about anything else the file may also get wrong.
+  // `buildOwExport` checks the parsed bindings again with the same rule.
   assertCanonicalBindingPaths(workTexts[BINDINGS_FILE]!);
   const bindings = parseInput(
     parseBindings(workTexts[BINDINGS_FILE]!),

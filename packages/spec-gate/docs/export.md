@@ -28,16 +28,27 @@ repository (`spec-dir-invalid`). The briefing then carries `digest`, the
 digest of the normative layer as `digest` prints it (read at the
 `commands_ref` commit of `--repo`).
 
-Every `file` and every `fixtures` entry of `bindings.yaml` must be in
-canonical repo-relative form before the briefing is built: no leading
-`./`, no `.` or `..` segment, no empty segment (so no `//`, no leading
-`/` and no trailing `/`), no backslash, and unchanged by POSIX path
-normalisation. An entry that is not is refused as
-`binding-path-not-canonical` (exit 2), naming the TP id and the path.
-The check reads the decoded document before `bindings.yaml` is validated
-as a format, so the refusal names the spelling and not some other
-problem the file may also have. The hint is built from these canonical
-paths and from nothing else.
+Export prints a briefing only when it can judge every path in it. What it
+cannot judge is refused with a named error (exit 2), never guessed and
+never rewritten. Paths are compared as git compares them, byte for byte,
+so both sides must spell a path in the one canonical repo-relative form:
+`/` separated segments, none of them empty, `.` or `..` (so no leading
+`./`, no `//` and no leading `/`), and no backslash. An entry that may
+name a directory, which is a Non-goal `paths` entry or a `fixtures` entry,
+may end in one `/`; a `file` may not.
+
+| Refusal | Input |
+|---|---|
+| `binding-path-not-canonical` | a `file` or `fixtures` entry of `bindings.yaml` that is not canonical; the message names the TP id, the field and the path |
+| `binding-path-glob` | a `file` or `fixtures` entry that holds `*` or `?`: a binding names one path, and a hint entry is never a pattern |
+| `nongoal-path-not-canonical` | a Non-goal `paths` entry that is not canonical; the message names the NG id and the entry |
+| `nongoal-glob-unsupported` | a Non-goal `paths` entry that holds `?`, `[`, `]`, `{` or `}`: the glob syntax of a Non-goal path is `*` and `**` and nothing else |
+
+The binding check reads the decoded document before `bindings.yaml` is
+validated as a format, so the refusal names the spelling and not some
+other problem the file may also have. The format parsers and `lint` accept
+spellings this verb refuses, so a spec can pass both and still be refused
+here until the path is spelled canonically.
 
 All file paths in the document are relative to the repository root, `/`
 separated, `<spec-dir>` included. Fixed key order, fixed list order, byte
@@ -53,16 +64,37 @@ identical across runs:
 | `forbidden_changes` | the `paths` attributes of the Non-goals, plus the spec directory's `spec.md` and `testplan.yaml`, sorted and deduplicated |
 | `constraints` | one string per Non-goal line without `paths` (`<spec-id>#NG-<n>: <text>`), then the line that every qualified AC and TP id of the spec must appear literally in at least one task |
 | `relevant_docs` | the spec directory's `spec.md` and `testplan.yaml` |
-| `allowed_changes_hint` | the `file` and `fixtures` paths of the bindings, plus the spec directory's `bindings.yaml`, `bindings.log` and `evidence/` directory, sorted and deduplicated, with every candidate the row above forbids dropped: a candidate is dropped when it is the spec directory's `spec.md` or `testplan.yaml` or when a Non-goal path covers it, meaning the candidate equals the Non-goal path, lies below it (the path is its prefix followed by `/`, which makes `dir/` a directory), or matches it when the Non-goal path holds a glob (a binding cannot move a forbidden path into the hint, in any spelling) |
+| `allowed_changes_hint` | the `file` and `fixtures` paths of the bindings as written, plus the spec directory's `bindings.yaml`, `bindings.log` and `evidence/` directory, sorted and deduplicated, without any candidate an entry of `forbidden_changes` covers (below) |
 
-The Non-goal `paths` that enter this document as globs (kept verbatim
-in `forbidden_changes`, matched in the drop rule above) use one
-semantics: `*` matches any characters except `/`, `**` matches any
-characters including `/`, and every other character matches itself (`?`
-is literal). A path covered by a Non-goal path is dropped from the hint
-even when the binding spells it exactly; a glob that does not match the
-path leaves it in (`src/*.gen.ts` covers `src/a.gen.ts` and not
-`src/sub/a.gen.ts`).
+No entry of `allowed_changes_hint` is covered by an entry of
+`forbidden_changes`. An entry of `forbidden_changes` covers a candidate
+when it matches the candidate itself or one of the directories above it.
+A Non-goal path therefore covers the path it names and everything below
+it, with or without the trailing `/`, and a glob that matches a directory
+covers everything below that directory: `src/leg*` covers
+`src/legacy/a.test.ts`. A path that only shares a prefix is not covered:
+`src/legacy` does not cover `src/legacy-x/a.test.ts`. The spec directory's
+`spec.md` and `testplan.yaml` are entries of `forbidden_changes` like the
+Non-goal paths, so a binding that names one of them never reaches the
+hint.
+
+A Non-goal `paths` entry is matched with one glob semantics: `*` matches
+any run of characters except `/`, `**` matches any run of characters
+including `/`, either run may be empty, and every other character matches
+itself (parentheses, `!`, `+` and `.` included). A segment that is exactly
+`**` also matches no segment at all: `a/**/b` covers `a/b`, `**/b` covers
+`b` and `a/**` covers `a`, so the entry covers what either common reading
+of `**` covers. `src/*.gen.ts` covers `src/a.gen.ts` and not
+`src/sub/a.gen.ts`. The entries are printed in `forbidden_changes` as the
+spec spells them.
+
+Two limits. The rule judges a hint entry and the directories above it,
+not what lies below it: a hint entry that is a directory (the `evidence/`
+directory, a fixtures directory) stays in the hint when a Non-goal names a
+path inside it, and `forbidden_changes` is the list that counts. And paths
+are git paths: two spellings git tells apart (`src/Legacy` and
+`src/legacy`) are two paths here, also on a file system that folds case or
+Unicode normal forms.
 
 Sort is plain code point order, applied where the order of the source file
 carries no meaning (binding paths, Non-goal paths); a list that follows

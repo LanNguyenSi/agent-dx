@@ -1,9 +1,12 @@
 /**
- * The path rules of `spec-gate export --format ow` over temporary git
- * repositories: the refusal of non-canonical binding paths (each spelling
- * as a `file` and as a `fixtures` entry) and the drop rule of
+ * The path rules of `spec-gate export --format ow` through the CLI, over
+ * temporary git repositories: every named refusal (a binding path or a
+ * Non-goal path that is not canonical, a binding path that is a pattern, a
+ * Non-goal glob export does not implement) and the drop rule of
  * `allowed_changes_hint` (a Non-goal directory, a Non-goal glob, a glob
- * that must not overreach, and the spec's own normative files).
+ * that matches a directory, a glob that must not overreach, and the spec's
+ * own normative files). The rule itself is tabulated in
+ * `hint-invariant.test.ts`.
  */
 import fs from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
@@ -51,6 +54,14 @@ const NON_CANONICAL = [
   "a\\b.ts",
 ];
 
+/**
+ * The same spellings for a `fixtures` entry, which may name a directory
+ * and so may end in one `/`: there it takes two to be refused.
+ */
+const NON_CANONICAL_FIXTURES = NON_CANONICAL.map((bad) =>
+  bad.endsWith("/") ? `${bad}/` : bad,
+);
+
 /** The fixture bindings plus a `TP-9` binding with this `file`. */
 function bindingsWithFile(file: string): string {
   return `${fixtureText("bindings.yaml")}TP-9:\n  status: existing\n  file: '${file}'\n`;
@@ -95,7 +106,9 @@ describe("export refuses non-canonical binding paths", () => {
       expect(run.stderr).toContain(JSON.stringify(bad));
       expect(run.stdout).toBe("");
     });
+  }
 
+  for (const bad of NON_CANONICAL_FIXTURES) {
     it(`refuses fixtures entry ${JSON.stringify(bad)} with binding-path-not-canonical`, async () => {
       const run = await exportOf({ bindings: bindingsWithFixture(bad) });
       expect(run.code).toBe(2);
@@ -106,9 +119,134 @@ describe("export refuses non-canonical binding paths", () => {
       expect(run.stdout).toBe("");
     });
   }
+
+  it("reads one trailing slash of a fixtures entry as a directory and still drops what is forbidden", async () => {
+    const run = await exportOf({
+      bindings:
+        `${fixtureText("bindings.yaml")}TP-9:\n` +
+        "  status: existing\n" +
+        "  file: test/x.test.ts\n" +
+        "  fixtures:\n" +
+        "    - specs/s1/testplan.yaml/\n" +
+        "    - src/auth/\n" +
+        "    - test/fixtures/big/\n",
+    });
+    expect(run.stderr).toBe("");
+    expect(run.code).toBe(0);
+    const hint = hintOf(run.stdout);
+    expect(hint).not.toContain("testplan.yaml");
+    expect(hint).not.toContain("src/auth");
+    expect(hint).toContain("  - test/fixtures/big/\n");
+    expect(
+      hint
+        .replace("  - test/fixtures/big/\n", "")
+        .replace("  - test/x.test.ts\n", ""),
+    ).toBe(hintOf(GOLDEN));
+  });
+
+  for (const pattern of ["src/*", "test/fixtures/**", "src/legac?/a.test.ts"]) {
+    it(`refuses file ${JSON.stringify(pattern)} with binding-path-glob`, async () => {
+      const run = await exportOf({ bindings: bindingsWithFile(pattern) });
+      expect(run.code).toBe(2);
+      expect(run.stderr).toContain(
+        "export: binding-path-glob: binding TP-9: file",
+      );
+      expect(run.stderr).toContain(JSON.stringify(pattern));
+      expect(run.stdout).toBe("");
+    });
+
+    it(`refuses fixtures entry ${JSON.stringify(pattern)} with binding-path-glob`, async () => {
+      const run = await exportOf({ bindings: bindingsWithFixture(pattern) });
+      expect(run.code).toBe(2);
+      expect(run.stderr).toContain(
+        "export: binding-path-glob: binding TP-9: fixtures[0]",
+      );
+      expect(run.stderr).toContain(JSON.stringify(pattern));
+      expect(run.stdout).toBe("");
+    });
+  }
+});
+
+describe("export refuses Non-goal paths it cannot judge", () => {
+  const binding = bindingsWithFiles("src/legacy/a.test.ts");
+
+  for (const bad of [
+    "./src/legacy",
+    "src/legacy//",
+    "src/./legacy",
+    "src/legacy/.",
+    "src//legacy",
+  ]) {
+    it(`refuses paths entry ${JSON.stringify(bad)} with nongoal-path-not-canonical`, async () => {
+      const run = await exportOf({
+        spec: specWithNonGoalPaths(`src/keep.ts, ${bad}`),
+        bindings: binding,
+      });
+      expect(run.code).toBe(2);
+      expect(run.stderr).toContain(
+        `export: nongoal-path-not-canonical: NG-1: paths entry ${JSON.stringify(bad)}`,
+      );
+      expect(run.stdout).toBe("");
+    });
+  }
+
+  for (const bad of [
+    "src/leg?cy/*",
+    "src/[l]egacy",
+    "src/legacy]",
+    "src/{legacy",
+    "src/legacy}",
+  ]) {
+    it(`refuses paths entry ${JSON.stringify(bad)} with nongoal-glob-unsupported`, async () => {
+      const run = await exportOf({
+        spec: specWithNonGoalPaths(`src/keep.ts, ${bad}`),
+        bindings: binding,
+      });
+      expect(run.code).toBe(2);
+      expect(run.stderr).toContain(
+        `export: nongoal-glob-unsupported: NG-1: paths entry ${JSON.stringify(bad)}`,
+      );
+      expect(run.stdout).toBe("");
+    });
+  }
 });
 
 describe("export drops forbidden paths from allowed_changes_hint", () => {
+  for (const glob of ["src/leg*", "src/legacy*", "*/legacy", "src/**/legacy"]) {
+    it(`drops a binding file below a directory the Non-goal glob ${glob} matches`, async () => {
+      const run = await exportOf({
+        spec: specWithNonGoalPaths(glob),
+        bindings: bindingsWithFiles(
+          "src/legacy/a.test.ts",
+          "src/legacy/b/a.test.ts",
+        ),
+      });
+      expect(run.stderr).toBe("");
+      expect(run.code).toBe(0);
+      const hint = hintOf(run.stdout);
+      expect(hint).not.toContain("src/legacy");
+      expect(hint).toBe(hintOf(GOLDEN));
+    });
+  }
+
+  it("keeps a sibling that only shares a prefix with a Non-goal directory", async () => {
+    const run = await exportOf({
+      spec: specWithNonGoalPaths("src/legacy"),
+      bindings: bindingsWithFiles(
+        "src/legacy/a.test.ts",
+        "src/legacy-x/a.test.ts",
+      ),
+    });
+    expect(run.stderr).toBe("");
+    expect(run.code).toBe(0);
+    const hint = hintOf(run.stdout);
+    expect(hint).toContain("  - src/legacy-x/a.test.ts\n");
+    expect(hint).not.toContain("  - src/legacy/a.test.ts\n");
+    expect(hint.replace("  - src/legacy-x/a.test.ts\n", "")).toBe(
+      hintOf(GOLDEN),
+    );
+  });
+
   it("drops a binding file below a Non-goal directory", async () => {
     const run = await exportOf({
       spec: specWithNonGoalPaths("src/legacy/"),
