@@ -13,6 +13,7 @@ import {
   MAX_MERGED_COMMITS,
   MERGED_SUMMARIES,
   MERGE_SHAPES,
+  SPEC_STANDINGS,
   TOKEN_VARIABLE,
 } from "../../src/approve/index.js";
 import {
@@ -197,13 +198,19 @@ describe('docs/approve.md, "After the merge"', () => {
       "a squash that follows a commit of the default branch that changed `.spec-gate/` or removed a proposed spec, within N - 1 commits, is not approved",
       "a pull request of more than 50 commits is not measured",
       "No merge is computed to say what the landed tree should be",
-      "Some measured first-parent step must change the spec and, for `single-commit`, so must the range from the reviewed base to the head commit",
-      "or when the spec is not `proposed` at its start: not there, not parsing, or a draft",
-      "Each step is asked on its own, not the two ends of all steps",
+      "the spec is `proposed` with the digest judged at the tip at the approved head commit, and is not so at the one merge base of that head with the first parent of the merge commit",
+      "some measured first-parent step of the default branch goes from another state to that state",
+      "The state judged at the tip arrives over a range when the spec is `proposed-tip` at its end and is not at its start: three of the sixteen pairs",
+      "A range whose end is in another state never counts, whatever its start is",
+      "For `merge-commit` the merge base of the head with the first parent is read for this condition alone",
+      "no merge base is `git-failed` and several are `ambiguous-merge-base`, for condition 3 only",
+      "The second part asks each measured step on its own, not the two ends of all steps",
+      "a merge commit the host names where the spec is at neither end of a measured step, or is `proposed-tip` at both",
+      "The claim does not say that the approver was shown the change",
       "Condition 3 asks that the spec is `proposed` at the commit of every approving review considered (`review-not-proposed`, which names the commit)",
       "A rebase merge can reach commits of the default branch as well",
       "N counts every commit of the pull request, its merge commits included",
-      "a pull request that did not change this spec does not approve it",
+      "a later pull request that only edits another file",
       "This takes the place of `head-in-reference`",
       "the default branch was moved to it by fast-forward, or the branch was pushed there",
       "No range starts at `base`, and none at the base commit the host reports",
@@ -213,6 +220,20 @@ describe('docs/approve.md, "After the merge"', () => {
     ]) {
       expect(said, phrase).toContain(phrase);
     }
+  });
+
+  it("names the four states of a spec at a commit, in the section about the pull request that brought the spec", () => {
+    const from = after.indexOf(
+      "\n### The pull request that brought the spec\n",
+    );
+    expect(from).toBeGreaterThan(
+      after.indexOf("\n### The ranges of the merge\n"),
+    );
+    const binding = after.slice(from, after.indexOf("\n### ", from + 1));
+    for (const standing of SPEC_STANDINGS) {
+      expect(binding, standing).toContain(`| \`${standing}\` |`);
+    }
+    expect(binding).toContain("`arrives` in\n`src/approve/binding.ts`");
   });
 
   it("says that a shallow repository is refused in both modes, and why", () => {
@@ -253,7 +274,10 @@ describe('docs/approve.md, "After the merge"', () => {
       "reports `merge-shape-unknown` and never approves",
       "Bindings after the merge: `bindings.yaml` and `bindings.log` are not part of the digest",
       "Which pull request, in the open mode: an approval of a commit counts for every spec in the tree of that commit",
-      "The check after the merge asks that the merge changed the digest of the spec (`spec-not-in-merge`); the open mode does not",
+      "The check after the merge asks that the pull request brought the spec to the state judged at the tip (`spec-not-in-merge`); the open mode does not",
+      "An approval given before the default branch moved, after the merge",
+      "Telling the two apart needs a fact of the host about the order of the review and the move of the base",
+      "A second pull request with the same commits",
       "The merge commit and the head are the host's word",
       "Named later by fewer commits than the pull request has, the steps can leave out the first commits of a rebase merge",
       "A squash merge is measured like a rebase merge",

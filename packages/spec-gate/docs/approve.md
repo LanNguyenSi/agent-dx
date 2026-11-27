@@ -250,7 +250,8 @@ at the head: a file is missing or does not parse, a command is unknown),
 `review-commit-unavailable` (the commit of a review is not in the repository;
 nothing is fetched), `review-digest-unavailable`, `digest-mismatch`,
 `git-failed`; after the merge `digest-mismatch-after-merge` in place of
-`digest-mismatch`, `review-not-proposed` and `spec-not-in-merge`.
+`digest-mismatch`, `review-not-proposed`, `spec-not-in-merge` and
+`ambiguous-merge-base`.
 
 ### 4. Proposed, and the final lint is clean
 
@@ -379,7 +380,7 @@ all of them:
 |---|---|
 | 1 | The host reports the pull request as merged, and an approving review stands on the head commit the host reports for it. |
 | 2 | An approver of that head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the tip of the default branch, the pull request targeted the default branch, its merge commit is on the default branch and no range of the merge changes a path under `.spec-gate/`. |
-| 3 | The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is `proposed` at each of those commits, and the merge changed this spec. |
+| 3 | The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is `proposed` at each of those commits, and the state judged at the tip (`proposed`, with the digest at the tip) arrives both over the reviewed commits and over a measured step of the default branch. |
 | 4 | The spec is `proposed` at the tip of the default branch, the checkout is at that commit, the spec directory of the work tree is the one it holds, and the final lint has no error. |
 | 5 | `agent_identities` is not empty and shares no account with `approvers`. |
 | 6 | The host enforces a review for `specs/` and for `.spec-gate/`, and reports the last change under `.spec-gate/`. |
@@ -404,8 +405,9 @@ moves on.
   commit or of the tip is `approval-stale`. A pull request the host does not
   report as merged is `not-merged`, also when it names a merge commit: for an
   open pull request a host can name a trial merge there.
-- Condition 3 also asks that the merge changed this spec
-  (`spec-not-in-merge`, see "The ranges of the merge").
+- Condition 3 also asks that the pull request is the one that brought the
+  spec to the state judged at the tip (`spec-not-in-merge`, see "The pull
+  request that brought the spec").
 - Condition 3 asks that the spec is `proposed` at the commit of every
   approving review considered (`review-not-proposed`, which names the
   commit). Condition 4 reads the status at the tip only, and the status is no
@@ -504,21 +506,6 @@ ranges show is counted once:
   is `config-in-merge`, whoever approved. This takes the place of
   `head-in-reference`.
 
-Condition 3 uses the ranges to tie the pull request to the spec. Some measured
-first-parent step must change the spec and, for `single-commit`, so must the
-range from the reviewed base to the head commit. A range changes the spec when
-the digest differs between its two ends, or when the spec is not `proposed` at
-its start: not there, not parsing, or a draft. The status is no part of the
-digest, so a pull request that only proposes a draft the default branch
-already held changes the spec in this sense, and it is the one that can
-approve it. Each step is asked on its own, not the two ends of all steps: a
-pull request that puts an earlier text back right after another one changed it
-leaves both ends equal. Otherwise the condition is `spec-not-in-merge`: a pull
-request that did not change this spec does not approve it, although its head
-holds the spec and its head was approved. That covers a later pull request
-that only edits another file, and a merge commit the host names so far from
-the real one that no measured step holds the spec.
-
 Every other shape is `merge-shape-unknown`, and conditions 2, 7 and 8 do not
 hold:
 
@@ -537,6 +524,65 @@ with the exception named above: the commits right before a squash merge, as
 many as the pull request has commits less one, and the commits right before
 the replayed commits of a rebase merge, as many as the pull request has merge
 commits and commits the replay dropped.
+
+### The pull request that brought the spec
+
+Condition 3 ties the pull request to the spec. What it guarantees is this
+claim, and no more: the check after the merge approves only when
+
+- the spec is `proposed` with the digest judged at the tip at the approved
+  head commit, and is not so at the one merge base of that head with the first
+  parent of the merge commit; and
+- some measured first-parent step of the default branch goes from another
+  state to that state.
+
+Both parts are one question about the two ends of a range (`arrives` in
+`src/approve/binding.ts`). At a commit the spec is in one of four states:
+
+| State | The spec at the commit |
+|---|---|
+| `absent` | no `spec.md` that parses |
+| `not-proposed` | a `spec.md` that parses with another status than `proposed` |
+| `proposed-other` | `proposed`, with another digest than the tip has, or with none |
+| `proposed-tip` | `proposed`, with the digest judged at the tip |
+
+The state judged at the tip arrives over a range when the spec is
+`proposed-tip` at its end and is not at its start: three of the sixteen pairs.
+A range whose end is in another state never counts, whatever its start is. So
+a spec that is a draft, or is not there, at both ends of a step was not
+brought by it, and neither was one that arrives at a text the tip does not
+hold.
+
+The first part is asked over the reviewed commits in both shapes. For
+`single-commit` the range is the one conditions 2, 7 and 8 measure as well.
+For `merge-commit` the merge base of the head with the first parent is read
+for this condition alone, and the ranges of conditions 2, 7 and 8 stay as
+they are; no merge base is `git-failed` and several are
+`ambiguous-merge-base`, for condition 3 only. The second part asks each
+measured step on its own, not the two ends of all steps: a pull request that
+puts an earlier text back right after another one changed it leaves both ends
+equal.
+
+When a part does not hold, the condition is `spec-not-in-merge`, and the
+message says which. That refuses:
+
+- a later pull request that only edits another file: the spec is
+  `proposed-tip` at both ends of its steps and of its reviewed commits;
+- a pull request merged while the default branch held the spec as a draft,
+  when a later push proposes it again: the spec is a draft at both ends of the
+  step;
+- a merge commit whose own tree proposes the spec while the reviewed commits
+  never touched it: the step arrives, the reviewed commits do not;
+- a merge commit the host names where the spec is at neither end of a
+  measured step, or is `proposed-tip` at both.
+
+It approves a pull request that only proposes a draft the default branch
+already held (the status is no part of the digest, and the state arrives over
+it), an approved edit, and an approved pull request that puts an earlier text
+back.
+
+The claim does not say that the approver was shown the change; see "Known
+gaps".
 
 ### The measuring base and `base` after the merge
 
@@ -1075,14 +1121,32 @@ Named here instead of closed:
   condition 8.
 - Which pull request, in the open mode: an approval of a commit counts for
   every spec in the tree of that commit, whether the pull request changed
-  that spec or not. The check after the merge asks that the merge changed the
-  digest of the spec (`spec-not-in-merge`); the open mode does not.
+  that spec or not. The check after the merge asks that the pull request
+  brought the spec to the state judged at the tip (`spec-not-in-merge`); the
+  open mode does not.
+- An approval given before the default branch moved, after the merge: the
+  binding of condition 3 reads the states of the spec at commits, not when a
+  review was given. A spec is on the default branch as proposed; a branch
+  first sets it back to draft and then restores the same text beside another
+  change, so that the approver is shown that other change alone; then the
+  first commit alone reaches the default branch, and the pull request is
+  merged. At that point git shows what a pull request shows that only
+  proposes a draft the default branch held, which must be approved, so the
+  check approves this one too. Telling the two apart needs a fact of the
+  host about the order of the review and the move of the base, which the
+  adapter does not supply. A decided boundary; whether a host dismisses a
+  review when the base of a pull request changes is a setting of the host.
+- A second pull request with the same commits: when a pull request whose
+  commits hold a spec is squashed within N - 1 commits after the commit that
+  brought that spec, the measured steps hold that landing and the reviewed
+  commits hold the spec, so it is taken for the one that brought it.
 - The merge commit and the head are the host's word: the check verifies that
   the merge commit is on the default branch and reads its history from git,
   and cannot verify that it is the commit that merged this pull request. A
-  host that names a later commit moves the measured steps: when they still
+  host that names another commit moves the measured steps: when they still
   hold the commit that brought the spec, they are measured as they are, and
-  when they do not, the condition is `spec-not-in-merge`. Named later by fewer
+  when no step of them brings the spec to the state judged at the tip, the
+  condition is `spec-not-in-merge`. Named later by fewer
   commits than the pull request has, the steps can leave out the first
   commits of a rebase merge. The number of steps comes from the head commit
   the host reports, so the check relies on the host to report the head that

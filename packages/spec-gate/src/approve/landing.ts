@@ -60,6 +60,8 @@ export interface Landing {
   merge: string;
   /** Its first parent: what the default branch held before it. */
   firstParent: string;
+  /** The head commit of the pull request, as the host reports it. */
+  head: string;
   shape: MergeShape;
   /** `single-commit` only: the one merge base of the head commit and `firstParent`. */
   reviewedBase: string | null;
@@ -69,11 +71,9 @@ export interface Landing {
    * for `single-commit`.
    */
   commits: number;
-  /** Where the measured steps begin: the commit `commits` first-parent steps below `merge`. */
-  landedFrom: string;
   /**
-   * What is measured: every first-parent step from `landedFrom` to `merge`,
-   * the last step first, and for `single-commit` also `reviewedBase` to the
+   * What is measured: the `commits` first-parent steps below `merge`, the
+   * last step first, and for `single-commit` also `reviewedBase` to the
    * head commit.
    */
   ranges: MergeRange[];
@@ -156,10 +156,10 @@ export function landingOf(
       landing: {
         merge,
         firstParent,
+        head,
         shape: "merge-commit",
         reviewedBase: null,
         commits: 1,
-        landedFrom: firstParent,
         ranges: [{ from: firstParent, to: merge }],
       },
     };
@@ -221,10 +221,10 @@ export function landingOf(
     landing: {
       merge,
       firstParent,
+      head,
       shape: "single-commit",
       reviewedBase,
       commits,
-      landedFrom: chain[commits]!,
       ranges: [...steps, { from: reviewedBase, to: head }],
     },
   };

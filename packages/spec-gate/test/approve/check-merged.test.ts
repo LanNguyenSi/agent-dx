@@ -68,6 +68,9 @@ const seam = vi.hoisted(() => ({
   commitParents: undefined as ((commit: string) => unknown) | undefined,
   /** Called instead of `isShallow`; a value other than `undefined` is returned in its place. */
   isShallow: undefined as (() => unknown) | undefined,
+  /** Called instead of `mergeBases`; a value other than `undefined` is returned in its place. */
+  // eslint-disable-next-line no-unused-vars
+  mergeBases: undefined as ((a: string, b: string) => unknown) | undefined,
   /** The options of every run of the final lint. */
   lints: [] as unknown[],
   /** The git inputs of every run of the repository check. */
@@ -85,6 +88,12 @@ vi.mock("../../src/approve/git.js", async (original) => {
       const instead = seam.commitParents?.(commit);
       return instead === undefined
         ? actual.commitParents(repo, commit)
+        : (instead as string[]);
+    },
+    mergeBases: (repo: string, a: string, b: string) => {
+      const instead = seam.mergeBases?.(a, b);
+      return instead === undefined
+        ? actual.mergeBases(repo, a, b)
         : (instead as string[]);
     },
     isShallow: (repo: string) => {
@@ -138,12 +147,19 @@ vi.mock("../../src/repo/index.js", async (original) => {
 beforeEach(() => {
   seam.commitParents = undefined;
   seam.isShallow = undefined;
+  seam.mergeBases = undefined;
   seam.lints.length = 0;
   seam.repoChecks.length = 0;
   seam.configFindings = undefined;
 });
 
 const ALL_OK = Array(8).fill("ok") as string[];
+/** The message of `spec-not-in-merge` when no measured step brings the spec. */
+const NO_STEP =
+  "no measured step of the default branch brought this spec to the state judged at the tip (proposed, with the digest at the tip): the pull request is not the one that brought it, and its approval is not an approval of this spec";
+/** The message of `spec-not-in-merge` when the reviewed commits do not bring the spec. */
+const NOT_REVIEWED =
+  "the reviewed commits did not bring this spec to the state judged at the tip: at the approved head it is not proposed with the digest at the tip, or at the merge base of that head with the default branch it already was. The approval is not an approval of this spec";
 const ONLY_BOB = CONFIG_ONLY_BOB;
 const WITH_MALLORY =
   "approvers: [Alice, bob, dev, mallory]\nagent_identities: [Spec-Bot]\n";
@@ -278,7 +294,7 @@ describe("approved after the merge", { timeout: 60_000 }, () => {
     expect(report.conditions.map((c) => c.message)).toEqual([
       "1 approving review stands on the head commit",
       "alice approved the head commit, is in approvers, is not the author and is not an agent identity",
-      "the digest at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is proposed at each of them, and the merge changed this spec",
+      "the digest at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is proposed at each of them, and the pull request brought the spec to that state",
       "the status at the tip of the default branch is proposed and the final lint has no error",
       "agent_identities is not empty and shares no account with approvers",
       "the host enforces a review for specs/ and .spec-gate/",
@@ -1628,8 +1644,7 @@ describe(
         name: "digest-unchanged",
         ok: false,
         code: "spec-not-in-merge",
-        message:
-          "the merge of the pull request did not change this spec: its approval is not an approval of this spec, whatever its head holds",
+        message: NO_STEP,
       });
       // Its head holds the spec, with the approved digest, and alice
       // approved that head: nothing else fails.
@@ -1654,6 +1669,7 @@ describe(
       expect(report.merge!.ranges[1]!.to).toBe(first.merge);
       expect(report.merge!.reviewed_base).toBe(first.landed);
       expect(cond(report, 3).code).toBe("spec-not-in-merge");
+      expect(cond(report, 3).message).toBe(NOT_REVIEWED);
       expect(failing(report)).toEqual([3]);
     });
 
@@ -1671,6 +1687,7 @@ describe(
       });
       expect(report.merge!.shape).toBe("merge-commit");
       expect(cond(report, 3).code).toBe("spec-not-in-merge");
+      expect(cond(report, 3).message).toBe(NO_STEP);
       expect(failing(report)).toEqual([3]);
     });
 
@@ -1828,7 +1845,308 @@ describe(
       ).toBe("");
       expect(specDigestAt(again.dir, first.c1, SPEC_REL)).toBeNull();
       expect(cond(report, 3).code).toBe("spec-not-in-merge");
+      expect(cond(report, 3).message).toBe(NO_STEP);
       expect(failing(report)).toEqual([3]);
+    });
+
+    /** Writes the spec of `dir` with its status set to `status`, the rest as it is. */
+    function setStatus(dir: string, status: "draft" | "proposed"): void {
+      const file = path.join(dir, SPEC_REL, "spec.md");
+      const text = fs.readFileSync(file, "utf8");
+      if (!/^status: (draft|proposed)$/m.test(text)) {
+        throw new Error("the spec has no status line");
+      }
+      fs.writeFileSync(
+        file,
+        text.replace(/^status: (draft|proposed)$/m, `status: ${status}`),
+      );
+    }
+
+    it("an unrelated pull request merged by a merge commit while the default branch holds the spec as a draft, proposed again by a later push: the spec is a draft at both ends of its step, spec-not-in-merge", async () => {
+      // The spec lands proposed with no approval of its own.
+      const first = await land(await build(), "squash");
+      await first.repo.checkout("other", first.landed);
+      const head = await first.repo.commit({ "README.md": "two\n" }, "typo");
+      await first.repo.checkout("main");
+      setStatus(first.dir, "draft");
+      const drafted = await first.repo.commit({}, "back to draft");
+      await first.repo.sh("merge", "-q", "--no-ff", "-m", "merge other", head);
+      const merge = await first.repo.head();
+      setStatus(first.dir, "proposed");
+      const landed = await first.repo.commit({}, "proposed again");
+      await first.repo.setRef(REMOTE_MAIN, landed);
+      expect(
+        await git(first.dir, ["diff", "--name-only", drafted, merge]),
+      ).toBe("README.md");
+      const report = await checkLanded(
+        { ...first, head, tip: first.landed, merge, landed },
+        { reviews: [review("alice", "APPROVED", head)] },
+      );
+      expect(report.merge!.shape).toBe("merge-commit");
+      expect(cond(report, 3)).toMatchObject({
+        ok: false,
+        code: "spec-not-in-merge",
+        message: NO_STEP,
+      });
+      expect(failing(report)).toEqual([3]);
+      expect(report.approved).toBe(false);
+    });
+
+    it("the host names an earlier commit of the default branch where the spec is at neither end of a measured step: spec-not-in-merge", async () => {
+      const s = await build();
+      await s.repo.checkout("main");
+      await s.repo.commit(
+        { ".spec-gate/config.yaml": ONLY_BOB },
+        "alice is no approver any more",
+      );
+      const fillers: string[] = [];
+      for (let i = 1; i <= 4; i += 1) {
+        fillers.push(
+          await s.repo.commit({ [`f-${i}.txt`]: `${i}\n` }, "filler"),
+        );
+      }
+      await s.repo.sh("merge", "-q", "--squash", "pr");
+      const merge = await s.repo.commit(
+        { ".spec-gate/config.yaml": CONFIG },
+        "squash pr",
+      );
+      await s.repo.setRef(REMOTE_MAIN, merge);
+      const m: Landed = { ...s, merge, landed: merge };
+      // The honest host: the squash carries its own settings.
+      expect(failing(await checkLanded(m))).toEqual([2, 7]);
+      const report = await checkLanded(m, {
+        pullRequest: landedPull(m, { mergeCommit: fillers[3]! }),
+      });
+      // The steps below the named commit are clean and hold no spec.
+      expect(cond(report, 2)).toMatchObject({ ok: true });
+      expect(cond(report, 7)).toMatchObject({ ok: true });
+      expect(cond(report, 3)).toMatchObject({
+        ok: false,
+        code: "spec-not-in-merge",
+        message: NO_STEP,
+      });
+      expect(failing(report)).toEqual([3]);
+    });
+
+    it("an unrelated pull request, merged by a merge commit whose own tree proposes the spec again: the step arrives, the reviewed commits do not, spec-not-in-merge", async () => {
+      const first = await land(await build(), "squash");
+      await first.repo.checkout("other", first.landed);
+      const head = await first.repo.commit({ "README.md": "two\n" }, "typo");
+      await first.repo.checkout("main");
+      setStatus(first.dir, "draft");
+      const drafted = await first.repo.commit({}, "back to draft");
+      await first.repo.sh("merge", "-q", "--no-ff", "--no-commit", head);
+      setStatus(first.dir, "proposed");
+      const merge = await first.repo.commit({}, "merge other");
+      await first.repo.setRef(REMOTE_MAIN, merge);
+      expect(await git(first.dir, ["rev-parse", `${merge}^2`])).toBe(head);
+      // Over the one step of the merge commit the spec goes from draft to
+      // proposed; the reviewed commits changed README.md alone.
+      expect(
+        await git(first.dir, ["diff", "--name-only", drafted, merge]),
+      ).toBe(`README.md\n${SPEC_REL}/spec.md`);
+      expect(
+        await git(first.dir, ["diff", "--name-only", first.landed, head]),
+      ).toBe("README.md");
+      const report = await checkLanded(
+        { ...first, head, tip: first.landed, merge, landed: merge },
+        { reviews: [review("alice", "APPROVED", head)] },
+      );
+      expect(report.merge).toMatchObject({
+        shape: "merge-commit",
+        reviewed_base: null,
+      });
+      expect(cond(report, 3)).toMatchObject({
+        ok: false,
+        code: "spec-not-in-merge",
+        message: NOT_REVIEWED,
+      });
+      expect(failing(report)).toEqual([3]);
+      expect(report.approved).toBe(false);
+    });
+
+    it("an approved edit of the spec: approved for the pull request that edited it, and the pull request that first brought it no longer matches the tip", async () => {
+      const first = await land(await build(), "squash");
+      await first.repo.checkout("pr2", first.landed);
+      editSpec(first.dir);
+      const edited = await squashOnto(
+        first,
+        "pr2",
+        await first.repo.commit({}, "the spec says 403"),
+      );
+      const report = await checkLanded(
+        { ...edited, tip: first.landed },
+        { reviews: [review("alice", "APPROVED", edited.head)] },
+      );
+      expect(codes(report)).toEqual(ALL_OK);
+      expect(report.approved).toBe(true);
+      const old = await checkLanded({ ...first, landed: edited.landed });
+      expect(cond(old, 3).code).toBe("digest-mismatch-after-merge");
+      expect(old.approved).toBe(false);
+    });
+
+    it("an approved edit, then an approved pull request of two commits that puts the old text back, squashed right after: approved", async () => {
+      const first = await land(await build(), "squash");
+      await first.repo.checkout("pr2", first.landed);
+      editSpec(first.dir);
+      const edited = await squashOnto(
+        first,
+        "pr2",
+        await first.repo.commit({}, "the spec says 403"),
+      );
+      await edited.repo.checkout("pr3", edited.landed);
+      await edited.repo.sh("revert", "--no-edit", edited.merge);
+      const back = await squashOnto(
+        edited,
+        "pr3",
+        await edited.repo.commit({ "why.txt": "the edit was wrong\n" }, "why"),
+      );
+      const report = await checkLanded(
+        { ...back, tip: edited.landed },
+        { reviews: [review("alice", "APPROVED", back.head)] },
+      );
+      // The two measured steps are the squash and the edit before it: the
+      // spec has the tip's digest before the first and after the last.
+      expect(report.merge!.commits).toBe(2);
+      expect(
+        specDigestAt(back.dir, report.merge!.ranges[1]!.from, SPEC_REL),
+      ).toBe(report.digest);
+      expect(codes(report)).toEqual(ALL_OK);
+      expect(report.approved).toBe(true);
+    });
+
+    it("a second pull request with the same commits, squashed right after the first: the measured steps hold the first landing, and it is taken for the one that brought the spec", async () => {
+      // A decided boundary: the steps before a squash are commits of the
+      // default branch, and the check cannot tell them from replayed ones.
+      const first = await land(await build(), "squash");
+      const again = await squashOnto(first, "pr", first.head);
+      const report = await checkLanded(again);
+      expect(report.merge!.ranges[1]!.to).toBe(first.merge);
+      expect(codes(report)).toEqual(ALL_OK);
+    });
+
+    it.each([
+      ["merge-commit", "merge-commit"],
+      ["merge-commit", "fast-forward"],
+      ["squash", "merge-commit"],
+      ["squash", "fast-forward"],
+    ] as const)(
+      "a decided boundary: the approval was given before the default branch moved to a draft under the pull request (merged by %s, the draft by %s): approved",
+      async (how, mid) => {
+        // The spec lands proposed with no approval of its own.
+        const first = await land(await build(), "squash");
+        // One branch, two commits: back to draft, then the proposed text
+        // again and a typo fix. The approver is shown README.md alone.
+        await first.repo.checkout("sneaky", first.landed);
+        setStatus(first.dir, "draft");
+        const drafting = await first.repo.commit({}, "back to draft");
+        setStatus(first.dir, "proposed");
+        const head = await first.repo.commit({ "README.md": "two\n" }, "typo");
+        expect(
+          await git(first.dir, [
+            "diff",
+            "--name-only",
+            `${first.landed}...${head}`,
+          ]),
+        ).toBe("README.md");
+        // The first commit alone reaches the default branch.
+        await first.repo.checkout("main");
+        if (mid === "fast-forward") {
+          await first.repo.sh("merge", "-q", "--ff-only", drafting);
+        } else {
+          await first.repo.sh(
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "draft",
+            drafting,
+          );
+        }
+        let merge: string;
+        if (how === "squash") {
+          await first.repo.sh("merge", "-q", "--squash", "sneaky");
+          merge = await first.repo.commit({}, "squash sneaky");
+        } else {
+          await first.repo.sh(
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "merge",
+            "sneaky",
+          );
+          merge = await first.repo.head();
+        }
+        await first.repo.setRef(REMOTE_MAIN, merge);
+        const report = await checkLanded(
+          { ...first, head, tip: first.landed, merge, landed: merge },
+          { reviews: [review("alice", "APPROVED", head)] },
+        );
+        // After the base moved, git shows what a propose-only pull request
+        // over a draft shows. Telling the two apart needs a fact of the
+        // host about when the review was given.
+        expect(codes(report)).toEqual(ALL_OK);
+        expect(report.approved).toBe(true);
+      },
+    );
+
+    it("a merge commit whose head has two merge bases with its first parent: ambiguous-merge-base for condition 3, none is picked", async () => {
+      const m = await land(
+        await crissCross("spec-deleted", "side"),
+        "merge-commit",
+      );
+      const first = await m.repo.sh("rev-parse", `${m.merge}^1`);
+      expect(
+        (await git(m.dir, ["merge-base", "--all", m.head, first])).split("\n"),
+      ).toHaveLength(2);
+      const report = await checkLanded(m);
+      expect(report.merge!.shape).toBe("merge-commit");
+      expect(cond(report, 3)).toEqual({
+        condition: 3,
+        name: "digest-unchanged",
+        ok: false,
+        code: "ambiguous-merge-base",
+        message:
+          "the head commit of the pull request and the first parent of its merge commit have 2 merge bases; what the reviewed commits brought is not read from one of several",
+      });
+      expect(report.approved).toBe(false);
+    });
+
+    it("a merge commit whose head shares no history with its first parent: git-failed for condition 3, and conditions 2, 7 and 8 keep their range", async () => {
+      seam.mergeBases = () => [];
+      const report = await checkLanded(MERGE);
+      expect(cond(report, 3)).toMatchObject({
+        ok: false,
+        code: "git-failed",
+        message:
+          "the head commit of the pull request and the first parent of its merge commit share no history; what the reviewed commits brought is not known",
+      });
+      expect(failing(report)).toEqual([3]);
+      expect(report.merge!.ranges).toHaveLength(1);
+    });
+
+    it("a read of the merge bases that fails: git-failed for condition 3, never a pass", async () => {
+      seam.mergeBases = () => {
+        throw new LintGitError(
+          "git-failed",
+          "git could not find the merge bases",
+        );
+      };
+      const report = await checkLanded(MERGE);
+      expect(cond(report, 3)).toMatchObject({ ok: false, code: "git-failed" });
+      expect(failing(report)).toEqual([3]);
+    });
+
+    it("the merge base of a merge commit is asked for the head and the first parent, once, and only for condition 3", async () => {
+      const asked: [string, string][] = [];
+      seam.mergeBases = (a, b) => {
+        asked.push([a, b]);
+        return undefined;
+      };
+      const report = await checkLanded(MERGE);
+      expect(report.approved).toBe(true);
+      expect(asked).toEqual([[MERGE.head, report.merge!.first_parent]]);
     });
 
     it("the pull request that brought the spec passes, for each way it was merged", async () => {

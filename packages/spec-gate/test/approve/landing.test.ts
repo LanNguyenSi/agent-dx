@@ -198,10 +198,10 @@ describe("landingOf: the shapes git can tell", { timeout: 60_000 }, () => {
       landing: {
         merge: m.merge,
         firstParent: first,
+        head: m.head,
         shape: "merge-commit",
         reviewedBase: null,
         commits: 1,
-        landedFrom: first,
         ranges: [{ from: first, to: m.merge }],
       },
     });
@@ -218,10 +218,10 @@ describe("landingOf: the shapes git can tell", { timeout: 60_000 }, () => {
       landing: {
         merge: m.merge,
         firstParent: first,
+        head: m.head,
         shape: "single-commit",
         reviewedBase: m.c1,
         commits: 2,
-        landedFrom: second,
         ranges: [
           { from: first, to: m.merge },
           { from: second, to: first },
@@ -238,12 +238,12 @@ describe("landingOf: the shapes git can tell", { timeout: 60_000 }, () => {
     const result = landingOf(m.dir, merged(m.head, m.merge), m.landed);
     expect(result).toMatchObject({
       ok: true,
-      landing: {
-        commits: 1,
-        landedFrom: await m.repo.sh("rev-parse", `${m.merge}~1`),
-      },
+      landing: { commits: 1, head: m.head },
     });
-    expect(result.ok && result.landing.ranges).toHaveLength(2);
+    expect(result.ok && result.landing.ranges).toEqual([
+      { from: await m.repo.sh("rev-parse", `${m.merge}~1`), to: m.merge },
+      { from: m.c1, to: m.head },
+    ]);
   });
 
   it("a pull request with more commits than the cap: merge-shape-unknown, at the cap it is measured", async () => {

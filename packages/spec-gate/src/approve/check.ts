@@ -49,6 +49,7 @@ import {
   repoPathOf,
   specPathIn,
 } from "../state/git.js";
+import { arrives, standingOf } from "./binding.js";
 import { readHostFacts, type Fact, type HostFacts } from "./facts.js";
 import { landingOf, type Landing, type LandingResult } from "./landing.js";
 import {
@@ -387,45 +388,83 @@ function digestUnchanged(s: Subject, headDigest: string | null): Outcome {
           );
     }
   }
-  if (s.landing !== null && !broughtBy(s, s.landing)) {
-    return fails(
-      "spec-not-in-merge",
-      "the merge of the pull request did not change this spec: its approval is not an approval of this spec, whatever its head holds",
-    );
+  if (s.landing !== null) {
+    const unbound = bindingProblem(s, s.landing, headDigest);
+    if (unbound !== null) return unbound;
   }
   return holds(
     s.mode === "merged"
-      ? "the digest at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is proposed at each of them, and the merge changed this spec"
+      ? "the digest at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is proposed at each of them, and the pull request brought the spec to that state"
       : "the digest at the head equals the digest at the commit of every approving review considered",
   );
 }
 
 /**
- * Whether the merged pull request is the one that brought this spec: some
- * measured first-parent step changes the spec and, where the reviewed
- * commits are not in the history of the merge commit, so does the range
- * from the reviewed base to the head.
+ * Why the merged pull request is not the one that brought this spec, or
+ * `null` when it is.
  *
- * A range changes the spec when the digest differs between its two ends, or
- * when the spec is not `proposed` at its start (not there, not parsing, or
- * a draft): the status is no part of the digest, and a pull request that
- * only proposes a draft the default branch already held is the one that
- * brought the spec. Each step is asked on its own, not the two ends of all
- * steps: a pull request that puts back an earlier text right after another
- * one changed it leaves both ends equal.
+ * The state judged at the tip is "proposed, with the digest at the tip"
+ * (`tipDigest`). The pull request brought the spec when that state arrives
+ * twice (see `arrives` in `binding.ts`):
+ *
+ * - over the reviewed commits: from the one merge base of the approved head
+ *   with the first parent of the merge commit to that head. For a merge
+ *   commit with one parent the landing already holds that base; for a merge
+ *   commit with two it is read here and used here alone, so the ranges of
+ *   conditions 2, 7 and 8 stay what they are. No merge base and several
+ *   fail closed;
+ * - on the default branch: over some measured first-parent step, each asked
+ *   on its own.
+ *
+ * What this does not say: that the approver was shown the change. An
+ * approval given before the default branch moved under the pull request
+ * counts like any other; the check reads no fact about that order.
  */
-function broughtBy(s: Subject, landing: Landing): boolean {
+function bindingProblem(
+  s: Subject,
+  landing: Landing,
+  tipDigest: string,
+): Failure | null {
   const repo = s.git.repo;
-  const changes = (from: string, to: string): boolean =>
-    specStateAt(repo, from, s.specPath)?.status !== "proposed" ||
-    specDigestAt(repo, from, s.specPath) !== specDigestAt(repo, to, s.specPath);
+  const standingAt = (commit: string) =>
+    standingOf(
+      specStateAt(repo, commit, s.specPath),
+      specDigestAt(repo, commit, s.specPath),
+      tipDigest,
+    );
   const steps = landing.ranges.slice(0, landing.commits);
-  if (!steps.some((step) => changes(step.from, step.to))) return false;
-  return (
-    landing.reviewedBase === null ||
-    s.approvedHead === null ||
-    changes(landing.reviewedBase, s.approvedHead)
-  );
+  if (
+    !steps.some((step) => arrives(standingAt(step.from), standingAt(step.to)))
+  ) {
+    return fails(
+      "spec-not-in-merge",
+      "no measured step of the default branch brought this spec to the state judged at the tip (proposed, with the digest at the tip): the pull request is not the one that brought it, and its approval is not an approval of this spec",
+    );
+  }
+  let base = landing.reviewedBase;
+  if (base === null) {
+    const bases = mergeBases(repo, landing.head, landing.firstParent);
+    if (bases.length === 0) {
+      return fails(
+        "git-failed",
+        "the head commit of the pull request and the first parent of its merge commit share no history; what the reviewed commits brought is not known",
+      );
+    }
+    if (bases.length > 1) {
+      return fails(
+        "ambiguous-merge-base",
+        `the head commit of the pull request and the first parent of its merge commit have ${bases.length} merge bases; what the reviewed commits brought is not read from one of several`,
+      );
+    }
+    base = bases[0]!;
+  }
+  if (!arrives(standingAt(base), standingAt(landing.head))) {
+    return fails(
+      "spec-not-in-merge",
+      "the reviewed commits did not bring this spec to the state judged at the tip: at the approved head it is not proposed with the digest at the tip, or at the merge base of that head with the default branch it already was. The approval is not an approval of this spec",
+    );
+  }
+  return null;
 }
 
 /**

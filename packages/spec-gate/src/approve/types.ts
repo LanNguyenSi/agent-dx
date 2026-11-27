@@ -74,7 +74,7 @@ export type ConditionName = (typeof CONDITIONS)[number]["name"];
 export const MERGED_SUMMARIES: Record<ConditionNumber, string> = {
   1: "The host reports the pull request as merged, and an approving review stands on the head commit the host reports for it.",
   2: "An approver of that head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the tip of the default branch, the pull request targeted the default branch, its merge commit is on the default branch and no range of the merge changes a path under `.spec-gate/`.",
-  3: "The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is `proposed` at each of those commits, and the merge changed this spec.",
+  3: "The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is `proposed` at each of those commits, and the state judged at the tip (`proposed`, with the digest at the tip) arrives both over the reviewed commits and over a measured step of the default branch.",
   4: "The spec is `proposed` at the tip of the default branch, the checkout is at that commit, the spec directory of the work tree is the one it holds, and the final lint has no error.",
   5: "`agent_identities` is not empty and shares no account with `approvers`.",
   6: "The host enforces a review for `specs/` and for `.spec-gate/`, and reports the last change under `.spec-gate/`.",
@@ -100,7 +100,7 @@ export const OK_CODE = "ok";
 export const FAILURE_CODES = {
   "host-failed": [1, 2, 3, 6, 7, 8],
   "git-failed": [2, 3, 4, 7, 8],
-  "ambiguous-merge-base": [2, 4, 7, 8],
+  "ambiguous-merge-base": [2, 3, 4, 7, 8],
   "not-merged": [1, 2, 7, 8],
   "merge-not-on-default": [2, 7, 8],
   "head-unavailable": [2, 7, 8],
