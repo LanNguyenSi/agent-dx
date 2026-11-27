@@ -118,7 +118,7 @@ reported as conflicts and left alone, never overwritten silently; the
 exceptions are the kit-owned surfaces: `.ai/workflow/manifest.json` (the
 kit's state file, rewritten whenever the applied state changes) and the
 fenced AGENTS.md section itself, which is restored on re-run. The install
-is fully reversible: `npx orchestrator-workflow uninstall` removes exactly
+is fully reversible: `npx orchestrator-workflow@0.53.0 uninstall` removes exactly
 this write surface again, keeping run history under `.ai/runs/` and any
 locally edited files. Network access is limited to the npm registry (for
 `npx`) and, in the manual fallback, this repository on github.com /
@@ -164,7 +164,7 @@ steps in the repository you were asked to install into.
 3. Run the non-interactive installer with the reviewed configuration:
 
    ```bash
-   npx orchestrator-workflow init --yes \
+   npx orchestrator-workflow@0.53.0 init --yes \
      --harness <claude,codex,opencode> \
      --profile <minimal|full> \
      [--models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>,advisor=<model>"] [--codex-models <codex-model-aliases.json>] \

@@ -38,7 +38,7 @@ annotate what is detected on disk with a " (detected)" label; select a
 harness to install it.
 
 ```bash
-npx orchestrator-workflow init --harness none --yes
+npx orchestrator-workflow@0.53.0 init --harness none --yes
 ```
 
 ## The `knowledge` manifest field

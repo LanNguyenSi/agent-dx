@@ -411,7 +411,7 @@ for `--profile` and `--models`. There is no interactive prompt for it:
 get `max` or `ultra` variants from this kit.
 
 ```bash
-npx orchestrator-workflow init --tiers --yes
+npx orchestrator-workflow@0.53.0 init --tiers --yes
 ```
 
 Turning tiers back off with `--no-tiers` after having them on follows the

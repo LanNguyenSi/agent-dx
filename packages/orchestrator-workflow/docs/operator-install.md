@@ -73,7 +73,9 @@ option flags as `init` (`--harness`, `--profile`, `--models`, `--codex-models`, 
 The defaults live in
 `<operator home>/manifest.json`, where the operator home is
 `~/.orchestrator-workflow/` unless the `ORCHESTRATOR_WORKFLOW_HOME`
-environment variable names a different directory.
+environment variable names a different directory. A relative value is
+resolved against each command's working directory, so set an absolute path:
+`setup`, `apply`, `doctor` and `adopt` then share one home and one lock.
 
 **`apply --target <repo>`** projects the operator's install onto a target
 repository and registers that target, by its real resolved path, in the
