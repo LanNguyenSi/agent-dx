@@ -292,8 +292,216 @@ the approver list is not detected.
   bounded time: the check waits for each answer;
 - keep secrets out of what it returns. What it throws is discarded.
 
-`ciRunStatus(ref)` (`verified`, `unverified`, `unknown`) is part of the
-interface for the evidence checks; the approval check does not call it.
+`ciRunStatus(commit, run)` (`verified`, `unverified`, `unknown`) is part of
+the interface for the evidence checks; the approval check does not call it.
+`run` is the host's own name of a CI run: its id, or its address on the host.
+`verified` means only that such a run exists in this repository, has completed
+and ran at `commit`. It does not say which workflow ran, how the run ended, or
+that a given evidence file came out of it.
+
+## GitHub adapter
+
+`createGitHubHost` in `src/host/github.ts` is a `HostAdapter` for one pull
+request of one repository, over the GitHub REST API. No CLI verb uses it yet.
+
+```ts
+import { createGitHubHost } from "./src/host/index.js";
+
+const host = createGitHubHost({
+  repository: "acme/widgets",
+  pullRequest: 7,
+  token,
+});
+```
+
+| Option | Meaning |
+|---|---|
+| `repository` | `<owner>/<name>`, the repository the pull request targets: letters, digits, `-` and `_`, and `.` in the name |
+| `pullRequest` | the number of the pull request, a positive integer |
+| `token` | a token that may read the repository: printable ASCII without a space |
+| `apiUrl` | the API root, `https://api.github.com` when left out. It must be `https:`; `http:` is accepted only for the loopback hosts `127.0.0.1`, `[::1]` and `localhost`. It carries no credentials, query or fragment |
+| `fetch` | a replacement for the global `fetch`: a seam for tests |
+
+An option that does not fit is refused when the adapter is made, before
+anything is sent, and the refusal does not repeat the value.
+
+One adapter is one view of the host. It asks for the pull request and for the
+enforcement once and keeps the answer, a failure too, so the branch whose
+enforcement it reports is the branch it reports as the target. Reviews, the
+last change under `.spec-gate/` and CI runs are asked for on every call. Make
+a new adapter for a new check.
+
+### Requests
+
+Every request is a `GET` with `Accept: application/vnd.github+json` and an
+`X-GitHub-Api-Version` header that pins one version of the API
+(`GITHUB_API_VERSION` in `src/host/github.ts`, the version the mapping below
+was checked against). The paths are below `/repos/{owner}/{repo}`; `{branch}`
+is `base.ref` of the pull request.
+
+| Method | Requests | Described in the GitHub REST documentation under |
+|---|---|---|
+| `pullRequest()` | `/pulls/{number}` | "Get a pull request" |
+| `reviews()` | `/pulls/{number}/reviews`, every page | "List reviews for a pull request" |
+| `reviewEnforcement(path)` | `/rules/branches/{branch}`, every page; then `/branches/{branch}/protection` | "Get rules for a branch", "Get branch protection" |
+| `lastConfigCommit()` | `/commits?sha={branch}&path=.spec-gate&per_page=1`; `/commits/{sha}/pulls`, every page; `/pulls/{n}/reviews`, every page | "List commits", "List pull requests associated with a commit" |
+| `ciRunStatus(commit, run)` | `/actions/runs/{id}` | "Get a workflow run" |
+
+The pull request: `author` is `user.login`, `head` is `head.sha`, `base` is
+`base.sha` and `targetRef` is `refs/heads/` followed by `base.ref`.
+`base.repo.full_name` must name the repository the adapter was made for (the
+case of the ASCII letters aside) and `number` must be the number asked for;
+otherwise the method throws. The head may lie in a fork. The title, the body,
+the labels and the branch name of the head are not read.
+
+A review: `login` is `user.login`, `state` is `state`, `commit` is `commit_id`
+and `submittedAt` is `submitted_at`. A `PENDING` entry was never submitted and
+is left out. Any other state outside `APPROVED`, `CHANGES_REQUESTED`,
+`COMMENTED` and `DISMISSED` throws, and so does an entry without a login, a
+full commit id or a time with a zone: a review that cannot be read is never
+dropped, because the reviews that remain would then tell another story. That
+holds for a review whose commit the host no longer has (`commit_id` is `null`)
+and for a review without a user as well: such a pull request stays
+`host-failed`.
+
+### Pages
+
+A list is asked for 100 entries at a time. Per "Using pagination in the REST
+API", a response whose list goes on carries a `Link` header with a
+`rel="next"` entry. The adapter reads a further page when that entry is there
+or when the page is full, so a full page whose header is missing is not taken
+for the end. The next link must stay on the origin of the API root, name the
+same list (under `/repos/{owner}/{repo}` or, as GitHub writes it,
+`/repositories/{id}`) and name the page that follows; a link that does not is
+an error, as is a header that cannot be read. The page itself is then
+requested at the adapter's own path: the token is never sent to an address
+taken from a header. At most 30 pages of one list are read; a longer list is
+an error, never a shortened list.
+
+### Enforcement
+
+`enforced` needs positive evidence that every pull request into the target
+branch needs at least one approving review. Two sources can give it:
+
+- a ruleset: `/rules/branches/{branch}` lists a rule of type `pull_request`
+  whose `parameters.required_approving_review_count` is 1 or more. Per "Get
+  rules for a branch" the list holds the active rules that apply to the
+  branch, from the repository and from the organization, and leaves out the
+  rules of rulesets in `evaluate` or `disabled` mode;
+- a classic branch protection: `/branches/{branch}/protection` answers with
+  `required_pull_request_reviews.required_approving_review_count` of 1 or
+  more.
+
+The ruleset is asked first, and the classic protection only when the ruleset
+does not prove the review.
+
+| Rulesets | Classic protection | Answer |
+|---|---|---|
+| require an approving review | not asked | `enforced` |
+| no such rule, or not readable | requires an approving review | `enforced` |
+| readable, no such rule | readable, no such requirement | `not-enforced` |
+| anything else | | `unknown` |
+
+A source is not readable when it answers 403 or 404. "Get branch protection"
+documents 404 without saying whether the branch has no protection or the
+token may not see it, and "Troubleshooting the REST API" names 404 as the
+answer to a request that may not see a private resource. So the adapter does
+not tell the two apart: a branch without a classic protection and without a
+ruleset that requires the review is reported as `unknown`, not as
+`not-enforced`. Both fail condition 6.
+
+A required code-owner review (`require_code_owner_review` in a ruleset,
+`require_code_owner_reviews` in a classic protection) with a review count of
+0 is not evidence: the adapter does not read a code-owners file and cannot
+say which paths it covers. Who may bypass a rule (the bypass list of a
+ruleset, `enforce_admins` and the bypass allowances of a classic protection)
+is not read either; see "Admin bypass" under "Known gaps".
+
+Rulesets and branch protections hold for a branch, not for a path, so the
+answer is the same for `specs/` and `.spec-gate/`.
+
+### Last change under `.spec-gate/`
+
+`commit` is the first entry of the commits of the target branch that touch
+the path `.spec-gate`, or `null` when there is none. The adapter asks for
+that path as it is written here: a change under a directory spelled in
+another case, such as `.Spec-Gate`, is not seen here (the lint rule of
+condition 7 does see it).
+
+`approver` is looked up through the pull requests the host associates with
+that commit. Exactly one of them must be merged, into the target branch of
+this repository, with that commit as its `merge_commit_sha`; then the
+approver is the account whose approval of that pull request stands and was
+submitted last, by the rule of condition 1 (on a tie, the first account in
+order). In every other case `approver` is `null`. That is the case for a
+change that was pushed without a pull request, and usually for a pull request
+merged with a merge commit, since the commit that changed the files is then a
+commit of the merged branch and not the merge commit. The approval may be of
+an earlier commit of that pull request.
+
+### CI runs
+
+`run` is a run id (digits) or the address
+`https://github.com/{owner}/{repo}/actions/runs/{id}` of a run of the same
+repository; anything else is `unverified` and nothing is asked. So is a
+`commit` that is not a full commit id. Then `verified` needs all of: the run
+exists (404 is `unverified`), its `repository.full_name` is this repository,
+its `head_sha` is `commit` and its `status` is `completed`. The remaining gap:
+any workflow of the repository counts, whatever started it and however it
+ended, and a run address on another host than `github.com` is never
+verified. This adapter never answers `unknown`.
+
+### Errors and limits
+
+The adapter throws instead of guessing, and the approval check turns that
+into `host-failed`:
+
+- any status other than 200, except the ones named above (403 and 404 for a
+  source of the enforcement, 404 for a CI run);
+- a redirect. Redirects are not followed, so the token does not travel to
+  another address;
+- a rate limit: 403 or 429 with `x-ratelimit-remaining: 0` or a `retry-after`
+  header ("Rate limits for the REST API"). The error says `rate limited`, and
+  the request is not repeated. With one of these headers a rate limit is
+  never read as a missing permission. A secondary rate limit that carries
+  neither is known only by the text of its message, which the adapter does
+  not read: on a source of the enforcement it counts as not readable, which
+  fails condition 6 as well;
+- a request that takes longer than 10 seconds, headers and body together;
+- a body over 4 MiB, a body that is not UTF-8 or not JSON, and a field that
+  is missing or of another type;
+- a body that holds the token in any text or key.
+
+The message of a failed request holds the method, the path the adapter built,
+the status and one fixed phrase, for example `github: GET
+/repos/acme/widgets/pulls/7 answered 403 (rate limited)`. It never holds the
+token, a response body or a header, and the error carries no cause. The path
+can hold the name of the target branch and a commit id as the host reported
+them, both only after their form was checked; nothing else of a response
+reaches a message.
+
+### Token and permissions
+
+The token is sent as `Authorization: Bearer` and nowhere else, only to the
+API root, and only over TLS or to a loopback host. The adapter object does not
+hold it.
+
+Reading needs these repository permissions ("Permissions required for
+fine-grained personal access tokens"; in a workflow the keys of
+`permissions:`):
+
+| Permission | For |
+|---|---|
+| Pull requests: read (`pull-requests: read`) | the pull request, its reviews, the pull requests of a commit |
+| Contents: read (`contents: read`) | the commits of the target branch |
+| Actions: read (`actions: read`) | CI runs |
+| Metadata: read (every token has it) | the rules of rulesets |
+| Administration: read | the classic branch protection |
+
+The token of a workflow run cannot be given the administration permission.
+With such a token the classic protection is not readable, and a repository
+that enforces the review through a classic protection alone gets `unknown`.
+A ruleset is readable with every token that can read the repository.
 
 ## Known gaps
 
