@@ -338,7 +338,10 @@ prints.
 opencode requires fully-qualified `provider/model-id`
 strings (e.g. `github-copilot/claude-sonnet-4.6`). At install time the CLI
 runs `opencode models` to fetch the live catalog and auto-detects which
-provider to use (the one that offers Claude models). When exactly one such
+provider to use (the one that offers Claude models). The lookup runs the
+`opencode` found on `PATH` from the home directory, never from the target
+repository; on Windows it never uses the current directory or a relative
+`PATH` entry and starts only `.exe` or `.com` files. When exactly one such
 provider exists the aliases are resolved to the highest-version matching id in
 the catalog. When multiple providers offer Claude models the CLI warns and asks
 you to pass `--opencode-provider <id>` to disambiguate, or to supply

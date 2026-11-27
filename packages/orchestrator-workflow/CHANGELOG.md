@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what changed is that a slow `lsof` no longer stalls the other sessions of the
   runner, which kept parallel sessions (`--jobs`) from overlapping.
 
+### Security
+
+- The opencode catalog lookup at install time (`opencode models`) now runs from
+  the home directory instead of the target repository, and on Windows finds
+  `opencode` only through fully qualified `PATH` entries (`.exe` and `.com`
+  files), never the current directory or a relative entry, so a repository can
+  no longer plant an executable the lookup would start. On other platforms the
+  lookup of the bare name is unchanged. Whether the home directory as working
+  directory changes which repository-local opencode configuration the command
+  reads has not been verified against opencode's source; a missing catalog
+  still falls back to the existing "no catalog" warnings.
+
 ## [0.53.0] - 2026-11-18
 
 ### Changed

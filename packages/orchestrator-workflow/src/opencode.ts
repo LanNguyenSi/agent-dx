@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
 
 import type { ModelAlias, ModelClass, Role } from "./models.js";
 import { CLASS_MODELS, isModelAlias, lowerModelClass } from "./models.js";
+import { isRegularFile, resolveExecutable } from "./resolve-executable.js";
 
 // ---------------------------------------------------------------------------
 // Pure catalog helpers (unit-testable without shell access)
@@ -263,16 +265,43 @@ export function resolveOpencodeModels(
 // Impure shell-out (kept tiny and free of logic so tests avoid it)
 // ---------------------------------------------------------------------------
 
+/** Injection points of {@link loadOpencodeCatalog}; defaults use the real process. */
+export interface OpencodeCatalogDeps {
+  platform?: string;
+  pathEnv?: string | undefined;
+  pathExt?: string | undefined;
+  isFile?: (path: string) => boolean;
+  /** Directory the child runs in; a neutral one, never the target repository. */
+  cwd?: () => string;
+  execFile?: typeof execFileSync;
+}
+
 /**
  * Runs `opencode models` and returns the parsed catalog. Returns an empty
  * array on any error (binary absent, non-zero exit, timeout, etc.).
+ *
+ * The child never runs inside the target repository: it starts in the home
+ * directory. On Windows the executable is looked up on `PATH` only (never the
+ * current directory or a relative `PATH` entry, `.exe` and `.com` only) and
+ * the absolute path is spawned; elsewhere the bare name goes to the operating
+ * system's lookup.
  */
-export function loadOpencodeCatalog(): string[] {
+export function loadOpencodeCatalog(deps: OpencodeCatalogDeps = {}): string[] {
   try {
-    const stdout = execFileSync("opencode", ["models"], {
+    const platform = deps.platform ?? process.platform;
+    const command = resolveExecutable("opencode", {
+      platform,
+      pathEnv: "pathEnv" in deps ? deps.pathEnv : process.env.PATH,
+      pathExt: "pathExt" in deps ? deps.pathExt : process.env.PATHEXT,
+      isFile: deps.isFile ?? isRegularFile,
+    });
+    if (command === undefined) return [];
+    const run = deps.execFile ?? execFileSync;
+    const stdout = run(command, ["models"], {
       encoding: "utf8",
       timeout: 10_000,
       stdio: ["ignore", "pipe", "ignore"],
+      cwd: (deps.cwd ?? homedir)(),
     });
     return parseOpencodeCatalog(stdout);
   } catch {
