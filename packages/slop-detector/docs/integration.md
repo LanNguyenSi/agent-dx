@@ -127,7 +127,7 @@ lint-staged appends the staged file paths to the command; `check` accepts severa
     node packages/slop-detector/dist/cli.js check . --format json > slop-report.json
 ```
 
-For annotated pull request checks, use the composite action (see [GitHub Action](../README.md#github-action)). To run workflow-slop in another repository as its own job, use the reusable workflow (see [Use from another repo](workflow-slop.md#use-from-another-repo)).
+For annotated pull request checks, use the composite action (see [GitHub Action](../README.md#github-action)). With `changed-files-only`, the action never follows a changed symbolic link or reads a file whose real path leaves the workspace; each such entry is named in an annotation instead. To run workflow-slop in another repository as its own job, use the reusable workflow (see [Use from another repo](workflow-slop.md#use-from-another-repo)).
 
 This repository also runs a dedicated `review-guard` CI job. It builds this
 package and runs `node packages/slop-detector/dist/cli.js check . --pack
@@ -180,6 +180,7 @@ Run `npm run build` first so `dist/mcp.js` exists.
 Input rules:
 
 - Several paths are scanned once each and folded into one result; the same file named twice (for example `a.md` and `./a.md`) is scanned once.
+- A path spelled inside the working directory whose real path (every symbolic link followed) lies outside it is skipped, not read, and named in the summary's `warnings` (`skipped <path>: resolves outside the working directory (symbolic link)`); the skip alone does not change the exit code. A path spelled outside the working directory (`/abs/file`, `../x`) is scanned as given, an in-tree link such as `AGENTS.md -> CLAUDE.md` is scanned, and a directory walk still never follows a symlink entry. The same rule applies to `--config`, except that such a config stops the run with exit `2` and a message that names the path without quoting the file.
 - No path, or a bare `-`, reads stdin. `--stdin-path` only names that content and never opens a file; passing it together with a path exits `2`.
 - Stdin with nothing to read exits `2`: a TTY, `< /dev/null`, an empty pipe, or a pipe that carries only whitespace.
 - A stdin that never writes a byte and never closes fails with the same error after a 10-second first-byte timeout. Set `SLOP_DETECTOR_STDIN_TIMEOUT_MS` to a positive number of milliseconds to change it. The timeout is cleared on the first chunk of data, so a producer that writes something and then stalls is not bounded.
@@ -214,7 +215,7 @@ Text output (and the `slop_check` MCP tool result) escapes control characters in
 }
 ```
 
-`message` and `rationale` are shortened here. `endLine` and `endColumn` are optional per violation. A `warnings` array of configuration warnings (for example a glob that matched no file) is present only when it is non-empty.
+`message` and `rationale` are shortened here. `endLine` and `endColumn` are optional per violation. A `warnings` array of configuration warnings (for example a glob that matched no file) and skipped targets (see Input rules) is present only when it is non-empty.
 
 ## Exit codes
 

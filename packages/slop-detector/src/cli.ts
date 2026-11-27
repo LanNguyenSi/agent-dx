@@ -8,6 +8,7 @@ import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
 import { renderText } from "./cli-render.js";
 import { resolvePatternAnchor } from "./util/pattern-anchor.js";
+import { isInside, resolvesInside } from "./util/path-containment.js";
 import { classifyStdoutError } from "./stdout-error.js";
 import {
   noStdinContentError,
@@ -128,6 +129,7 @@ async function runCheck(
   command: Command,
 ): Promise<void> {
   const opts = normalizeOpts(rawOpts);
+  if (opts.config) refuseConfigOutside(opts.config);
   const config = opts.config ? loadConfig(opts.config) : defaultConfig();
   const packFilter = opts.pack && opts.pack.length > 0 ? opts.pack : undefined;
   const packs = packsByFilter(packFilter);
@@ -200,6 +202,8 @@ async function runCheck(
     // and every violation it carries.
     const seen = new Set<string>();
     const perPath: CheckSummary[] = [];
+    const skipWarnings: string[] = [];
+    const cwd = process.cwd();
     for (const rawPath of rawPaths) {
       if (!fs.existsSync(rawPath)) {
         throw new Error(`Path does not exist: ${rawPath}`);
@@ -207,6 +211,19 @@ async function runCheck(
       const resolved = path.resolve(rawPath);
       if (seen.has(resolved)) continue;
       seen.add(resolved);
+      // A target spelled inside the working directory usually comes from
+      // repository content (a changed-file list, a glob): when a symbolic
+      // link along it leads out of the working directory, it is skipped
+      // and named instead of read. A target spelled outside (`/abs/file`,
+      // `../x`) is the caller's explicit choice and is scanned as given.
+      // Compared on real paths, unlike the pattern anchor below, which
+      // stays lexical (docs/configuration.md#path-pattern-anchor).
+      if (isInside(cwd, resolved) && !resolvesInside(cwd, resolved)) {
+        skipWarnings.push(
+          `skipped ${rawPath}: resolves outside the working directory (symbolic link)`,
+        );
+        continue;
+      }
       // Decided per target, not once for the whole invocation: an
       // out-of-tree or absolute `--config` (e.g. a central config outside
       // the scanned directory) must leave `check .`'s own verdict alone,
@@ -228,7 +245,10 @@ async function runCheck(
     const violations = perPath.flatMap((s) => s.violations);
     const filesScanned = perPath.reduce((sum, s) => sum + s.filesScanned, 0);
     summary = summarize(violations, filesScanned);
-    const warnings = perPath.flatMap((s) => s.warnings ?? []);
+    const warnings = [
+      ...skipWarnings,
+      ...perPath.flatMap((s) => s.warnings ?? []),
+    ];
     if (warnings.length > 0) summary.warnings = warnings;
   }
 
@@ -241,6 +261,24 @@ async function runCheck(
   // large payload written to a pipe is flushed asynchronously, and an
   // immediate exit cuts it at the pipe buffer.
   process.exitCode = summary.blockCount > 0 ? 1 : 0;
+}
+
+/**
+ * A `--config` spelled inside the working directory is usually repository
+ * content: when a symbolic link along it leads out of the working
+ * directory, the run stops (exit 2) before the file is read, and the
+ * message names the path only, never any of its content. A config spelled
+ * outside (a central `../shared/slop.config.yml`) is the caller's choice
+ * and is read as given; a missing file is left to `loadConfig`.
+ */
+function refuseConfigOutside(configPath: string): void {
+  const cwd = process.cwd();
+  const resolved = path.resolve(configPath);
+  if (!isInside(cwd, resolved) || !fs.existsSync(resolved)) return;
+  if (resolvesInside(cwd, resolved)) return;
+  throw new Error(
+    `refusing --config ${configPath}: resolves outside the working directory (symbolic link)`,
+  );
 }
 
 function normalizeOpts(raw: unknown): CheckOpts {

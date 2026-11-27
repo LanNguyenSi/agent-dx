@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+} from "vitest";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -581,5 +589,237 @@ describe("cli check escapes terminal control characters in text output", () => {
     };
     expect(parsed.violations[0]!.matched).toBe(raw);
     expect(parsed.violations[0]!.message).toContain(raw);
+  });
+});
+
+// Explicit targets and symbolic links, through the built CLI with a working
+// directory under os.tmpdir(): on macOS that directory is spelled
+// /var/folders/... while the process working directory (and every real
+// path) starts with /private, so containment must compare real paths.
+describe("cli check explicit targets and symbolic links", () => {
+  const builtEntry = path.join(packageRoot, "dist", "cli.js");
+  const marker = "The checkout lives at /Users/someone/git/repo for now.\n";
+  let base: string;
+  let work: string;
+  let outside: string;
+
+  beforeAll(() => {
+    ensureBuilt();
+    base = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cli-link-"));
+    work = path.join(base, "work");
+    outside = path.join(base, "outside");
+    fs.mkdirSync(path.join(work, "real"), { recursive: true });
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, "AGENTS.md"), `# Out\n\n${marker}`);
+    fs.writeFileSync(path.join(work, "AGENTS.md"), `# In\n\n${marker}`);
+    fs.writeFileSync(path.join(work, "real", "AGENTS.md"), `# In\n\n${marker}`);
+    fs.symlinkSync(
+      path.join(outside, "AGENTS.md"),
+      path.join(work, "out-file.md"),
+    );
+    fs.symlinkSync(outside, path.join(work, "out-dir"));
+    fs.symlinkSync("AGENTS.md", path.join(work, "CLAUDE.md"));
+    fs.symlinkSync("real", path.join(work, "in-dir"));
+  }, 180_000);
+
+  afterAll(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  function runBuilt(args: string[]): {
+    summary: {
+      filesScanned: number;
+      blockCount: number;
+      warnings?: string[];
+      violations: { path: string }[];
+    };
+    status: number | null;
+    stderr: string;
+  } {
+    const r = spawnSync(
+      process.execPath,
+      [
+        builtEntry,
+        "check",
+        "--format",
+        "json",
+        "--pack",
+        "placement-slop",
+        ...args,
+      ],
+      { cwd: work, encoding: "utf8" },
+    );
+    return {
+      summary: JSON.parse(r.stdout),
+      status: r.status,
+      stderr: r.stderr,
+    };
+  }
+
+  it("a file spelled inside that resolves outside is skipped with a warning, exit 0", () => {
+    const r = runBuilt(["out-file.md"]);
+    expect(r.status).toBe(0);
+    expect(r.summary.filesScanned).toBe(0);
+    expect(r.summary.violations).toEqual([]);
+    expect(r.summary.warnings).toEqual([
+      "skipped out-file.md: resolves outside the working directory (symbolic link)",
+    ]);
+  });
+
+  it("a directory spelled inside that resolves outside is skipped with a warning, exit 0", () => {
+    const r = runBuilt(["out-dir"]);
+    expect(r.status).toBe(0);
+    expect(r.summary.filesScanned).toBe(0);
+    expect(r.summary.warnings).toEqual([
+      "skipped out-dir: resolves outside the working directory (symbolic link)",
+    ]);
+  });
+
+  it("a file below a symlinked directory that leads outside is skipped", () => {
+    const r = runBuilt(["out-dir/AGENTS.md"]);
+    expect(r.status).toBe(0);
+    expect(r.summary.filesScanned).toBe(0);
+    expect(r.summary.warnings).toEqual([
+      "skipped out-dir/AGENTS.md: resolves outside the working directory (symbolic link)",
+    ]);
+  });
+
+  it("a skipped target leaves the other targets and their verdict alone", () => {
+    const r = runBuilt(["out-file.md", "AGENTS.md"]);
+    expect(r.status).toBe(1);
+    expect(r.summary.filesScanned).toBe(1);
+    expect(r.summary.blockCount).toBe(1);
+    expect(r.summary.warnings).toEqual([
+      "skipped out-file.md: resolves outside the working directory (symbolic link)",
+    ]);
+  });
+
+  it("a file spelled inside that resolves inside (AGENTS.md -> CLAUDE.md style) is scanned", () => {
+    const r = runBuilt(["CLAUDE.md"]);
+    expect(r.status).toBe(1);
+    expect(r.summary.filesScanned).toBe(1);
+    expect(r.summary.warnings).toBeUndefined();
+  });
+
+  it("a directory spelled inside that resolves inside is scanned", () => {
+    const r = runBuilt(["in-dir"]);
+    expect(r.status).toBe(1);
+    expect(r.summary.filesScanned).toBe(1);
+    expect(r.summary.warnings).toBeUndefined();
+  });
+
+  it("a file spelled outside (absolute or `..`) is the caller's choice and is scanned", () => {
+    for (const target of [
+      path.join(outside, "AGENTS.md"),
+      path.join("..", "outside", "AGENTS.md"),
+    ]) {
+      const r = runBuilt([target]);
+      expect(r.status).toBe(1);
+      expect(r.summary.filesScanned).toBe(1);
+      expect(r.summary.warnings).toBeUndefined();
+    }
+  });
+
+  it("a directory spelled outside (absolute or `..`) is the caller's choice and is scanned", () => {
+    for (const target of [outside, path.join("..", "outside")]) {
+      const r = runBuilt([target]);
+      expect(r.status).toBe(1);
+      expect(r.summary.filesScanned).toBe(1);
+      expect(r.summary.warnings).toBeUndefined();
+    }
+  });
+
+  it("a directory walk still never follows a symlink entry", () => {
+    const r = runBuilt(["."]);
+    // AGENTS.md and real/AGENTS.md; CLAUDE.md, out-file.md, out-dir and
+    // in-dir are symlink entries the walk skips, as before.
+    expect(r.summary.filesScanned).toBe(2);
+    expect(r.summary.warnings).toBeUndefined();
+    expect(r.summary.violations.every((v) => !v.path.includes("outside"))).toBe(
+      true,
+    );
+  });
+});
+
+// `--config` through a symbolic link, built CLI, working directory under
+// os.tmpdir() (an alias of its real path on macOS).
+describe("cli check --config and symbolic links", () => {
+  const builtEntry = path.join(packageRoot, "dist", "cli.js");
+  const fragment = "SECRET-FRAGMENT-QX7";
+  let base: string;
+  let work: string;
+  let outside: string;
+
+  beforeAll(() => {
+    ensureBuilt();
+    base = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cli-cfg-"));
+    work = path.join(base, "work");
+    outside = path.join(base, "outside");
+    fs.mkdirSync(work);
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(work, "a.md"), "# A\n\nPlain text.\n");
+    fs.writeFileSync(
+      path.join(work, "real.yml"),
+      "packs:\n  agent-tics: true\n",
+    );
+    fs.writeFileSync(path.join(outside, "secret.yml"), `packs: [${fragment}\n`);
+    fs.writeFileSync(path.join(outside, "secret.json"), `{"${fragment}": `);
+    fs.writeFileSync(
+      path.join(outside, "ok.yml"),
+      "packs:\n  agent-tics: true\n",
+    );
+    fs.symlinkSync(
+      path.join(outside, "secret.yml"),
+      path.join(work, "slop.config.yml"),
+    );
+    fs.symlinkSync(
+      path.join(outside, "secret.json"),
+      path.join(work, "slop.config.json"),
+    );
+    fs.symlinkSync("real.yml", path.join(work, "alias.yml"));
+  }, 180_000);
+
+  afterAll(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  function runBuilt(args: string[]) {
+    return spawnSync(
+      process.execPath,
+      [builtEntry, "check", "--format", "json", ...args, "a.md"],
+      { cwd: work, encoding: "utf8" },
+    );
+  }
+
+  for (const name of ["slop.config.yml", "slop.config.json"]) {
+    it(`a ${name} spelled inside that resolves outside is refused (exit 2) without quoting it`, () => {
+      const r = runBuilt(["--config", name]);
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toBe(
+        `slop-detector: refusing --config ${name}: resolves outside the working directory (symbolic link)\n`,
+      );
+      expect(r.stderr).not.toContain(fragment);
+    });
+  }
+
+  it("an in-tree config symlink is loaded as before", () => {
+    const r = runBuilt(["--config", "alias.yml"]);
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout).filesScanned).toBe(1);
+  });
+
+  it("a config spelled outside the working directory is the caller's choice and is read", () => {
+    const ok = runBuilt(["--config", path.join("..", "outside", "ok.yml")]);
+    expect(ok.status).toBe(0);
+    const bad = runBuilt(["--config", path.join(outside, "secret.yml")]);
+    expect(bad.status).toBe(2);
+    expect(bad.stderr).not.toContain("refusing");
+  });
+
+  it("a missing config still reports not found", () => {
+    const r = runBuilt(["--config", "nope.yml"]);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("Config file not found");
   });
 });
