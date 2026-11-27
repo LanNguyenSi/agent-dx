@@ -1122,7 +1122,7 @@ program
   )
   .option(
     "--prune",
-    "remove missing and no-manifest targets from the operator registry before reporting; rewrites the whole manifest file in its normalized form (a hand-edited or legacy entry that readOperatorManifest could not parse is dropped from the file, not just left alone)",
+    "remove missing and no-manifest targets from the operator registry before reporting (this includes targets on a removable or network mount that is not mounted right now; restore one with `adopt <dir>`); rewrites the whole manifest file in its normalized form (a hand-edited or legacy entry that readOperatorManifest could not parse is dropped from the file, not just left alone)",
   )
   .action(async (opts: { json?: boolean; prune?: boolean }) => {
     const home = resolveOperatorHome();
@@ -1238,7 +1238,7 @@ program
     );
     if (opts.prune) {
       console.log(
-        `pruned: ${report.pruned.length > 0 ? report.pruned.join(", ") : "(none)"}`,
+        `pruned: ${report.pruned.length > 0 ? `${report.pruned.join(", ")}\nhint: restore a pruned target with \`orchestrator-workflow adopt <dir>\`.` : "(none)"}`,
       );
       // Printed only when the file actually held a raw target entry the
       // parser could not validate (fix-round-2, review finding M3): the

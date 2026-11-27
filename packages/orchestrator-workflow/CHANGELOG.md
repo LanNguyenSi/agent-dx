@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `doctor --prune` documents that it de-registers a target whose path is missing
+  or has no repo manifest, including one on a removable or network mount that
+  is not mounted at that moment (the `--prune` help text and the operator
+  install doc say so), and a non-empty prune now prints one human-output hint
+  naming `orchestrator-workflow adopt <dir>` to restore the entry. The `--json`
+  output is unchanged.
+
 ### Fixed
 
 - The replay evaluation under `eval/` (development tooling, not shipped) on

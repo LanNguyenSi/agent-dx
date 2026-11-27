@@ -112,7 +112,15 @@ of human output, with one entry per target plus the operator home and
 version. `--prune` removes `missing` and `no-manifest` targets from the
 registry before reporting (never an `unverifiable` one, since that status
 means the check itself was inconclusive, not that the target is confirmed
-gone) and rewrites the manifest file in its normalized form.
+gone) and rewrites the manifest file in its normalized form. A target whose
+path no longer exists (ENOENT) or is no longer a directory counts as
+`missing`, and a directory without a repo manifest counts as `no-manifest`;
+both are de-registered, including a target on a removable or network mount
+that is not mounted at that moment (the path is gone, or the empty mount point
+has no manifest). Do not schedule `--prune` while targets live on such a
+mount. After a non-empty prune the human output prints a restore hint after the pruned list;
+`orchestrator-workflow adopt <dir>` restores a pruned entry once the target is
+available again. The `--json` output is unchanged.
 For a legacy opencode leaf without a recorded provider-qualified model id,
 doctor reports `Routing comparison incomplete` and includes
 `routingComparisonGaps` in JSON instead of declaring a false routing

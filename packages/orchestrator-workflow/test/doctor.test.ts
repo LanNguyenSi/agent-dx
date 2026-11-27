@@ -913,6 +913,33 @@ describe("CLI human output", () => {
     expect(result.status).toBe(0);
   });
 
+  it("prints a restore hint naming adopt after a non-empty prune, and no hint when nothing was pruned", () => {
+    const cleanRepo = makeRepo();
+    const missingRepo = makeRepo();
+    registerHome(defaults(), [cleanRepo, missingRepo]);
+    rmSync(missingRepo, { recursive: true, force: true });
+
+    const pruned = runCli("--prune");
+    expect(pruned.stdout).toContain("adopt <dir>");
+    expect(pruned.stdout).toContain("restore a pruned target");
+
+    const nothing = runCli("--prune");
+    expect(nothing.stdout).toContain("pruned: (none)");
+    expect(nothing.stdout).not.toContain("adopt <dir>");
+  });
+
+  it("keeps the --json report free of the restore hint and its shape unchanged", () => {
+    const cleanRepo = makeRepo();
+    const missingRepo = makeRepo();
+    registerHome(defaults(), [cleanRepo, missingRepo]);
+    rmSync(missingRepo, { recursive: true, force: true });
+
+    const result = runCli("--prune", "--json");
+    expect(result.stdout).not.toContain("adopt <dir>");
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.pruned).toEqual([missingRepo]);
+  });
+
   it("prints a divergence line and a matching-pin detail line (pin equals the installed version, no version-lag)", () => {
     const repo = makeRepo({ profile: "minimal" });
     setManifestField(repo, { version: "0.0.1", pin: "0.0.1" });
