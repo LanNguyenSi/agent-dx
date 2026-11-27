@@ -198,7 +198,8 @@ export const REFERENCE_STATES: readonly ReferenceState[] = [
     setBy: "the host runner; never a model role",
     setByCode: true,
     step: "evidence (phase `baseline`) and closure (phase `closure`)",
-    storedIn: "`specs/<id>/evidence/TP-<n>.jsonl`, one file per test-plan row, JSON Lines, both phases in one file",
+    storedIn:
+      "`specs/<id>/evidence/TP-<n>.jsonl`, one file per test-plan row, JSON Lines, both phases in one file",
     ancestryCheck:
       "`baseline`: the commit must equal `base_commit`, the work tree clean, the `commands_digest` the digest of the row's one command at `commands_ref` and the selector the binding's, else `stale-evidence`; `closure` (which includes per-slice evidence): the commit must be the start commit or a descendant of it; after a squash merge an envelope stays valid if its commit is reachable from the default branch, otherwise only if it was on the PR branch before the squash and the PR's CI run references it",
   },

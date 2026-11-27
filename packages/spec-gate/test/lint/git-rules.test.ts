@@ -886,11 +886,12 @@ describe("stale-evidence", () => {
         specWithEvidence(c1, {
           [`${SPEC_REL}/evidence/TP-2.jsonl`]:
             cleanTp2(c1) +
-            envelope(
-              FOREIGN,
-              "f".repeat(64),
-              { phase: "closure", dirty: true, selector: "bogus", result: "fail" },
-            ),
+            envelope(FOREIGN, "f".repeat(64), {
+              phase: "closure",
+              dirty: true,
+              selector: "bogus",
+              result: "fail",
+            }),
           [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
         }),
         "spec and evidence",
@@ -931,7 +932,9 @@ describe("stale-evidence", () => {
       const report = await oneTp2Change(
         envelope(FOREIGN, SELECTOR_DIGEST, { selector: "login works" }),
       );
-      expect(ofRule(report, "stale-evidence")).toEqual([staleAt("commit-mismatch")]);
+      expect(ofRule(report, "stale-evidence")).toEqual([
+        staleAt("commit-mismatch"),
+      ]);
       return report;
     },
   );
@@ -1009,6 +1012,138 @@ describe("stale-evidence", () => {
         staleAt("selector-mismatch"),
       ]);
       return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
+    "fail",
+    "cause command-unknown: the row is selector-bound and the set at commands_ref has no command with {selector}",
+    async () => {
+      const repo = await Repo.create();
+      await repo.commit({ "README.md": "one\n" }, "init");
+      const c1 = await repo.commit(
+        { ".spec-gate/commands.yaml": COMMANDS_OK },
+        "commands",
+      );
+      await repo.setRef(REMOTE_MAIN, c1);
+      await repo.checkout("pr", c1);
+      await repo.commit(
+        specWithEvidence(c1, {
+          [`${SPEC_REL}/evidence/TP-2.jsonl`]: cleanTp2(c1),
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+        }),
+        "spec and evidence",
+      );
+      const report = lintIn(repo, DEFAULT);
+      expect(ofRule(report, "stale-evidence")).toEqual([
+        staleAt("command-unknown"),
+      ]);
+      return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
+    "pass",
+    "the selector-bound twin: the set at commands_ref carries the selector command, so the digest is judged",
+    async () => {
+      const { repo, c1 } = await evidenceHistory();
+      await repo.commit(
+        specWithEvidence(c1, {
+          [`${SPEC_REL}/evidence/TP-2.jsonl`]: cleanTp2(c1),
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+        }),
+        "spec and evidence",
+      );
+      return lintIn(repo, DEFAULT);
+    },
+  );
+
+  async function withBindings(
+    bindings: string,
+    // The base no-unused-vars rule reads the names in a signature as variables.
+    // eslint-disable-next-line no-unused-vars
+    tp2: (commit: string) => string,
+  ): Promise<ReturnType<typeof lintIn>> {
+    const { repo, c1 } = await evidenceHistory();
+    await repo.commit(
+      {
+        ...specFiles({ base: c1, ref: c1, plan: EVIDENCE_PLAN }),
+        [`${SPEC_REL}/bindings.yaml`]: bindings,
+        [`${SPEC_REL}/evidence/TP-2.jsonl`]: tp2(c1),
+        [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+      },
+      "spec and evidence",
+    );
+    return lintIn(repo, DEFAULT);
+  }
+
+  const NO_SELECTOR_BINDINGS =
+    "TP-1:\n  status: new\nTP-2:\n  status: existing\n";
+
+  gitCase(
+    "stale-evidence",
+    "fail",
+    "cause command-unknown: the row is not static and its binding has no selector",
+    async () => {
+      const report = await withBindings(NO_SELECTOR_BINDINGS, (commit) =>
+        envelope(commit, SELECTOR_DIGEST),
+      );
+      expect(ofRule(report, "stale-evidence")).toEqual([
+        staleAt("command-unknown"),
+      ]);
+      return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
+    "pass",
+    "the unbound-row twin: the same row with a selector in its binding has a determinable command",
+    async () => withBindings(EVIDENCE_BINDINGS, cleanTp2),
+  );
+
+  gitCase(
+    "stale-evidence",
+    "fail",
+    "evidence only of the static row: its command alone reads the set at commands_ref and a wrong digest is stale",
+    async () => {
+      const { repo, c1 } = await evidenceHistory();
+      await repo.commit(
+        specWithEvidence(c1, {
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: envelope(c1, "0".repeat(64)),
+        }),
+        "spec and evidence",
+      );
+      const report = lintIn(repo, DEFAULT);
+      expect(ofRule(report, "stale-evidence")).toEqual([
+        expect.objectContaining({
+          level: "warning",
+          file: "evidence/TP-3.jsonl",
+          path: "[0]",
+          line: 1,
+          id: "TP-3",
+          code: "digest-mismatch",
+        }),
+      ]);
+      return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
+    "pass",
+    "the static-only twin: the digest of the static row's one command at commands_ref is fresh",
+    async () => {
+      const { repo, c1 } = await evidenceHistory();
+      await repo.commit(
+        specWithEvidence(c1, {
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+        }),
+        "spec and evidence",
+      );
+      return lintIn(repo, DEFAULT);
     },
   );
 

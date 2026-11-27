@@ -5,12 +5,18 @@
  * rules only see parsed envelopes and never repeat a layout finding.
  *
  * - `stale-evidence` (needs git): a `baseline` envelope that no longer
- *   matches what the spec was written against. The four causes are the
- *   commit, the cleanliness, the command-set digest and the selector; the
- *   expected digest is `expectedCommandsDigest` of the one command the row
- *   uses in `.spec-gate/commands.yaml` at `commands_ref`, read at that
+ *   matches what the spec was written against. The five causes are the
+ *   commit, the cleanliness, the command-set digest, the selector and an
+ *   indeterminable row command (`command-unknown`: the row is not
+ *   `static` and its binding has no selector, or the row is selector-bound
+ *   and no command of the set carries the placeholder; a `static` row
+ *   naming no command of the set is reported by `static-command-unknown`).
+ *   The expected digest is `expectedCommandsDigest` of the one command the
+ *   row uses in `.spec-gate/commands.yaml` at `commands_ref`, read at that
  *   commit like the reference-state rules do, never at the head or the
- *   default tip. `closure` envelopes are never stale (`staleEvidenceApplies`).
+ *   default tip; an indeterminable command fails closed, it never skips
+ *   the digest silently. `closure` envelopes are never stale
+ *   (`staleEvidenceApplies`).
  * - `unproven`: a `stays-green` row with no fresh, passing `baseline`
  *   envelope. It judges the causes visible in the envelope's own fields
  *   (commit, dirty, selector); the digest cause belongs to
@@ -69,7 +75,12 @@ function evidenceFile(tpId: string): string {
 
 // ------------------------------------------------------------- stale-evidence
 
-/** The expected digest of what one row's check runs, or `undefined` when the row uses no command of the set. */
+/**
+ * The expected digest of what one row's check runs, or `undefined` when
+ * the row has no determinable command: the rule then reports
+ * `command-unknown`, except for a `static` row, whose unknown
+ * `check_command_ref` is the `static-command-unknown` error.
+ */
 function rowTemplate(
   row: TestPlanRow,
   binding: Binding | undefined,
@@ -92,10 +103,7 @@ type Templates =
  * reads it: only at that commit, never at a `commands_ref` that failed its
  * ancestry check. A git read that could not run is thrown to the guard.
  */
-function templatesAtCommandsRef(
-  ctx: RuleContext,
-  git: GitInputs,
-): Templates {
+function templatesAtCommandsRef(ctx: RuleContext, git: GitInputs): Templates {
   const ref = valueOf(ctx.inputs.spec).frontmatter.commands_ref;
   if (!isCommit(git.repo, ref) || !isAncestor(git.repo, ref, git.reference)) {
     return {
@@ -153,7 +161,12 @@ function staleEvidenceCheck(ctx: RuleContext): RuleFinding[] {
   if (evidence === undefined) return [];
   const baseCommit = spec.frontmatter.base_commit;
   const rowsById = new Map(plan.map((row) => [row.id, row]));
-  const baseline: { tpId: string; row: TestPlanRow | undefined; env: EvidenceEnvelope; index: number }[] = [];
+  const baseline: {
+    tpId: string;
+    row: TestPlanRow | undefined;
+    env: EvidenceEnvelope;
+    index: number;
+  }[] = [];
   for (const [tpId, envelopes] of Object.entries(evidence)) {
     envelopes.forEach((env, index) => {
       if (!staleEvidenceApplies(env.phase)) return;
@@ -207,24 +220,41 @@ function staleEvidenceCheck(ctx: RuleContext): RuleFinding[] {
         message: `${at("was gathered on a dirty work tree (dirty: true)")}`,
       });
     }
-    if (row !== undefined && templates?.ok === true) {
-      const template = rowTemplate(
-        row,
-        bindings[tpId],
-        templates.selectorArgv,
-        templates.byName,
-      );
-      if (
-        template !== undefined &&
-        env.commands_digest !== expectedCommandsDigest(template)
-      ) {
+    if (row !== undefined) {
+      const selectorBound = bindings[tpId]?.selector !== undefined;
+      let unknownCommand: string | undefined;
+      if (row.kind !== "static" && !selectorBound) {
+        unknownCommand = "row is not static and its binding has no selector";
+      } else if (templates?.ok === true) {
+        const template = rowTemplate(
+          row,
+          bindings[tpId],
+          templates.selectorArgv,
+          templates.byName,
+        );
+        if (template === undefined) {
+          if (selectorBound) {
+            unknownCommand = `selector-bound row but no command with {selector} in ${COMMANDS_PATH} at commands_ref`;
+          }
+        } else if (env.commands_digest !== expectedCommandsDigest(template)) {
+          findings.push({
+            file,
+            path: `[${index}]`,
+            line: index + 1,
+            id: tpId,
+            code: "digest-mismatch",
+            message: `${at("holds a commands_digest that is not the digest of the one command the row uses at commands_ref")}`,
+          });
+        }
+      }
+      if (unknownCommand !== undefined) {
         findings.push({
           file,
           path: `[${index}]`,
           line: index + 1,
           id: tpId,
-          code: "digest-mismatch",
-          message: `${at("holds a commands_digest that is not the digest of the one command the row uses at commands_ref")}`,
+          code: "command-unknown",
+          message: `${at(`has no determinable command to compare its digest with: ${unknownCommand}`)}`,
         });
       }
     }
@@ -362,7 +392,7 @@ export const EVIDENCE_RULES: readonly RuleDef[] = [
     ackable: true,
     needsGit: true,
     summary:
-      "A baseline envelope is stale: its commit is not the frontmatter base_commit, its work tree was dirty, its commands_digest is not the expected digest of the one command its row uses at commands_ref, or its selector is not its row's binding selector; closure envelopes are never stale. Acknowledge with the row ID; an unreadable command set is acknowledged with ID commands.",
+      "A baseline envelope is stale: its commit is not the frontmatter base_commit, its work tree was dirty, its commands_digest is not the expected digest of the one command its row uses at commands_ref, its row has no determinable command (the row is not static and its binding has no selector, or the row is selector-bound and no command of the set carries {selector}), or its selector is not its row's binding selector; closure envelopes are never stale. Acknowledge with the row ID; an unreadable command set is acknowledged with ID commands.",
     needs: ["spec", "testplan"],
     uses: ["bindings", "evidence"],
     check: checkStaleEvidence,

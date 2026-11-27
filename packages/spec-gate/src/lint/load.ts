@@ -112,7 +112,10 @@ function load<T>(
  * `failed`: the evidence rules then skip (their findings would be about
  * half-read evidence) while the error fails the run.
  */
-export function loadEvidence(dir: string, sink: FindingSink): Loaded<EvidenceFiles> {
+export function loadEvidence(
+  dir: string,
+  sink: FindingSink,
+): Loaded<EvidenceFiles> {
   let entries: fs.Dirent[];
   try {
     if (!fs.lstatSync(path.join(dir, EVIDENCE_DIR)).isDirectory()) {

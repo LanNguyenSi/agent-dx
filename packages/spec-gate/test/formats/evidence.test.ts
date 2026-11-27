@@ -367,7 +367,9 @@ describe("expectedCommandsDigest", () => {
     // is a run of one command, so the list holds the row's one command
     const template = ["npm", "run", "typecheck"];
     expect(expectedCommandsDigest(template)).toBe(
-      createHash("sha256").update(JSON.stringify([template])).digest("hex"),
+      createHash("sha256")
+        .update(JSON.stringify([template]))
+        .digest("hex"),
     );
     expect(expectedCommandsDigest(template)).toBe(
       "0ee47a7219f84f1731be022c31c88b7c58549d44f204e3e2dc45364618084aa4",

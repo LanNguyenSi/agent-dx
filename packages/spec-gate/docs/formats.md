@@ -620,7 +620,8 @@ pull request that adds a command is where that is reviewed.
 ## Evidence
 
 A runner writes one envelope per check. Envelopes are JSON Lines (one object
-per line) or one object per file. The schema is shipped as
+per line) stored in one `TP-<n>.jsonl` file per test-plan row (Layout below).
+The schema is shipped as
 `schemas/evidence-envelope.json`, a copy of the reference runner's schema; a
 test pins the copy byte for byte. Envelopes are validated in code, field for
 field, without a schema library.
@@ -649,7 +650,8 @@ mapping from an envelope to its row. The file is JSON Lines and holds both
 phases of the row. Nothing else lives in the directory. A regular file whose
 name is not a row file is a format finding of code `evidence-layout`; a
 subdirectory, a link or any other non-regular entry there is a file finding;
-a file for a TP ID that is no test-plan row is the error
+a row file over the reader's 4 MiB size cap is a file finding of code
+`input-too-large`; a file for a TP ID that is no test-plan row is the error
 `evidence-unknown-row`, because a file for a row that no longer exists is
 evidence nobody asked for.
 

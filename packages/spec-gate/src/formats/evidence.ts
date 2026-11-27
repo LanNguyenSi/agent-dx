@@ -2,7 +2,8 @@
  * Evidence intake.
  *
  * Evidence arrives as envelopes written by a runner: one JSON object per
- * line (JSON Lines), or one object per file. The envelope schema ships in
+ * line (JSON Lines), in one `TP-<n>.jsonl` file per test-plan row. The
+ * envelope schema ships in
  * `schemas/evidence-envelope.json`, a copy of the reference runner's
  * schema; a test pins the two byte for byte. This module validates in
  * code, field for field as the schema reads, and adds no dependency.

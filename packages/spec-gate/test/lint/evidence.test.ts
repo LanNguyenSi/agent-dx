@@ -7,11 +7,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { EVIDENCE_FILE_RE, evidenceFileTpId } from "../../src/formats/index.js";
 import {
-  EVIDENCE_FILE_RE,
-  evidenceFileTpId,
-} from "../../src/formats/index.js";
-import { lintSpecDir, RULES, type LintReport } from "../../src/lint/index.js";
+  lintSpecDir,
+  MAX_FILE_BYTES,
+  RULES,
+  type LintReport,
+} from "../../src/lint/index.js";
 import { EVIDENCE_BINDINGS, EVIDENCE_PLAN } from "./git-helpers.js";
 import { specDir } from "./helpers.js";
 
@@ -96,7 +98,10 @@ describe("unproven: a stays-green row needs a fresh passing baseline", () => {
         unproven(
           run({
             ...PLAN_FILES,
-            "evidence/TP-2.jsonl": envelope({ selector: "login works", ...over }),
+            "evidence/TP-2.jsonl": envelope({
+              selector: "login works",
+              ...over,
+            }),
           }),
         ),
       ).toEqual([expected]);
@@ -198,7 +203,10 @@ describe("self-reported: a local envelope is judged, ci and host are not", () =>
 describe("evidence-unknown-row: a file maps to a row that exists", () => {
   it("a well-formed file for an unknown TP ID is one error", () => {
     expect(
-      ofRule(run({ "evidence/TP-9.jsonl": envelope() }), "evidence-unknown-row"),
+      ofRule(
+        run({ "evidence/TP-9.jsonl": envelope() }),
+        "evidence-unknown-row",
+      ),
     ).toEqual([
       expect.objectContaining({
         level: "error",
@@ -268,7 +276,10 @@ describe("the loader's evidence/ scan", () => {
 
   it("a plain text note under evidence/ is the same format finding", () => {
     expect(
-      ofRule(run({ "evidence/notes.txt": "handwritten run notes\n" }), "format"),
+      ofRule(
+        run({ "evidence/notes.txt": "handwritten run notes\n" }),
+        "format",
+      ),
     ).toEqual([
       expect.objectContaining({
         file: "evidence/notes.txt",
@@ -278,9 +289,7 @@ describe("the loader's evidence/ scan", () => {
   });
 
   it("an evidence entry that is not a directory is a file finding", () => {
-    expect(
-      ofRule(run({ evidence: "not a directory\n" }), "file"),
-    ).toEqual([
+    expect(ofRule(run({ evidence: "not a directory\n" }), "file")).toEqual([
       expect.objectContaining({
         file: "evidence",
         code: "input-not-regular",
@@ -297,8 +306,28 @@ describe("the loader's evidence/ scan", () => {
     expect(ofRule(report, "unproven")).toEqual([]);
   });
 
+  it("a row file over the reader's size cap is an input-too-large file finding", () => {
+    const dir = specDir(PLAN_FILES);
+    fs.mkdirSync(path.join(dir, "evidence"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "evidence", "TP-2.jsonl"),
+      Buffer.alloc(MAX_FILE_BYTES + 1, 0x78),
+    );
+    const report = runDir(dir);
+    expect(ofRule(report, "file")).toEqual([
+      expect.objectContaining({
+        file: "evidence/TP-2.jsonl",
+        code: "input-too-large",
+      }),
+    ]);
+    expect(skipReason(report, "unproven")).toBe("input-failed");
+  });
+
   it("the layout findings also run in the light profile", () => {
-    const report = run({ "evidence/TP-1.json": envelope() }, { profile: "light" });
+    const report = run(
+      { "evidence/TP-1.json": envelope() },
+      { profile: "light" },
+    );
     expect(ofRule(report, "format")).toEqual([
       expect.objectContaining({ code: "evidence-layout" }),
     ]);
