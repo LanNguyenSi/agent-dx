@@ -353,7 +353,8 @@ repository state it is given.
   base sha of a `pull_request` event), a full commit id.
 - The full history is fetched. A shallow clone does not hold the commits the
   ancestry checks compare, so `base_commit` and `commands_ref` report as not
-  being commits, and the diff base may not be found.
+  being commits, and the diff base may not be found or, when the shallow
+  boundary hides the true merge base, may be an older commit.
 - The checkout is the one the job trusts: the lint refuses a repository that
   the `.git` entry of its work tree does not name (the repository check
   above), but it does not vouch for a checkout whose `.git` the pull request

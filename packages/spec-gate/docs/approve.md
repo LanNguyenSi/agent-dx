@@ -473,6 +473,10 @@ The permissions the token needs are listed under "Token and permissions".
 - Fetch the default branch with its history before the check. The check
   never fetches: it needs the commit `--default-ref` names (for example
   `refs/remotes/origin/main`) and the merge base of that commit and the head.
+- The checkout must hold the complete history of the head and of the default
+  branch and must not be shallow (for example `fetch-depth: 0`). A shallow
+  boundary can hide the true merge base, so that git reports an older one and
+  the conditions that measure from it see less than the merge changes.
 - `--base` is optional. When given, it must lie on the default ref and be
   the base commit the host reports for the pull request (`base-mismatch`
   otherwise). Nothing is measured from it: the report is the same with and
