@@ -23,7 +23,10 @@ const read = (rel: string): string =>
   readFileSync(new URL(rel, import.meta.url), "utf8");
 
 const template = read("../templates/okf-staleness.yml");
-const pkg = JSON.parse(read("../package.json")) as { files: string[] };
+const pkg = JSON.parse(read("../package.json")) as {
+  files: string[];
+  version: string;
+};
 
 describe("templates/okf-staleness.yml", () => {
   it("is shipped in the npm package", () => {
@@ -76,6 +79,7 @@ describe("templates/okf-staleness.yml", () => {
 
 interface Step {
   name?: string;
+  shell?: string;
   run?: string;
 }
 
@@ -84,6 +88,10 @@ const steps = (
 ).jobs["okf-staleness"].steps;
 
 const checkStep = steps.find((s) => s.name === "Check bundle (warn-only)");
+const installStep = steps.find((s) => s.name === "Install okf-kit (exact pin)");
+const assertStep = steps.find(
+  (s) => s.name === "Assert CLI version equals the pin",
+);
 
 describe("shipped templates pin actions by commit", () => {
   const dir = new URL("../templates/", import.meta.url);
@@ -110,6 +118,15 @@ describe("templates/okf-staleness.yml pin", () => {
     expect(header).not.toBeNull();
     expect(install).not.toBeNull();
     expect(header?.[1]).toBe(install?.[1]);
+  });
+
+  it("install pin equals the version this package publishes as", () => {
+    // The header-vs-install test above lets a whole template pin a version
+    // package.json never published; this ties the pin to the package's own
+    // version, the way .github/workflows/ci.yml derives its pin.
+    const install = template.match(/npm install -g okf-kit@(\d+\.\d+\.\d+)/);
+    expect(install).not.toBeNull();
+    expect(install?.[1]).toBe(pkg.version);
   });
 });
 
@@ -170,5 +187,135 @@ describe("templates/okf-staleness.yml check step, executed", () => {
 
   it("fails red on a tool/usage error (exit 2)", () => {
     expect(runStep(2, report(0, 0, "")).status).not.toBe(0);
+  });
+});
+
+describe("templates/okf-staleness.yml install step, executed", () => {
+  it("finds the install step and runs it under shell: bash", () => {
+    expect(installStep?.run).toBeTruthy();
+    expect(installStep?.shell).toBe("bash");
+  });
+
+  it("runs the pinned install command once and exports the pin to GITHUB_ENV", () => {
+    // Stub npm on PATH: no install happens, but the argv the step passes to
+    // npm and the GITHUB_ENV append are the real ones, replayed under the
+    // Actions bash invocation.
+    const dir = mkdtempSync(join(tmpdir(), "okf-staleness-install-"));
+    try {
+      const bin = join(dir, "bin");
+      mkdirSync(bin);
+      const npmArgs = join(dir, "npm-args");
+      const githubEnv = join(dir, "github_env");
+      writeFileSync(
+        join(bin, "npm"),
+        `#!/bin/sh\nprintf '%s\\n' "$*" > '${npmArgs}'\nexit 0\n`,
+      );
+      chmodSync(join(bin, "npm"), 0o755);
+      const res = spawnSync(
+        "bash",
+        [
+          "--noprofile",
+          "--norc",
+          "-eo",
+          "pipefail",
+          "-c",
+          installStep?.run ?? "",
+        ],
+        {
+          cwd: dir,
+          encoding: "utf8",
+          env: {
+            PATH: `${bin}:${process.env.PATH ?? ""}`,
+            GITHUB_ENV: githubEnv,
+          },
+        },
+      );
+      expect(res.status).toBe(0);
+      expect(readFileSync(npmArgs, "utf8").trim()).toBe(
+        `install -g okf-kit@${pkg.version} --no-audit --no-fund`,
+      );
+      expect(readFileSync(githubEnv, "utf8")).toBe(
+        `OKF_KIT_PIN=${pkg.version}\n`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("templates/okf-staleness.yml assert step, executed", () => {
+  // Stub okf-kit on PATH printing `printed` on stdout; `pin` is exported as
+  // OKF_KIT_PIN only when given, so omitting it replays the unset case.
+  const runAssert = (printed: string, pin?: string) => {
+    const dir = mkdtempSync(join(tmpdir(), "okf-staleness-assert-"));
+    try {
+      const bin = join(dir, "bin");
+      mkdirSync(bin);
+      const stub = join(bin, "okf-kit");
+      writeFileSync(stub, `#!/bin/sh\nprintf '%s' '${printed}'\nexit 0\n`);
+      chmodSync(stub, 0o755);
+      const env: Record<string, string> = {
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      };
+      if (pin !== undefined) env.OKF_KIT_PIN = pin;
+      return spawnSync(
+        "bash",
+        [
+          "--noprofile",
+          "--norc",
+          "-eo",
+          "pipefail",
+          "-c",
+          assertStep?.run ?? "",
+        ],
+        { cwd: dir, encoding: "utf8", env },
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("finds the assert step", () => {
+    expect(assertStep?.run).toBeTruthy();
+  });
+
+  it("passes and prints the version when the CLI prints the pin", () => {
+    const res = runAssert(pkg.version, pkg.version);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain(`okf-kit ${pkg.version}`);
+  });
+
+  it("fails with ::error and exit 1 when the CLI prints a different version", () => {
+    const res = runAssert("9.9.9", pkg.version);
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain("::error");
+    expect(res.stdout).toContain("9.9.9");
+    expect(res.stdout).toContain(pkg.version);
+  });
+
+  it("fails with ::error and exit 1 when the CLI prints nothing", () => {
+    const res = runAssert("", pkg.version);
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain("::error");
+    // The empty-output branch's own message: the mismatch branch printing
+    // the pin instead must not satisfy this test.
+    expect(res.stdout).toContain("printed no output");
+  });
+
+  it("fails with ::error and exit 1 when the CLI prints nothing and OKF_KIT_PIN is unset", () => {
+    // The empty-output branch on its own: with the pin unset the only
+    // branch that can exit 1 here is the empty-output one, so this pins
+    // that branch's condition and its exit, not the mismatch branch's.
+    const res = runAssert("");
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain("::error");
+    expect(res.stdout).toContain("printed no output");
+  });
+
+  it("fails with ::error and exit 1 when OKF_KIT_PIN is unset", () => {
+    const res = runAssert(pkg.version);
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain("::error");
+    expect(res.stdout).toContain("OKF_KIT_PIN");
   });
 });

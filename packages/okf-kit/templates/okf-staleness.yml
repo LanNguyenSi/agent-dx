@@ -60,19 +60,39 @@ jobs:
           node-version: 22
 
       - name: Install okf-kit (exact pin)
+        shell: bash
         # Exact pin: okf-kit@0.3.0 on npm is a deprecated silent no-op
-        # (exit 0, no output). The output assertion below exists to catch
+        # (exit 0, no output). The version assertion below exists to catch
         # any regression of that failure mode: never assert on exit code
         # alone here. Move this pin deliberately, never as an automatic
         # upgrade, and record each move in the bundle's log.md together with
         # the old and the new version's measured verdict on this bundle.
-        run: npm install -g okf-kit@0.23.0 --no-audit --no-fund
+        # The pin is written exactly once, inside the install array below;
+        # the same array element is exported as OKF_KIT_PIN for the
+        # assertion step, so the job can never install one version and
+        # assert another.
+        run: |
+          install_cmd=(npm install -g okf-kit@0.23.0 --no-audit --no-fund)
+          pin="${install_cmd[3]#*okf-kit@}"
+          "${install_cmd[@]}"
+          echo "OKF_KIT_PIN=${pin}" >> "${GITHUB_ENV}"
 
-      - name: Assert CLI is alive (output, not exit code)
+      - name: Assert CLI version equals the pin
         shell: bash
         run: |
           v="$(okf-kit --version)"
-          test -n "$v"
+          if [ -z "${v}" ]; then
+            echo "::error title=okf-kit pin assert::okf-kit --version printed no output: the CLI on PATH is a silent no-op, not the pinned okf-kit"
+            exit 1
+          fi
+          if [ "${v}" != "${OKF_KIT_PIN:-}" ]; then
+            if [ -z "${OKF_KIT_PIN:-}" ]; then
+              echo "::error title=okf-kit pin assert::OKF_KIT_PIN is unset: the Install step did not export the pin, so the okf-kit on PATH (printing ${v}) cannot be verified"
+            else
+              echo "::error title=okf-kit pin assert::okf-kit on PATH reports ${v}, expected the pinned ${OKF_KIT_PIN}: the installed CLI is not the version this job pins"
+            fi
+            exit 1
+          fi
           echo "okf-kit ${v}"
 
       - name: Check bundle (warn-only)
