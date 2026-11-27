@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/init.md` no longer states that `index.md` and `log.md` always carry no
   frontmatter; it names the OKF v0.2 exception, the bundle-root `index.md`
   carrying only the `okf_version` key.
+- `templates/okf-staleness.yml`: the install step now writes its exact pin
+  once, inside a `bash` array whose element also becomes the job env var
+  `OKF_KIT_PIN`, and the assert step fails the job (`::error`, exit 1) when
+  `okf-kit --version` prints nothing, prints a version other than
+  `OKF_KIT_PIN`, or runs with `OKF_KIT_PIN` unset, instead of accepting any
+  non-empty output. A consumer re-syncing the template gets the stricter
+  assert: the job now fails when the `okf-kit` on PATH is not the version
+  the template pins, and a template whose pin drifted from the release that
+  ships it fails this package's own test suite.
 
 ## [0.23.0] - 2026-11-25
 
