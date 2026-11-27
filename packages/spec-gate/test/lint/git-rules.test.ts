@@ -1099,6 +1099,36 @@ describe("stale-evidence", () => {
 
   gitCase(
     "stale-evidence",
+    "fail",
+    "cause command-unknown without static evidence: a non-static row without a selector is reported even when no command set is read",
+    async () => {
+      const { repo, c1 } = await evidenceHistory();
+      await repo.commit(
+        {
+          ...specFiles({ base: c1, ref: c1, plan: EVIDENCE_PLAN }),
+          [`${SPEC_REL}/bindings.yaml`]: NO_SELECTOR_BINDINGS,
+          [`${SPEC_REL}/evidence/TP-2.jsonl`]: envelope(c1, SELECTOR_DIGEST),
+        },
+        "spec and evidence",
+      );
+      const report = lintIn(repo, DEFAULT);
+      expect(ofRule(report, "stale-evidence")).toEqual([
+        expect.objectContaining({
+          level: "warning",
+          file: "evidence/TP-2.jsonl",
+          id: "TP-2",
+          code: "command-unknown",
+          message: expect.stringContaining(
+            "row is not static and its binding has no selector",
+          ),
+        }),
+      ]);
+      return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
     "pass",
     "the unbound-row twin: the same row with a selector in its binding has a determinable command",
     async () => withBindings(EVIDENCE_BINDINGS, cleanTp2),
