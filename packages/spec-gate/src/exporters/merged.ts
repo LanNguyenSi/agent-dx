@@ -132,7 +132,9 @@ export function loadMergedSpecDir(
 
   let root: string;
   try {
-    root = fs.realpathSync(toplevel);
+    // The native form so a spelling of either path in another case on a
+    // case-insensitive volume is compared with the case on disk.
+    root = fs.realpathSync.native(toplevel);
   } catch {
     throw new ExportError(
       "git-failed",
@@ -141,7 +143,7 @@ export function loadMergedSpecDir(
   }
   let specReal: string;
   try {
-    specReal = fs.realpathSync(specDir);
+    specReal = fs.realpathSync.native(specDir);
   } catch {
     throw new ExportError("spec-dir-invalid", `${specDir} does not exist`);
   }

@@ -55,7 +55,9 @@ function fail(message: string): GitResolution {
 
 function realpath(dir: string): string | null {
   try {
-    return fs.realpathSync(dir);
+    // The native form so a spelling in another case on a case-insensitive
+    // volume is compared with the case on disk.
+    return fs.realpathSync.native(dir);
   } catch {
     return null;
   }

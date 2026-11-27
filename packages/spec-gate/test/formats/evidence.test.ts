@@ -153,6 +153,15 @@ describe("evidence envelope validation", () => {
     expect(codes(envelope({ exit: 1.5 }))).toEqual(["wrong-type @ exit"]);
   });
 
+  it("refuses an exit integer past the IEEE-754 safe range, both signs", () => {
+    for (const v of [2 ** 53, -(2 ** 53)]) {
+      expect(codes(envelope({ exit: v })), String(v)).toEqual([
+        "wrong-type @ exit",
+      ]);
+    }
+    expect(codes(envelope({ exit: 2 ** 53 - 1 }))).toEqual([]);
+  });
+
   it("accepts sha-1 and sha-256 commits, lower case only", () => {
     expect(codes(envelope({ commit: "a".repeat(64) }))).toEqual([]);
     for (const commit of [

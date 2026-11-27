@@ -1,8 +1,12 @@
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { computeDigest } from "../../src/canonical/index.js";
 import {
   TEST_PLAN_KINDS,
   allowedFieldsOf,
   layerOf,
+  parseSpec,
   parseTestPlan,
   requiredFieldsOf,
   validateTestPlan,
@@ -251,6 +255,105 @@ describe("testplan.yaml: kinds and required fields", () => {
         bad,
       ).toBe(1);
     }
+  });
+});
+
+describe("testplan.yaml: integers and the IEEE-754 safe range", () => {
+  // The YAML core schema decodes an integer as a double, so these two
+  // spellings arrive as one and the same number; only the refusal of
+  // non-safe integers keeps a measurement honest.
+  const COLLIDING = ["9007199254740993", "9007199254740992"];
+
+  /** One measurement row as YAML text, with the listed fields overridden. */
+  function measurementText(over: Record<string, string>): string {
+    const fields = {
+      id: "TP-1",
+      covers: "[NG-1]",
+      kind: "measurement",
+      claim: "c",
+      baseline: "1",
+      threshold: '"<= 2"',
+      runs: "3",
+      ...over,
+    };
+    return Object.entries(fields)
+      .map(([key, value], i) => `${i === 0 ? "- " : "  "}${key}: ${value}`)
+      .join("\n");
+  }
+
+  it("refuses both spellings of a big integer in baseline and threshold", () => {
+    for (const field of ["baseline", "threshold"]) {
+      for (const value of COLLIDING) {
+        const r = parseTestPlan(measurementText({ [field]: value }));
+        expect(r.ok, `${field}: ${value}`).toBe(false);
+        if (r.ok) continue;
+        expect(r.errors.map((e) => `${e.code} @ ${e.path}`)).toEqual([
+          `invalid-value @ TP-1.${field}`,
+        ]);
+        expect(r.errors[0]!.message, `${field}: ${value}`).toContain("2^53-1");
+      }
+    }
+  });
+
+  it("refuses a decoded integer one step past the safe range, both signs", () => {
+    for (const v of [2 ** 53, -(2 ** 53)]) {
+      expect(codes({ ...VALID.measurement!, baseline: v }), String(v)).toEqual([
+        "invalid-value @ TP-1.baseline",
+      ]);
+    }
+  });
+
+  it("accepts the largest safe integer with either sign, decoded from YAML", () => {
+    for (const value of ["9007199254740991", "-9007199254740991"]) {
+      const r = parseTestPlan(measurementText({ baseline: value }));
+      expect(r.ok, value).toBe(true);
+      if (r.ok) expect(r.value[0]!.baseline).toBe(Number(value));
+    }
+  });
+
+  it("refuses a runs value past the safe range, naming the safe range", () => {
+    expect(codes({ ...VALID.measurement!, runs: 2 ** 53 })).toEqual([
+      "invalid-value @ TP-1.runs",
+    ]);
+    const r = validateTestPlan([{ ...VALID.measurement!, runs: 2 ** 53 }]);
+    if (r.ok) throw new Error("not refused");
+    expect(r.errors[0]!.message).toContain("runs");
+    expect(r.errors[0]!.message).toContain("2^53-1");
+    const y = parseTestPlan(measurementText({ runs: "9007199254740992" }));
+    expect(y.ok).toBe(false);
+  });
+
+  it("keeps quoted big integers apart, where numbers would collapse", () => {
+    // The premise, pinned: as doubles the two spellings are one number.
+    expect(Number("9007199254740993")).toBe(Number("9007199254740992"));
+    const a = parseTestPlan(
+      measurementText({ baseline: '"9007199254740993"' }),
+    );
+    const b = parseTestPlan(
+      measurementText({ baseline: '"9007199254740992"' }),
+    );
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(a.value[0]!.baseline).toBe("9007199254740993");
+    expect(b.value[0]!.baseline).toBe("9007199254740992");
+    // and the digest keeps them apart too
+    const spec = parseSpec(
+      fs.readFileSync(
+        fileURLToPath(
+          new URL("../fixtures/golden-digest/base/spec.md", import.meta.url),
+        ),
+        "utf8",
+      ),
+    );
+    expect(spec.ok).toBe(true);
+    if (!spec.ok) return;
+    const digest = (testPlan: typeof a.value) =>
+      computeDigest({ spec: spec.value, testPlan, commands: {} });
+    expect(digest(a.value)).not.toBe(digest(b.value));
+  });
+
+  it("still accepts a finite number that is not an integer", () => {
+    expect(codes({ ...VALID.measurement!, threshold: 1.5 })).toEqual([]);
   });
 });
 

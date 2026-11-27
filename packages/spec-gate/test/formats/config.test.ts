@@ -114,4 +114,21 @@ describe("config.yaml defaults", () => {
       true,
     );
   });
+
+  it("refuses a warn_above past the IEEE-754 safe range, in text and decoded", () => {
+    for (const r of [
+      validateConfig({ questions: { warn_above: 2 ** 53 } }),
+      parseConfig("questions:\n  warn_above: 9007199254740992\n"),
+    ]) {
+      expect(r.ok).toBe(false);
+      if (r.ok) continue;
+      expect(r.errors.map((e) => `${e.code} @ ${e.path}`)).toEqual([
+        "invalid-value @ questions.warn_above",
+      ]);
+      expect(r.errors[0]!.message).toContain("2^53-1");
+    }
+    expect(validateConfig({ questions: { warn_above: 2 ** 53 - 1 } }).ok).toBe(
+      true,
+    );
+  });
 });
