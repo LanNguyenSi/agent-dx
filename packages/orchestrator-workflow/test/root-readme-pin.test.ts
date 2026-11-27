@@ -38,11 +38,26 @@ describe("root README quick start pins the published orchestrator-workflow versi
   });
 });
 
+// One site per `npx` or `npm exec` invocation of the package, with or without
+// flags before the package name (`npx -y`, `npx --yes`); group 1 is the
+// `@<version>` suffix, if any.
+const PIN_SITE =
+  /\b(?:npx|npm exec)(?:\s+--?[\w-]+)*\s+orchestrator-workflow(@[^\s`)]*)?/g;
+
+describe("the pin site pattern", () => {
+  it("finds flag forms and reports them unpinned", () => {
+    const text =
+      "npx -y orchestrator-workflow init\nnpx --yes orchestrator-workflow@1.2.3 doctor\nnpm exec orchestrator-workflow apply";
+    const sites = [...text.matchAll(PIN_SITE)].map((m) => m[1]);
+    expect(sites).toEqual([undefined, "@1.2.3", undefined]);
+  });
+});
+
 describe("every npx orchestrator-workflow invocation carries the package.json version", () => {
   for (const file of PIN_FILES) {
     it(file, () => {
       const text = readFileSync(`${repoRoot}/${file}`, "utf8");
-      const sites = [...text.matchAll(/npx orchestrator-workflow(@[^\s`]*)?/g)];
+      const sites = [...text.matchAll(PIN_SITE)];
       expect(
         sites.length,
         `no npx orchestrator-workflow example found in ${file}`,

@@ -26,8 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runner, which kept parallel sessions (`--jobs`) from overlapping.
 - The package README, `INSTALL-AGENT.md` and the two reference docs that show
   `npx orchestrator-workflow` now pin the release version, and a test keeps the
-  root README, the package README and `INSTALL-AGENT.md` on the version in
-  `package.json`. The package README links the knowledge bundle by its GitHub
+  root README, the package README, `INSTALL-AGENT.md` and the two reference
+  docs on the version in `package.json`. The package README links the knowledge bundle by its GitHub
   URL, because `docs/okf/` is not part of the published package, and a test
   checks that every other relative link in the README and `INSTALL-AGENT.md`
   resolves inside the package files. `docs/operator-install.md` now says that a
