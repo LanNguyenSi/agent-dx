@@ -10,7 +10,7 @@ import { defaultConfig, loadConfig } from "./config.js";
 import { packsByFilter } from "./packs/registry.js";
 import { sanitizeForTerminal } from "./util/terminal.js";
 import { resolvePatternAnchor } from "./util/pattern-anchor.js";
-import { resolvesInside } from "./util/path-containment.js";
+import { isInside, realPath, resolvesInside } from "./util/path-containment.js";
 import type { CheckSummary, Severity, Violation } from "./types.js";
 
 export interface SlopCheckInput {
@@ -52,6 +52,17 @@ export function runSlopCheck(
   if (input.configPath) {
     configPath = path.resolve(root, input.configPath);
     if (!resolvesInside(root, configPath)) {
+      // A config that cannot be resolved and is spelled inside the root is
+      // missing, not outside: only a resolvable or lexically outside value
+      // is reported as outside.
+      if (
+        realPath(configPath) === undefined &&
+        isInside(path.resolve(root), configPath)
+      ) {
+        throw new Error(
+          `slop_check: configPath does not exist: ${input.configPath}`,
+        );
+      }
       throw new Error(
         `slop_check: configPath is outside the server's working directory: ${input.configPath}`,
       );
@@ -93,7 +104,7 @@ export function runSlopCheck(
   }
   if (input.path !== undefined) {
     const target = path.resolve(root, input.path);
-    if (!fs.existsSync(target)) {
+    if (input.path === "" || !fs.existsSync(target)) {
       throw new Error(`slop_check: path does not exist: ${input.path}`);
     }
     if (!resolvesInside(root, target)) {
@@ -102,7 +113,16 @@ export function runSlopCheck(
       );
     }
     const pathAnchor = resolvePatternAnchor(configPath, target);
-    return checkPath(target, {
+    // The scan runs from the process working directory. A relative value
+    // that names the same place from there keeps its spelling, so default
+    // ignores such as `**/build/**` match against the path as written and
+    // not against the absolute path above the launch directory, and reported
+    // paths stay relative. Anything else is scanned by its absolute path.
+    const scanTarget =
+      !path.isAbsolute(input.path) && path.resolve(input.path) === target
+        ? input.path
+        : target;
+    return checkPath(scanTarget, {
       packs,
       config,
       packFilter,

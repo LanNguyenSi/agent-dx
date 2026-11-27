@@ -87,7 +87,7 @@ describe("runSlopCheck — path input", () => {
   });
 });
 
-describe("runSlopCheck — confinement to the root", () => {
+describe("runSlopCheck: confinement to the root", () => {
   const SLOPPY = "We shipped it \u2014 and it worked.\n";
   const hasEmDash = (s: ReturnType<typeof runSlopCheck>) =>
     s.violations.some((v) => v.ruleId === "prose-slop/em-dash");
@@ -169,14 +169,57 @@ describe("runSlopCheck — confinement to the root", () => {
   });
 
   it("loads a configPath inside the root", () => {
+    fs.writeFileSync(
+      path.join(root, "off.yml"),
+      "rules:\n  prose-slop/em-dash:\n    enabled: false\n",
+    );
+    expect(hasEmDash(runSlopCheck({ path: "in.md" }, { root }))).toBe(true);
     expect(
       hasEmDash(
-        runSlopCheck(
-          { path: "in.md", configPath: "slop.config.yml" },
-          { root },
-        ),
+        runSlopCheck({ path: "in.md", configPath: "off.yml" }, { root }),
       ),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("reports a missing configPath inside the root as missing, one outside as outside", () => {
+    expect(() =>
+      runSlopCheck({ path: "in.md", configPath: "nope.yml" }, { root }),
+    ).toThrow(/configPath does not exist: nope\.yml/);
+    expect(() =>
+      runSlopCheck(
+        { path: "in.md", configPath: path.join(outside, "nope.yml") },
+        { root },
+      ),
+    ).toThrow(/configPath is outside/);
+  });
+
+  it("keeps the does-not-exist error for an empty path", () => {
+    expect(() => runSlopCheck({ path: "" }, { root })).toThrow(
+      /path does not exist/,
+    );
+  });
+
+  it("scans a relative path by its spelling when the root sits under a build directory", () => {
+    // Real path: the process cwd is always reported without symlinks.
+    const buildRoot = path.join(fs.realpathSync(base), "build", "repo");
+    fs.mkdirSync(path.join(buildRoot, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(buildRoot, "docs", "n.md"), SLOPPY);
+    const cwd = process.cwd();
+    try {
+      process.chdir(buildRoot);
+      const summary = runSlopCheck({ path: "docs" }, { root: buildRoot });
+      expect(summary.filesScanned).toBe(1);
+      expect(hasEmDash(summary)).toBe(true);
+      expect(summary.violations[0]?.path).toBe(path.join("docs", "n.md"));
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it("scans by absolute path when a relative value does not resolve from the working directory", () => {
+    // root differs from the process cwd: the relative spelling would point
+    // somewhere else, so the resolved path is used.
+    expect(hasEmDash(runSlopCheck({ path: "in.md" }, { root }))).toBe(true);
   });
 
   it("refuses a configPath outside the root without loading it", () => {
