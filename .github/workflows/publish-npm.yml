@@ -128,9 +128,10 @@ jobs:
         # Runs before any repository code executes (npm ci, build, test).
         # It stops an accidental or unmodified side-branch tag from
         # publishing. It is not a boundary against someone with write access
-        # who edits this workflow on the tagged ref; operator-side controls
-        # are a tag ruleset and/or a protected environment bound in the npm
-        # Trusted Publisher entry. HEAD is the commit the tag resolves to
+        # who edits this workflow on the tagged ref; what would close that
+        # gap is a tag ruleset or a protected environment bound in the npm
+        # Trusted Publisher entry, and this repository configures neither
+        # (see CONTRIBUTING.md). HEAD is the commit the tag resolves to
         # (checkout ref above), for the push and the workflow_dispatch path
         # alike. Master is fetched explicitly rather than trusting what the
         # checkout happened to bring.

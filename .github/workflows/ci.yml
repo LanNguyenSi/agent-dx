@@ -159,11 +159,11 @@ jobs:
   # comment) before okf-kit's anchored citations (0.6.0). See
   # packages/orchestrator-workflow/docs/okf/log.md for the rule contract,
   # the anchor count, and the residual gap this does not close. Note:
-  # master carries no required-status-check branch protection today, so
+  # the default-branch ruleset requires no status check on master, so
   # "fails the build" means this job's own run goes red, not an enforced
-  # merge block; that is an orchestrator decision, not a branch-protection
-  # change. If packages/orchestrator-workflow/docs/okf is ever moved or
-  # renamed, update BUNDLE_PATH below in the same PR.
+  # merge block; that is an orchestrator decision, not a change to the
+  # default-branch ruleset. If packages/orchestrator-workflow/docs/okf is
+  # ever moved or renamed, update BUNDLE_PATH below in the same PR.
   okf-anchor-guard:
     name: OKF bundle anchor guard
     runs-on: ubuntu-latest
