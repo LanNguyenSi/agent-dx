@@ -29,6 +29,27 @@ export const STATIC_PLAN =
   `${validFiles()["testplan.yaml"]!}\n` +
   '- id: TP-2\n  covers: [AC-1]\n  kind: static\n  claim: "the type check passes"\n  check_command_ref: typecheck\n';
 
+/** A command set with the selector command and `typecheck`, for the evidence rules. */
+export const COMMANDS_WITH_SELECTOR =
+  'discovery:\n  argv: ["npx", "vitest", "list"]\n' +
+  "commands:\n" +
+  '  typecheck:\n    argv: ["npm", "run", "typecheck"]\n' +
+  '  unit:\n    argv: ["npx", "vitest", "run", "-t", "{selector}"]\n';
+
+/**
+ * The valid test plan plus a selector-bound stays-green row (TP-2) and a
+ * static row naming `typecheck` (TP-3): one row per digest rule of the
+ * evidence rules.
+ */
+export const EVIDENCE_PLAN =
+  `${validFiles()["testplan.yaml"]!}\n` +
+  '- id: TP-2\n  covers: [AC-1]\n  kind: stays-green\n  claim: "login keeps working"\n  probe_hint: "break the login handler"\n' +
+  '- id: TP-3\n  covers: [AC-1]\n  kind: static\n  claim: "the type check passes"\n  check_command_ref: typecheck\n';
+
+export const EVIDENCE_BINDINGS =
+  "TP-1:\n  status: new\n" +
+  "TP-2:\n  status: existing\n  selector: login works\n";
+
 /** A file to commit: its text, a symbolic link to `linkTo`, or `null` to delete it. */
 export type Change = string | null | { linkTo: string };
 

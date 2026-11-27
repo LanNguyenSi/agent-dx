@@ -17,7 +17,7 @@ describe("rule registry", () => {
     for (const id of ids) expect(id, id).toMatch(RULE_ID_RE);
   });
 
-  it("registers the engine, form, content, reference-state and bindings-log rules in the order of the docs", () => {
+  it("registers the engine, form, content, reference-state, bindings-log and evidence rules in the order of the docs", () => {
     expect(RULES.map((r) => r.id)).toEqual([
       "file",
       "format",
@@ -51,6 +51,10 @@ describe("rule registry", () => {
       "spec-changes-config",
       "static-command-unknown",
       "bindings-log",
+      "stale-evidence",
+      "unproven",
+      "self-reported",
+      "evidence-unknown-row",
     ]);
   });
 
@@ -116,19 +120,30 @@ describe("rule registry", () => {
       "spec-changes-config",
       "static-command-unknown",
       "bindings-log",
+      "stale-evidence",
+      "unproven",
+      "self-reported",
+      "evidence-unknown-row",
     ]);
   });
 
-  it("exactly the four repository rules and bindings-log need git, and every reference-state rule is an error that cannot be acknowledged", () => {
+  it("exactly the four repository rules, bindings-log and stale-evidence need git, and every reference-state rule is an error that cannot be acknowledged", () => {
     expect(RULES.filter((r) => r.needsGit === true).map((r) => r.id)).toEqual([
       "base-commit-not-ancestor",
       "commands-ref-not-ancestor",
       "spec-changes-config",
       "static-command-unknown",
       "bindings-log",
+      "stale-evidence",
     ]);
     const log = RULES.find((r) => r.id === "bindings-log")!;
     expect([log.level, log.ackable, log.gated]).toEqual(["error", false, true]);
+    const stale = RULES.find((r) => r.id === "stale-evidence")!;
+    expect([stale.level, stale.ackable, stale.gated]).toEqual([
+      "warning",
+      true,
+      false,
+    ]);
     for (const id of [
       "rule-skipped",
       "meta-frontmatter-mismatch",
@@ -136,6 +151,7 @@ describe("rule registry", () => {
       "commands-ref-not-ancestor",
       "spec-changes-config",
       "static-command-unknown",
+      "evidence-unknown-row",
     ]) {
       const rule = RULES.find((r) => r.id === id)!;
       expect(rule.level, id).toBe("error");
@@ -152,6 +168,7 @@ const absent: LintInputs = {
   questions: { state: "absent" },
   triage: { state: "absent" },
   meta: { state: "absent" },
+  evidence: { state: "absent" },
 };
 
 function ctx(over: Partial<RuleContext> = {}): RuleContext {

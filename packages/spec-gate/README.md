@@ -3,7 +3,8 @@
 `spec-gate` turns a ticket or intent into a checked, reviewable spec and
 test plan before implementation starts. The package is young: the CLI
 answers `--help` and `--version` and runs the `intake file`, `triage`,
-`digest`, `lint`, `lint-ack`, `propose`, `bind`, `repo-check` and `export` verbs described below, and further
+`digest`, `lint`, `lint-ack`, `propose`, `bind`, `repo-check`, `export`,
+`questions`, `answer` and `status` verbs described below, and further
 capabilities land as subcommands on top of this entry point as they are
 built.
 
@@ -70,6 +71,21 @@ string field of at least one task of the slicer return, 1 with the missing
 ids listed, 2 on a usage or parse error; the briefing keys, the path
 conventions and the token rule are described in
 [docs/export.md](docs/export.md); the code lives in `src/exporters/`.
+
+`spec-gate questions <spec-dir>` prints one JSON line
+(`spec-gate-questions/1`) with a spec's unanswered questions in numeric ID
+order and their counts, exiting 0 with none unanswered and 1 with at least one
+listed. `spec-gate answer <spec-dir> <question-id> (--answer <text> [--option
+<label>] | --accept-recommended) --channel <file|chat|comment> --author <login>
+[--comment-url <url>]` appends one answer to a draft spec's `questions.json`,
+with the time taken from the clock and the channel, author and optional
+comment URL recorded as provenance; it exits 0 when written and 2 on any
+refusal. `spec-gate status <spec-dir>` prints one offline JSON line
+(`spec-gate-status/1`) with the spec's status, triage class stored and derived,
+question counts, open residuals, bindings by status, `bindings.log` entry count
+and propose commit, and ack count, exiting 0 for a report. The frontier rule,
+the provenance and the exit codes are described in
+[docs/questions.md](docs/questions.md); the code lives in `src/state/`.
 
 ## Formats
 

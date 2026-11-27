@@ -1,15 +1,19 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   EVIDENCE_FIELDS,
+  EVIDENCE_FILE_RE,
   EVIDENCE_PHASES,
   EVIDENCE_PRODUCERS,
   EVIDENCE_RESULTS,
   MAX_CI_RUN_LENGTH,
   MAX_INPUT_LENGTH,
   SQUASH_EVIDENCE_RULE,
+  evidenceFileTpId,
   evidenceSurvivesSquash,
+  expectedCommandsDigest,
   parseEvidenceLines,
   staleEvidenceApplies,
   validateEvidenceEnvelope,
@@ -352,5 +356,75 @@ describe("evidence after a squash merge", () => {
     expect(SQUASH_EVIDENCE_RULE.summary).toMatch(
       /reachable from the default branch/,
     );
+  });
+});
+
+describe("expectedCommandsDigest", () => {
+  const UNIT_TEMPLATE = ["npx", "vitest", "run", "-t", "{selector}"];
+
+  it("equals the reference runner's formula for a run of one check", () => {
+    // the runner digests the list of argv lists of a run; a spec-gate check
+    // is a run of one command, so the list holds the row's one command
+    const template = ["npm", "run", "typecheck"];
+    expect(expectedCommandsDigest(template)).toBe(
+      createHash("sha256")
+        .update(JSON.stringify([template]))
+        .digest("hex"),
+    );
+    expect(expectedCommandsDigest(template)).toBe(
+      "0ee47a7219f84f1731be022c31c88b7c58549d44f204e3e2dc45364618084aa4",
+    );
+  });
+
+  it("is pinned to the reference vector", () => {
+    expect(expectedCommandsDigest(UNIT_TEMPLATE)).toBe(
+      "4a40e701c107ced85a444c19d8c979921e1e800965f16dad60e59a395bf0e0a4",
+    );
+  });
+
+  it("digests the selector placeholder unsubstituted", () => {
+    expect(expectedCommandsDigest(UNIT_TEMPLATE)).not.toBe(
+      // the same run with the selector substituted is a different digest:
+      // lint can only name the command set, not the test the run picked
+      "aca2195374f51d3f81cd9d27573752ca71195d6964e9218472668719b79e8950",
+    );
+    expect(
+      expectedCommandsDigest(["npx", "vitest", "run", "-t", "login works"]),
+    ).toBe("aca2195374f51d3f81cd9d27573752ca71195d6964e9218472668719b79e8950");
+  });
+
+  it("is stable under copying and sensitive to the command", () => {
+    expect(expectedCommandsDigest([...UNIT_TEMPLATE])).toBe(
+      expectedCommandsDigest(UNIT_TEMPLATE),
+    );
+    expect(expectedCommandsDigest(UNIT_TEMPLATE)).not.toBe(
+      expectedCommandsDigest(["npm", "test"]),
+    );
+  });
+});
+
+describe("the evidence file layout", () => {
+  it("names every row file shape and no other name", () => {
+    for (const name of ["TP-1.jsonl", "TP-123456789.jsonl"]) {
+      expect(EVIDENCE_FILE_RE.test(name), name).toBe(true);
+    }
+    for (const name of [
+      "TP-0.jsonl",
+      "TP-01.jsonl",
+      "tp-1.jsonl",
+      "TP-1.JSONL",
+      "TP-1.json",
+      "TP-1.jsonl.bak",
+      "bindings.yaml",
+    ]) {
+      expect(EVIDENCE_FILE_RE.test(name), name).toBe(false);
+    }
+  });
+
+  it("maps a row file to its row and every other name to nothing", () => {
+    expect(evidenceFileTpId("TP-42.jsonl")).toBe("TP-42");
+    for (const name of ["TP-0.jsonl", "TP-1.json", "TP-1.jsonl.bak"]) {
+      expect(evidenceFileTpId(name), name).toBeUndefined();
+    }
   });
 });
