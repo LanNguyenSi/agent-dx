@@ -3,6 +3,7 @@ import fs from "node:fs";
 import process from "node:process";
 import { Command, CommanderError, Option } from "commander";
 import { intakeFile } from "./adapters/file.js";
+import { runApproveCheck } from "./approve/index.js";
 import {
   DigestError,
   computeSpecDigest,
@@ -637,13 +638,91 @@ program
     process.exitCode = 0;
   });
 
+// `approve-check` exits 0 only for a report that says approved, 1 for a
+// report that does not, and 2 for a usage error, a refusal or an exception.
+// The token is read from the environment and has no option. An option the
+// verb does not know is counted here and refused by the verb itself, so
+// commander never repeats it on stderr: a token given as `--token=...` by
+// mistake is not printed. The verb has no help option of its own, so
+// `--help` among its arguments is such an option and exits 2 instead of 0;
+// `spec-gate help approve-check` prints the help.
+program
+  .command("approve-check")
+  .description(
+    "check whether the proposed spec of an open GitHub pull request is approved and print one JSON report line " +
+      "(spec-gate-approve/1): the eight conditions, the repository check among them, and the commands the spec " +
+      "refers to; exits 0 when approved, 1 when not, 2 on a usage error or refusal. The checkout must be at the head " +
+      "commit of the pull request, not at a merge of it. The token is read from the environment variable GITHUB_TOKEN only",
+  )
+  .argument("<spec-dir>", "the spec directory, specs/<name> inside --repo")
+  .requiredOption(
+    "--repo <dir>",
+    "the trusted checkout root, as for lint; never discovered",
+  )
+  .requiredOption(
+    "--default-ref <ref>",
+    "full ref name of the fetched default branch, as for lint; the settings are read at its commit",
+  )
+  .option(
+    "--base <commit>",
+    "full commit id of the pull request base; it must lie on --default-ref and be the base the host reports. " +
+      "Nothing is measured from it",
+  )
+  .requiredOption(
+    "--github-repo <owner/name>",
+    "the repository the pull request targets",
+  )
+  .requiredOption("--pr <number>", "the number of the pull request")
+  .option(
+    "--api-url <url>",
+    "the API root of the host (default: https://api.github.com); https, or http for a loopback host",
+  )
+  .helpOption(false)
+  .allowUnknownOption()
+  .allowExcessArguments(true)
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action(
+    async (
+      specDir: string,
+      options: {
+        repo: string;
+        defaultRef: string;
+        base?: string;
+        githubRepo: string;
+        pr: string;
+        apiUrl?: string;
+      },
+      command: Command,
+    ) => {
+      const run = await runApproveCheck(
+        {
+          specDir,
+          repo: options.repo,
+          defaultRef: options.defaultRef,
+          ...(options.base !== undefined ? { base: options.base } : {}),
+          githubRepo: options.githubRepo,
+          pr: options.pr,
+          ...(options.apiUrl !== undefined ? { apiUrl: options.apiUrl } : {}),
+          unknownArguments: command.args.length - 1,
+        },
+        process.env,
+      );
+      if (run.stdout !== "") process.stdout.write(run.stdout);
+      if (run.stderr !== "") process.stderr.write(run.stderr);
+      process.exitCode = run.exitCode;
+    },
+  );
+
 try {
   await program.parseAsync();
 } catch (err) {
-  // Only `intake file`, `lint`, `lint-ack`, `propose`, `bind`,
-  // `repo-check` and `export` have exitOverride, so every CommanderError comes from one
-  // of them: help and version keep their exit code 0, a usage error exits 2;
-  // anything else is an unexpected exception and also exits 2.
+  // Only `intake file`, `lint`, `lint-ack`, `propose`, `bind`, `repo-check`,
+  // `export`, `questions`, `answer`, `status` and `approve-check` have
+  // exitOverride, so every CommanderError comes from one of them: help and
+  // version keep their exit code 0, a usage error exits 2; anything else is
+  // an unexpected exception and also exits 2.
   if (err instanceof CommanderError) {
     // commander has already written the usage message to stderr.
     process.exitCode = err.exitCode === 0 ? 0 : 2;

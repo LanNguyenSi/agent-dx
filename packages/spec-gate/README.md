@@ -4,9 +4,9 @@
 test plan before implementation starts. The package is young: the CLI
 answers `--help` and `--version` and runs the `intake file`, `triage`,
 `digest`, `lint`, `lint-ack`, `propose`, `bind`, `repo-check`, `export`,
-`questions`, `answer` and `status` verbs described below, and further
-capabilities land as subcommands on top of this entry point as they are
-built.
+`questions`, `answer`, `status` and `approve-check` verbs described below,
+and further capabilities land as subcommands on top of this entry point as
+they are built.
 
 ## Commands
 
@@ -87,6 +87,18 @@ and propose commit, and ack count, exiting 0 for a report. The frontier rule,
 the provenance and the exit codes are described in
 [docs/questions.md](docs/questions.md); the code lives in `src/state/`.
 
+`spec-gate approve-check <spec-dir> --repo <dir> --default-ref <ref> [--base
+<commit>] --github-repo <owner/name> --pr <number> [--api-url <url>]` checks
+whether the proposed spec of an open GitHub pull request is approved and
+prints one JSON report line (`spec-gate-approve/1`) with the eight conditions,
+the repository check among them, and the commands the spec refers to. It
+exits 0 when approved, 1 when not and 2 on a usage error or refusal; only 0
+means approved. The token is read from the environment variable
+`GITHUB_TOKEN` only, never from an option, and is never printed. The checkout
+must be at the head commit of the pull request, not at a merge of it. It is
+described in [docs/approve.md](docs/approve.md) ("CLI"); the code lives in
+`src/approve/` and `src/host/`.
+
 ## Formats
 
 The files `spec-gate` reads and writes, their grammars, the field-to-layer
@@ -104,4 +116,4 @@ The code lives in `src/canonical/`.
 
 ## Approval
 
-Whether a proposed spec counts as approved is derived by `checkApproval` in `src/approve/` from the facts a host adapter (`src/host/`) supplies and from git (a library entry point, no CLI verb); the conditions, the report and the limits are described in [docs/approve.md](docs/approve.md).
+Whether a proposed spec counts as approved is derived by `checkApproval` in `src/approve/` from the facts a host adapter (`src/host/`) supplies and from git; `spec-gate approve-check` runs it for a pull request on GitHub. The conditions, the report and the limits are described in [docs/approve.md](docs/approve.md).

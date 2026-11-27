@@ -86,7 +86,7 @@ async function check(): Promise<ApproveReport> {
 describe("checkApproval on the GitHub adapter", { timeout: 60_000 }, () => {
   it("approved: every condition holds on the facts the adapter reads", async () => {
     const report = await check();
-    expect(codes(report)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
+    expect(codes(report)).toEqual(Array(8).fill("ok"));
     expect(report.approved).toBe(true);
     expect(report.approve_reported).toBe(false);
     expect(report.pull_request).toEqual({

@@ -240,7 +240,10 @@ Findings are sorted by `path`, then `code`, then `message`; a path is
 repository-relative and the report holds no absolute path. Exit codes: 0
 without findings, 1 with findings, 2 on a usage error (a missing `--repo`, no
 `--default-ref` and no `--base`, a git input that does not resolve) or a git
-read that fails. The code lives in `src/repo/`.
+read that fails. The code lives in `src/repo/`. `spec-gate approve-check` runs
+this check as its condition 8, from the one merge base of `HEAD` and the
+default commit and never from `--base` (see [approve.md](approve.md)); that
+does not replace the run on every pull request.
 
 ## Git inputs
 
@@ -350,7 +353,8 @@ repository state it is given.
   base sha of a `pull_request` event), a full commit id.
 - The full history is fetched. A shallow clone does not hold the commits the
   ancestry checks compare, so `base_commit` and `commands_ref` report as not
-  being commits, and the diff base may not be found.
+  being commits, and the diff base may not be found or, when the shallow
+  boundary hides the true merge base, may be an older commit.
 - The checkout is the one the job trusts: the lint refuses a repository that
   the `.git` entry of its work tree does not name (the repository check
   above), but it does not vouch for a checkout whose `.git` the pull request

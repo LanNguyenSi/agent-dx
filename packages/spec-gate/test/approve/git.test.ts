@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  mergeBases,
   specDigestAt,
   specDirMatchesCommit,
   specStateAt,
@@ -17,7 +18,8 @@ import {
   specFiles,
   type Change,
 } from "../lint/git-helpers.js";
-import { build, type SpecChange } from "./helpers.js";
+import { scratch } from "../lint/helpers.js";
+import { build, crissCross, staleBase, type SpecChange } from "./helpers.js";
 
 const NO_COMMIT = "0".repeat(40);
 
@@ -321,5 +323,108 @@ describe("specDirMatchesCommit", { timeout: 60_000 }, () => {
         specDirMatchesCommit(s.dir, commit, specPath, s.spec),
       ).toThrow(LintGitError);
     }
+  });
+});
+
+describe("mergeBases", { timeout: 60_000 }, () => {
+  it("is the one commit two histories forked at", async () => {
+    const s = await build();
+    expect(mergeBases(s.dir, s.head, s.c1)).toEqual([s.c1]);
+    expect(mergeBases(s.dir, s.c1, s.head)).toEqual([s.c1]);
+    expect(mergeBases(s.dir, s.head, s.head)).toEqual([s.head]);
+  });
+
+  it("is the merged commit once the head merged a newer one", async () => {
+    const s = await staleBase("spec-deleted");
+    expect(mergeBases(s.dir, s.head, s.newer)).toEqual([s.newer]);
+  });
+
+  it.each([["side"], ["default"]] as const)(
+    "lists both merge bases of histories that crossed (the %s commit committed last)",
+    async (later) => {
+      const s = await crissCross("spec-deleted", later);
+      const all = mergeBases(s.dir, s.head, s.newer);
+      expect(all).toHaveLength(2);
+      expect([...all].sort()).toEqual([...s.bases].sort());
+    },
+  );
+
+  it("is empty for two histories without a common commit", async () => {
+    const s = await build();
+    await s.repo.sh("checkout", "-q", "--orphan", "lone");
+    const lone = await s.repo.commit({ "lone.txt": "lone\n" }, "no parent");
+    expect(mergeBases(s.dir, lone, s.c1)).toEqual([]);
+  });
+
+  it("throws for a value that is no full commit id, and for a commit the repository lacks", async () => {
+    const s = await build();
+    for (const bad of ["HEAD", "main", s.head.slice(0, 12), "--all", ""]) {
+      expect(() => mergeBases(s.dir, bad, s.c1)).toThrow(LintGitError);
+      expect(() => mergeBases(s.dir, s.c1, bad)).toThrow(LintGitError);
+    }
+    expect(() => mergeBases(s.dir, NO_COMMIT, s.c1)).toThrow(LintGitError);
+  });
+});
+
+describe("mergeBases: what git answers", { timeout: 60_000 }, () => {
+  const saved = process.env["PATH"];
+  afterEach(() => {
+    process.env["PATH"] = saved;
+  });
+
+  /**
+   * A `git` first on PATH that answers every `merge-base` call with
+   * `output` and the exit status `status`; every other call goes to the
+   * real git.
+   */
+  function answering(output: string, status: number): void {
+    const dir = fs.mkdtempSync(path.join(scratch(), "answering-git-"));
+    const real = [
+      "/usr/bin/git",
+      "/opt/homebrew/bin/git",
+      "/usr/local/bin/git",
+    ].find((p) => fs.existsSync(p))!;
+    fs.writeFileSync(path.join(dir, "out"), output);
+    fs.writeFileSync(
+      path.join(dir, "git"),
+      [
+        "#!/bin/sh",
+        'for a in "$@"; do',
+        `  if [ "$a" = "merge-base" ]; then cat "${dir}/out"; exit ${status}; fi`,
+        "done",
+        `exec "${real}" "$@"`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    process.env["PATH"] = `${dir}${path.delimiter}${saved ?? ""}`;
+  }
+
+  const A = "a".repeat(40);
+  const B = "b".repeat(40);
+
+  it("returns every id git lists, in its order", async () => {
+    const s = await build();
+    answering(`${B}\n${A}\n`, 0);
+    expect(mergeBases(s.dir, s.head, s.c1)).toEqual([B, A]);
+  });
+
+  it("is empty only for exit 1 without output", async () => {
+    const s = await build();
+    answering("", 1);
+    expect(mergeBases(s.dir, s.head, s.c1)).toEqual([]);
+  });
+
+  it.each([
+    ["exit 0 without output: never read as no shared history", "", 0],
+    ["exit 0 with a line that is no commit id", "not-an-id\n", 0],
+    ["exit 0 with a commit id and a line that is none", `${A}\nHEAD\n`, 0],
+    ["exit 1 with output", `${A}\n`, 1],
+    ["another exit status with a commit id", `${A}\n`, 2],
+    ["exit 128 without output", "", 128],
+  ])("throws for %s", async (_what, output, status) => {
+    const s = await build();
+    answering(output, status);
+    expect(() => mergeBases(s.dir, s.head, s.c1)).toThrow(LintGitError);
   });
 });

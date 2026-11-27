@@ -1,7 +1,8 @@
 /**
  * The git reads of the approval check that no other module has: the digest
- * of a spec as a commit holds it, and whether the spec directory of the work
- * tree is the one the head commit holds.
+ * of a spec as a commit holds it, whether the spec directory of the work
+ * tree is the one the head commit holds, and every merge base of two
+ * commits.
  *
  * Every git call goes through `runGit` of the lint or through the digest's
  * own readers, so the hardening of `canonical/git-hardening.ts` applies:
@@ -14,6 +15,7 @@ import path from "node:path";
 import {
   DigestError,
   assertCommit as assertCommandsRef,
+  compareText,
   computeDigest,
   readCommandSet,
   referencedCommandNames,
@@ -109,6 +111,106 @@ export function specDigestAt(
     if (!isReadError(err)) throw err;
     return null;
   }
+}
+
+/** The commands of a spec, or the reason they cannot be listed. */
+export type SpecCommands =
+  | { ok: true; commands: { name: string; argv: string[] }[] }
+  /** `problem` is a fixed code: one of this module's own or a code of the digest's readers. */
+  | { ok: false; problem: string };
+
+/**
+ * The commands a runner may start for the spec at `specPath` as `commit`
+ * holds it, sorted by name: every command a test-plan row names
+ * (`check_command_ref`), and the command of the set that carries
+ * `{selector}` when the set has one. That one is listed whatever the
+ * bindings say: it is what a runner starts for every row bound to a
+ * selector, and a binding can gain a selector after the approval.
+ *
+ * `spec.md` and `testplan.yaml` are read from the tree of `commit`, the
+ * command set from git at the `commands_ref` of that spec, through the
+ * readers of the digest: never at the tip of the default branch, never at
+ * `commit` itself and never from the work tree. A set that cannot be read
+ * there (no such commit, no regular file, a file that does not parse) and a
+ * row that names a command the set lacks are a problem, not an empty list.
+ */
+export function specCommandsAt(
+  repo: string,
+  commit: string,
+  specPath: string,
+): SpecCommands {
+  try {
+    const spec = specAt(repo, commit, specPath);
+    if (spec === null) return { ok: false, problem: "spec-unreadable" };
+    const planBytes = readBlobBytes(
+      repo,
+      commit,
+      repoPathOf(specPath, TESTPLAN_FILE),
+    );
+    const planText = planBytes === null ? null : decodeUtf8(planBytes);
+    const plan = planText === null ? null : parseTestPlan(planText);
+    if (plan === null || !plan.ok) {
+      return { ok: false, problem: "testplan-unreadable" };
+    }
+    const ref = spec.frontmatter.commands_ref;
+    const set = readCommandSet(repo, ref);
+    const argvOf = new Map<string, string[]>();
+    for (const name of referencedCommandNames(plan.value)) {
+      const entry = set.commands.find((c) => c.name === name);
+      if (entry === undefined) {
+        return { ok: false, problem: "command-ref-unknown" };
+      }
+      argvOf.set(name, entry.argv);
+    }
+    for (const entry of set.commands) {
+      if (entry.usesSelector) argvOf.set(entry.name, entry.argv);
+    }
+    return {
+      ok: true,
+      commands: [...argvOf.keys()]
+        .sort(compareText)
+        .map((name) => ({ name, argv: [...argvOf.get(name)!] })),
+    };
+  } catch (err) {
+    if (err instanceof DigestError) return { ok: false, problem: err.code };
+    if (err instanceof LintGitError)
+      return { ok: false, problem: "git-failed" };
+    throw err;
+  }
+}
+
+/**
+ * Every merge base of the commits `a` and `b`: each common ancestor that no
+ * other common ancestor descends from, as full commit ids in the order git
+ * lists them. No entry when the two share no history. Histories that
+ * crossed (each side merged a commit of the other that the other reached on
+ * its own) have more than one, and git's plain `merge-base` then prints one
+ * of them; a caller that needs one commit to measure a change from must
+ * know that there are several.
+ */
+export function mergeBases(repo: string, a: string, b: string): string[] {
+  if (!COMMIT_RE.test(a) || !COMMIT_RE.test(b)) {
+    throw new LintGitError(
+      "not-a-commit",
+      "a value is not a full commit id (40 or 64 lower-case hex digits)",
+    );
+  }
+  const run = runGit(repo, ["merge-base", "--all", "--end-of-options", a, b]);
+  // Exit 1 with no output is git's answer for two histories without a
+  // common commit.
+  if (run.status === 1 && run.stdout.length === 0) return [];
+  const ids = run.stdout
+    .toString("utf8")
+    .split("\n")
+    .filter((line) => line !== "");
+  if (
+    run.status !== 0 ||
+    ids.length === 0 ||
+    ids.some((id) => !COMMIT_RE.test(id))
+  ) {
+    throw new LintGitError("git-failed", "git could not find the merge bases");
+  }
+  return ids;
 }
 
 /** The modes of a regular file in a git tree. */

@@ -51,7 +51,13 @@ export const CONDITIONS = [
     condition: 7,
     name: "config-untouched",
     summary:
-      "No file under `.spec-gate/` differs between the diff base and the head.",
+      "No file under `.spec-gate/` differs between the merge base of the head with the default branch and the head.",
+  },
+  {
+    condition: 8,
+    name: "repo-check-clean",
+    summary:
+      "The repository check has no finding between the merge base of the head with the default branch and the head: no protected spec disappears, changes its id, goes back to `draft` or loses its log.",
   },
 ] as const;
 
@@ -67,7 +73,8 @@ export const OK_CODE = "ok";
  */
 export const FAILURE_CODES = {
   "host-failed": [1, 2, 3, 6],
-  "git-failed": [2, 3, 4, 7],
+  "git-failed": [2, 3, 4, 7, 8],
+  "ambiguous-merge-base": [4, 7, 8],
   "head-mismatch": [1],
   "no-approval": [1, 2, 3],
   "approval-stale": [1],
@@ -90,6 +97,8 @@ export const FAILURE_CODES = {
   "approval-not-verifiable": [5],
   "approval-not-enforced": [6],
   "spec-changes-config": [7],
+  "repo-check-findings": [8],
+  "tree-too-large": [8],
 } as const satisfies Record<string, readonly ConditionNumber[]>;
 
 export type FailureCode = keyof typeof FAILURE_CODES;
@@ -136,6 +145,16 @@ export const GAPS: readonly Gap[] = [
   },
 ];
 
+/** The code of the gap a report carries when `commands` is `null`. */
+export const COMMANDS_GAP = "commands-not-resolved";
+
+/** One command a runner may start for the spec, as the set at `commands_ref` has it. */
+export interface ReportedCommand {
+  name: string;
+  /** The argv list, element for element; `{selector}` is left as it is written. */
+  argv: string[];
+}
+
 export interface ApproveReport {
   format: typeof APPROVE_FORMAT;
   /** The frontmatter `id` at the head, or `null` when `spec.md` does not parse there. */
@@ -152,7 +171,12 @@ export interface ApproveReport {
   approve_reported: boolean;
   /** The commit that was checked: `HEAD` of the repository. */
   head: string;
-  /** The reference commit of the final lint and of the diff base: `base` when given, else `default_commit`. */
+  /**
+   * The base commit that is compared with the base the host reports: `base`
+   * when given, else `default_commit`. No condition measures from it;
+   * conditions 4, 7 and 8 measure from the one merge base of `head` and
+   * `default_commit`.
+   */
   reference: string;
   /** The commit the default ref names: the settings were read there. */
   default_commit: string;
@@ -177,6 +201,14 @@ export interface ApproveReport {
    * to see who let the current settings in.
    */
   last_config_commit: { commit: string | null; approver: string | null };
+  /**
+   * The commands the spec at the head refers to, read from git at the
+   * `commands_ref` of that spec and sorted by name: every command a
+   * test-plan row names, and the command that carries `{selector}` when the
+   * set has one. `null` when they cannot be read; `gaps` then holds
+   * `commands-not-resolved` with the reason. Never a condition.
+   */
+  commands: ReportedCommand[] | null;
   gaps: Gap[];
 }
 

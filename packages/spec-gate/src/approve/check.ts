@@ -3,7 +3,10 @@
  *
  * The tree knows `draft` and `proposed` only; "approved" is derived here,
  * from facts a host adapter supplies and from git reads at fixed commits.
- * It holds only when all seven conditions hold (see `CONDITIONS` and
+ * What a pull request changes is measured from one base, the one merge base
+ * of the head and the tip of the default branch (`measureOf`); a base commit
+ * the caller gives is only compared with the base the host reports.
+ * It holds only when all eight conditions hold (see `CONDITIONS` and
  * `docs/approve.md`). The check never fetches, never writes and never reads
  * text a pull request author controls: the settings come from git at the
  * commit the default ref names (the tip of the default branch, with or
@@ -31,6 +34,7 @@ import { resolveGitInputs, type GitRequest } from "../lint/git/resolve.js";
 import { checkSpecChangesConfig } from "../lint/rules/refs.js";
 import { lintSpecDir } from "../lint/run.js";
 import type { GitInputs, Loaded, RuleContext } from "../lint/types.js";
+import { checkRepository } from "../repo/index.js";
 import {
   SPECS_DIR,
   isRepoPath,
@@ -39,11 +43,18 @@ import {
   specPathIn,
 } from "../state/git.js";
 import { readHostFacts, type Fact, type HostFacts } from "./facts.js";
-import { specDigestAt, specDirMatchesCommit, specStateAt } from "./git.js";
+import {
+  mergeBases,
+  specCommandsAt,
+  specDigestAt,
+  specDirMatchesCommit,
+  specStateAt,
+} from "./git.js";
 import { allowlisted, sameAccount } from "./logins.js";
 import { standingApprovals, type StandingApproval } from "./reviews.js";
 import {
   APPROVE_FORMAT,
+  COMMANDS_GAP,
   CONDITIONS,
   GAPS,
   OK_CODE,
@@ -54,6 +65,7 @@ import {
   type ConditionNumber,
   type ConditionResult,
   type FailureCode,
+  type Gap,
   type ReportedApproval,
 } from "./types.js";
 
@@ -81,9 +93,17 @@ interface Subject {
   dir: string;
   /** The spec directory in the repository, `specs/<name>`. */
   specPath: string;
+  /**
+   * The git inputs as the caller gave them, `base` included. Conditions read
+   * `repo` and `head` from it, and condition 2 compares `reference` with the
+   * base the host reports. No condition measures a change from its
+   * `reference` or its `diffBase`: that is what `measure` is for.
+   */
   git: GitInputs;
   /** The commit `defaultRef` names. */
   defaultCommit: string;
+  /** The one base conditions 4, 7 and 8 measure from, or why there is none. */
+  measure: Measure;
   facts: HostFacts;
   /** The settings at `defaultCommit`; the format defaults when the file is absent. */
   config: SpecGateConfig | null;
@@ -281,7 +301,10 @@ function digestUnchanged(s: Subject, headDigest: string | null): Outcome {
   );
 }
 
-/** 4: `proposed` at the head, and the final lint of that head is clean. */
+/**
+ * 4: `proposed` at the head, and the final lint of that head is clean. The
+ * lint measures from the measuring base, never from a base commit given.
+ */
 function proposedAndClean(
   s: Subject,
   state: { status: string } | null,
@@ -304,10 +327,14 @@ function proposedAndClean(
       "the spec directory of the work tree is not, byte for byte, the one the head commit holds; the lint would judge other files",
     );
   }
+  if (!s.measure.ok) return s.measure.outcome;
+  // The lint is given the default ref and never the base commit. It then
+  // resolves its reference to the default commit and its diff base to the
+  // merge base of the head with it, which is the measuring base: there is
+  // exactly one, or the line above returned.
   const request: GitRequest = {
     repo: s.request.repo,
     defaultRef: s.request.defaultRef,
-    ...(s.request.base !== undefined ? { base: s.request.base } : {}),
   };
   const lint = lintSpecDir(s.dir, { final: true, git: request });
   if (!lint.ok) {
@@ -380,8 +407,85 @@ function reviewEnforced(s: Subject): Outcome {
   return holds(`the host enforces a review for ${REVIEW_PATHS.join(" and ")}`);
 }
 
-/** 7: the pull request changes nothing under `.spec-gate/`, judged as the lint judges it. */
+/**
+ * The measuring base: what conditions 4, 7 and 8 measure the pull request
+ * from. It is derived once, and those conditions use nothing else.
+ */
+type Measure =
+  | {
+      ok: true;
+      /** The head against the default commit, the diff base their one merge base. */
+      git: GitInputs;
+    }
+  | { ok: false; outcome: Outcome };
+
+/**
+ * Derives the measuring base: the one merge base of the head and the commit
+ * the default ref names.
+ *
+ * A base commit given by the caller is not it. A base says where the pull
+ * request started, and a host can report one that is older than a default
+ * commit the head has merged since. Measured from that older commit, a file
+ * the pull request puts back to its old content shows no change, a spec the
+ * default branch gained in between is not in the tree a walk starts from,
+ * and a log merged in between is not there to be compared with. Measured
+ * from the default branch, all three show.
+ *
+ * With more than one merge base there is no commit to measure from: git
+ * would pick one, the check cannot rely on which, and from one whose tree
+ * lacks a spec the deletion of that spec does not show while a merge still
+ * makes it. That is `ambiguous-merge-base`, and nothing is measured. No
+ * merge base and a failed read are `git-failed`.
+ */
+function measureOf(git: GitInputs, defaultCommit: string): Measure {
+  let bases: string[];
+  try {
+    bases = mergeBases(git.repo, git.head, defaultCommit);
+  } catch (err) {
+    if (!(err instanceof LintGitError)) throw err;
+    return {
+      ok: false,
+      outcome: fails(
+        "git-failed",
+        `the repository could not be read (${err.code}); the merge base of the head with the default branch is not known and nothing is measured from a guess`,
+      ),
+    };
+  }
+  if (bases.length === 0) {
+    return {
+      ok: false,
+      outcome: fails(
+        "git-failed",
+        "the head and the tip of the default branch share no history; there is no commit to measure the pull request from",
+      ),
+    };
+  }
+  if (bases.length > 1) {
+    return {
+      ok: false,
+      outcome: fails(
+        "ambiguous-merge-base",
+        `the head and the tip of the default branch have ${bases.length} merge bases; the pull request is not measured from one of several. Merge the tip of the default branch into the pull request branch, or rebase onto it, so that one remains`,
+      ),
+    };
+  }
+  return {
+    ok: true,
+    git: {
+      repo: git.repo,
+      reference: defaultCommit,
+      diffBase: bases[0]!,
+      head: git.head,
+    },
+  };
+}
+
+/**
+ * 7: the pull request changes nothing under `.spec-gate/`, judged by the
+ * rule of the lint from the measuring base.
+ */
 function configUntouched(s: Subject): Outcome {
+  if (!s.measure.ok) return s.measure.outcome;
   const absent = { state: "absent" } as const;
   const ctx: RuleContext = {
     inputs: {
@@ -395,7 +499,7 @@ function configUntouched(s: Subject): Outcome {
     status: null,
     profile: "full",
     mode: "final",
-    git: s.git,
+    git: s.measure.git,
   };
   const findings = checkSpecChangesConfig(ctx);
   if (findings.some((finding) => finding.code !== "spec-changes-config")) {
@@ -411,7 +515,44 @@ function configUntouched(s: Subject): Outcome {
     );
   }
   return holds(
-    "no file under .spec-gate/ differs between the diff base and the head",
+    "no file under .spec-gate/ differs between the merge base with the default branch and the head",
+  );
+}
+
+/** The most findings of the repository check a message of condition 8 lists. */
+export const MAX_LISTED_FINDINGS = 20;
+
+/**
+ * 8: the repository check has no finding, judged as `repo-check` judges it.
+ *
+ * It runs from the measuring base to the head, both trees read from git.
+ * The work tree is not asked, so a spec the head deletes stays deleted
+ * whatever the checkout holds, and the walk covers the whole tree, not only
+ * `specs/`.
+ */
+function repoCheckClean(s: Subject): Outcome {
+  if (!s.measure.ok) return s.measure.outcome;
+  const { findings } = checkRepository(s.measure.git);
+  if (findings.some((finding) => finding.code === "tree-too-large")) {
+    return fails(
+      "tree-too-large",
+      "the tree of the diff base or of the head is over a cap of the repository check; a tree that was not read in full is never passed",
+    );
+  }
+  if (findings.length > 0) {
+    // The findings arrive sorted by path, then code. A path is text of the
+    // tree, so it is quoted: where one ends is never a guess.
+    const listed = findings
+      .slice(0, MAX_LISTED_FINDINGS)
+      .map((finding) => `${finding.code} ${JSON.stringify(finding.path)}`);
+    const more = findings.length - listed.length;
+    return fails(
+      "repo-check-findings",
+      `the repository check reports ${count(findings.length, "finding", "findings")}: ${listed.join(", ")}${more > 0 ? ` (and ${more} more)` : ""}`,
+    );
+  }
+  return holds(
+    "no protected spec of the merge base with the default branch disappears, changes its id, goes back to draft or loses its log at the head",
   );
 }
 
@@ -502,8 +643,8 @@ export async function checkApproval(
   const facts = await readHostFacts(request.host);
   // Who may approve is what the default branch says now, with or without a
   // base commit: an approver revoked there after the pull request base, or
-  // an account made an agent identity there, must not count. The base only
-  // sets the diff base and the reference of the lint.
+  // an account made an agent identity there, must not count. The base is
+  // only compared with the base the host reports.
   const config = configOf(
     loadConfigAtReference(
       { ...git, reference: defaultCommit },
@@ -522,6 +663,7 @@ export async function checkApproval(
     specPath,
     git,
     defaultCommit,
+    measure: measureOf(git, defaultCommit),
     facts,
     config,
     standing,
@@ -559,7 +701,25 @@ export async function checkApproval(
       7,
       evaluate(() => configUntouched(subject)),
     ),
+    result(
+      8,
+      evaluate(() => repoCheckClean(subject)),
+    ),
   ];
+  // What a runner may start for this spec. It is shown to the reader and is
+  // no condition: the digest of condition 3 already binds the same argv
+  // lists for every command a row names.
+  const commands = specCommandsAt(git.repo, git.head, specPath);
+  const gaps: Gap[] = GAPS.map((gap) => ({
+    code: gap.code,
+    message: gap.message,
+  }));
+  if (!commands.ok) {
+    gaps.push({
+      code: COMMANDS_GAP,
+      message: `the commands of the spec could not be read from git at its commands_ref (${commands.problem}); the report lists none`,
+    });
+  }
 
   const code = (n: ConditionNumber) => conditions[n - 1]!.code;
   const pullRequest = facts.pullRequest.ok ? facts.pullRequest.value : null;
@@ -595,7 +755,8 @@ export async function checkApproval(
       commit: configCommit.commit,
       approver: configCommit.approver,
     },
-    gaps: GAPS.map((gap) => ({ code: gap.code, message: gap.message })),
+    commands: commands.ok ? commands.commands : null,
+    gaps,
   };
   return { kind: "report", report };
 }
