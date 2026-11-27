@@ -1,8 +1,12 @@
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { computeDigest } from "../../src/canonical/index.js";
 import {
   TEST_PLAN_KINDS,
   allowedFieldsOf,
   layerOf,
+  parseSpec,
   parseTestPlan,
   requiredFieldsOf,
   validateTestPlan,
@@ -332,6 +336,20 @@ describe("testplan.yaml: integers and the IEEE-754 safe range", () => {
     if (!a.ok || !b.ok) return;
     expect(a.value[0]!.baseline).toBe("9007199254740993");
     expect(b.value[0]!.baseline).toBe("9007199254740992");
+    // and the digest keeps them apart too
+    const spec = parseSpec(
+      fs.readFileSync(
+        fileURLToPath(
+          new URL("../fixtures/golden-digest/base/spec.md", import.meta.url),
+        ),
+        "utf8",
+      ),
+    );
+    expect(spec.ok).toBe(true);
+    if (!spec.ok) return;
+    const digest = (testPlan: typeof a.value) =>
+      computeDigest({ spec: spec.value, testPlan, commands: {} });
+    expect(digest(a.value)).not.toBe(digest(b.value));
   });
 
   it("still accepts a finite number that is not an integer", () => {

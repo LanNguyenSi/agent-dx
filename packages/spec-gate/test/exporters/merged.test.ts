@@ -265,20 +265,14 @@ describe("spec-gate export --format ow with a spelling in another case", () => {
     return folds;
   }
 
-  const SKIP =
-    "skipped: the temporary volume is case-sensitive (Linux CI): a spelling in another case cannot be produced here";
-
-  it("takes a spec directory spelled in another case", async () => {
+  it("takes a spec directory spelled in another case", async (ctx) => {
     const repo = await mergedRepo();
-    if (!foldsCase(repo.dir)) {
-      console.warn(SKIP);
-      return;
-    }
+    if (!foldsCase(repo.dir)) ctx.skip();
     // Folded both at a component of the repository's own path and below
     // it: the containment test and the git reads must see the case on disk.
-    const folded = path
-      .join(repo.dir, "Specs", "s1")
-      .replace("spec-gate-export", "SPEC-GATE-EXPORT");
+    const original = path.join(repo.dir, "Specs", "s1");
+    const folded = original.replace("spec-gate-export", "SPEC-GATE-EXPORT");
+    expect(folded).not.toBe(original);
     const run = await runCli(
       [
         "export",
@@ -297,13 +291,11 @@ describe("spec-gate export --format ow with a spelling in another case", () => {
     expect(dropRef(run.stdout)).toBe(dropRef(GOLDEN));
   });
 
-  it("takes a --repo spelled in another case", async () => {
+  it("takes a --repo spelled in another case", async (ctx) => {
     const repo = await mergedRepo();
-    if (!foldsCase(repo.dir)) {
-      console.warn(SKIP);
-      return;
-    }
+    if (!foldsCase(repo.dir)) ctx.skip();
     const folded = repo.dir.replace("spec-gate-export", "SPEC-GATE-EXPORT");
+    expect(folded).not.toBe(repo.dir);
     const run = await runCli(
       [
         "export",
@@ -322,20 +314,19 @@ describe("spec-gate export --format ow with a spelling in another case", () => {
     expect(dropRef(run.stdout)).toBe(dropRef(GOLDEN));
   });
 
-  it("still refuses a spec directory that lies outside the repository, folded or not", async () => {
+  it("still refuses a spec directory that lies outside the repository, folded or not", async (ctx) => {
     const repo = await mergedRepo();
-    if (!foldsCase(repo.dir)) {
-      console.warn(SKIP);
-      return;
-    }
+    if (!foldsCase(repo.dir)) ctx.skip();
     const outside = fs.mkdtempSync(
       path.join(path.dirname(repo.dir), "spec-gate-outside-"),
     );
     roots.push(outside);
-    for (const spec of [
-      outside,
-      outside.replace("spec-gate-outside", "SPEC-GATE-OUTSIDE"),
-    ]) {
+    const foldedOutside = outside.replace(
+      "spec-gate-outside",
+      "SPEC-GATE-OUTSIDE",
+    );
+    expect(foldedOutside).not.toBe(outside);
+    for (const spec of [outside, foldedOutside]) {
       const run = await runCli(
         [
           "export",
