@@ -8,6 +8,7 @@ import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
 import { renderText } from "./cli-render.js";
 import { resolvePatternAnchor } from "./util/pattern-anchor.js";
+import { isInside, resolvesInside } from "./util/path-containment.js";
 import { classifyStdoutError } from "./stdout-error.js";
 import {
   noStdinContentError,
@@ -200,6 +201,8 @@ async function runCheck(
     // and every violation it carries.
     const seen = new Set<string>();
     const perPath: CheckSummary[] = [];
+    const skipWarnings: string[] = [];
+    const cwd = process.cwd();
     for (const rawPath of rawPaths) {
       if (!fs.existsSync(rawPath)) {
         throw new Error(`Path does not exist: ${rawPath}`);
@@ -207,6 +210,19 @@ async function runCheck(
       const resolved = path.resolve(rawPath);
       if (seen.has(resolved)) continue;
       seen.add(resolved);
+      // A target spelled inside the working directory usually comes from
+      // repository content (a changed-file list, a glob): when a symbolic
+      // link along it leads out of the working directory, it is skipped
+      // and named instead of read. A target spelled outside (`/abs/file`,
+      // `../x`) is the caller's explicit choice and is scanned as given.
+      // Compared on real paths, unlike the pattern anchor below, which
+      // stays lexical (docs/configuration.md#path-pattern-anchor).
+      if (isInside(cwd, resolved) && !resolvesInside(cwd, resolved)) {
+        skipWarnings.push(
+          `skipped ${rawPath}: resolves outside the working directory (symbolic link)`,
+        );
+        continue;
+      }
       // Decided per target, not once for the whole invocation: an
       // out-of-tree or absolute `--config` (e.g. a central config outside
       // the scanned directory) must leave `check .`'s own verdict alone,
@@ -228,7 +244,10 @@ async function runCheck(
     const violations = perPath.flatMap((s) => s.violations);
     const filesScanned = perPath.reduce((sum, s) => sum + s.filesScanned, 0);
     summary = summarize(violations, filesScanned);
-    const warnings = perPath.flatMap((s) => s.warnings ?? []);
+    const warnings = [
+      ...skipWarnings,
+      ...perPath.flatMap((s) => s.warnings ?? []),
+    ];
     if (warnings.length > 0) summary.warnings = warnings;
   }
 

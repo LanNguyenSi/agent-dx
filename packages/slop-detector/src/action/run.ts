@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import type { CheckSummary, Severity, Violation } from "../types.js";
+import { isInside, realPath } from "../util/path-containment.js";
 
 export type Threshold = Severity;
 
@@ -71,13 +72,60 @@ export function exceedsThreshold(
 }
 
 /**
- * Keep the changed files that still exist and lie inside `scanPath`
- * (a deleted file shows up in `git diff --name-only` but cannot be scanned).
+ * What a changed path is on disk, decided without following a symbolic
+ * link at the path itself: `file` (a regular file whose real path lies
+ * inside the workspace), `missing` (deleted in the pull request),
+ * `symlink`, `not-regular` (a directory such as a submodule gitlink, a
+ * FIFO, ...), or `outside` (a regular file reached through a symlinked
+ * parent directory, or a name with `..`, whose real path leaves the
+ * workspace).
+ */
+export type FileClass =
+  "file" | "missing" | "symlink" | "not-regular" | "outside";
+
+/** Classify `file` (relative to `root`, the workspace) for scanning. */
+export function classifyPath(root: string, file: string): FileClass {
+  const abs = path.resolve(root, file);
+  let st: fs.Stats;
+  try {
+    st = fs.lstatSync(abs);
+  } catch {
+    return "missing";
+  }
+  if (st.isSymbolicLink()) return "symlink";
+  if (!st.isFile()) return "not-regular";
+  const realRoot = realPath(root);
+  const realFile = realPath(abs);
+  if (realRoot === undefined || realFile === undefined) return "outside";
+  return isInside(realRoot, realFile) ? "file" : "outside";
+}
+
+/** A changed path that was not scanned, and the annotation that names it. */
+export function skipAnnotation(file: string, kind: FileClass): string | null {
+  const prop = `file=${escapeProperty(file)},title=slop-detector`;
+  switch (kind) {
+    case "symlink":
+      return `::warning ${prop}::${escapeData(`${file}: symbolic link, not followed`)}`;
+    case "outside":
+      return `::warning ${prop}::${escapeData(`${file}: resolves outside the workspace, not read`)}`;
+    case "not-regular":
+      return `::notice ${prop}::${escapeData(`${file}: not a regular file (a submodule or other special entry), skipped`)}`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Keep the changed files that are regular files inside the workspace and
+ * lie inside `scanPath` (a deleted file shows up in `git diff --name-only`
+ * but cannot be scanned). Every other kind of entry is reported through
+ * `onSkip` and left out: a symbolic link is never followed.
  */
 export function selectChangedFiles(
   changed: string[],
-  exists: (file: string) => boolean,
+  classify: (file: string) => FileClass,
   scanPath = ".",
+  onSkip: (file: string, kind: FileClass) => void = () => {},
 ): string[] {
   const root = path.posix.normalize(scanPath.split(path.sep).join("/"));
   const seen = new Set<string>();
@@ -90,8 +138,13 @@ export function selectChangedFiles(
       root === "" ||
       file === root ||
       file.startsWith(root.endsWith("/") ? root : `${root}/`);
-    if (!inside || !exists(file)) continue;
+    if (!inside) continue;
     seen.add(file);
+    const kind = classify(file);
+    if (kind !== "file") {
+      onSkip(file, kind);
+      continue;
+    }
     out.push(file);
   }
   return out;
@@ -179,7 +232,8 @@ export interface SpawnResult {
 export interface ActionDeps {
   spawn: (cmd: string, args: string[], opts: { cwd: string }) => SpawnResult;
   readFile: (file: string) => string;
-  exists: (file: string) => boolean;
+  /** `classifyPath` by default; `file` is relative to `root`. */
+  classify: (root: string, file: string) => FileClass;
   write: (text: string) => void;
   cliPath: string;
 }
@@ -193,7 +247,7 @@ export function defaultDeps(): ActionDeps {
         maxBuffer: 256 * 1024 * 1024,
       }),
     readFile: (f) => fs.readFileSync(f, "utf8"),
-    exists: (f) => fs.existsSync(f),
+    classify: classifyPath,
     write: (t) => {
       process.stdout.write(t);
     },
@@ -263,8 +317,12 @@ function changedFilesFromEvent(
   }
   return selectChangedFiles(
     parseNulList(diff.stdout),
-    (f) => deps.exists(path.join(root, f)),
+    (f) => deps.classify(root, f),
     repoRelativeScanPath(scanPath, root),
+    (f, kind) => {
+      const line = skipAnnotation(f, kind);
+      if (line !== null) deps.write(line + "\n");
+    },
   );
 }
 

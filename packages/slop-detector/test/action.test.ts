@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  classifyPath,
   escapeData,
   escapeProperty,
   exceedsThreshold,
@@ -17,6 +18,8 @@ import {
   type SpawnResult,
   parseThreshold,
   selectChangedFiles,
+  skipAnnotation,
+  type FileClass,
 } from "../src/action/run.js";
 import type { Severity, Violation } from "../src/types.js";
 import { ensureBuilt } from "./built-cli.js";
@@ -182,7 +185,8 @@ describe("parseSummary", () => {
 
 describe("selectChangedFiles", () => {
   const present = new Set(["a.md", "docs/b.md", "src/c.ts"]);
-  const exists = (f: string) => present.has(f);
+  const exists = (f: string): FileClass =>
+    present.has(f) ? "file" : "missing";
 
   it("drops files that no longer exist", () => {
     expect(
@@ -194,13 +198,190 @@ describe("selectChangedFiles", () => {
     expect(selectChangedFiles(["a.md", "docs/b.md"], exists, "docs")).toEqual([
       "docs/b.md",
     ]);
-    expect(selectChangedFiles(["docs2/x.md"], () => true, "docs")).toEqual([]);
+    expect(selectChangedFiles(["docs2/x.md"], () => "file", "docs")).toEqual(
+      [],
+    );
   });
 
   it("de-duplicates and skips blanks", () => {
     expect(selectChangedFiles(["a.md", "", "a.md", "./a.md"], exists)).toEqual([
       "a.md",
     ]);
+  });
+
+  it("passes only `file` entries and reports every other kind but `missing` once", () => {
+    const kinds: Record<string, FileClass> = {
+      "a.md": "file",
+      "gone.md": "missing",
+      link: "symlink",
+      sub: "not-regular",
+      "via/x.md": "outside",
+    };
+    const skipped: [string, FileClass][] = [];
+    const out = selectChangedFiles(
+      ["a.md", "gone.md", "link", "sub", "via/x.md", "link"],
+      (f) => kinds[f],
+      ".",
+      (f, k) => skipped.push([f, k]),
+    );
+    expect(out).toEqual(["a.md"]);
+    expect(skipped).toEqual([
+      ["gone.md", "missing"],
+      ["link", "symlink"],
+      ["sub", "not-regular"],
+      ["via/x.md", "outside"],
+    ]);
+  });
+});
+
+describe("skipAnnotation", () => {
+  it("is a warning for a symlink, escaping the name in property and message", () => {
+    expect(skipAnnotation("a%b,c:d.md", "symlink")).toBe(
+      "::warning file=a%25b%2Cc%3Ad.md,title=slop-detector::a%25b,c:d.md: symbolic link, not followed",
+    );
+  });
+
+  it("is a warning for a path that resolves outside", () => {
+    expect(skipAnnotation("via/x.md", "outside")).toBe(
+      "::warning file=via/x.md,title=slop-detector::via/x.md: resolves outside the workspace, not read",
+    );
+  });
+
+  it("is a notice for a non-regular entry", () => {
+    expect(skipAnnotation("vendor/sub", "not-regular")).toBe(
+      "::notice file=vendor/sub,title=slop-detector::vendor/sub: not a regular file (a submodule or other special entry), skipped",
+    );
+  });
+
+  it("is silent for a deleted file and a scanned file", () => {
+    expect(skipAnnotation("gone.md", "missing")).toBeNull();
+    expect(skipAnnotation("a.md", "file")).toBeNull();
+  });
+});
+
+// Real files under os.tmpdir(): on macOS that path is spelled /var/folders/...
+// while its real path starts with /private, so containment must compare
+// real paths on both sides.
+describe("classifyPath", () => {
+  let base: string;
+  let root: string;
+
+  beforeAll(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), "slop-classify-"));
+    root = path.join(base, "repo");
+    const outside = path.join(base, "outside");
+    fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+    fs.mkdirSync(path.join(root, "vendor", "sub"), { recursive: true });
+    fs.mkdirSync(outside);
+    fs.mkdirSync(path.join(base, "repo2"));
+    fs.writeFileSync(path.join(root, "a.md"), "a\n");
+    fs.writeFileSync(path.join(outside, "secret.txt"), "s\n");
+    fs.writeFileSync(path.join(base, "repo2", "x.md"), "x\n");
+    fs.symlinkSync(path.join(outside, "secret.txt"), path.join(root, "out"));
+    fs.symlinkSync("a.md", path.join(root, "alias.md"));
+    fs.symlinkSync(outside, path.join(root, "outdir"));
+    fs.symlinkSync(path.join(base, "nowhere"), path.join(root, "dangling"));
+    fs.symlinkSync(path.join(base, "repo2"), path.join(root, "sib"));
+    fs.symlinkSync(root, path.join(base, "repo-link"));
+  });
+
+  afterAll(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it("a regular file inside is `file`", () => {
+    expect(classifyPath(root, "a.md")).toBe("file");
+    expect(classifyPath(path.join(base, "repo-link"), "a.md")).toBe("file");
+  });
+
+  it("a deleted file is `missing`", () => {
+    expect(classifyPath(root, "gone.md")).toBe("missing");
+  });
+
+  it("every symlink is `symlink`, wherever it points", () => {
+    expect(classifyPath(root, "out")).toBe("symlink");
+    expect(classifyPath(root, "alias.md")).toBe("symlink");
+    expect(classifyPath(root, "outdir")).toBe("symlink");
+    expect(classifyPath(root, "dangling")).toBe("symlink");
+  });
+
+  it("a directory (a submodule gitlink checkout) is `not-regular`", () => {
+    expect(classifyPath(root, "vendor/sub")).toBe("not-regular");
+  });
+
+  it("a file reached through a symlinked parent or `..` is `outside`", () => {
+    expect(classifyPath(root, "outdir/secret.txt")).toBe("outside");
+    expect(classifyPath(root, "sib/x.md")).toBe("outside");
+    expect(classifyPath(root, "../outside/secret.txt")).toBe("outside");
+  });
+});
+
+describe("runAction changed-files-only on a real workspace", () => {
+  let base: string;
+  let root: string;
+
+  beforeAll(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), "slop-action-ws-"));
+    root = path.join(base, "repo");
+    const outside = path.join(base, "outside");
+    fs.mkdirSync(path.join(root, "vendor", "sub"), { recursive: true });
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(root, "a.md"), "a\n");
+    fs.writeFileSync(path.join(outside, "secret.txt"), "s\n");
+    fs.symlinkSync(path.join(outside, "secret.txt"), path.join(root, "out"));
+    fs.symlinkSync("a.md", path.join(root, "alias.md"));
+    fs.symlinkSync(outside, path.join(root, "outdir"));
+    fs.symlinkSync(path.join(base, "nowhere"), path.join(root, "dangling"));
+  });
+
+  afterAll(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it("passes only the regular file; one warning per symlink, one notice for the gitlink, silence for a deletion", () => {
+    const h = harness({
+      event: prEvent(SHA_A, SHA_B),
+      git: {
+        stdout:
+          "a.md\0out\0alias.md\0outdir\0dangling\0vendor/sub\0gone.md\0outdir/secret.txt\0",
+      },
+      cli: { stdout: cleanJson },
+    });
+    h.deps.classify = classifyPath;
+    expect(runAction({ ...prEnv, GITHUB_WORKSPACE: root }, h.deps)).toBe(0);
+    const cli = h.calls[1].args;
+    expect(cli.slice(cli.indexOf("--") + 1)).toEqual(["a.md"]);
+    const lines = h.out.join("").split("\n");
+    for (const name of ["out", "alias.md", "outdir", "dangling"]) {
+      expect(
+        lines.filter(
+          (l) =>
+            l ===
+            `::warning file=${name},title=slop-detector::${name}: symbolic link, not followed`,
+        ),
+      ).toHaveLength(1);
+    }
+    expect(
+      lines.filter((l) => l.startsWith("::notice file=vendor/sub,")),
+    ).toHaveLength(1);
+    expect(
+      lines.filter((l) =>
+        l.startsWith("::warning file=outdir/secret.txt,title=slop-detector::"),
+      ),
+    ).toHaveLength(1);
+    expect(lines.some((l) => l.includes("gone.md"))).toBe(false);
+  });
+
+  it("only skipped entries means no CLI run and the no-changed-files line", () => {
+    const h = harness({
+      event: prEvent(SHA_A, SHA_B),
+      git: { stdout: "out\0" },
+      cli: { stdout: cleanJson },
+    });
+    h.deps.classify = classifyPath;
+    expect(runAction({ ...prEnv, GITHUB_WORKSPACE: root }, h.deps)).toBe(0);
+    expect(h.calls).toHaveLength(1);
+    expect(h.out.join("")).toContain("slop-detector: no changed files to scan");
   });
 });
 
@@ -215,7 +396,9 @@ describe("parseNulList", () => {
   });
 
   it("selectChangedFiles keeps a leading-space name intact", () => {
-    expect(selectChangedFiles([" lead.md"], () => true)).toEqual([" lead.md"]);
+    expect(selectChangedFiles([" lead.md"], () => "file")).toEqual([
+      " lead.md",
+    ]);
   });
 });
 
@@ -229,7 +412,7 @@ describe("repoRelativeScanPath", () => {
   it("filters changed files against an absolute path input", () => {
     const scan = repoRelativeScanPath("/w/repo/docs", "/w/repo");
     expect(
-      selectChangedFiles(["docs/a.md", "src/b.ts"], () => true, scan),
+      selectChangedFiles(["docs/a.md", "src/b.ts"], () => "file", scan),
     ).toEqual(["docs/a.md"]);
   });
 });
@@ -253,7 +436,7 @@ function harness(opts: {
   const deps: ActionDeps = {
     cliPath: "/cli.js",
     write: (t) => out.push(t),
-    exists: () => true,
+    classify: () => "file",
     readFile: () => {
       if (opts.event instanceof Error) throw opts.event;
       return opts.event ?? "{}";
@@ -483,5 +666,115 @@ describe("action entrypoint subprocess", () => {
     const r = runEntry({ INPUT_PACK: "placement-slop" });
     expect(r.status).toBe(1);
     expect(r.stdout).toMatch(/^::error file=AGENTS\.md,line=3,/m);
+  });
+});
+
+// End to end through the built entrypoint and the built CLI: the content a
+// symlink points at must never reach an annotation, and the summary line
+// counts only what was scanned.
+describe("action entrypoint subprocess with symlinked targets", () => {
+  const packageRoot = path.dirname(
+    path.dirname(fileURLToPath(import.meta.url)),
+  );
+  const entry = path.join(packageRoot, "dist", "action", "run.js");
+  const marker = "The checkout lives at /Users/someone/git/repo for now.\n";
+  let base: string;
+  let repo: string;
+  let baseSha: string;
+  let headSha: string;
+
+  function git(args: string[]): string {
+    const r = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+    return r.stdout.trim();
+  }
+
+  beforeAll(() => {
+    ensureBuilt();
+    base = fs.mkdtempSync(path.join(os.tmpdir(), "slop-action-link-"));
+    repo = path.join(base, "repo");
+    const outside = path.join(base, "outside");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, "AGENTS.md"), `# Secret\n\n${marker}`);
+    git(["init", "-q"]);
+    git(["config", "user.email", "t@example.invalid"]);
+    git(["config", "user.name", "t"]);
+    git(["config", "commit.gpgsign", "false"]);
+    fs.writeFileSync(path.join(repo, "README.md"), "# Repo\n");
+    git(["add", "."]);
+    git(["commit", "-q", "-m", "base"]);
+    baseSha = git(["rev-parse", "HEAD"]);
+    fs.writeFileSync(path.join(repo, "notes.md"), "# Notes\n\nPlain text.\n");
+    fs.symlinkSync(
+      path.join(outside, "AGENTS.md"),
+      path.join(repo, "AGENTS.md"),
+    );
+    fs.symlinkSync(outside, path.join(repo, "docs"));
+    git(["add", "."]);
+    git(["commit", "-q", "-m", "head"]);
+    headSha = git(["rev-parse", "HEAD"]);
+    fs.writeFileSync(
+      path.join(base, "event.json"),
+      JSON.stringify({
+        pull_request: { base: { sha: baseSha }, head: { sha: headSha } },
+      }),
+    );
+  });
+
+  afterAll(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  function runEntry(extra: Record<string, string>) {
+    const env: NodeJS.ProcessEnv = {};
+    for (const k of ["PATH", "HOME", "SYSTEMROOT"]) {
+      if (process.env[k] !== undefined) env[k] = process.env[k];
+    }
+    return spawnSync(process.execPath, [entry], {
+      cwd: repo,
+      encoding: "utf8",
+      env: {
+        ...env,
+        GITHUB_WORKSPACE: repo,
+        INPUT_PACK: "placement-slop",
+        ...extra,
+      },
+    });
+  }
+
+  it("changed-files-only scans the regular file, warns per symlink and never reads the target", () => {
+    const r = runEntry({
+      INPUT_CHANGED_FILES_ONLY: "true",
+      GITHUB_EVENT_NAME: "pull_request",
+      GITHUB_EVENT_PATH: path.join(base, "event.json"),
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(
+      "::warning file=AGENTS.md,title=slop-detector::AGENTS.md: symbolic link, not followed\n",
+    );
+    expect(r.stdout).toContain(
+      "::warning file=docs,title=slop-detector::docs: symbolic link, not followed\n",
+    );
+    expect(r.stdout).not.toContain("::error");
+    expect(r.stdout).not.toContain("/Users/someone");
+    expect(r.stdout).toMatch(/^slop-detector: 1 file\(s\) scanned,/m);
+  });
+
+  it("a `path` input that resolves outside the workspace is skipped with a warning, never read", () => {
+    const r = runEntry({ INPUT_PATH: "docs" });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(
+      "::warning title=slop-detector::skipped docs: resolves outside the working directory (symbolic link)\n",
+    );
+    expect(r.stdout).not.toContain("::error");
+    expect(r.stdout).toMatch(/^slop-detector: 0 file\(s\) scanned,/m);
+  });
+
+  it("the same `path` input pointing at a real directory is scanned as before", () => {
+    const r = runEntry({ INPUT_PATH: "." });
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain("skipped");
+    expect(r.stdout).toMatch(/^slop-detector: 2 file\(s\) scanned,/m);
   });
 });

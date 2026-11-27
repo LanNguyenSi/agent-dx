@@ -18,7 +18,7 @@ inputs:
     required: false
     default: block
   changed-files-only:
-    description: On pull_request and pull_request_target events, scan only files changed in the PR (needs enough fetch depth for the base commit).
+    description: On pull_request and pull_request_target events, scan only files changed in the PR (needs enough fetch depth for the base commit); symbolic links and non-regular entries are skipped with an annotation, never followed.
     required: false
     default: "false"
 runs:
