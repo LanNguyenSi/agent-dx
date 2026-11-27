@@ -30,7 +30,7 @@ directory is not compared with the `id`. Repo-wide settings live in
 | `specs/<id>/bindings.yaml` | the binding of each check to a concrete test |
 | `specs/<id>/bindings.log` | the record of every binding change after `proposed`, written by `propose` and `bind` |
 | `specs/<id>/questions.json` | questions and their answers |
-| `specs/<id>/evidence/` | evidence envelopes written by a runner |
+| `specs/<id>/evidence/` | evidence envelopes written by a runner, one `TP-<n>.jsonl` per test-plan row |
 | `.spec-gate/config.yaml` | repo-wide settings |
 | `.spec-gate/commands.yaml` | the only commands a runner may execute |
 
@@ -57,7 +57,7 @@ at its base), never at the head of a spec pull request.
 | `commands_ref` | the head of the fetched remote default branch at intake, the same commit as `base_commit` | `intake`; `propose` only verifies and sets nothing | intake | `source/meta.json` and the `spec.md` frontmatter | must be an ancestor of the default branch, checked as for `base_commit`; the approval check resolves the argv lists at this commit itself and prints them |
 | binding reference | `bindings.yaml` at the commit `propose` ran at; once the log is on the default branch and the propose commit is no ancestor of the head (a squash or rebase merge), `bindings.yaml` at the diff base, read from git | `propose`, as the hash of `bindings.yaml` in the first `bindings.log` entry | propose | `specs/<id>/bindings.log` (outside the digest) | the propose commit must be an ancestor of the head; after a squash or rebase merge it may not be, and then the diff base must hold the log of the spec at the same path with the same propose entry, the log at the head must extend it, and only the bind entries after it are checked and replayed; otherwise a lint error |
 | start commit | the commit the implementation work started from; closing evidence is compared there | the host, passed as `closure --start <commit>` | closure | not stored; an argument of the closing check | must be a descendant of the merged spec commit; otherwise the closing check stops |
-| evidence envelopes | the commit each envelope names in its `commit` field, which the runner reads from its own checkout | the host runner; never a model role | evidence (phase `baseline`) and closure (phase `closure`) | `specs/<id>/evidence/*.json` | `baseline`: the commit must equal `base_commit`, else `stale-evidence`; `closure` (which includes per-slice evidence): the commit must be the start commit or a descendant of it; after a squash merge an envelope stays valid if its commit is reachable from the default branch, otherwise only if it was on the PR branch before the squash and the PR's CI run references it |
+| evidence envelopes | the commit each envelope names in its `commit` field, which the runner reads from its own checkout | the host runner; never a model role | evidence (phase `baseline`) and closure (phase `closure`) | `specs/<id>/evidence/TP-<n>.jsonl`, one file per test-plan row, JSON Lines, both phases in one file | `baseline`: the commit must equal `base_commit`, the work tree clean, the `commands_digest` the digest of the row's one command at `commands_ref` and the selector the binding's, else `stale-evidence`; `closure` (which includes per-slice evidence): the commit must be the start commit or a descendant of it; after a squash merge an envelope stays valid if its commit is reachable from the default branch, otherwise only if it was on the PR branch before the squash and the PR's CI run references it |
 <!-- END generated: reference-states -->
 
 The table is exported as `REFERENCE_STATES`; a test fails when this page and
@@ -620,7 +620,8 @@ pull request that adds a command is where that is reviewed.
 ## Evidence
 
 A runner writes one envelope per check. Envelopes are JSON Lines (one object
-per line) or one object per file. The schema is shipped as
+per line) stored in one `TP-<n>.jsonl` file per test-plan row (Layout below).
+The schema is shipped as
 `schemas/evidence-envelope.json`, a copy of the reference runner's schema; a
 test pins the copy byte for byte. Envelopes are validated in code, field for
 field, without a schema library.
@@ -642,6 +643,29 @@ references that commit; otherwise it does not count. Without a squash merge
 the rule does not apply. The three facts are git and host questions: the
 closing check answers them and passes them to `evidenceSurvivesSquash`;
 nothing in the format layer runs git.
+
+**Layout.** Envelopes are stored under `specs/<id>/evidence/`, one file per
+test-plan row, named `TP-<n>.jsonl` after that row's id: the file name is the
+mapping from an envelope to its row. The file is JSON Lines and holds both
+phases of the row. Nothing else lives in the directory. A regular file whose
+name is not a row file is a format finding of code `evidence-layout`; a
+subdirectory, a link or any other non-regular entry there is a file finding;
+a row file over the reader's 4 MiB size cap is a file finding of code
+`input-too-large`; a file for a TP ID that is no test-plan row is the error
+`evidence-unknown-row`, because a file for a row that no longer exists is
+evidence nobody asked for.
+
+**commands_digest.** An envelope's `commands_digest` names the command set
+the runner ran, so lint can see when the row's command changed underneath
+the run. It is SHA-256 over the JSON serialization of the list of the run's
+argv lists, the same bytes the reference runner hashes; a spec-gate check is
+a run of one command, so the list holds the row's one argv list. The digest
+is taken of the command template from `commands.yaml` read at `commands_ref`,
+with a
+`{selector}` placeholder left in unsubstituted: lint can name the command
+set, but not the test the run picked. The function is
+`expectedCommandsDigest`; `stale-evidence` compares it with the envelope's
+and names the cause `digest-mismatch`.
 
 ## Forbidden characters
 

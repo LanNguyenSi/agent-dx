@@ -108,6 +108,7 @@ describe("resolving the git inputs", () => {
       "base-commit-not-ancestor",
       "commands-ref-not-ancestor",
       "spec-changes-config",
+      "stale-evidence",
       "static-command-unknown",
     ]);
   });
@@ -626,6 +627,7 @@ describe("rule-skipped under --final", () => {
     ]);
     expect(final.ok).toBe(false);
     expect(final.skipped.map((s) => s.reason)).toEqual([
+      "no-git",
       "no-git",
       "no-git",
       "no-git",

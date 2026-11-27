@@ -30,6 +30,7 @@ spec-gate bind <spec-dir> <tp-id> --status <new|existing> [--selector <s>] [--fi
 | `triage.json` | no | the triage format; decides the profile |
 | `source/meta.json` | no (the full profile reports its absence through `ledger-complete`) | `base_commit` and `commands_ref` (each a full commit id, 40 or 64 lower-case hex digits, both required) and the source line list (`lines[]`, each `{ id, kind }`) |
 | `acks.yaml` | no | acknowledged warnings, see below |
+| `evidence/` | no | the runner's evidence directory, one `TP-<n>.jsonl` per test-plan row, JSON Lines (see [formats.md](formats.md)); the layout itself is checked, see the evidence rules |
 | the file given to `--config` | no | repo-wide settings in `.spec-gate/config.yaml` format; it sits outside the spec directory and is only read for `--config`, which cannot be combined with git inputs |
 | `.spec-gate/config.yaml` at the reference commit | no | the same settings, read from git instead of a path when git inputs are given; see "Git inputs" |
 
@@ -429,8 +430,8 @@ that they exist; the rules that need git are covered as described under
 <!-- BEGIN generated: rules -->
 | Rule | Level | Profiles | Gated | Ackable | Checks |
 |---|---|---|---|---|---|
-| `file` | error | light, full | no | no | A required file is missing, or a file is a link, not a regular file, over the size limit, not UTF-8 or unreadable. |
-| `format` | error | light, full | no | no | A file does not parse; carries the format error's code and path. |
+| `file` | error | light, full | no | no | A required file is missing, or a file is a link, not a regular file, over the size limit, not UTF-8 or unreadable; a link, subdirectory or other non-regular entry under evidence/ is reported here too. |
+| `format` | error | light, full | no | no | A file does not parse; carries the format error's code and path. An entry of evidence/ whose name is not TP-<n>.jsonl is reported here (code evidence-layout). |
 | `profile-no-spec` | error | light, full | no | no | The triage class leads to no spec (unsuitable, decision, split, clarify). |
 | `profile-mismatch` | error | light, full | no | no | `--profile` disagrees with the profile the triage class gives. |
 | `profile-default` | warning | light, full | no | yes | No `triage.json` and no `--profile`: the full profile is used. Acknowledge with id `triage`. |
@@ -461,6 +462,10 @@ that they exist; the rules that need git are covered as described under
 | `spec-changes-config` | error | light, full | no | no | No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count. |
 | `static-command-unknown` | error | light, full | no | no | Every static test-plan row's check_command_ref names a command of .spec-gate/commands.yaml at commands_ref; a missing or invalid command set there is an error, and the set is not read at a commands_ref that failed its ancestry check. |
 | `bindings-log` | error | light, full | yes | no | At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; when the propose commit is not a commit or not an ancestor of HEAD (after a squash or rebase merge) and the diff base holds the log of this spec at the same path with the same propose entry, bindings.yaml read from git at the diff base is the anchor instead and only the bind entries after that log are checked and replayed over it; the spec directory is specs/<name>, one level below the top-level specs/; every log the diff base holds there for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory. |
+| `stale-evidence` | warning | full | no | yes | A baseline envelope is stale: its commit is not the frontmatter base_commit, its work tree was dirty, its commands_digest is not the expected digest of the one command its row uses at commands_ref, its row has no determinable command (the row is not static and its binding has no selector, or the row is selector-bound and no command of the set carries {selector}), or its selector is not its row's binding selector; closure envelopes are never stale. Acknowledge with the row ID; an unreadable command set is acknowledged with ID commands. |
+| `unproven` | warning | full | no | yes | A stays-green row has no baseline envelope with result pass that is unstale by its own fields: commit equal to base_commit, work tree clean, selector equal to the row's binding selector. The digest cause is judged by stale-evidence, the only evidence rule that reads the repository. Acknowledge with the row ID. |
+| `self-reported` | warning | full | no | yes | A row's evidence file holds an envelope of producer local. producer ci is not judged by lint: the closing check verifies it through the host. Acknowledge with the row ID. |
+| `evidence-unknown-row` | error | full | no | no | Every well-named evidence/TP-<n>.jsonl names a test-plan row: the file name is the mapping from an envelope to its row, and a file for an unknown TP ID is an error. |
 <!-- END generated: rules -->
 
 The form rules:
@@ -687,6 +692,56 @@ the very class its own fields derive and the current `rule_version`; one
 error per mismatch. The rule runs in both profiles: the profile step always
 follows the class the fields derive, so a stale file is caught whichever
 profile it lands in.
+
+Evidence. `stale-evidence`, `unproven`, `self-reported` and
+`evidence-unknown-row` read `evidence/` (layout and formats in
+[formats.md](formats.md)): one `TP-<n>.jsonl` per test-plan row, JSON Lines,
+both phases in one file. The layout is checked while the inputs are read: a
+regular file there whose name is not a row file is a `format` finding (code
+`evidence-layout`), a subdirectory, a link or any other non-regular entry is
+a `file` finding, and an envelope line that does not parse is a `format`
+finding. Any of these fails the input and the four rules skip `input-failed`.
+All four run in the full profile only. `evidence-unknown-row` (error, not
+acknowledgeable): every well-named file must name a TP ID of `testplan.yaml`;
+a file for an unknown ID is one error on that file, because evidence for a
+row that is not there is evidence nobody asked for. `unproven` (warning):
+every `stays-green` row must have, in its own file, a `baseline` envelope
+with `result: pass` whose `commit` is the frontmatter `base_commit`, whose
+`dirty` is false and whose `selector` is the row's binding selector (or
+null with no selector); `fail`, `skip` and `error` results, `closure`
+envelopes and envelopes stale by those fields prove nothing. The digest
+cause is not judged here: `stale-evidence` owns it, being the only evidence
+rule that reads the repository. `self-reported` (warning): a file holding a
+`baseline` or `closure` envelope of `producer: local` is one warning for
+that row; a `host` producer is not flagged and `producer: ci` is not judged
+by lint at all, because the closing check verifies a CI run through the
+host. `stale-evidence` (warning, needs git inputs, skipped `no-git`
+without; a skipped warning never becomes a `rule-skipped` error): every
+`baseline` envelope (closure envelopes are never stale, see
+`staleEvidenceApplies` in [formats.md](formats.md)) is judged on five
+causes, once per cause: its `commit` must equal `base_commit`
+(`commit-mismatch`), its `dirty` must be false (`dirty`), its
+`commands_digest` must equal `expectedCommandsDigest` of the one command
+its row uses in `.spec-gate/commands.yaml` at `commands_ref`
+(`digest-mismatch`), and its `selector` must equal the row's binding
+selector or null (`selector-mismatch`). A row whose command cannot be
+determined is stale with `command-unknown`: `row is not static and its
+binding has no selector`, or `selector-bound row but no command with
+{selector} in .spec-gate/commands.yaml at commands_ref`. An
+indeterminable command never lets the digest pass unjudged; a `static`
+row whose `check_command_ref` names no command of the set is not reported
+here, it is the `static-command-unknown` error. The row's command is the
+`check_command_ref` entry for a `static` row and the command carrying the
+`{selector}` placeholder for a row whose binding has a selector; the
+placeholder stays unsubstituted in the digest, so lint names the command
+set, never the test a run picked. The command set is read at `commands_ref`
+only, like `static-command-unknown` reads it, never from the working tree
+or the default tip, and only when some row needs it: when the set cannot be
+read (`commands-ref-untrusted`, `commands-file-missing`,
+`commands-file-invalid`, or a git read that failed with its code) the rule
+reports one warning with id `commands` on `repo:.spec-gate/commands.yaml`
+and judges no digest. Findings carry the file `evidence/TP-<n>.jsonl`, the
+line of the envelope and the row ID.
 
 ## Acknowledgements
 

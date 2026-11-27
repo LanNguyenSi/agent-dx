@@ -1,0 +1,12 @@
+{
+  "errors": [],
+  "warnings": [
+    {
+      "rule": "self-reported",
+      "file": "evidence/TP-1.jsonl",
+      "path": "$",
+      "id": "TP-1"
+    }
+  ],
+  "acked": []
+}

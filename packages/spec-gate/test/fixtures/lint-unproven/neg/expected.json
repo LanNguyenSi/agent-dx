@@ -1,0 +1,12 @@
+{
+  "errors": [],
+  "warnings": [
+    {
+      "rule": "unproven",
+      "file": "testplan.yaml",
+      "path": "TP-2.kind",
+      "id": "TP-2"
+    }
+  ],
+  "acked": []
+}

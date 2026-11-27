@@ -2,7 +2,8 @@
  * Evidence intake.
  *
  * Evidence arrives as envelopes written by a runner: one JSON object per
- * line (JSON Lines), or one object per file. The envelope schema ships in
+ * line (JSON Lines), in one `TP-<n>.jsonl` file per test-plan row. The
+ * envelope schema ships in
  * `schemas/evidence-envelope.json`, a copy of the reference runner's
  * schema; a test pins the two byte for byte. This module validates in
  * code, field for field as the schema reads, and adds no dependency.
@@ -18,7 +19,12 @@
  * commit, the command set or the selector it should is a check for the
  * lint and closure steps, which read git; those steps call
  * `staleEvidenceApplies` and `evidenceSurvivesSquash` for the rules.
+ *
+ * The layout under `specs/<id>/evidence/` is named here too (see
+ * `EVIDENCE_DIR`, `EVIDENCE_FILE_RE` and `expectedCommandsDigest`), because
+ * the lint loader and the evidence rules read it with the same constants.
  */
+import { createHash } from "node:crypto";
 import type { ParseResult } from "./errors.js";
 import { ErrorSink, failResult, okResult } from "./errors.js";
 import { parseJsonText } from "./input.js";
@@ -399,4 +405,44 @@ export function evidenceSurvivesSquash(facts: SquashFacts): {
       ? "the commit is not on the default branch and the PR's CI run does not reference it"
       : "the commit is neither on the default branch nor was it on the PR branch before the squash",
   };
+}
+
+// ------------------------------------------------------------------- layout
+
+/**
+ * The one directory of a spec that holds evidence, and the only file name
+ * allowed in it: `TP-<n>.jsonl`, the JSON Lines of every envelope of that
+ * test-plan row, both phases in one file. The envelope has no row field, so
+ * the file name is the mapping from envelope to row. Any other entry under
+ * `evidence/` is a layout violation, reported by the lint as a `file` or
+ * `format` finding; a well-named file of an unknown row ID is the
+ * `evidence-unknown-row` finding.
+ */
+export const EVIDENCE_DIR = "evidence";
+export const EVIDENCE_FILE_SUFFIX = ".jsonl";
+export const EVIDENCE_FILE_RE = /^TP-[1-9][0-9]{0,8}\.jsonl$/;
+
+/** The row ID a well-named evidence file names, `undefined` for any other. */
+export function evidenceFileTpId(fileName: string): string | undefined {
+  if (!EVIDENCE_FILE_RE.test(fileName)) return undefined;
+  return fileName.slice(0, -EVIDENCE_FILE_SUFFIX.length);
+}
+
+/**
+ * The `commands_digest` an envelope of a test-plan row must carry: the
+ * SHA-256, lower-case hex, of the RFC 8785 JSON of the one-element array
+ * `[template]`, where `template` is the argv list of the one command of
+ * `.spec-gate/commands.yaml` at `commands_ref` that the row uses (the one
+ * command with the `{selector}` placeholder for a row whose binding carries
+ * a selector, the `check_command_ref` command for a `static` row), written
+ * with the placeholder unsubstituted. For an array of strings the RFC 8785
+ * form is the compact `JSON.stringify` form. This equals what
+ * `agent-primitives verify` writes as the digest of a run of that one
+ * check, which hashes the same one-element argv array in run order; the
+ * formula lives here, not there, so lint needs no dependency on it.
+ */
+export function expectedCommandsDigest(template: readonly string[]): string {
+  return createHash("sha256")
+    .update(JSON.stringify([[...template]]))
+    .digest("hex");
 }
