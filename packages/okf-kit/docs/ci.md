@@ -10,7 +10,7 @@
   run: npx okf-kit@<version> check path/to/bundle  # the exact version, see the README's "Use in CI" example
 ```
 
-The shipped `templates/okf-staleness.yml` pins its actions by commit SHA, not by tag, as the snippet above does; take new SHAs from LanNguyenSi/agent-dx's own `.github/workflows/okf-staleness.yml`, where Renovate keeps them current, rather than from a floating tag.
+The shipped `templates/okf-staleness.yml` pins its actions by commit SHA, not by tag, as the snippet above does; take new SHAs from the okf-kit source repository's own `.github/workflows/okf-staleness.yml`, where Renovate keeps them current, rather than from a floating tag.
 
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
 
