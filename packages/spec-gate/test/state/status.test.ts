@@ -97,4 +97,34 @@ describe("status verb", () => {
     const result = statusSpecDir(path.join(draftSpecDir(), "missing"));
     expect(result.ok).toBe(false);
   });
+
+  it("reports stored, derived and profile separately when the stored class is stale", () => {
+    const triage = {
+      single_goal: { value: "yes", evidence: "one goal in the ticket" },
+      code_related: {
+        value: "yes",
+        evidence: "the ticket names the auth module",
+      },
+      core_is_decision: {
+        value: "no",
+        evidence: "the ticket states the behaviour",
+      },
+      scope_within_request: {
+        value: "yes",
+        evidence: "the ticket asks for it",
+      },
+      multiple_repos: { value: "no", evidence: "one repository" },
+      trivial: { value: "no", evidence: "touches the auth flow" },
+      blocking_unknowns: [],
+      class: "split",
+      rule_version: 1,
+    };
+    const report = read(
+      draftSpecDir({ "triage.json": JSON.stringify(triage) }),
+    );
+    expect(report.errors).toEqual([]);
+    expect(report.triage?.stored).toBe("split");
+    expect(report.triage?.derived).toBe("actionable");
+    expect(report.triage?.profile).toBe("full");
+  });
 });

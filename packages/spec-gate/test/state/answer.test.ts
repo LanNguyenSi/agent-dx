@@ -8,7 +8,7 @@ import {
   serializeQuestions,
   type AnswerResult,
 } from "../../src/state/index.js";
-import { edited } from "../lint/helpers.js";
+import { edited, scratch, validFiles } from "../lint/helpers.js";
 import {
   clockAt,
   draftSpecDir,
@@ -173,6 +173,22 @@ describe("answer: writing an answer", () => {
     expect(
       fs.readdirSync(dir).filter((name) => name.includes(".tmp-")),
     ).toEqual([]);
+  });
+
+  it("replaces questions.json through a rename, so the answer lands on a new inode", () => {
+    const dir = draftSpecDir({
+      "questions.json": questionsFile([question("QN-1")], []),
+    });
+    const file = path.join(dir, "questions.json");
+    const before = fs.statSync(file).ino;
+    expect(
+      answerSpecDir(
+        dir,
+        { question: "QN-1", answer: "yes", channel: "chat", author: "alice" },
+        CLOCK,
+      ).ok,
+    ).toBe(true);
+    expect(fs.statSync(file).ino).not.toBe(before);
   });
 });
 
@@ -394,6 +410,86 @@ describe("answer: refusals", () => {
       ),
       "spec-dir-not-spec-layout",
     );
+  });
+
+  it("refuses --accept-recommended given together with --option and leaves the file byte-identical", () => {
+    const dir = draftSpecDir({
+      "questions.json": questionsFile(
+        [
+          question("QN-1", {
+            class: "divergence",
+            options: [{ label: "keep", consequence: "sessions stay" }],
+            recommended: "keep",
+          }),
+        ],
+        [],
+      ),
+    });
+    const file = path.join(dir, "questions.json");
+    const before = fs.readFileSync(file);
+    ok(
+      answerSpecDir(
+        dir,
+        {
+          question: "QN-1",
+          acceptRecommended: true,
+          option: "keep",
+          channel: "chat",
+          author: "alice",
+        },
+        CLOCK,
+      ),
+      "answer-choice",
+    );
+    expect(fs.readFileSync(file)).toEqual(before);
+  });
+
+  it("refuses a channel outside file, chat and comment and leaves the file byte-identical", () => {
+    const dir = draftSpecDir({
+      "questions.json": questionsFile([question("QN-1")], []),
+    });
+    const file = path.join(dir, "questions.json");
+    const before = fs.readFileSync(file);
+    ok(
+      answerSpecDir(
+        dir,
+        { question: "QN-1", answer: "x", channel: "email", author: "alice" },
+        CLOCK,
+      ),
+      "channel-invalid",
+    );
+    expect(fs.readFileSync(file)).toEqual(before);
+  });
+
+  it("refuses a spec directory that is a symlink to a real spec directory and writes nothing", () => {
+    const root = scratch();
+    const real = path.join(root, "real");
+    const files = {
+      ...validFiles(),
+      "questions.json": questionsFile([question("QN-1")], []),
+    };
+    for (const [rel, text] of Object.entries(files)) {
+      const file = path.join(real, rel);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+    }
+    const specs = path.join(root, "specs");
+    fs.mkdirSync(specs, { recursive: true });
+    const link = path.join(specs, "s1");
+    fs.symlinkSync(real, link);
+    const file = path.join(real, "questions.json");
+    const before = fs.readFileSync(file);
+    const result = answerSpecDir(
+      link,
+      { question: "QN-1", answer: "x", channel: "chat", author: "alice" },
+      CLOCK,
+    );
+    expect(result.ok, JSON.stringify(result)).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("spec-dir-not-a-directory");
+      expect(result.message).toContain("symlink");
+    }
+    expect(fs.readFileSync(file)).toEqual(before);
   });
 });
 

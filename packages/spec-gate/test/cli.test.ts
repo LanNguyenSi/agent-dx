@@ -213,6 +213,33 @@ describe("spec-gate questions, answer and status", () => {
       expect(run.code).toBe(2);
       expect(run.stderr).toContain("--channel");
     });
+
+    it("exits 2 when --accept-recommended is given with --option", async () => {
+      const dir = specHome(
+        [
+          qn("QN-1", {
+            class: "divergence",
+            options: [{ label: "keep", consequence: "sessions stay" }],
+            recommended: "keep",
+          }),
+        ],
+        [],
+      );
+      const run = await runCli([
+        "answer",
+        dir,
+        "QN-1",
+        "--accept-recommended",
+        "--option",
+        "keep",
+        "--channel",
+        "chat",
+        "--author",
+        "alice",
+      ]);
+      expect(run.code).toBe(2);
+      expect(run.stderr).toContain("--option");
+    });
   });
 
   describe("status", () => {
