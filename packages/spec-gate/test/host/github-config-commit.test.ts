@@ -1454,6 +1454,30 @@ const CONJUNCTS: {
     },
   },
   {
+    id: "C-MRG-29",
+    function: "mergedPullOf",
+    conjunct:
+      "a merge commit id in upper case is another commit: the pull request did not merge it",
+    row: {
+      pulls: [mergedPull({ merge_commit_sha: CONFIG.toUpperCase() })],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-MRG-30",
+    function: "mergedPullOf",
+    conjunct:
+      "a base branch that differs from the target only in case is another branch",
+    row: {
+      pulls: [mergedPull(into("Main"))],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
     id: "C-APP-27",
     function: "latestApprover",
     conjunct:

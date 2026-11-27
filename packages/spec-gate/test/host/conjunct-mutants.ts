@@ -1873,6 +1873,16 @@ const configCommit: Omit<ConjunctMutant, "table">[] = [
     untyped: true,
   },
   {
+    id: "C-MRG-29",
+    match: "mergeCommit === commit &&",
+    with: "String(mergeCommit).toLowerCase() === commit &&",
+  },
+  {
+    id: "C-MRG-30",
+    match: "baseRef === branch &&",
+    with: "baseRef.toLowerCase() === branch.toLowerCase() &&",
+  },
+  {
     id: "C-APP-27",
     match: "standingApprovals(timed)",
     with: "standingApprovals([])",
