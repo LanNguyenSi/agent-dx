@@ -36,7 +36,7 @@ const RULE_ID = "footnotes-resolve";
 export const footnotesResolveRule: Rule = {
   id: RULE_ID,
   description:
-    "OKF v0.2 footnotes: every body `[^id]` reference must resolve to a `sources` mapping entry with that `id` (error, once per id), and every `sources` entry with an `id` must be referenced by at least one `[^id]` (warning). Definition lines `[^id]: ...`, fenced code and inline code are not references. Runs for spec v0.2 only.",
+    "OKF v0.2 footnotes: every body `[^id]` reference must resolve to a `sources` mapping entry with that `id` (error, once per id), and every `sources` entry with an `id` must be referenced by at least one `[^id]` (warning). Two `sources` entries that share an `id` are an error, once per duplicated id. Definition lines `[^id]: ...`, fenced code and inline code are not references. Runs for spec v0.2 only.",
   run(ctx) {
     const findings: Finding[] = [];
     if (ctx.specVersion !== "v0.2") return findings;

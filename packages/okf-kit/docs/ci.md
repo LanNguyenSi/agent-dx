@@ -3,14 +3,14 @@
 `okf-kit check` is advisory: don't fail the build on warnings unless you pass `--strict`. Use a normal (non-shallow) checkout of the repo that owns the bundle: repo-root detection runs `git rev-parse --show-toplevel` from the `path/to/bundle` argument itself, not from the shell's working directory, and `sources-fresh` reads `git log`. A shallow clone (`actions/checkout`'s default `fetch-depth: 1`, or any `git clone --depth`) does NOT report paths as untracked -- every path is still tracked at the boundary commit's own commit time. What it DOES cost: `sources-fresh`'s re-stamp check (see [Staleness](staleness.md)) can no longer tell a doc's real root commit from the grafted boundary commit history was cut off at, so a doc whose own last commit lands there gets a `staleness not assessable` notice instead of a real STALE/pass verdict. Pass `fetch-depth: 0` (a full checkout) to get a real verdict there too.
 
 ```yaml
-- uses: actions/checkout@v5
+- uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
   with:
     fetch-depth: 0
 - name: OKF bundle check
   run: npx okf-kit@<version> check path/to/bundle  # the exact version, see the README's "Use in CI" example
 ```
 
-The shipped `templates/okf-staleness.yml` pins its actions by commit SHA, not by tag.
+The shipped `templates/okf-staleness.yml` pins its actions by commit SHA, not by tag, as the snippet above does; take new SHAs from LanNguyenSi/agent-dx's own `.github/workflows/okf-staleness.yml`, where Renovate keeps them current, rather than from a floating tag.
 
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
 

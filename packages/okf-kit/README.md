@@ -101,7 +101,7 @@ See [Scaffold a bundle](docs/init.md), [Reverse lookup](docs/docs-for.md), [Re-p
 Pin the exact version and use a full (non-shallow) checkout; [CI usage](docs/ci.md) explains why:
 
 ```yaml
-- uses: actions/checkout@v5
+- uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
   with:
     fetch-depth: 0
 - name: OKF bundle check

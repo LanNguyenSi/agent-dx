@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Three docs now match the code and the policy they describe. The CI snippets
+  in `README.md` and `docs/ci.md` pin `actions/checkout` by the same commit
+  SHA the shipped `templates/okf-staleness.yml` pins it to, with the release in
+  a trailing comment, instead of the floating `@v5` tag, and `docs/ci.md` says
+  where to take current SHAs (as the template header does); a new test keeps
+  every `uses:` line in both docs' fenced YAML a 40-character SHA equal to the
+  template's pin for that action. The `footnotes-resolve` rule description and
+  its check-catalog row now name the finding they had omitted: two `sources`
+  entries that share an `id`, an error reported once per duplicated id.
+  `docs/init.md` no longer states that `index.md` and `log.md` always carry no
+  frontmatter; it names the OKF v0.2 exception, the bundle-root `index.md`
+  carrying only the `okf_version` key.
+
 ## [0.23.0] - 2026-11-25
 
 ### Security
