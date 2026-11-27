@@ -99,9 +99,12 @@ export interface HostAdapter {
   /** The last change under `.spec-gate/` on the default branch. */
   lastConfigCommit(): Promise<HostConfigCommit>;
   /**
-   * Whether the host vouches that its own CI ran at `ref` (a full commit
-   * id). The approval check does not call it; the evidence checks do.
+   * Whether the host vouches that `run`, a run of its own CI named by the
+   * id or the address the host gave it, ran at `commit` (a full commit id).
+   * `verified` only for a run that exists in this repository, has completed
+   * and ran at that commit; it says nothing about what the run did or how
+   * it ended. The approval check does not call it; the evidence checks do.
    */
   // eslint-disable-next-line no-unused-vars
-  ciRunStatus(ref: string): Promise<CiRunStatus>;
+  ciRunStatus(commit: string, run: string): Promise<CiRunStatus>;
 }
