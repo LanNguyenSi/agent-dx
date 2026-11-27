@@ -10,6 +10,8 @@ import {
   FAILURE_CODES,
   GAPS,
   MAX_LISTED_FINDINGS,
+  MERGED_SUMMARIES,
+  MERGE_SHAPES,
   TOKEN_VARIABLE,
 } from "../../src/approve/index.js";
 import {
@@ -132,6 +134,117 @@ describe("docs/approve.md", () => {
   });
 });
 
+describe('docs/approve.md, "After the merge"', () => {
+  const from = doc.indexOf("\n## After the merge\n");
+  const after = doc.slice(from, doc.indexOf("\n## Report\n", from));
+  // Line breaks of the prose are not part of what it says.
+  const said = after.replace(/\s+/g, " ");
+  const gaps = doc.slice(doc.indexOf("\n## Known gaps\n")).replace(/\s+/g, " ");
+
+  it("stands between the conditions and the report, and has a row per condition with the summary of the source", () => {
+    expect(from).toBeGreaterThan(doc.indexOf("\n### 8. "));
+    expect(after.length).toBeGreaterThan(1000);
+    for (const c of CONDITIONS) {
+      expect(after).toContain(
+        `| ${c.condition} | ${MERGED_SUMMARIES[c.condition]} |`,
+      );
+    }
+    expect(Object.keys(MERGED_SUMMARIES)).toHaveLength(CONDITIONS.length);
+    // Conditions 5 and 6 ask the same in both modes.
+    for (const c of CONDITIONS.filter((c) => [5, 6].includes(c.condition))) {
+      expect(MERGED_SUMMARIES[c.condition]).toBe(c.summary);
+    }
+  });
+
+  it("names every code and every shape of the check after the merge", () => {
+    for (const word of [
+      "not-merged",
+      "merge-not-on-default",
+      "head-unavailable",
+      "merge-shape-unknown",
+      "ambiguous-merge-base",
+      "config-in-merge",
+      "digest-mismatch-after-merge",
+      "checkout-not-default-tip",
+      "review-commit-unavailable",
+      "worktree-not-head",
+      ...MERGE_SHAPES,
+    ]) {
+      expect(after, word).toContain(`\`${word}\``);
+      if (!(MERGE_SHAPES as readonly string[]).includes(word)) {
+        expect(Object.keys(FAILURE_CODES), word).toContain(word);
+      }
+    }
+  });
+
+  it("says where the spec is judged, what the ranges are and that none starts at a base commit", () => {
+    for (const phrase of [
+      "The tip of the default branch is the commit `defaultRef` names when the check runs",
+      "The approval must stand on the head commit the host reports for the pull request",
+      "the message names both digests and both commits",
+      "`HEAD` must be the commit `defaultRef` names",
+      "an approver taken off the list on the default branch after the merge does not count",
+      "The first range runs from the first parent of the merge commit to the merge commit",
+      "the one merge base of the head commit with the first parent to the head commit",
+      "A rebase merge puts only its last commit into the commit the host names",
+      "This takes the place of `head-in-reference`",
+      "the default branch was moved to it by fast-forward, or the branch was pushed there",
+      "No range starts at `base`, and none at the base commit the host reports",
+      "The measuring base of the open mode, the merge base of `HEAD` and the default commit, is not used after the merge",
+      "The final lint of condition 4 is given `repo` and `defaultRef`",
+      "compare the tip with itself",
+    ]) {
+      expect(said, phrase).toContain(phrase);
+    }
+  });
+
+  it("says what a job after the merge must do: the tip checked out, no shallow history, the head brought in", () => {
+    const job = after
+      .slice(after.indexOf("\n### In a job after the merge\n"))
+      .replace(/\s+/g, " ");
+    for (const phrase of [
+      "never for a number taken from text",
+      "Check out the commit `--default-ref` names, with the complete history of the default branch",
+      "The checkout must not be shallow",
+      "at a shallow boundary a commit shows no parents",
+      "Bring the head commit of the pull request into the repository before the check",
+      "The check never fetches",
+      "`--base` is optional and nothing is measured from it",
+      "An open pull request with `--merged` exits 1 (`not-merged`)",
+    ]) {
+      expect(job, phrase).toContain(phrase);
+    }
+  });
+
+  it("names the boundaries of the check after the merge under the known gaps", () => {
+    for (const phrase of [
+      "the check after the merge compares the digest at the tip of the default branch with the digest at the commit of the approving review",
+      "reports `merge-shape-unknown` and never approves",
+      "Bindings after the merge: `bindings.yaml` and `bindings.log` are not part of the digest",
+      "Which pull request: the check after the merge takes the pull request the caller names",
+      "The merge commit and the head are the host's word",
+    ]) {
+      expect(gaps, phrase).toContain(phrase);
+    }
+    // What the earlier text said about a later check.
+    expect(doc).not.toContain("is a separate, later check");
+  });
+
+  it("describes the merge facts of the adapter and the fields of the report", () => {
+    const flat = doc.replace(/\s+/g, " ");
+    for (const phrase of [
+      "report `merged: true` only when the host itself says the pull request was merged",
+      "a trial merge the host computed for an open pull request is never reported",
+      "`mergeCommit` is `merge_commit_sha` for a merged pull request",
+      "| `mode` | `open`, or `merged` for the check after the merge |",
+      "| `merge` | after the merge, the merge as it was measured",
+      "| `merged` | `true` for the check after the merge",
+    ]) {
+      expect(flat, phrase).toContain(phrase);
+    }
+  });
+});
+
 describe('docs/approve.md, "Commands" and "CLI"', () => {
   /** The section under a heading of any level, up to the next heading of that level or above. */
   function under(heading: string): string {
@@ -182,12 +295,23 @@ describe('docs/approve.md, "Commands" and "CLI"', () => {
       "--pr",
       "--api-url",
     ]);
+    // The options that take no value: the one for the check after the merge.
+    const switches = [...block.matchAll(/ption\(\s*"(--[a-z-]+)",/g)].map(
+      (m) => m[1]!,
+    );
+    expect(switches).toEqual(["--merged"]);
     const cli = under("## CLI");
     const readme = fs.readFileSync(at("../../README.md"), "utf8");
     for (const flag of flags) {
       expect(cli, flag).toContain(`\`${flag}\``);
       expect(readme, flag).toContain(`${flag} <`);
     }
+    expect(cli).toContain("[--api-url <url>] [--merged]");
+    expect(cli).toContain("| `--merged` | `merged: true`");
+    expect(readme).toContain("`spec-gate approve-check --merged`");
+    expect(fs.readFileSync(at("../../CHANGELOG.md"), "utf8")).toContain(
+      "`spec-gate approve-check --merged`",
+    );
     expect(readme).toContain("spec-gate approve-check <spec-dir>");
     expect(fs.readFileSync(at("../../CHANGELOG.md"), "utf8")).toContain(
       "spec-gate approve-check <spec-dir>",
@@ -284,7 +408,7 @@ describe("the approval sources", () => {
     expect(text).not.toMatch(/\$\{token\}/);
   });
 
-  it("the only git arguments they write are a read of a tree and the merge bases of two commits", () => {
+  it("the only git arguments they write are a read of a tree, the merge bases of two commits and the parents of a commit", () => {
     const calls = sources.flatMap((file) =>
       [
         ...fs
@@ -292,20 +416,23 @@ describe("the approval sources", () => {
           .matchAll(/runGit\(\s*\w+,\s*\[([^\]]*)\]/g),
       ].map((m) => m[1]!.replace(/\s+/g, " ").trim()),
     );
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     expect(calls[0]).toMatch(
       /^"merge-base", "--all", "--end-of-options", a, b,?$/,
     );
     expect(calls[1]).toMatch(
+      /^"rev-list", "--parents", "--max-count=1", "--end-of-options", commit,?$/,
+    );
+    expect(calls[2]).toMatch(
       /^"ls-tree", "-r", "-z", "--full-tree", "--end-of-options", commit, "--", prefix,?$/,
     );
-    // Every runGit call of these sources is one of the two above: none is
+    // Every runGit call of these sources is one of the three above: none is
     // written in a form the pattern does not see.
     const written = sources.reduce(
       (n, file) =>
         n + (fs.readFileSync(file, "utf8").match(/\brunGit\(/g) ?? []).length,
       0,
     );
-    expect(written).toBe(2);
+    expect(written).toBe(3);
   });
 });

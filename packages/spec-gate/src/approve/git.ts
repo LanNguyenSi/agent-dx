@@ -1,8 +1,8 @@
 /**
  * The git reads of the approval check that no other module has: the digest
  * of a spec as a commit holds it, whether the spec directory of the work
- * tree is the one the head commit holds, and every merge base of two
- * commits.
+ * tree is the one a commit holds, every merge base of two commits, and the
+ * parents of a commit.
  *
  * Every git call goes through `runGit` of the lint or through the digest's
  * own readers, so the hardening of `canonical/git-hardening.ts` applies:
@@ -211,6 +211,44 @@ export function mergeBases(repo: string, a: string, b: string): string[] {
     throw new LintGitError("git-failed", "git could not find the merge bases");
   }
   return ids;
+}
+
+/**
+ * The parents of `commit` as full commit ids, the first parent first; no
+ * entry for a commit without one. The first parent of a commit on a branch
+ * is what the branch held before that commit.
+ *
+ * The answer is the one git's history walk gives: in a shallow repository a
+ * commit at the boundary has no parent here, whatever its object says.
+ */
+export function commitParents(repo: string, commit: string): string[] {
+  if (!COMMIT_RE.test(commit)) {
+    throw new LintGitError(
+      "not-a-commit",
+      "a value is not a full commit id (40 or 64 lower-case hex digits)",
+    );
+  }
+  const run = runGit(repo, [
+    "rev-list",
+    "--parents",
+    "--max-count=1",
+    "--end-of-options",
+    commit,
+  ]);
+  // One line: the commit itself, then its parents. An id that is not one
+  // (a second line would be part of the last) is no answer.
+  const ids = run.stdout.toString("utf8").replace(/\n$/, "").split(" ");
+  if (
+    run.status !== 0 ||
+    ids[0] !== commit ||
+    ids.some((id) => !COMMIT_RE.test(id))
+  ) {
+    throw new LintGitError(
+      "git-failed",
+      "git could not list the parents of a commit",
+    );
+  }
+  return ids.slice(1);
 }
 
 /** The modes of a regular file in a git tree. */

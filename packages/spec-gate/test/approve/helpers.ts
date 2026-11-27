@@ -25,7 +25,9 @@ import {
   REMOTE_MAIN,
   Repo,
   SPEC_REL,
+  rebaseMerge,
   specFiles,
+  squashMerge,
 } from "../lint/git-helpers.js";
 import { validFiles } from "../lint/helpers.js";
 import { BIND_BINDINGS, BIND_PLAN, commitSpec } from "../state/helpers.js";
@@ -274,6 +276,139 @@ export async function crissCross(
   return { ...s, head, newer, bases: [d1, s1] };
 }
 
+/** How a test merges a pull request into the default branch. */
+export type MergeHow = "merge-commit" | "squash" | "rebase";
+
+/**
+ * A merged pull request: the scenario after its merge. `head` stays the
+ * head commit of the pull request, which the host reports and the reviews
+ * stand on; the checkout is on `main` at `landed`.
+ */
+export interface Landed extends Scenario {
+  /** The commit the merge put on the default branch, as the host reports it. */
+  merge: string;
+  /** The commit the default ref names. */
+  landed: string;
+}
+
+/**
+ * Merges the branch `pr` of `s` into `main` the way a host does: `main`
+ * first moves on by an unrelated commit, then a merge commit whose second
+ * parent is the head, one squashed commit, or the commits of the branch
+ * replayed. The default ref is set to the result and `main` is checked out
+ * there. The base the host reports stays `c1`, which is older than the
+ * first parent of the merge.
+ */
+export async function land(s: Built, how: MergeHow): Promise<Built & Landed> {
+  const head = await s.repo.sh("rev-parse", "pr");
+  let merge: string;
+  if (how === "squash") merge = await squashMerge(s.repo, "pr");
+  else if (how === "rebase") merge = await rebaseMerge(s.repo, "pr");
+  else {
+    await s.repo.checkout("main");
+    await s.repo.commit({ "elsewhere.txt": "main moved on\n" }, "elsewhere");
+    await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge pr", head);
+    merge = await s.repo.head();
+    await s.repo.setRef(REMOTE_MAIN, merge);
+  }
+  return { ...s, head, merge, landed: merge };
+}
+
+/** Commits `files` on `main` after the merge and moves the default ref there. */
+export async function afterMerge(
+  m: Built & Landed,
+  files: Record<string, string | null>,
+  message = "the default branch moves on after the merge",
+): Promise<Built & Landed> {
+  await m.repo.checkout("main");
+  const landed = await m.repo.commit(files, message);
+  await m.repo.setRef(REMOTE_MAIN, landed);
+  return { ...m, landed };
+}
+
+/** The settings of the default branch once `alice` is no approver any more. */
+export const CONFIG_ONLY_BOB =
+  "approvers: [bob]\nagent_identities: [Spec-Bot]\n";
+
+/**
+ * A squash merge that carries its own change to the settings, which the
+ * head of the pull request never made: the default branch took `alice` off
+ * the approvers after `c1`, the base the host reports, and the squashed
+ * commit puts `.spec-gate/config.yaml` back to its text at `c1`. Nothing
+ * under `.spec-gate/` differs between `c1` and the squashed commit, or
+ * between `c1` and the head; only the first parent of the squashed commit
+ * shows the change.
+ */
+export async function squashWithOwnSettings(): Promise<Built & Landed> {
+  const s = await build();
+  await s.repo.checkout("main");
+  await s.repo.commit(
+    { ".spec-gate/config.yaml": CONFIG_ONLY_BOB },
+    "alice is no approver any more",
+  );
+  await s.repo.sh("merge", "-q", "--squash", "pr");
+  const merge = await s.repo.commit(
+    { ".spec-gate/config.yaml": CONFIG },
+    "squash pr",
+  );
+  await s.repo.setRef(REMOTE_MAIN, merge);
+  return { ...s, merge, landed: merge };
+}
+
+/** Changes the normative layer of the spec in the work tree of `dir`. */
+export function editSpec(dir: string): void {
+  const file = path.join(dir, SPEC_REL, "spec.md");
+  const text = fs.readFileSync(file, "utf8");
+  if (!text.includes("HTTP 401")) throw new Error("nothing to edit");
+  fs.writeFileSync(file, text.replace("HTTP 401", "HTTP 403"));
+}
+
+/**
+ * A squash merge whose one commit holds another normative layer than the
+ * head that was approved: the spec is edited between the squash and its
+ * commit.
+ */
+export async function squashEdited(): Promise<Built & Landed> {
+  const s = await build();
+  await s.repo.checkout("main");
+  await s.repo.commit({ "elsewhere.txt": "main moved on\n" }, "elsewhere");
+  await s.repo.sh("merge", "-q", "--squash", "pr");
+  editSpec(s.dir);
+  const merge = await s.repo.commit({}, "squash pr");
+  await s.repo.setRef(REMOTE_MAIN, merge);
+  return { ...s, merge, landed: merge };
+}
+
+/** As `keep`, for a merged pull request. */
+export function keepLanded(m: Landed): Landed {
+  return { ...keep(m), merge: m.merge, landed: m.landed };
+}
+
+/** The pull request of `m` as the host reports it after the merge. */
+export function landedPull(
+  m: Landed,
+  over: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return pullRequestOf(m, { merged: true, mergeCommit: m.merge, ...over });
+}
+
+/**
+ * Runs the check after the merge for `m`: the host reports the pull request
+ * as merged with the merge commit of `m`, and an approval by `alice` on its
+ * head, unless `says` changes it.
+ */
+export async function checkLanded(
+  m: Landed,
+  says: HostSays = {},
+  over: Partial<ApproveRequest> = {},
+): Promise<ApproveReport> {
+  return check(
+    m,
+    { pullRequest: landedPull(m), ...says },
+    { merged: true, ...over },
+  );
+}
+
 /** Proposes the draft at `HEAD` and commits the result. */
 export async function propose(repo: Repo): Promise<string> {
   const result = proposeSpecDir(repo.spec, {
@@ -405,6 +540,8 @@ export function pullRequestOf(
     head: s.head,
     base: s.tip ?? s.c1,
     targetRef: "refs/heads/main",
+    merged: false,
+    mergeCommit: null,
     ...over,
   };
 }

@@ -550,6 +550,8 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
     const baseSha = isRecord(base) ? base.sha : undefined;
     const baseRef = isRecord(base) ? base.ref : undefined;
     const baseRepo = isRecord(base) ? base.repo : undefined;
+    const isMerged = json.merged;
+    const mergeSha = json.merge_commit_sha;
     if (json.number !== pullNumber) {
       throw failure(path, 200, "another pull request number");
     }
@@ -560,6 +562,17 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
     if (!isRecord(baseRepo) || !sameRepository(baseRepo.full_name)) {
       throw failure(path, 200, "the base is in another repository");
     }
+    // Merged is what the host says in so many words, a boolean. For an open
+    // pull request `merge_commit_sha` is the trial merge the host computed,
+    // which is on no branch: it is read for a merged pull request only.
+    if (typeof isMerged !== "boolean") {
+      throw failure(path, 200, "no merged state");
+    }
+    let landed: string | null = null;
+    if (isMerged) {
+      if (!isCommitId(mergeSha)) throw failure(path, 200, "no merge commit");
+      landed = mergeSha;
+    }
     return {
       pull: {
         number: pullNumber,
@@ -567,6 +580,8 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
         head: headSha,
         base: baseSha,
         targetRef: `refs/heads/${baseRef}`,
+        merged: isMerged,
+        mergeCommit: landed,
       },
       branch: baseRef,
     };

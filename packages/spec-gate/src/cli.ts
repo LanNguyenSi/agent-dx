@@ -652,7 +652,9 @@ program
     "check whether the proposed spec of an open GitHub pull request is approved and print one JSON report line " +
       "(spec-gate-approve/1): the eight conditions, the repository check among them, and the commands the spec " +
       "refers to; exits 0 when approved, 1 when not, 2 on a usage error or refusal. The checkout must be at the head " +
-      "commit of the pull request, not at a merge of it. The token is read from the environment variable GITHUB_TOKEN only",
+      "commit of the pull request, not at a merge of it. With --merged it checks after the merge whether the spec at " +
+      "the tip of the default branch is the one that was approved; the checkout must then be at that tip. " +
+      "The token is read from the environment variable GITHUB_TOKEN only",
   )
   .argument("<spec-dir>", "the spec directory, specs/<name> inside --repo")
   .requiredOption(
@@ -677,6 +679,11 @@ program
     "--api-url <url>",
     "the API root of the host (default: https://api.github.com); https, or http for a loopback host",
   )
+  .option(
+    "--merged",
+    "check after the merge: the pull request must be merged, the checkout at the commit --default-ref names, " +
+      "and the head commit of the pull request fetched. Nothing is measured from --base then either",
+  )
   .helpOption(false)
   .allowUnknownOption()
   .allowExcessArguments(true)
@@ -693,6 +700,7 @@ program
         githubRepo: string;
         pr: string;
         apiUrl?: string;
+        merged?: boolean;
       },
       command: Command,
     ) => {
@@ -705,6 +713,7 @@ program
           githubRepo: options.githubRepo,
           pr: options.pr,
           ...(options.apiUrl !== undefined ? { apiUrl: options.apiUrl } : {}),
+          ...(options.merged === true ? { merged: true } : {}),
           unknownArguments: command.args.length - 1,
         },
         process.env,

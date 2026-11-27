@@ -6,6 +6,11 @@ pull request that carries the spec. `checkApproval` in `src/approve/` is that
 derivation. It is a library function; the CLI verb `spec-gate approve-check`
 calls it for a pull request on GitHub (see "CLI").
 
+It has two modes. This page describes the open mode first: the check of an
+open pull request, at its head commit. With `merged: true` (`--merged`) it
+checks a merged pull request instead, at the tip of the default branch; what
+differs then is described in "After the merge".
+
 ```ts
 import { checkApproval } from "./src/approve/index.js";
 
@@ -33,6 +38,7 @@ tree.
 | `specDir` | the spec directory, `specs/<name>` inside `repo` |
 | `defaultRef` | the full name of the ref that holds the default branch in `repo` (for example `refs/remotes/origin/main`), as `--default-ref` of the lint; required |
 | `base` | the full id of the pull request base commit; optional. It is only compared with the base the host reports, and no condition measures from it |
+| `merged` | `true` for the check after the merge (see "After the merge"); optional. Left out or `false`, an open pull request is judged. Any other value is refused |
 | `host` | the host adapter |
 
 `repo`, `defaultRef` and `base` are resolved exactly as the lint resolves its
@@ -59,7 +65,8 @@ type ApproveResult =
 
 A refusal means the check could not start: `specDir` is not a directory or is
 a link, a git input does not resolve (the lint's own messages), `defaultRef`
-is missing, or the spec directory is not `specs/<name>`. The host is not asked
+is missing, `merged` is neither `true` nor `false`, or the spec directory is
+not `specs/<name>`. The host is not asked
 anything then. A refusal is never an approval.
 
 A report is not an approval either: it says `approved: true` or
@@ -70,7 +77,9 @@ A report is not an approval either: it says `approved: true` or
 
 `approved` is true only when all eight conditions hold. The report has one
 entry per condition, in this order, each with `ok`, a `code` (`ok` when it
-holds) and a `message`.
+holds) and a `message`. The table and the sections below describe the open
+mode; "After the merge" says what each condition asks for a merged pull
+request, and each list of codes names the codes of both modes.
 
 | # | Name | Holds when |
 |---|---|---|
@@ -146,7 +155,8 @@ reports for the pull request (`head-mismatch` otherwise): everything else the
 check reads from git is read at `HEAD`, so a checkout at another commit would
 judge another tree than the one that was reviewed.
 
-Codes: `host-failed`, `head-mismatch`, `no-approval`, `approval-stale`.
+Codes: `host-failed`, `head-mismatch`, `no-approval`, `approval-stale`; after
+the merge `not-merged` in place of `head-mismatch`.
 
 ### 2. An allowed approver
 
@@ -209,7 +219,9 @@ The condition also ties the settings to the branch the spec is merged into:
 
 Codes: `host-failed`, `config-invalid`, `target-not-default`,
 `base-mismatch`, `base-not-on-default`, `head-in-reference`, `no-approval`,
-`approver-not-qualified`, `git-failed`.
+`approver-not-qualified`, `git-failed`; after the merge, in place of
+`head-in-reference`: `not-merged`, `merge-not-on-default`, `head-unavailable`,
+`merge-shape-unknown`, `ambiguous-merge-base`, `config-in-merge`.
 
 ### 3. The digest that was approved
 
@@ -230,7 +242,8 @@ Codes: `host-failed`, `no-approval`, `digest-unavailable` (no digest exists
 at the head: a file is missing or does not parse, a command is unknown),
 `review-commit-unavailable` (the commit of a review is not in the repository;
 nothing is fetched), `review-digest-unavailable`, `digest-mismatch`,
-`git-failed`.
+`git-failed`; after the merge `digest-mismatch-after-merge` in place of
+`digest-mismatch`.
 
 ### 4. Proposed, and the final lint is clean
 
@@ -254,7 +267,7 @@ nothing is fetched), `review-digest-unavailable`, `digest-mismatch`,
 
 Codes: `spec-unreadable`, `status-not-proposed`, `worktree-not-head`,
 `ambiguous-merge-base`, `lint-failed`, `lint-errors`, `head-moved`,
-`git-failed`.
+`git-failed`; after the merge also `checkout-not-default-tip`.
 
 ### 5. Agent identities are set apart
 
@@ -293,7 +306,9 @@ branch made itself does not count, before or after the pull request merged
 it. The final lint of condition 4 runs the same rule from the same base, so
 a change here fails condition 4 as well.
 
-Codes: `spec-changes-config`, `ambiguous-merge-base`, `git-failed`.
+Codes: `spec-changes-config`, `ambiguous-merge-base`, `git-failed`; after the
+merge also `host-failed`, `not-merged`, `merge-not-on-default`,
+`head-unavailable`, `merge-shape-unknown`.
 
 ### 8. The repository check is clean
 
@@ -327,7 +342,174 @@ request without a spec to approve deletes a spec just as well, so
 `repo-check` still runs on every pull request.
 
 Codes: `repo-check-findings`, `tree-too-large`, `ambiguous-merge-base`,
-`git-failed`.
+`git-failed`; after the merge also `host-failed`, `not-merged`,
+`merge-not-on-default`, `head-unavailable`, `merge-shape-unknown`.
+
+## After the merge
+
+`checkApproval({ ..., merged: true })`, on the command line
+`approve-check --merged`, answers another question than the open mode: is the
+spec a merged pull request left on the default branch the spec that was
+approved?
+
+The open mode cannot answer it. A squash merge and a rebase merge write new
+commits, so the approved head is not what the default branch holds; a merge
+can be made by an actor who may bypass the review; and the default branch
+moves on afterwards. The open mode refuses a head the default branch already
+holds (`head-in-reference`).
+
+Like the open mode it decides from the host's facts and from git, never from
+text of the pull request. It needs two more facts of the host: whether the
+pull request is merged, and the commit the merge put on the target branch
+(`merged` and `mergeCommit` of `HostPullRequest`).
+
+The eight conditions keep their numbers and names, and `approved` is still
+all of them:
+
+| # | After the merge, the condition asks |
+|---|---|
+| 1 | The host reports the pull request as merged, and an approving review stands on the head commit the host reports for it. |
+| 2 | An approver of that head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the tip of the default branch, the pull request targeted the default branch, its merge commit is on the default branch and no range of the merge changes a path under `.spec-gate/`. |
+| 3 | The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered. |
+| 4 | The spec is `proposed` at the tip of the default branch, the checkout is at that commit, the spec directory of the work tree is the one it holds, and the final lint has no error. |
+| 5 | `agent_identities` is not empty and shares no account with `approvers`. |
+| 6 | The host enforces a review for `specs/` and for `.spec-gate/`, and reports the last change under `.spec-gate/`. |
+| 7 | No path under `.spec-gate/` differs over a range of the merge. |
+| 8 | The repository check has no finding over a range of the merge. |
+
+Conditions 5 and 6 ask what they ask in the open mode.
+
+### What is judged, and where
+
+The tip of the default branch is the commit `defaultRef` names when the check
+runs. `spec.md` and `testplan.yaml`, the digest and the commands are read from
+git at that commit, and `spec`, `digest` and `commands` of the report are
+those of that commit. The merge commit may lie below the tip: a commit the
+default branch gained after the merge is part of what is judged. So the answer
+is about the default branch as it is now, and it can change when the branch
+moves on.
+
+- Condition 1 does not look at the checkout. The approval must stand on the
+  head commit the host reports for the pull request; a review of the merge
+  commit or of the tip is `approval-stale`. A pull request the host does not
+  report as merged is `not-merged`, also when it names a merge commit: for an
+  open pull request a host can name a trial merge there.
+- Condition 3 compares the digest at the tip with the digest at the commit of
+  each approving review considered, both computed from git. A difference is
+  `digest-mismatch-after-merge`, and the message names both digests and both
+  commits. It covers a squash that carried other content than the approved
+  head and a later commit that changed the spec. The commit of the review is
+  usually not in the history of the default branch after a squash or rebase
+  merge: the job must have it in the repository
+  (`review-commit-unavailable` otherwise; nothing is fetched).
+- Condition 4 reads the status at the tip. The lint reads the spec directory
+  from the work tree and its git view from `HEAD`, so `HEAD` must be the
+  commit `defaultRef` names (`checkout-not-default-tip`) and the spec
+  directory of the work tree must be the one that commit holds
+  (`worktree-not-head`).
+- The settings of conditions 2 and 5 are read at the tip, as in the open mode:
+  an approver taken off the list on the default branch after the merge does
+  not count, and neither does an account made an agent identity there since.
+
+### The ranges of the merge
+
+What the pull request changed is measured over ranges of commits that are
+derived from git and from two facts of the host, the head commit of the pull
+request and its merge commit (`landingOf` in `src/approve/landing.ts`). The
+merge commit must be the commit `defaultRef` names or an ancestor of it
+(`merge-not-on-default`; a default ref that was not fetched since the merge
+gives this too).
+
+The first range runs from the first parent of the merge commit to the merge
+commit: the first parent is what the default branch held before. Whether that
+range is the whole pull request depends on how it was merged, and git shows
+two shapes that can be told:
+
+| Shape | git shows | Ranges |
+|---|---|---|
+| `merge-commit` | the merge commit has two parents, the second is the head commit of the pull request, and that head was not in the history of the first parent | first parent to merge commit |
+| `single-commit` | the merge commit has one parent, and the head commit of the pull request is not in its history: a squash merge or a rebase merge | first parent to merge commit; and the one merge base of the head commit with the first parent to the head commit |
+
+A squash merge puts the whole pull request into its one commit. A rebase merge
+puts only its last commit into the commit the host names; the commits before
+it lie further down the first-parent chain, and git does not say where they
+begin. The second range covers them from the other side: it is what the
+reviewed commits change, whichever of them landed in which commit. So a
+rebase merge whose first commit changes `.spec-gate/config.yaml`, or deletes
+another proposed spec, is not approved although the range of its last commit
+is clean. The head commit must be in the repository for it
+(`head-unavailable`), and it must have exactly one merge base with the first
+parent (`ambiguous-merge-base` for several, `git-failed` for none).
+
+Conditions 2, 7 and 8 use every range, and a path or a finding that several
+ranges show is counted once:
+
+- condition 7: no path under `.spec-gate/` differs over a range, by the lint
+  rule `spec-changes-config` as in the open mode;
+- condition 8: the repository check has no finding over a range;
+- condition 2: after the merge the tip of the default branch holds the pull
+  request, so the settings read there could be its own. They are trusted only
+  when no range changes a path under `.spec-gate/`; otherwise the condition
+  is `config-in-merge`, whoever approved. This takes the place of
+  `head-in-reference`.
+
+Every other shape is `merge-shape-unknown`, and conditions 2, 7 and 8 do not
+hold:
+
+- the head commit of the pull request is itself in the history of the merge
+  commit without a merge commit of its own: the default branch was moved to
+  it by fast-forward, or the branch was pushed there. The first parent of
+  such a commit is a commit of the pull request, and a range from it would
+  leave out what the commits before it changed;
+- a merge commit whose second parent is the head while the first parent
+  already held that head;
+- a merge commit with two parents whose second parent is not the head, with
+  more than two parents, or with none.
+
+A change the default branch made itself, before or after the merge, lies in
+no range and is not counted.
+
+### The measuring base and `base` after the merge
+
+The measuring base of the open mode, the merge base of `HEAD` and the default
+commit, is not used after the merge: `HEAD` is the default commit, so that
+merge base is the tip itself and nothing would differ from it. The ranges of
+the merge take its place for conditions 7 and 8.
+
+No range starts at `base`, and none at the base commit the host reports. A
+base the host reports can be older than the first parent of the merge commit:
+measured from it, a settings file the merge puts back to its old text shows no
+change. `base` keeps its one use, the comparison with the base the host
+reports in condition 2 (`base-mismatch`, `base-not-on-default`), and the
+report is the same with and without it but for `reference`.
+
+The final lint of condition 4 is given `repo` and `defaultRef`, as in the open
+mode. Its diff base is then the tip itself, so its rules that measure a change
+(`spec-changes-config`, and `bindings-log` against a log merged before)
+compare the tip with itself and report nothing the pull request did. What the
+pull request changed under `.spec-gate/` and to other specs is measured by
+conditions 7 and 8. A `bindings.log` it replaced is not: see "Known gaps".
+
+### In a job after the merge
+
+- Run it for the pull request the host names for the merge (the event of the
+  merge or the pull request the host associates with the pushed commit),
+  never for a number taken from text.
+- Check out the commit `--default-ref` names, with the complete history of the
+  default branch. The checkout must not be shallow (for example
+  `fetch-depth: 0`): at a shallow boundary a commit shows no parents, so a
+  merge commit is not recognised, and a hidden merge base makes git report an
+  older one, from which the reviewed range shows another change than the pull
+  request made.
+- Bring the head commit of the pull request into the repository before the
+  check, with its history down to the default branch. The check never fetches.
+  On GitHub that commit stays readable as `refs/pull/<number>/head` after a
+  squash or rebase merge.
+- `--base` is optional and nothing is measured from it.
+- The exit codes are those of the open mode: 0 only for `approved: true`. An
+  open pull request with `--merged` exits 1 (`not-merged`).
+- When the default branch moves on, the answer of an earlier run is about an
+  earlier tip. Run the check again to have it for the new one.
 
 ## Report
 
@@ -338,19 +520,21 @@ time, no absolute path, and nothing a host adapter threw.
 | Field | Meaning |
 |---|---|
 | `format` | `spec-gate-approve/1` |
-| `spec` | the frontmatter `id` at the head, or `null` |
+| `mode` | `open`, or `merged` for the check after the merge |
+| `spec` | the frontmatter `id` at the commit that was judged (the head; after the merge the tip of the default branch), or `null` |
 | `path` | the spec directory in the repository, `specs/<name>` |
 | `approved` | true only when every condition holds |
 | `approve_reported` | true when an approving review stands on the head (condition 1 holds) and condition 5 is `approval-not-verifiable` or condition 6 is `approval-not-enforced`: an approve was seen, an approval is not claimed. Never true together with `approved` |
-| `head` | the commit that was checked |
+| `head` | `HEAD` of the checkout: in the open mode the commit that was judged. After the merge that commit is `default_commit`, and condition 4 holds only when `head` equals it |
 | `reference` | the base commit that is compared with the base the host reports: `base` when given, else `default_commit`. No condition measures from it; conditions 4, 7 and 8 measure from the one merge base of `head` and `default_commit` |
 | `default_commit` | the commit `defaultRef` names; the settings were read there |
-| `digest` | the digest of the spec at the head, or `null` |
+| `digest` | the digest of the spec at the commit that was judged, or `null` |
 | `pull_request` | `number`, `author`, `head`, `base`, `target_ref` as the host reports them, or `null` when the host failed |
+| `merge` | after the merge, the merge as it was measured: `commit` (the merge commit the host reports), `first_parent`, `shape` (`merge-commit` or `single-commit`), `reviewed_base` (the merge base of the second range, `null` for `merge-commit`) and `ranges` (each with `from` and `to`). `null` in the open mode, and after the merge when no range could be derived; conditions 2, 7 and 8 then say why |
 | `conditions` | eight entries: `condition`, `name`, `ok`, `code`, `message` |
-| `approvals` | every approval that stands, on the head or not: `login`, `commit`, `at_head`, `problem` (`null` for an approver that counts) |
+| `approvals` | every approval that stands, on the head or not: `login`, `commit`, `at_head`, `problem` (`null` for an approver that counts). After the merge the head is the head commit the host reports for the pull request |
 | `last_config_commit` | `commit` and `approver` of the last change under `.spec-gate/`; `null` is unknown |
-| `commands` | the commands the spec at the head refers to, each with `name` and `argv`, sorted by name; `null` when they cannot be read (see "Commands") |
+| `commands` | the commands the spec at the commit that was judged refers to, each with `name` and `argv`, sorted by name; `null` when they cannot be read (see "Commands") |
 | `gaps` | the checks the approval does not make, each with a `code` and a `message`; a gap never changes `approved` |
 
 ### Commands
@@ -391,13 +575,15 @@ command set, can therefore be approved with `commands: null`.
 
 ```
 spec-gate approve-check <spec-dir> --repo <dir> --default-ref <ref> [--base <commit>]
-    --github-repo <owner/name> --pr <number> [--api-url <url>]
+    --github-repo <owner/name> --pr <number> [--api-url <url>] [--merged]
 ```
 
 runs the check for one open pull request on GitHub and prints the report as
 one JSON line on stdout. It makes one GitHub adapter (see "GitHub adapter")
 and calls `checkApproval` once. The code is `runApproveCheck` in
-`src/approve/verb.ts`.
+`src/approve/verb.ts`. With `--merged` it runs the check after the merge for
+one merged pull request (see "After the merge" and "In a job after the
+merge").
 
 | Argument | Meaning |
 |---|---|
@@ -406,6 +592,7 @@ and calls `checkApproval` once. The code is `runApproveCheck` in
 | `--github-repo` | `repository` of the adapter: `<owner>/<name>` of the repository the pull request targets; required |
 | `--pr` | the number of the pull request: digits only, 1 or more; required |
 | `--api-url` | `apiUrl` of the adapter; `https://api.github.com` when left out |
+| `--merged` | `merged: true`: the check after the merge. It takes no value |
 
 ### Exit codes
 
@@ -509,6 +696,12 @@ the approver list is not detected.
   pull request (title, body, comments, commit messages, labels);
 - report commits as full commit ids, the target as `refs/heads/<branch>`, and
   times as ISO 8601 with a zone;
+- report `merged: true` only when the host itself says the pull request was
+  merged, and then `mergeCommit` as the commit the merge put on the target
+  branch (the merge commit, the one commit of a squash merge, the last commit
+  of a rebase merge). For a pull request that is not merged `mergeCommit` is
+  `null`: a trial merge the host computed for an open pull request is never
+  reported;
 - return every submitted review, all pages, with the state each has now (a
   dismissed approval is `DISMISSED`), and leave out a review that was never
   submitted;
@@ -577,7 +770,13 @@ is `base.ref` of the pull request.
 | `ciRunStatus(commit, run)` | `/actions/runs/{id}` | "Get a workflow run" |
 
 The pull request: `author` is `user.login`, `head` is `head.sha`, `base` is
-`base.sha` and `targetRef` is `refs/heads/` followed by `base.ref`.
+`base.sha` and `targetRef` is `refs/heads/` followed by `base.ref`. `merged`
+is the boolean `merged`, and an answer without it throws. `mergeCommit` is
+`merge_commit_sha` for a merged pull request, where it must be a full commit
+id, and `null` for every other one: for an open pull request that field holds
+the trial merge GitHub computed, which is on no branch, and it is not read.
+`merged_at` and `state` of the pull request are not read: a closed pull
+request is not a merged one.
 `base.repo.full_name` must name the repository the adapter was made for (the
 case of the ASCII letters aside) and `number` must be the number asked for;
 otherwise the method throws. The head may lie in a fork. The title, the body,
@@ -768,9 +967,36 @@ Named here instead of closed:
   of the spec could not be read at its `commands_ref`, so the report shows
   none. No condition depends on it.
 - Squash merges: what lands on the default branch can differ from the head
-  that was approved. This check judges the head of the pull request; comparing
-  the digest on the default branch with the digest at the commit of the
-  approving review is a separate, later check.
+  that was approved. The open mode judges the head of the pull request and
+  says nothing about what was merged; the check after the merge compares the
+  digest at the tip of the default branch with the digest at the commit of the
+  approving review (see "After the merge"). A job that runs only the open mode
+  leaves this open.
+- Merges whose shape git cannot tell: after a fast-forward of the default
+  branch to the head of the pull request, or a push of the branch, and for a
+  merge commit that is not a merge of that head into the default branch, the
+  check after the merge reports `merge-shape-unknown` and never approves.
+  There is no setting that makes it pick a range for such a merge.
+- Bindings after the merge: `bindings.yaml` and `bindings.log` are not part
+  of the digest, and the final lint of the check after the merge compares the
+  tip of the default branch with itself. So a pull request that replaced a
+  `bindings.log` merged before (back to `draft` and a second propose) is not
+  noticed once it is merged, and neither is a squash that carried other
+  bindings than the approved head. The open mode notices the first
+  (`lint-errors`). The removal of a log is noticed in both modes, by
+  condition 8.
+- Which pull request: the check after the merge takes the pull request the
+  caller names. It does not ask whether that pull request is the one that
+  brought the spec to the default branch; a later merged pull request whose
+  reviewed head holds the same spec, with an approval on that head, passes
+  conditions 1 and 3 as well. The open mode has the same property: an approval
+  of a commit counts for every spec in the tree of that commit.
+- The merge commit and the head are the host's word: the check verifies that
+  the merge commit is on the default branch and reads its parents from git,
+  and cannot verify that it is the commit that merged this pull request. The
+  commits of a rebase merge before its last one are measured through the head
+  commit the host reports, so the check relies on the host to report the head
+  that was merged.
 - Enforcement is the host's word: the check cannot verify a ruleset, it
   relays what the adapter reports.
 - The check reads the work tree once for the lint and compares it with the

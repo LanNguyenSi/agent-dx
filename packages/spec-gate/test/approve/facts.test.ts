@@ -35,6 +35,8 @@ describe("readHostFacts: a good host", () => {
           head: HEAD,
           base: BASE,
           targetRef: "refs/heads/main",
+          merged: false,
+          mergeCommit: null,
         },
       },
       reviews: {
@@ -200,9 +202,41 @@ describe("readHostFacts: a value that is not of the type gives no fact", () => {
       "fields that are inherited, not own",
       Object.create(pullRequestOf(S)) as unknown,
     ],
+    ["no merged state", pullRequestOf(S, { merged: undefined })],
+    ["a merged state that is null", pullRequestOf(S, { merged: null })],
+    ["a merged state as text", pullRequestOf(S, { merged: "true" })],
+    ["a merged state as a number", pullRequestOf(S, { merged: 1 })],
+    ["no merge commit field", pullRequestOf(S, { mergeCommit: undefined })],
+    [
+      "a short merge commit",
+      pullRequestOf(S, { merged: true, mergeCommit: BASE.slice(0, 12) }),
+    ],
+    [
+      "an upper-case merge commit",
+      pullRequestOf(S, { merged: true, mergeCommit: BASE.toUpperCase() }),
+    ],
+    [
+      "a merge commit that is a list",
+      pullRequestOf(S, { merged: true, mergeCommit: [BASE] }),
+    ],
+    ["a merge commit that is false", pullRequestOf(S, { mergeCommit: false })],
   ])("the pull request: %s", async (_what, value) => {
     const facts = await readHostFacts(hostFor(S, { pullRequest: value }));
     expect(facts.pullRequest).toEqual({ ok: false });
+  });
+
+  it("the pull request: the merge facts are handed on as given, merged or not", async () => {
+    for (const over of [
+      { merged: true, mergeCommit: BASE },
+      { merged: true, mergeCommit: null },
+      { merged: false, mergeCommit: BASE },
+      { merged: false, mergeCommit: null },
+    ]) {
+      const facts = await readHostFacts(
+        hostFor(S, { pullRequest: pullRequestOf(S, over) }),
+      );
+      expect(facts.pullRequest).toMatchObject({ ok: true, value: over });
+    }
   });
 
   const good = review("alice", "APPROVED", HEAD, 1);

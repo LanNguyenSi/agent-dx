@@ -38,6 +38,7 @@ describe("checkApproval: approved", { timeout: 60_000 }, () => {
       kind: "report",
       report: {
         format: APPROVE_FORMAT,
+        mode: "open",
         spec: "tiny-valid",
         path: SPEC_REL,
         approved: true,
@@ -53,6 +54,7 @@ describe("checkApproval: approved", { timeout: 60_000 }, () => {
           base: S.c1,
           target_ref: "refs/heads/main",
         },
+        merge: null,
         conditions: CONDITIONS.map((c) => ({
           condition: c.condition,
           name: c.name,

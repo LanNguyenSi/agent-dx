@@ -38,7 +38,46 @@ describe("pullRequest", () => {
       head: HEAD,
       base: BASE,
       targetRef: "refs/heads/main",
+      merged: false,
+      mergeCommit: null,
     });
+  });
+
+  it("reports a merged pull request with the commit the merge put on the target branch", async () => {
+    stub.on(PULL_PATH, { json: pullJson(mergedAt(MERGE)) });
+    const pull = await giving(hostAt(stub).pullRequest());
+    expect(pull).toEqual({
+      number: 7,
+      author: "dev",
+      head: HEAD,
+      base: BASE,
+      targetRef: "refs/heads/main",
+      merged: true,
+      mergeCommit: MERGE,
+    });
+  });
+
+  it("never reports the trial merge of an open pull request as a merge commit, closed or not", async () => {
+    for (const state of ["open", "closed"]) {
+      stub.on(PULL_PATH, {
+        json: pullJson({ state, merged: false, merge_commit_sha: MERGE }),
+      });
+      const pull = await giving(hostAt(stub).pullRequest());
+      expect(pull).toMatchObject({ merged: false, mergeCommit: null });
+    }
+  });
+
+  it("does not take a merge time or a closed state for the word of the host that it is merged", async () => {
+    stub.on(PULL_PATH, {
+      json: pullJson({
+        state: "closed",
+        merged: false,
+        merged_at: "2024-05-01T11:00:00Z",
+        merge_commit_sha: MERGE,
+      }),
+    });
+    const pull = await giving(hostAt(stub).pullRequest());
+    expect(pull).toMatchObject({ merged: false, mergeCommit: null });
   });
 
   it("accepts a head in a fork, and a head whose repository is gone", async () => {
@@ -121,6 +160,43 @@ describe("pullRequest", () => {
     ],
     ["another number", { number: 8 }, "another pull request number"],
     ["a number as text", { number: "7" }, "another pull request number"],
+    ["no merged state", { merged: undefined }, "no merged state"],
+    ["a merged state that is null", { merged: null }, "no merged state"],
+    [
+      "a merged state as text",
+      { merged: "true", merge_commit_sha: sha("c") },
+      "no merged state",
+    ],
+    [
+      "a merged state as a number",
+      { merged: 1, merge_commit_sha: sha("c") },
+      "no merged state",
+    ],
+    [
+      "a merged pull request without a merge commit",
+      { merged: true, merge_commit_sha: null },
+      "no merge commit",
+    ],
+    [
+      "a merged pull request whose merge commit is left out",
+      { merged: true, merge_commit_sha: undefined },
+      "no merge commit",
+    ],
+    [
+      "a merged pull request with a short merge commit id",
+      { merged: true, merge_commit_sha: "ccccccc" },
+      "no merge commit",
+    ],
+    [
+      "a merged pull request with a merge commit id in upper case",
+      { merged: true, merge_commit_sha: "C".repeat(40) },
+      "no merge commit",
+    ],
+    [
+      "a merged pull request whose merge commit is a list",
+      { merged: true, merge_commit_sha: [sha("c")] },
+      "no merge commit",
+    ],
     ["no user", { user: null }, "no author login"],
     ["a login that is no text", { user: { login: 7 } }, "no author login"],
     [
@@ -283,6 +359,17 @@ const base = (over: Record<string, unknown>) => ({
 const head = (id: unknown) => ({
   head: { ref: "feature", sha: id, repo: null },
 });
+/** The commit a merge put on the target branch. */
+const MERGE = sha("c");
+/** The fields of a merged pull request whose merge commit is `id`. */
+function mergedAt(id: unknown): Record<string, unknown> {
+  return {
+    state: "closed",
+    merged: true,
+    merged_at: "2024-05-01T11:00:00Z",
+    merge_commit_sha: id,
+  };
+}
 const HEX39 = "a".repeat(39);
 
 interface PullRow {
@@ -679,6 +766,87 @@ const CONJUNCTS: {
       over: { head: { sha: "main" } },
       expect: { error: "no head commit" },
     },
+  },
+  {
+    id: "C-PUL-29",
+    function: "readPullRequest",
+    conjunct:
+      "an answer without a merged state is an error, not an open pull request",
+    row: {
+      over: { merged: undefined },
+      expect: { error: "no merged state" },
+    },
+  },
+  {
+    id: "C-PUL-30",
+    function: "readPullRequest",
+    conjunct: "a merged state that only reads as true is none",
+    row: {
+      over: { ...mergedAt(MERGE), merged: 1 },
+      expect: { error: "no merged state" },
+    },
+  },
+  {
+    id: "C-PUL-31",
+    function: "readPullRequest",
+    conjunct:
+      "the merge commit is read for a merged pull request only: the trial merge of an open one is not reported",
+    row: {
+      over: { merged: false, merge_commit_sha: MERGE },
+      expect: { merged: false, mergeCommit: null },
+    },
+  },
+  {
+    id: "C-PUL-32",
+    function: "readPullRequest",
+    conjunct: "a merged pull request reports its merge commit",
+    row: {
+      over: mergedAt(MERGE),
+      expect: { merged: true, mergeCommit: MERGE },
+    },
+  },
+  {
+    id: "C-PUL-33",
+    function: "readPullRequest",
+    conjunct: "the merge commit must be a full commit id",
+    row: {
+      over: mergedAt("ccccccc"),
+      expect: { error: "no merge commit" },
+    },
+  },
+  {
+    id: "C-PUL-34",
+    function: "readPullRequest",
+    conjunct: "a merged pull request without a merge commit is an error",
+    row: { over: mergedAt(null), expect: { error: "no merge commit" } },
+  },
+  {
+    id: "C-PUL-35",
+    function: "readPullRequest",
+    conjunct:
+      "merged is what the host says: an open pull request is not merged",
+    row: { expect: { merged: false } },
+  },
+  {
+    id: "C-PUL-36",
+    function: "readPullRequest",
+    conjunct: "the merge commit is the merge commit, not the head",
+    row: { over: mergedAt(MERGE), expect: { mergeCommit: MERGE } },
+  },
+  {
+    id: "C-PUL-37",
+    function: "readPullRequest",
+    conjunct: "merged is the host's own word, not a merge time that is set",
+    row: {
+      over: { merged: false, merged_at: "2024-05-01T11:00:00Z" },
+      expect: { merged: false, mergeCommit: null },
+    },
+  },
+  {
+    id: "C-PUL-38",
+    function: "readPullRequest",
+    conjunct: "the merge commit is read from the field of that name",
+    row: { over: mergedAt(MERGE), expect: { mergeCommit: MERGE } },
   },
 ];
 

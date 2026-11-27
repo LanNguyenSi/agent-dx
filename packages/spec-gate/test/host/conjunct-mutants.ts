@@ -612,6 +612,57 @@ const pull: Omit<ConjunctMutant, "table">[] = [
     with: 'typeof value === "string"',
     untyped: true,
   },
+  // The merge facts of readPullRequest.
+  {
+    id: "C-PUL-29",
+    match: 'typeof isMerged !== "boolean"',
+    with: '(typeof isMerged !== "boolean" && false)',
+    untyped: true,
+  },
+  {
+    id: "C-PUL-30",
+    match: 'typeof isMerged !== "boolean"',
+    with: "isMerged === undefined",
+    untyped: true,
+  },
+  {
+    id: "C-PUL-31",
+    match: "if (isMerged) {",
+    with: "if (isMerged || true) {",
+  },
+  {
+    id: "C-PUL-32",
+    match: "if (isMerged) {",
+    with: "if (isMerged && false) {",
+  },
+  {
+    id: "C-PUL-33",
+    match: "!isCommitId(mergeSha)",
+    with: 'typeof mergeSha !== "string"',
+    untyped: true,
+  },
+  {
+    id: "C-PUL-34",
+    match: "!isCommitId(mergeSha)",
+    with: "mergeSha === undefined",
+    untyped: true,
+  },
+  { id: "C-PUL-35", match: "merged: isMerged,", with: "merged: true," },
+  {
+    id: "C-PUL-36",
+    match: "mergeCommit: landed,",
+    with: "mergeCommit: headSha,",
+  },
+  {
+    id: "C-PUL-37",
+    match: "const isMerged = json.merged;",
+    with: "const isMerged = json.merged_at !== null;",
+  },
+  {
+    id: "C-PUL-38",
+    match: "const mergeSha = json.merge_commit_sha;",
+    with: "const mergeSha = headSha;",
+  },
 ];
 
 const reviews: Omit<ConjunctMutant, "table">[] = [

@@ -97,6 +97,8 @@ function pullRequestOf(value: unknown): Fact<HostPullRequest> {
   const head = own(value, "head");
   const base = own(value, "base");
   const targetRef = own(value, "targetRef");
+  const merged = own(value, "merged");
+  const mergeCommit = own(value, "mergeCommit");
   if (
     typeof number !== "number" ||
     !Number.isSafeInteger(number) ||
@@ -105,11 +107,18 @@ function pullRequestOf(value: unknown): Fact<HostPullRequest> {
     !isCommitId(head) ||
     !isCommitId(base) ||
     typeof targetRef !== "string" ||
-    !TARGET_REF_RE.test(targetRef)
+    !TARGET_REF_RE.test(targetRef) ||
+    // Merged is a boolean the host gave, never a value that only reads as
+    // one; the merge commit is a full commit id or `null`, never left out.
+    typeof merged !== "boolean" ||
+    (mergeCommit !== null && !isCommitId(mergeCommit))
   ) {
     return MISSING;
   }
-  return { ok: true, value: { number, author, head, base, targetRef } };
+  return {
+    ok: true,
+    value: { number, author, head, base, targetRef, merged, mergeCommit },
+  };
 }
 
 function reviewsOf(value: unknown): Fact<TimedReview[]> {
