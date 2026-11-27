@@ -185,8 +185,10 @@ function validateEnvelope(
   let exit: number | null | undefined;
   if (hasOwn(rec, "exit")) {
     const v = rec["exit"];
-    if (v === null || (typeof v === "number" && Number.isInteger(v))) exit = v;
-    else sink.add("wrong-type", at("exit"), "exit must be an integer or null");
+    if (v === null || (typeof v === "number" && Number.isSafeInteger(v))) {
+      exit = v;
+    } else
+      sink.add("wrong-type", at("exit"), "exit must be an integer or null");
   }
 
   // ci_run: required for producer ci, not allowed otherwise

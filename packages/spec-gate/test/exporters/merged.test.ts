@@ -246,3 +246,114 @@ describe("spec-gate export --format ow", () => {
     expect(run.stdout).toBe("");
   });
 });
+
+/**
+ * On a case-insensitive volume a directory can be named in another case
+ * than the one on disk. The containment test must compare the case on
+ * disk, so such a spelling exports; a directory that really lies outside
+ * is still refused. On a case-sensitive volume (Linux CI) the folded
+ * spelling does not exist and the tests say so instead of passing
+ * silently.
+ */
+describe("spec-gate export --format ow with a spelling in another case", () => {
+  /** Whether `dir`'s volume folds case: make `CaseProbe`, read `caseprobe`. */
+  function foldsCase(dir: string): boolean {
+    const made = path.join(dir, "CaseProbe");
+    fs.mkdirSync(made);
+    const folds = fs.existsSync(path.join(dir, "caseprobe"));
+    fs.rmSync(made, { recursive: true, force: true });
+    return folds;
+  }
+
+  const SKIP =
+    "skipped: the temporary volume is case-sensitive (Linux CI): a spelling in another case cannot be produced here";
+
+  it("takes a spec directory spelled in another case", async () => {
+    const repo = await mergedRepo();
+    if (!foldsCase(repo.dir)) {
+      console.warn(SKIP);
+      return;
+    }
+    // Folded both at a component of the repository's own path and below
+    // it: the containment test and the git reads must see the case on disk.
+    const folded = path
+      .join(repo.dir, "Specs", "s1")
+      .replace("spec-gate-export", "SPEC-GATE-EXPORT");
+    const run = await runCli(
+      [
+        "export",
+        folded,
+        "--format",
+        "ow",
+        "--repo",
+        repo.dir,
+        "--default-ref",
+        REMOTE_MAIN,
+      ],
+      EXPORT_TIMEOUT_MS,
+    );
+    expect(run.stderr).toBe("");
+    expect(run.code).toBe(0);
+    expect(dropRef(run.stdout)).toBe(dropRef(GOLDEN));
+  });
+
+  it("takes a --repo spelled in another case", async () => {
+    const repo = await mergedRepo();
+    if (!foldsCase(repo.dir)) {
+      console.warn(SKIP);
+      return;
+    }
+    const folded = repo.dir.replace("spec-gate-export", "SPEC-GATE-EXPORT");
+    const run = await runCli(
+      [
+        "export",
+        repo.spec,
+        "--format",
+        "ow",
+        "--repo",
+        folded,
+        "--default-ref",
+        REMOTE_MAIN,
+      ],
+      EXPORT_TIMEOUT_MS,
+    );
+    expect(run.stderr).toBe("");
+    expect(run.code).toBe(0);
+    expect(dropRef(run.stdout)).toBe(dropRef(GOLDEN));
+  });
+
+  it("still refuses a spec directory that lies outside the repository, folded or not", async () => {
+    const repo = await mergedRepo();
+    if (!foldsCase(repo.dir)) {
+      console.warn(SKIP);
+      return;
+    }
+    const outside = fs.mkdtempSync(
+      path.join(path.dirname(repo.dir), "spec-gate-outside-"),
+    );
+    roots.push(outside);
+    for (const spec of [
+      outside,
+      outside.replace("spec-gate-outside", "SPEC-GATE-OUTSIDE"),
+    ]) {
+      const run = await runCli(
+        [
+          "export",
+          spec,
+          "--format",
+          "ow",
+          "--repo",
+          repo.dir,
+          "--default-ref",
+          REMOTE_MAIN,
+        ],
+        EXPORT_TIMEOUT_MS,
+      );
+      expect(run.code, spec).toBe(2);
+      expect(run.stderr).toContain(
+        "spec-gate: export: spec-dir-invalid: the spec directory is not inside the repository",
+      );
+      expect(run.stdout).toBe("");
+    }
+  });
+});

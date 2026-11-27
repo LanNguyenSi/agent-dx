@@ -410,7 +410,11 @@ check run against a running system: `steps` is a non-empty list, `control`
 already exist.
 
 Value rules: `runs` is a positive integer; `baseline` and `threshold` are a
-non-empty string or a number; `check_command_ref` is a command name as in
+non-empty string or a number; every integer a format field holds must lie
+in the IEEE-754 safe range `-(2^53-1)` to `2^53-1`, because a bigger one
+has no exact representation once the document is decoded (two spellings of
+it can arrive as one value); a big integer that must stay exact is written
+as a quoted string; `check_command_ref` is a command name as in
 `commands.yaml`; every other field is a non-empty string, `steps` a list of
 them. Evidence is never a field of the plan.
 

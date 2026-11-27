@@ -91,6 +91,19 @@ describe("triage.json", () => {
       ]);
   });
 
+  it("refuses a rule_version past the IEEE-754 safe range, both signs", () => {
+    for (const v of [2 ** 53, -(2 ** 53)]) {
+      const r = validateTriage(triage({ rule_version: v }));
+      expect(r.ok, String(v)).toBe(false);
+      if (r.ok) continue;
+      expect(r.errors.map((e) => `${e.code} @ ${e.path}`)).toEqual([
+        "invalid-value @ rule_version",
+      ]);
+      expect(r.errors[0]!.message).toContain("2^53-1");
+    }
+    expect(validateTriage(triage({ rule_version: 2 ** 53 - 1 })).ok).toBe(true);
+  });
+
   it("parses text with strict JSON", () => {
     expect(parseTriage(JSON.stringify(triage())).ok).toBe(true);
     expect(parseTriage("{").ok).toBe(false);

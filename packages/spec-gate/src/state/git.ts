@@ -50,8 +50,10 @@ export function specPathIn(toplevel: string, specDir: string): string | null {
   let root: string;
   let spec: string;
   try {
-    root = fs.realpathSync(toplevel);
-    spec = fs.realpathSync(specDir);
+    // The native form so a spelling in another case on a case-insensitive
+    // volume is compared with the case on disk.
+    root = fs.realpathSync.native(toplevel);
+    spec = fs.realpathSync.native(specDir);
   } catch {
     return null;
   }

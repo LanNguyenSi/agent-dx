@@ -103,6 +103,10 @@ export function boolValue(
   return value;
 }
 
+/** The safe range of an IEEE-754 double, in words; shared by the integer checks. */
+export const SAFE_INTEGER_WHY =
+  "must be an integer between -(2^53-1) and 2^53-1";
+
 export function intValue(
   sink: ErrorSink,
   value: unknown,
@@ -116,6 +120,13 @@ export function intValue(
       path,
       `${what} must be an integer, got ${describeType(value)}`,
     );
+    return undefined;
+  }
+  // A double outside the safe range has no exact representation: two
+  // spellings of a big integer can arrive as the same value, so a number
+  // that is not a safe integer is refused before its size is judged.
+  if (!Number.isSafeInteger(value)) {
+    sink.add("invalid-value", path, `${what} ${SAFE_INTEGER_WHY}`);
     return undefined;
   }
   if (value < min) {

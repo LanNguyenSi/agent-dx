@@ -27,7 +27,9 @@ the lint reference rules use: `--repo` is the trusted checkout root (never
 discovered from the spec directory), `--default-ref` must be a full ref
 name under `refs/` resolved to one full commit id (`ref-invalid`,
 `ref-unresolvable`), and the spec directory must lie inside the
-repository (`spec-dir-invalid`). The briefing then carries `digest`, the
+repository (`spec-dir-invalid`); a path spelled in another case on a
+case-insensitive file system is resolved to the spelling on disk before
+that containment test. The briefing then carries `digest`, the
 digest of the normative layer as `digest` prints it (read at the
 `commands_ref` commit of `--repo`).
 

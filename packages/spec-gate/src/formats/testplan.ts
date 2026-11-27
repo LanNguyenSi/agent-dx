@@ -30,6 +30,7 @@ import {
 import type { TestPlanKind } from "./layers.js";
 import type { Rec } from "./validate.js";
 import {
+  SAFE_INTEGER_WHY,
   describeType,
   enumValue,
   hasOwn,
@@ -97,6 +98,12 @@ function numberOrString(
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
       sink.add("invalid-value", path, `${what} must be a finite number`);
+      return undefined;
+    }
+    // An integer-valued double outside the safe range is refused: its
+    // exact value did not survive decoding, and a quoted string keeps it.
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      sink.add("invalid-value", path, `${what} ${SAFE_INTEGER_WHY}`);
       return undefined;
     }
     return value;

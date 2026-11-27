@@ -27,6 +27,25 @@ describe("specPathIn", () => {
     ).toBeNull();
     expect(specPathIn(root, path.join(root, "missing"))).toBeNull();
   });
+
+  it("folds a spelling in another case back to the case on disk on a case-insensitive volume", () => {
+    const root = scratch();
+    fs.mkdirSync(path.join(root, "specs/s1"), { recursive: true });
+    fs.mkdirSync(path.join(root, "CaseProbe"));
+    if (!fs.existsSync(path.join(root, "caseprobe"))) {
+      console.warn(
+        "skipped: the temporary volume is case-sensitive (Linux CI): a spelling in another case cannot be produced here",
+      );
+      return;
+    }
+    const foldedRoot = path.join(root, "SPECS");
+    const foldedSpec = path.join(root, "Specs", "S1");
+    // each side alone: the root is folded, then the spec directory is
+    expect(specPathIn(foldedRoot, path.join(root, "specs", "s1"))).toBe("s1");
+    expect(specPathIn(root, foldedSpec)).toBe("specs/s1");
+    // and both together
+    expect(specPathIn(foldedRoot, foldedSpec)).toBe("s1");
+  });
 });
 
 describe("isSpecLayoutPath", () => {

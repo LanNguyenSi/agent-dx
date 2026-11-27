@@ -125,6 +125,25 @@ describe("resolving the git inputs", () => {
       expect(report.errors, JSON.stringify(request)).toEqual([]);
     }
   });
+
+  it("a spec directory spelled in another case on a case-insensitive volume", async () => {
+    const { repo } = await committed();
+    const probe = scratch();
+    fs.mkdirSync(path.join(probe, "CaseProbe"));
+    if (!fs.existsSync(path.join(probe, "caseprobe"))) {
+      console.warn(
+        "skipped: the temporary volume is case-sensitive (Linux CI): a spelling in another case cannot be produced here",
+      );
+      return;
+    }
+    // On such a volume the caller can spell the repository's temporary
+    // directory as `REPO-...` and `specs` as `Specs`; containment must
+    // compare the case git reports, not the case the argument carried.
+    const folded = path.join(repo.dir, "Specs", "s1").replace("repo-", "REPO-");
+    const result = lintSpecDir(folded, { git: { ...DEFAULT, repo: repo.dir } });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.report.errors).toEqual([]);
+  });
 });
 
 describe("usage errors", () => {
