@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-11-27T06:32:32Z
+timestamp: 2026-11-27T06:39:22Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -74,7 +74,7 @@ orchestrator to spawn the installed prompts under
 instead of improvising role text
 (`packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:63#"the [agentic-coding-playbook"`). Per-role
 default models (`DEFAULT_MODELS`,
-`packages/orchestrator-workflow/src/models.ts:285-290#"as Record<Role, string>;"`) are out of this doc's
+`packages/orchestrator-workflow/src/models.ts:298-303#"as Record<Role, string>;"`) are out of this doc's
 lane; see [model-preselection.md](model-preselection.md).
 
 ## Repository-bound verification sets

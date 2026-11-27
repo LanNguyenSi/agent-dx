@@ -1,6 +1,11 @@
 import { HARNESSES } from "./detect.js";
 import { readAsset } from "./assets.js";
-import { MODEL_ALIASES, ROLE_TIERS, ROLES } from "./models.js";
+import {
+  MODEL_ALIASES,
+  MODEL_ID_FORBIDDEN_CHARS,
+  ROLE_TIERS,
+  ROLES,
+} from "./models.js";
 
 import type { Harness } from "./detect.js";
 import type { Role, Tier } from "./models.js";
@@ -90,7 +95,7 @@ function assertModelId(
   ) {
     throw new Error(`${location}.model must be a non-empty trimmed string`);
   }
-  if (/\s|[\u0000-\u001f\u007f]/.test(model)) {
+  if (MODEL_ID_FORBIDDEN_CHARS.test(model)) {
     throw new Error(
       `${location}.model must not contain whitespace or control characters`,
     );

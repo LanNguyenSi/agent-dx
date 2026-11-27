@@ -89,6 +89,15 @@ export function opencodeModelValue(model: string): string | undefined {
 }
 
 /**
+ * One definition of "whitespace or control character" for model ids, shared
+ * by `assertValidModelId` here and `assertModelId` in `routing.ts`. `\s`
+ * covers every JS whitespace form (space, CR, tab, VT, FF, and the U+2028 /
+ * U+2029 line and paragraph separators); the class adds the C0 controls and
+ * DEL, which `\s` does not match.
+ */
+export const MODEL_ID_FORBIDDEN_CHARS = /\s|[\u0000-\u001f\u007f]/;
+
+/**
  * Model values are interpolated into YAML frontmatter as plain scalars;
  * reject anything that could break out of that position.
  */
@@ -96,7 +105,11 @@ export function assertValidModelId(model: string): void {
   if (model.length === 0) {
     throw new Error("Model id must not be empty");
   }
-  if (/[:"'#\n\\]/.test(model) || model !== model.trim()) {
+  if (
+    /[:"'#\n\\]/.test(model) ||
+    model !== model.trim() ||
+    MODEL_ID_FORBIDDEN_CHARS.test(model)
+  ) {
     throw new Error(
       `Invalid model id "${model}"; expected an alias (${MODEL_ALIASES.join(", ")}) or a plain id like anthropic/claude-opus-4-8`,
     );

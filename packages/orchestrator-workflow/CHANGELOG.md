@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the repository's `opencode.json` no longer appear in the catalog; pass
   fully qualified `--models` entries (`provider/model-id`) for them.
 
+### Security
+
+- Model id validation now rejects every whitespace and control character,
+  not just newlines and surrounding whitespace: `assertValidModelId` and
+  routing's model check share one character class, so an id with an
+  internal space, tab, carriage return, vertical tab, form feed, NUL, DEL,
+  or the U+2028/U+2029 separators is rejected from `--models` and the
+  interactive prompt, and a repo or operator manifest recording such an id
+  now drops that role to its default (the way invalid ids already did)
+  instead of installing agent frontmatter whose `model:` line a later
+  reader would misparse.
+
 ## [0.53.0] - 2026-11-18
 
 ### Changed
