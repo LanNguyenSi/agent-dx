@@ -297,6 +297,19 @@ describe("templates/okf-staleness.yml assert step, executed", () => {
     const res = runAssert("", pkg.version);
     expect(res.status).toBe(1);
     expect(res.stdout).toContain("::error");
+    // The empty-output branch's own message: the mismatch branch printing
+    // the pin instead must not satisfy this test.
+    expect(res.stdout).toContain("printed no output");
+  });
+
+  it("fails with ::error and exit 1 when the CLI prints nothing and OKF_KIT_PIN is unset", () => {
+    // The empty-output branch on its own: with the pin unset the only
+    // branch that can exit 1 here is the empty-output one, so this pins
+    // that branch's condition and its exit, not the mismatch branch's.
+    const res = runAssert("");
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain("::error");
+    expect(res.stdout).toContain("printed no output");
   });
 
   it("fails with ::error and exit 1 when OKF_KIT_PIN is unset", () => {
