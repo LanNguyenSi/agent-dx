@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderText } from "../src/cli-render.js";
-import type { Violation } from "../src/types.js";
-import type { CheckSummary } from "../src/types.js";
+import type { CheckSummary, Violation } from "../src/types.js";
 
 function summary(overrides: Partial<CheckSummary> = {}): CheckSummary {
   return {
