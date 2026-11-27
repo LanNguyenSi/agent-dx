@@ -15,16 +15,24 @@ import {
 } from "vitest";
 import type { ApproveReport } from "../src/approve/index.js";
 import {
+  afterMerge,
   build,
   codes,
   cond,
+  CONFIG_ONLY_BOB,
+  editSpec,
   failing,
   keep,
+  keepLanded,
+  land,
   otherSpec,
   crissCross,
   relogged,
+  squashEdited,
+  squashWithOwnSettings,
   staleBase,
   STALE_OTHER,
+  type Landed,
   type Scenario,
 } from "./approve/helpers.js";
 import { runBounded, type Run } from "./canonical/helpers.js";
@@ -986,5 +994,319 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
     expect(fs.existsSync(path.join(MERGED.dir, SPEC_REL, "spec.md"))).toBe(
       true,
     );
+  });
+});
+
+/**
+ * `approve-check --merged`: the built command for a merged pull request,
+ * against a repository on disk whose checkout is at the tip of the default
+ * branch and a stub of the GitHub API on a loopback port.
+ */
+describe("spec-gate approve-check --merged", { timeout: 60_000 }, () => {
+  let stub: Stub;
+  /** The standard pull request, merged with a merge commit, squashed and rebased. */
+  let BY: Record<"merge-commit" | "squash" | "rebase", Landed>;
+  /** The standard pull request, still open: the checkout is at its head. */
+  let OPEN: Scenario;
+  /** A squash whose commit holds another normative layer than the approved head. */
+  let EDITED: Landed;
+  /** A squash, and a later commit of the default branch that changes the spec. */
+  let LATER: Landed;
+  /** A squash that puts the settings back to their text at the base the host reports. */
+  let OWN_SETTINGS: Landed;
+  /** A squash the default ref of the checkout does not hold yet. */
+  let OFF_DEFAULT: Landed;
+  /** A squash, and a later commit of the default branch that takes the approver off the list. */
+  let REVOKED: Landed;
+
+  beforeAll(async () => {
+    stub = await Stub.start();
+    BY = {
+      "merge-commit": keepLanded(await land(await build(), "merge-commit")),
+      squash: keepLanded(await land(await build(), "squash")),
+      rebase: keepLanded(await land(await build(), "rebase")),
+    };
+    OPEN = keep(await build());
+    EDITED = keepLanded(await squashEdited());
+
+    const later = await land(await build(), "squash");
+    editSpec(later.dir);
+    LATER = keepLanded(await afterMerge(later, {}, "the spec changes"));
+
+    OWN_SETTINGS = keepLanded(await squashWithOwnSettings());
+
+    const off = await land(await build(), "squash");
+    await off.repo.setRef(
+      REMOTE_MAIN,
+      await off.repo.sh("rev-parse", `${off.merge}^`),
+    );
+    OFF_DEFAULT = keepLanded(off);
+
+    REVOKED = keepLanded(
+      await afterMerge(await land(await build(), "squash"), {
+        ".spec-gate/config.yaml": CONFIG_ONLY_BOB,
+      }),
+    );
+  }, 240_000);
+
+  afterAll(async () => {
+    await stub.close();
+  });
+
+  /**
+   * A host on which everything holds for the pull request of `s`: pull
+   * request 7 by `dev` with the head of `s` and the base `c1`, an approval
+   * by `alice` on that head, a ruleset that requires one approval, and the
+   * settings merged by pull request 3 with an approval by `bob`. `merge` is
+   * the merge commit the host reports; without one the pull request is open.
+   */
+  function hostOf(s: Scenario, merge?: string): void {
+    stub.reset();
+    stub.on(PULL_PATH, {
+      json: pullJson({
+        head: { ref: "pr", sha: s.head, repo: { full_name: "dev/widgets" } },
+        base: { ref: "main", sha: s.c1, repo: { full_name: REPOSITORY } },
+        ...(merge === undefined
+          ? {}
+          : {
+              state: "closed",
+              merged: true,
+              merged_at: "2024-05-01T12:00:00Z",
+              merge_commit_sha: merge,
+            }),
+      }),
+    });
+    stub.on(REVIEWS_PATH, {
+      json: [reviewJson("alice", "APPROVED", s.head, 1)],
+    });
+    stub.on(RULES_PATH, { json: [pullRequestRule(1)] });
+    stub.on(`${P}/commits`, { json: [{ sha: s.c1 }] });
+    stub.on(`${P}/commits/${s.c1}/pulls`, {
+      json: [
+        {
+          number: 3,
+          merged_at: "2024-05-01T11:00:00Z",
+          merge_commit_sha: s.c1,
+          head: { ref: "settings", sha: sha("d") },
+          base: { ref: "main", repo: { full_name: REPOSITORY } },
+        },
+      ],
+    });
+    stub.on(`${P}/pulls/3/reviews`, {
+      json: [reviewJson("bob", "APPROVED", sha("d"), 1)],
+    });
+  }
+
+  /** Runs the built command for `s` against the stub, with `extra` after the options. */
+  async function run(s: Scenario, extra: string[]): Promise<Run> {
+    const env: NodeJS.ProcessEnv = { ...process.env, GITHUB_TOKEN: TOKEN };
+    const result = await runBounded(
+      process.execPath,
+      [
+        cliPath,
+        "approve-check",
+        s.spec,
+        "--repo",
+        s.dir,
+        "--default-ref",
+        REMOTE_MAIN,
+        "--github-repo",
+        REPOSITORY,
+        "--pr",
+        String(PULL),
+        "--api-url",
+        stub.url,
+        ...extra,
+      ],
+      { env, timeoutMs: 30_000 },
+    );
+    expect(result.timedOut).toBe(false);
+    expect(result.stdout.includes(TOKEN), "the token on stdout").toBe(false);
+    expect(result.stderr.includes(TOKEN), "the token on stderr").toBe(false);
+    return result;
+  }
+
+  /** The report of a run for the merged pull request of `m`, and its exit code. */
+  async function merged(
+    m: Landed,
+    extra: string[] = [],
+  ): Promise<{ code: number | null; report: ApproveReport }> {
+    hostOf(m, m.merge);
+    const result = await run(m, ["--merged", ...extra]);
+    expect(result.stderr).toBe("");
+    const lines = result.stdout.split("\n").filter((line) => line !== "");
+    expect(lines).toHaveLength(1);
+    return {
+      code: result.code,
+      report: JSON.parse(lines[0]!) as ApproveReport,
+    };
+  }
+
+  it.each([
+    ["merge-commit", "merge-commit", 1],
+    ["squash", "single-commit", 3],
+    ["rebase", "single-commit", 3],
+  ] as const)(
+    "exits 0 for a pull request merged by %s: approved at the tip of the default branch",
+    async (how, shape, ranges) => {
+      const m = BY[how];
+      const { code, report } = await merged(m);
+      expect(code).toBe(0);
+      expect(report.approved).toBe(true);
+      expect(codes(report)).toEqual(Array(8).fill("ok"));
+      expect(report.mode).toBe("merged");
+      expect(report.head).toBe(m.landed);
+      expect(report.default_commit).toBe(m.landed);
+      expect(report.pull_request!.head).toBe(m.head);
+      expect(report.merge).toMatchObject({ commit: m.merge, shape });
+      expect(report.merge!.ranges).toHaveLength(ranges);
+      for (const hit of stub.hits) expect(hit.method).toBe("GET");
+    },
+  );
+
+  it("exits 0 with the base commit of the host given as --base, and the report differs in reference alone", async () => {
+    const without = await merged(BY.squash);
+    const withBase = await merged(BY.squash, ["--base", BY.squash.c1]);
+    expect(withBase.code).toBe(0);
+    expect(withBase.report.reference).toBe(BY.squash.c1);
+    expect({
+      ...withBase.report,
+      reference: without.report.reference,
+    }).toEqual(without.report);
+  });
+
+  it("exits 1 for a pull request that is not merged: not-merged", async () => {
+    hostOf(OPEN);
+    const result = await run(OPEN, ["--merged"]);
+    expect(result.code).toBe(1);
+    const report = JSON.parse(result.stdout) as ApproveReport;
+    expect(report.approved).toBe(false);
+    for (const condition of [1, 2, 7, 8] as const) {
+      expect(cond(report, condition).code).toBe("not-merged");
+    }
+    expect(report.merge).toBeNull();
+    // The same pull request is approved as an open one.
+    hostOf(OPEN);
+    expect((await run(OPEN, [])).code).toBe(0);
+  });
+
+  it("exits 1 for a merged pull request without --merged: it is judged as an open one", async () => {
+    hostOf(BY.squash, BY.squash.merge);
+    const result = await run(BY.squash, []);
+    expect(result.code).toBe(1);
+    const report = JSON.parse(result.stdout) as ApproveReport;
+    expect(report.mode).toBe("open");
+    expect(cond(report, 1).code).toBe("head-mismatch");
+  });
+
+  it("exits 1 for a squash that changed the normative layer after the approval", async () => {
+    const { code, report } = await merged(EDITED);
+    expect(code).toBe(1);
+    expect(cond(report, 3).code).toBe("digest-mismatch-after-merge");
+    expect(cond(report, 3).message).toContain(report.digest!);
+    expect(cond(report, 3).message).toContain(EDITED.head);
+    expect(report.approved).toBe(false);
+  });
+
+  it("exits 1 when a later commit of the default branch changed the spec", async () => {
+    const { code, report } = await merged(LATER);
+    expect(code).toBe(1);
+    expect(report.default_commit).toBe(LATER.landed);
+    expect(report.default_commit).not.toBe(LATER.merge);
+    expect(cond(report, 3).code).toBe("digest-mismatch-after-merge");
+    expect(report.approved).toBe(false);
+  });
+
+  it.each([
+    ["without --base", false],
+    ["with --base", true],
+  ])(
+    "exits 1 for a squash that carried its own approvers change, %s",
+    async (_how, withBase) => {
+      const m = OWN_SETTINGS;
+      const { code, report } = await merged(
+        m,
+        withBase ? ["--base", m.c1] : [],
+      );
+      expect(code).toBe(1);
+      // At the tip the settings name the approver; they are the merge's own.
+      expect(report.approvals).toEqual([
+        { login: "alice", commit: m.head, at_head: true, problem: null },
+      ]);
+      expect(failing(report)).toEqual([2, 7]);
+      expect(cond(report, 2).code).toBe("config-in-merge");
+      expect(cond(report, 7).code).toBe("spec-changes-config");
+      expect(report.pull_request!.base).toBe(m.c1);
+      expect(report.reference).toBe(withBase ? m.c1 : m.landed);
+      expect(report.approved).toBe(false);
+    },
+  );
+
+  it("exits 1 for a merge commit that is not on the default ref", async () => {
+    const { code, report } = await merged(OFF_DEFAULT);
+    expect(code).toBe(1);
+    for (const condition of [2, 7, 8] as const) {
+      expect(cond(report, condition).code).toBe("merge-not-on-default");
+    }
+    expect(report.merge).toBeNull();
+    expect(report.approved).toBe(false);
+  });
+
+  it("exits 1 when the approver was taken off the list on the default branch after the merge", async () => {
+    const { code, report } = await merged(REVOKED);
+    expect(code).toBe(1);
+    expect(failing(report)).toEqual([2]);
+    expect(cond(report, 2).code).toBe("approver-not-qualified");
+  });
+
+  it("exits 1 for the same with --base at a commit where the approver still was one: the settings are the tip's", async () => {
+    const { code, report } = await merged(REVOKED, ["--base", REVOKED.c1]);
+    expect(code).toBe(1);
+    expect(report.reference).toBe(REVOKED.c1);
+    expect(report.default_commit).toBe(REVOKED.landed);
+    expect(failing(report)).toEqual([2]);
+    expect(cond(report, 2).code).toBe("approver-not-qualified");
+    expect(report.approvals[0]!.problem).toBe("not-allowlisted");
+  });
+
+  it("exits 1 when the host fails: host-failed for the conditions that need the pull request, never a pass", async () => {
+    hostOf(BY.squash, BY.squash.merge);
+    stub.on(PULL_PATH, { status: 500 });
+    const result = await run(BY.squash, ["--merged"]);
+    expect(result.code).toBe(1);
+    const report = JSON.parse(result.stdout) as ApproveReport;
+    expect(report.pull_request).toBeNull();
+    for (const condition of [1, 2, 7, 8] as const) {
+      expect(cond(report, condition).code).toBe("host-failed");
+    }
+  });
+
+  it("--merged takes no value: a value after it is an argument the verb does not know, exit 2", async () => {
+    hostOf(BY.squash, BY.squash.merge);
+    const result = await run(BY.squash, ["--merged", "yes"]);
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("an argument or option it does not know");
+    expect(result.stderr).toContain("--api-url and --merged");
+    expect(stub.hits).toEqual([]);
+  });
+
+  it("the help of the verb names --merged", async () => {
+    const result = await runBounded(
+      process.execPath,
+      [cliPath, "help", "approve-check"],
+      { timeoutMs: 30_000 },
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("--merged");
+    expect(result.stdout).toContain("check after the merge");
+  });
+
+  it("the scenarios are the ones the tests name", () => {
+    expect(LATER.landed).not.toBe(LATER.merge);
+    expect(REVOKED.landed).not.toBe(REVOKED.merge);
+    expect(OFF_DEFAULT.landed).toBe(OFF_DEFAULT.merge);
+    expect(OPEN.head).not.toBe(OPEN.c1);
+    for (const m of Object.values(BY)) expect(m.head).not.toBe(m.landed);
   });
 });

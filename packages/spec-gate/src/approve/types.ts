@@ -4,6 +4,12 @@
  * The report is deterministic: the same repository state and the same host
  * facts give the same report, key for key. It holds no time, no absolute
  * path and nothing a host adapter threw.
+ *
+ * The check has two modes. In the open mode it judges the head of an open
+ * pull request. In the merged mode (`merged: true` in the request) it
+ * judges what a merged pull request left on the default branch. The
+ * conditions keep their numbers and names in both; `MERGED_SUMMARIES` says
+ * what each one asks after the merge.
  */
 import type { HostAdapter } from "../host/index.js";
 
@@ -64,6 +70,26 @@ export const CONDITIONS = [
 export type ConditionNumber = (typeof CONDITIONS)[number]["condition"];
 export type ConditionName = (typeof CONDITIONS)[number]["name"];
 
+/** What each condition asks in the merged mode, by condition number. */
+export const MERGED_SUMMARIES: Record<ConditionNumber, string> = {
+  1: "The host reports the pull request as merged, and an approving review stands on the head commit the host reports for it.",
+  2: "An approver of that head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the tip of the default branch, the pull request targeted the default branch, its merge commit is on the default branch and no range of the merge changes a path under `.spec-gate/`.",
+  3: "The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is `proposed` at each of those commits, and the state judged at the tip (`proposed`, with the digest at the tip) arrives both over the reviewed commits and over a measured step of the default branch.",
+  4: "The spec is `proposed` at the tip of the default branch, the checkout is at that commit, the spec directory of the work tree is the one it holds, and the final lint has no error.",
+  5: "`agent_identities` is not empty and shares no account with `approvers`.",
+  6: "The host enforces a review for `specs/` and for `.spec-gate/`, and reports the last change under `.spec-gate/`.",
+  7: "No path under `.spec-gate/` differs over a range of the merge.",
+  8: "The repository check has no finding over a range of the merge.",
+};
+
+/** The modes of the check. */
+export const APPROVE_MODES = ["open", "merged"] as const;
+export type ApproveMode = (typeof APPROVE_MODES)[number];
+
+/** How a merged pull request reached the default branch, as git shows it. */
+export const MERGE_SHAPES = ["merge-commit", "single-commit"] as const;
+export type MergeShape = (typeof MERGE_SHAPES)[number];
+
 /** The code of a condition that holds. */
 export const OK_CODE = "ok";
 
@@ -72,9 +98,14 @@ export const OK_CODE = "ok";
  * that use it.
  */
 export const FAILURE_CODES = {
-  "host-failed": [1, 2, 3, 6],
+  "host-failed": [1, 2, 3, 6, 7, 8],
   "git-failed": [2, 3, 4, 7, 8],
-  "ambiguous-merge-base": [4, 7, 8],
+  "ambiguous-merge-base": [2, 3, 4, 7, 8],
+  "not-merged": [1, 2, 7, 8],
+  "merge-not-on-default": [2, 7, 8],
+  "head-unavailable": [2, 7, 8],
+  "merge-shape-unknown": [2, 7, 8],
+  "shallow-repository": [2, 4, 7, 8],
   "head-mismatch": [1],
   "no-approval": [1, 2, 3],
   "approval-stale": [1],
@@ -83,13 +114,18 @@ export const FAILURE_CODES = {
   "base-mismatch": [2],
   "base-not-on-default": [2],
   "head-in-reference": [2],
+  "config-in-merge": [2],
   "approver-not-qualified": [2],
   "digest-unavailable": [3],
   "review-commit-unavailable": [3],
   "review-digest-unavailable": [3],
   "digest-mismatch": [3],
+  "digest-mismatch-after-merge": [3],
+  "review-not-proposed": [3],
+  "spec-not-in-merge": [3],
   "spec-unreadable": [4],
   "status-not-proposed": [4],
+  "checkout-not-default-tip": [4],
   "worktree-not-head": [4],
   "lint-failed": [4],
   "lint-errors": [4],
@@ -125,7 +161,11 @@ export type ApproverProblem = (typeof APPROVER_PROBLEMS)[number];
 export interface ReportedApproval {
   login: string;
   commit: string;
-  /** Whether `commit` is the head. */
+  /**
+   * Whether `commit` is the head: `HEAD` of the checkout in the open mode,
+   * the head commit the host reports for the pull request in the merged
+   * mode.
+   */
   at_head: boolean;
   /** `null` for an approver that counts. */
   problem: ApproverProblem | null;
@@ -155,9 +195,44 @@ export interface ReportedCommand {
   argv: string[];
 }
 
+/**
+ * What a merged pull request put on the default branch, as the merged mode
+ * measured it.
+ */
+export interface ReportedMerge {
+  /** The merge commit the host reports. */
+  commit: string;
+  /** Its first parent: what the default branch held before it. */
+  first_parent: string;
+  shape: MergeShape;
+  /**
+   * `single-commit` only: the one merge base of the head commit of the pull
+   * request and `first_parent`. `null` for `merge-commit`.
+   */
+  reviewed_base: string | null;
+  /**
+   * How many steps of the first-parent chain below `commit` were measured:
+   * 1 for `merge-commit`, the number of commits from `reviewed_base` to the
+   * head for `single-commit`.
+   */
+  commits: number;
+  /**
+   * The ranges conditions 2, 7 and 8 measured, each from one commit to
+   * another: the first-parent steps, the last one first, then for
+   * `single-commit` the range from `reviewed_base` to the head.
+   */
+  ranges: { from: string; to: string }[];
+}
+
 export interface ApproveReport {
   format: typeof APPROVE_FORMAT;
-  /** The frontmatter `id` at the head, or `null` when `spec.md` does not parse there. */
+  /** `merged` when the request asked for the check after the merge. */
+  mode: ApproveMode;
+  /**
+   * The frontmatter `id` at the commit that was judged (the head in the
+   * open mode, the tip of the default branch in the merged mode), or `null`
+   * when `spec.md` does not parse there.
+   */
   spec: string | null;
   /** The spec directory in the repository, `specs/<name>`. */
   path: string;
@@ -169,7 +244,11 @@ export interface ApproveReport {
    * seen, an approval is not claimed.
    */
   approve_reported: boolean;
-  /** The commit that was checked: `HEAD` of the repository. */
+  /**
+   * `HEAD` of the repository. In the open mode it is the commit that was
+   * judged; in the merged mode that is `default_commit`, and condition 4
+   * holds only when the two are the same.
+   */
   head: string;
   /**
    * The base commit that is compared with the base the host reports: `base`
@@ -180,7 +259,7 @@ export interface ApproveReport {
   reference: string;
   /** The commit the default ref names: the settings were read there. */
   default_commit: string;
-  /** The digest of the spec at the head, or `null` when none exists. */
+  /** The digest of the spec at the commit that was judged, or `null` when none exists. */
   digest: string | null;
   /** The pull request as the host reports it, or `null` when the host failed. */
   pull_request: {
@@ -190,6 +269,12 @@ export interface ApproveReport {
     base: string;
     target_ref: string;
   } | null;
+  /**
+   * The merge as the merged mode measured it. `null` in the open mode, and
+   * in the merged mode when it could not be derived; conditions 2, 7 and 8
+   * say why.
+   */
+  merge: ReportedMerge | null;
   /** Exactly one entry per condition, in order. */
   conditions: ConditionResult[];
   /** Every approval that stands, on the head or not. */
@@ -202,7 +287,7 @@ export interface ApproveReport {
    */
   last_config_commit: { commit: string | null; approver: string | null };
   /**
-   * The commands the spec at the head refers to, read from git at the
+   * The commands the spec at the commit that was judged refers to, read from git at the
    * `commands_ref` of that spec and sorted by name: every command a
    * test-plan row names, and the command that carries `{selector}` when the
    * set has one. `null` when they cannot be read; `gaps` then holds
@@ -221,6 +306,12 @@ export interface ApproveRequest {
   defaultRef: string;
   /** The full id of the pull request base commit, when the caller has it. */
   base?: string;
+  /**
+   * True for the check after the merge: the pull request must be merged,
+   * and what is judged is the spec at the tip of the default branch. No
+   * range is taken from `base` then either.
+   */
+  merged?: boolean;
   host: HostAdapter;
 }
 

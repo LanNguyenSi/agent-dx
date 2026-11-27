@@ -13,6 +13,13 @@
  * without a base commit given), the digests from git at the head and at the
  * commit of a review, and who reviewed what comes from the host.
  *
+ * With `merged: true` the check runs after the merge instead (the merged
+ * mode): the pull request must be merged, the spec is judged at the tip of
+ * the default branch, the approval is looked for on the head commit the
+ * host reports, and what the pull request changed is measured over the
+ * ranges `landingOf` derives from its merge commit, never from a base
+ * commit.
+ *
  * A condition that could not be evaluated does not hold. A host method that
  * throws or returns something else than its type is `host-failed`, a git
  * read that fails is `git-failed`; neither is ever a pass.
@@ -34,7 +41,7 @@ import { resolveGitInputs, type GitRequest } from "../lint/git/resolve.js";
 import { checkSpecChangesConfig } from "../lint/rules/refs.js";
 import { lintSpecDir } from "../lint/run.js";
 import type { GitInputs, Loaded, RuleContext } from "../lint/types.js";
-import { checkRepository } from "../repo/index.js";
+import { checkRepository, type RepoCheckFinding } from "../repo/index.js";
 import {
   SPECS_DIR,
   isRepoPath,
@@ -42,8 +49,11 @@ import {
   repoPathOf,
   specPathIn,
 } from "../state/git.js";
+import { arrives, standingOf } from "./binding.js";
 import { readHostFacts, type Fact, type HostFacts } from "./facts.js";
+import { landingOf, type Landing, type LandingResult } from "./landing.js";
 import {
+  isShallow,
   mergeBases,
   specCommandsAt,
   specDigestAt,
@@ -58,6 +68,7 @@ import {
   CONDITIONS,
   GAPS,
   OK_CODE,
+  type ApproveMode,
   type ApproveReport,
   type ApproveRequest,
   type ApproveResult,
@@ -69,18 +80,17 @@ import {
   type ReportedApproval,
 } from "./types.js";
 
-type Outcome =
-  | { ok: true; message: string }
-  | { ok: false; code: FailureCode; message: string };
+type Failure = { ok: false; code: FailureCode; message: string };
+type Outcome = { ok: true; message: string } | Failure;
 
 const holds = (message: string): Outcome => ({ ok: true, message });
-const fails = (code: FailureCode, message: string): Outcome => ({
+const fails = (code: FailureCode, message: string): Failure => ({
   ok: false,
   code,
   message,
 });
 
-const HOST_FAILED = (what: string): Outcome =>
+const HOST_FAILED = (what: string): Failure =>
   fails(
     "host-failed",
     `the host adapter did not report ${what}; a fact the host did not give is never assumed`,
@@ -97,21 +107,51 @@ interface Subject {
    * The git inputs as the caller gave them, `base` included. Conditions read
    * `repo` and `head` from it, and condition 2 compares `reference` with the
    * base the host reports. No condition measures a change from its
-   * `reference` or its `diffBase`: that is what `measure` is for.
+   * `reference` or its `diffBase`: that is what `spans` is for.
    */
   git: GitInputs;
+  /** `merged` for the check after the merge. */
+  mode: ApproveMode;
+  /**
+   * Why the history of the repository cannot be relied on (it is shallow,
+   * or git could not say), or `null`. Every condition that reads ancestry
+   * fails with it.
+   */
+  history: Failure | null;
+  /** After the merge: where the pull request landed, when that could be derived. */
+  landing: Landing | null;
   /** The commit `defaultRef` names. */
   defaultCommit: string;
-  /** The one base conditions 4, 7 and 8 measure from, or why there is none. */
-  measure: Measure;
+  /**
+   * The commit whose spec is judged: the head in the open mode, the commit
+   * `defaultRef` names in the merged mode.
+   */
+  at: string;
+  /**
+   * What the pull request changes, as ranges to measure, or why there is
+   * none. In the open mode it is one range, from the measuring base to the
+   * head, and conditions 4, 7 and 8 use it. In the merged mode they are the
+   * ranges of the merge, and conditions 2, 7 and 8 use them.
+   */
+  spans: Spans;
   facts: HostFacts;
   /** The settings at `defaultCommit`; the format defaults when the file is absent. */
   config: SpecGateConfig | null;
   /** The approvals that stand, or the host failure. */
   standing: Fact<StandingApproval[]>;
-  /** The approvals that stand on the head commit. */
+  /**
+   * The commit an approval must stand on: the head of the checkout in the
+   * open mode, the head commit the host reports for the pull request in the
+   * merged mode (`null` when the host did not report the pull request).
+   */
+  approvedHead: string | null;
+  /** The approvals that stand on `approvedHead`. */
   atHead: StandingApproval[];
 }
+
+/** The ranges the conditions measure, each as the git inputs of a rule, or why there is none. */
+type Spans =
+  { ok: true; ranges: GitInputs[] } | { ok: false; outcome: Failure };
 
 function refuse(message: string): ApproveResult {
   return { kind: "refused", message: `approve-check: ${message}` };
@@ -165,11 +205,25 @@ function problemOf(s: Subject, login: string): ApproverProblem | null {
 const count = (n: number, one: string, many: string): string =>
   `${n} ${n === 1 ? one : many}`;
 
+const compareText = (a: string, b: string): number =>
+  a < b ? -1 : a > b ? 1 : 0;
+
+/** The commit that is judged, in the words of a message. */
+const whereOf = (s: Subject): string =>
+  s.mode === "merged" ? "the tip of the default branch" : "the head commit";
+
 /** 1: an approving review stands on the head. */
 function approvalAtHead(s: Subject): Outcome {
   if (!s.facts.pullRequest.ok) return HOST_FAILED("the pull request");
   if (!s.standing.ok) return HOST_FAILED("the reviews");
-  if (s.facts.pullRequest.value.head !== s.git.head) {
+  if (s.mode === "merged") {
+    // After the merge the checkout is at the tip of the default branch, not
+    // at the head of the pull request: the approval is looked for on the
+    // head commit the host reports, and only for a merged pull request.
+    if (!s.spans.ok && s.spans.outcome.code === "not-merged") {
+      return s.spans.outcome;
+    }
+  } else if (s.facts.pullRequest.value.head !== s.git.head) {
     return fails(
       "head-mismatch",
       "the checkout is not at the head commit of the pull request; check out that commit, not a merge of it",
@@ -191,6 +245,7 @@ function approvalAtHead(s: Subject): Outcome {
 
 /** 2: an approver of the head is allowed, by settings the pull request cannot write. */
 function approverAllowed(s: Subject): Outcome {
+  if (s.history !== null) return s.history;
   if (!s.facts.pullRequest.ok) return HOST_FAILED("the pull request");
   if (!s.standing.ok) return HOST_FAILED("the reviews");
   const config = s.config;
@@ -223,7 +278,21 @@ function approverAllowed(s: Subject): Outcome {
       "the base commit the host reports is not on the default ref of the checkout; the default branch may need to be fetched by the job",
     );
   }
-  if (isAncestor(s.git.repo, s.git.head, s.defaultCommit)) {
+  if (s.mode === "merged") {
+    // After the merge the tip of the default branch holds the pull request,
+    // so the settings read there are trusted only when no range of the
+    // merge wrote under `.spec-gate/`. That takes the place of
+    // `head-in-reference`.
+    if (!s.spans.ok) return s.spans.outcome;
+    const changed = configChanges(s.spans.ranges);
+    if (changed === null) return CONFIG_NOT_READ;
+    if (changed.length > 0) {
+      return fails(
+        "config-in-merge",
+        `${count(changed.length, "path", "paths")} under .spec-gate/ changed over a range of the merge: the settings at the tip of the default branch may be the pull request's own, and who may approve is not taken from them`,
+      );
+    }
+  } else if (isAncestor(s.git.repo, s.git.head, s.defaultCommit)) {
     // The settings are trusted because the pull request did not write the
     // commit they are read at, the tip of the default branch. A head that
     // commit already contains (a merged pull request, a branch without a
@@ -256,7 +325,10 @@ function approverAllowed(s: Subject): Outcome {
   );
 }
 
-/** 3: the digest at the head is the digest that was approved. */
+/**
+ * 3: the digest at the commit that is judged (the head, or after the merge
+ * the tip of the default branch) is the digest that was approved.
+ */
 function digestUnchanged(s: Subject, headDigest: string | null): Outcome {
   if (!s.standing.ok) return HOST_FAILED("the reviews");
   const subjects = s.atHead.length > 0 ? s.atHead : s.standing.value;
@@ -269,11 +341,11 @@ function digestUnchanged(s: Subject, headDigest: string | null): Outcome {
   if (headDigest === null) {
     return fails(
       "digest-unavailable",
-      "no digest exists for the spec at the head commit",
+      `no digest exists for the spec at ${whereOf(s)}`,
     );
   }
   const commits = [...new Set(subjects.map((approval) => approval.commit))]
-    .filter((commit) => commit !== s.git.head)
+    .filter((commit) => commit !== s.at)
     .sort();
   for (const commit of commits) {
     if (!isCommit(s.git.repo, commit)) {
@@ -289,21 +361,117 @@ function digestUnchanged(s: Subject, headDigest: string | null): Outcome {
         `no digest exists for the spec at the commit ${commit} of an approving review`,
       );
     }
-    if (digest !== headDigest) {
+    if (
+      s.mode === "merged" &&
+      specStateAt(s.git.repo, commit, s.specPath)?.status !== "proposed"
+    ) {
+      // The status is no part of the digest. Before the merge condition 4
+      // reads it at the head, which is where a counted approval stands;
+      // after the merge it reads it at the tip, so the reviewed commit is
+      // asked here: an approval of a draft approves no spec.
       return fails(
-        "digest-mismatch",
-        `the digest at the head differs from the digest at the commit ${commit} of an approving review`,
+        "review-not-proposed",
+        `the spec is not proposed at the commit ${commit} of an approving review; an approval of a draft does not count, whatever status the default branch gave the spec later`,
       );
     }
+    if (digest !== headDigest) {
+      // After the merge both sides are named: the reader has no checkout of
+      // the reviewed commit to compute the second one from.
+      return s.mode === "merged"
+        ? fails(
+            "digest-mismatch-after-merge",
+            `the digest ${headDigest} at the tip of the default branch ${s.at} differs from the digest ${digest} at the commit ${commit} of an approving review: what is on the default branch is not what was approved`,
+          )
+        : fails(
+            "digest-mismatch",
+            `the digest at the head differs from the digest at the commit ${commit} of an approving review`,
+          );
+    }
+  }
+  if (s.landing !== null) {
+    const unbound = bindingProblem(s, s.landing, headDigest);
+    if (unbound !== null) return unbound;
   }
   return holds(
-    "the digest at the head equals the digest at the commit of every approving review considered",
+    s.mode === "merged"
+      ? "the digest at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is proposed at each of them, and the pull request brought the spec to that state"
+      : "the digest at the head equals the digest at the commit of every approving review considered",
   );
 }
 
 /**
- * 4: `proposed` at the head, and the final lint of that head is clean. The
- * lint measures from the measuring base, never from a base commit given.
+ * Why the merged pull request is not the one that brought this spec, or
+ * `null` when it is.
+ *
+ * The state judged at the tip is "proposed, with the digest at the tip"
+ * (`tipDigest`). The pull request brought the spec when that state arrives
+ * twice (see `arrives` in `binding.ts`):
+ *
+ * - over the reviewed commits: from the one merge base of the approved head
+ *   with the first parent of the merge commit to that head. For a merge
+ *   commit with one parent the landing already holds that base; for a merge
+ *   commit with two it is read here and used here alone, so the ranges of
+ *   conditions 2, 7 and 8 stay what they are. No merge base and several
+ *   fail closed;
+ * - on the default branch: over some measured first-parent step, each asked
+ *   on its own.
+ *
+ * What this does not say: that the approver was shown the change. An
+ * approval given before the default branch moved under the pull request
+ * counts like any other; the check reads no fact about that order.
+ */
+function bindingProblem(
+  s: Subject,
+  landing: Landing,
+  tipDigest: string,
+): Failure | null {
+  const repo = s.git.repo;
+  const standingAt = (commit: string) =>
+    standingOf(
+      specStateAt(repo, commit, s.specPath),
+      specDigestAt(repo, commit, s.specPath),
+      tipDigest,
+    );
+  const steps = landing.ranges.slice(0, landing.commits);
+  if (
+    !steps.some((step) => arrives(standingAt(step.from), standingAt(step.to)))
+  ) {
+    return fails(
+      "spec-not-in-merge",
+      "no measured step of the default branch brought this spec to the state judged at the tip (proposed, with the digest at the tip): the pull request is not the one that brought it, and its approval is not an approval of this spec",
+    );
+  }
+  let base = landing.reviewedBase;
+  if (base === null) {
+    const bases = mergeBases(repo, landing.head, landing.firstParent);
+    if (bases.length === 0) {
+      return fails(
+        "git-failed",
+        "the head commit of the pull request and the first parent of its merge commit share no history; what the reviewed commits brought is not known",
+      );
+    }
+    if (bases.length > 1) {
+      return fails(
+        "ambiguous-merge-base",
+        `the head commit of the pull request and the first parent of its merge commit have ${bases.length} merge bases; what the reviewed commits brought is not read from one of several`,
+      );
+    }
+    base = bases[0]!;
+  }
+  if (!arrives(standingAt(base), standingAt(landing.head))) {
+    return fails(
+      "spec-not-in-merge",
+      "the reviewed commits did not bring this spec to the state judged at the tip: at the approved head it is not proposed with the digest at the tip, or at the merge base of that head with the default branch it already was. The approval is not an approval of this spec",
+    );
+  }
+  return null;
+}
+
+/**
+ * 4: `proposed` at the commit that is judged, and the final lint there is
+ * clean. In the open mode the lint measures from the measuring base, never
+ * from a base commit given. In the merged mode the checkout must be at the
+ * tip of the default branch, and the lint compares that tip with itself.
  */
 function proposedAndClean(
   s: Subject,
@@ -312,22 +480,33 @@ function proposedAndClean(
   if (state === null) {
     return fails(
       "spec-unreadable",
-      `${SPEC_FILE} at the head commit is missing, is not a regular file or does not parse`,
+      `${SPEC_FILE} at ${whereOf(s)} is missing, is not a regular file or does not parse`,
     );
   }
   if (state.status !== "proposed") {
     return fails(
       "status-not-proposed",
-      `the status at the head commit is ${state.status}; only a proposed spec is approved`,
+      `the status at ${whereOf(s)} is ${state.status}; only a proposed spec is approved`,
     );
   }
-  if (!specDirMatchesCommit(s.git.repo, s.git.head, s.specPath, s.dir)) {
+  if (s.mode === "merged" && s.git.head !== s.defaultCommit) {
+    // The lint takes its git view from `HEAD` and its files from the work
+    // tree; both must be the tip that is judged.
+    return fails(
+      "checkout-not-default-tip",
+      "the checkout is not at the commit the default ref names; after the merge the check judges the tip of the default branch and the lint reads the checkout",
+    );
+  }
+  if (!specDirMatchesCommit(s.git.repo, s.at, s.specPath, s.dir)) {
     return fails(
       "worktree-not-head",
-      "the spec directory of the work tree is not, byte for byte, the one the head commit holds; the lint would judge other files",
+      `the spec directory of the work tree is not, byte for byte, the one ${whereOf(s)} holds; the lint would judge other files`,
     );
   }
-  if (!s.measure.ok) return s.measure.outcome;
+  if (s.history !== null) return s.history;
+  // After the merge the lint measures nothing from the pull request, so no
+  // range is needed for it.
+  if (s.mode === "open" && !s.spans.ok) return s.spans.outcome;
   // The lint is given the default ref and never the base commit. It then
   // resolves its reference to the default commit and its diff base to the
   // merge base of the head with it, which is the measuring base: there is
@@ -351,7 +530,7 @@ function proposedAndClean(
     return fails("head-moved", "HEAD moved while the check ran");
   }
   return holds(
-    "the status at the head commit is proposed and the final lint has no error",
+    `the status at ${whereOf(s)} is proposed and the final lint has no error`,
   );
 }
 
@@ -417,7 +596,7 @@ type Measure =
       /** The head against the default commit, the diff base their one merge base. */
       git: GitInputs;
     }
-  | { ok: false; outcome: Outcome };
+  | { ok: false; outcome: Failure };
 
 /**
  * Derives the measuring base: the one merge base of the head and the commit
@@ -481,41 +660,145 @@ function measureOf(git: GitInputs, defaultCommit: string): Measure {
 }
 
 /**
- * 7: the pull request changes nothing under `.spec-gate/`, judged by the
- * rule of the lint from the measuring base.
+ * Why the history of `repo` cannot be relied on, or `null` when it can. In a
+ * shallow repository a commit at the boundary shows no parents and a merge
+ * base can be older than the true one, from which a file put back to its
+ * older text shows no change: nothing is measured there.
  */
-function configUntouched(s: Subject): Outcome {
-  if (!s.measure.ok) return s.measure.outcome;
-  const absent = { state: "absent" } as const;
-  const ctx: RuleContext = {
-    inputs: {
-      spec: absent,
-      testplan: absent,
-      bindings: absent,
-      questions: absent,
-      triage: absent,
-      meta: absent,
-    },
-    status: null,
-    profile: "full",
-    mode: "final",
-    git: s.measure.git,
-  };
-  const findings = checkSpecChangesConfig(ctx);
-  if (findings.some((finding) => finding.code !== "spec-changes-config")) {
+function historyProblem(repo: string): Failure | null {
+  let shallow: boolean;
+  try {
+    shallow = isShallow(repo);
+  } catch (err) {
+    if (!(err instanceof LintGitError)) throw err;
     return fails(
       "git-failed",
-      "the repository could not be read; the change under .spec-gate/ is not verified",
+      `the repository could not be read (${err.code}); whether its history is complete is not known`,
     );
   }
-  if (findings.length > 0) {
+  return shallow
+    ? fails(
+        "shallow-repository",
+        "the repository is shallow: its history ends at a boundary, where a commit shows no parents and a merge base can be older than the true one. Nothing is measured in it; the job must check out the full history",
+      )
+    : null;
+}
+
+/** The one range of the open mode: from the measuring base to the head. */
+function openSpans(measure: Measure): Spans {
+  return measure.ok ? { ok: true, ranges: [measure.git] } : measure;
+}
+
+/**
+ * The ranges of the merged mode, and the landing they come from: where the
+ * merged pull request `pull` landed on the branch whose tip is
+ * `defaultCommit` (see `landingOf`). They are derived from git and from the
+ * head and the merge commit the host reports, and from nothing else: no
+ * base commit of the caller or of the host is a start of a range.
+ *
+ * A pull request the host did not report is `host-failed`, a git read that
+ * fails is `git-failed`, and a landing that cannot be derived keeps its own
+ * code. None of them leaves a range to measure.
+ */
+function landedOf(
+  repo: string,
+  pull: HostPullRequest | null,
+  defaultCommit: string,
+): { spans: Spans; landing: Landing | null } {
+  const none = (outcome: Failure) => ({
+    spans: { ok: false, outcome } as const,
+    landing: null,
+  });
+  if (pull === null) return none(HOST_FAILED("the pull request"));
+  let result: LandingResult;
+  try {
+    result = landingOf(repo, pull, defaultCommit);
+  } catch (err) {
+    if (!(err instanceof LintGitError)) throw err;
+    return none(
+      fails(
+        "git-failed",
+        `the repository could not be read (${err.code}); where the pull request landed is not known and nothing is measured from a guess`,
+      ),
+    );
+  }
+  if (!result.ok) return none(fails(result.code, result.message));
+  const landing = result.landing;
+  return {
+    spans: {
+      ok: true,
+      ranges: landing.ranges.map((range) => ({
+        repo,
+        reference: defaultCommit,
+        diffBase: range.from,
+        head: range.to,
+      })),
+    },
+    landing,
+  };
+}
+
+const CONFIG_NOT_READ = fails(
+  "git-failed",
+  "the repository could not be read; the change under .spec-gate/ is not verified",
+);
+
+/**
+ * The paths under `.spec-gate/` that differ over `ranges`, by the rule of
+ * the lint, each as the rule prints it; a path that differs over several
+ * ranges is listed once. `null` when a range could not be read.
+ */
+function configChanges(ranges: readonly GitInputs[]): string[] | null {
+  const absent = { state: "absent" } as const;
+  const changed: string[] = [];
+  for (const git of ranges) {
+    const ctx: RuleContext = {
+      inputs: {
+        spec: absent,
+        testplan: absent,
+        bindings: absent,
+        questions: absent,
+        triage: absent,
+        meta: absent,
+      },
+      status: null,
+      profile: "full",
+      mode: "final",
+      git,
+    };
+    const findings = checkSpecChangesConfig(ctx);
+    if (findings.some((finding) => finding.code !== "spec-changes-config")) {
+      return null;
+    }
+    const before = [...changed];
+    for (const finding of findings) {
+      if (!before.includes(finding.file)) changed.push(finding.file);
+    }
+  }
+  return changed;
+}
+
+/**
+ * 7: the pull request changes nothing under `.spec-gate/`, judged by the
+ * rule of the lint: from the measuring base in the open mode, over every
+ * range of the merge in the merged mode.
+ */
+function configUntouched(s: Subject): Outcome {
+  if (!s.spans.ok) return s.spans.outcome;
+  const changed = configChanges(s.spans.ranges);
+  if (changed === null) return CONFIG_NOT_READ;
+  if (changed.length > 0) {
     return fails(
       "spec-changes-config",
-      `the pull request changes ${count(findings.length, "path", "paths")} under .spec-gate/; a change there is a pull request of its own`,
+      s.mode === "merged"
+        ? `${count(changed.length, "path", "paths")} under .spec-gate/ changed over a range of the merge; a change there is a pull request of its own`
+        : `the pull request changes ${count(changed.length, "path", "paths")} under .spec-gate/; a change there is a pull request of its own`,
     );
   }
   return holds(
-    "no file under .spec-gate/ differs between the merge base with the default branch and the head",
+    s.mode === "merged"
+      ? "no file under .spec-gate/ differs over a range of the merge"
+      : "no file under .spec-gate/ differs between the merge base with the default branch and the head",
   );
 }
 
@@ -528,15 +811,35 @@ export const MAX_LISTED_FINDINGS = 20;
  * It runs from the measuring base to the head, both trees read from git.
  * The work tree is not asked, so a spec the head deletes stays deleted
  * whatever the checkout holds, and the walk covers the whole tree, not only
- * `specs/`.
+ * `specs/`. In the merged mode it runs over every range of the merge, and a
+ * finding of several ranges is listed once.
  */
 function repoCheckClean(s: Subject): Outcome {
-  if (!s.measure.ok) return s.measure.outcome;
-  const { findings } = checkRepository(s.measure.git);
-  if (findings.some((finding) => finding.code === "tree-too-large")) {
-    return fails(
-      "tree-too-large",
-      "the tree of the diff base or of the head is over a cap of the repository check; a tree that was not read in full is never passed",
+  if (!s.spans.ok) return s.spans.outcome;
+  const findings: RepoCheckFinding[] = [];
+  for (const git of s.spans.ranges) {
+    const found = checkRepository(git).findings;
+    if (found.some((finding) => finding.code === "tree-too-large")) {
+      return fails(
+        "tree-too-large",
+        "the tree of the diff base or of the head is over a cap of the repository check; a tree that was not read in full is never passed",
+      );
+    }
+    const before = [...findings];
+    for (const finding of found) {
+      if (
+        !before.some(
+          (other) => other.code === finding.code && other.path === finding.path,
+        )
+      ) {
+        findings.push(finding);
+      }
+    }
+  }
+  // One range arrives sorted; several are put into the same order.
+  if (s.spans.ranges.length > 1) {
+    findings.sort(
+      (a, b) => compareText(a.path, b.path) || compareText(a.code, b.code),
     );
   }
   if (findings.length > 0) {
@@ -552,7 +855,9 @@ function repoCheckClean(s: Subject): Outcome {
     );
   }
   return holds(
-    "no protected spec of the merge base with the default branch disappears, changes its id, goes back to draft or loses its log at the head",
+    s.mode === "merged"
+      ? "no protected spec disappears, changes its id, goes back to draft or loses its log over a range of the merge"
+      : "no protected spec of the merge base with the default branch disappears, changes its id, goes back to draft or loses its log at the head",
   );
 }
 
@@ -585,7 +890,7 @@ function reportedApprovals(s: Subject): ReportedApproval[] {
   return s.standing.value.map((approval) => ({
     login: approval.login,
     commit: approval.commit,
-    at_head: approval.commit === s.git.head,
+    at_head: approval.commit === s.approvedHead,
     problem: problemOf(s, approval.login),
   }));
 }
@@ -604,6 +909,11 @@ export async function checkApproval(
       "needs the default ref: the full name of the ref that holds the default branch",
     );
   }
+  if (request.merged !== undefined && typeof request.merged !== "boolean") {
+    // A value that only reads as true or false does not pick a mode.
+    return refuse("merged must be true or false");
+  }
+  const mode: ApproveMode = request.merged === true ? "merged" : "open";
   const dir = path.resolve(request.specDir);
   let dirStat: fs.Stats;
   try {
@@ -641,6 +951,20 @@ export async function checkApproval(
   }
 
   const facts = await readHostFacts(request.host);
+  const pull = facts.pullRequest.ok ? facts.pullRequest.value : null;
+  const history = historyProblem(git.repo);
+  // In a history that cannot be relied on nothing is derived and nothing
+  // is measured.
+  const landed =
+    mode === "merged" && history === null
+      ? landedOf(git.repo, pull, defaultCommit)
+      : null;
+  const spans: Spans =
+    history !== null
+      ? { ok: false, outcome: history }
+      : landed === null
+        ? openSpans(measureOf(git, defaultCommit))
+        : landed.spans;
   // Who may approve is what the default branch says now, with or without a
   // base commit: an approver revoked there after the pull request base, or
   // an account made an agent identity there, must not count. The base is
@@ -654,24 +978,35 @@ export async function checkApproval(
   const standing: Fact<StandingApproval[]> = facts.reviews.ok
     ? { ok: true, value: standingApprovals(facts.reviews.value) }
     : { ok: false };
+  // After the merge the checkout is not at the head of the pull request:
+  // the approval must stand on the head commit the host reports.
+  const approvedHead = mode === "merged" ? (pull?.head ?? null) : git.head;
   const atHead = standing.ok
-    ? standing.value.filter((approval) => approval.commit === git.head)
+    ? standing.value.filter((approval) => approval.commit === approvedHead)
     : [];
+  // After the merge the spec is judged where it landed, at the commit the
+  // default ref names, wherever the checkout is.
+  const at = mode === "merged" ? defaultCommit : git.head;
   const subject: Subject = {
     request,
     dir,
     specPath,
     git,
+    mode,
+    history,
+    landing: landed?.landing ?? null,
     defaultCommit,
-    measure: measureOf(git, defaultCommit),
+    at,
+    spans,
     facts,
     config,
     standing,
+    approvedHead,
     atHead,
   };
 
-  const state = specStateAt(git.repo, git.head, specPath);
-  const headDigest = specDigestAt(git.repo, git.head, specPath);
+  const state = specStateAt(git.repo, at, specPath);
+  const headDigest = specDigestAt(git.repo, at, specPath);
   const conditions: ConditionResult[] = [
     result(
       1,
@@ -709,7 +1044,7 @@ export async function checkApproval(
   // What a runner may start for this spec. It is shown to the reader and is
   // no condition: the digest of condition 3 already binds the same argv
   // lists for every command a row names.
-  const commands = specCommandsAt(git.repo, git.head, specPath);
+  const commands = specCommandsAt(git.repo, at, specPath);
   const gaps: Gap[] = GAPS.map((gap) => ({
     code: gap.code,
     message: gap.message,
@@ -722,12 +1057,14 @@ export async function checkApproval(
   }
 
   const code = (n: ConditionNumber) => conditions[n - 1]!.code;
-  const pullRequest = facts.pullRequest.ok ? facts.pullRequest.value : null;
+  const pullRequest = pull;
+  const landing = landed?.landing ?? null;
   const configCommit = facts.configCommit.ok
     ? facts.configCommit.value
     : { commit: null, approver: null };
   const report: ApproveReport = {
     format: APPROVE_FORMAT,
+    mode,
     spec: state?.id ?? null,
     path: specPath,
     approved: conditions.every((c) => c.ok),
@@ -748,6 +1085,20 @@ export async function checkApproval(
             head: pullRequest.head,
             base: pullRequest.base,
             target_ref: pullRequest.targetRef,
+          },
+    merge:
+      landing === null
+        ? null
+        : {
+            commit: landing.merge,
+            first_parent: landing.firstParent,
+            shape: landing.shape,
+            reviewed_base: landing.reviewedBase,
+            commits: landing.commits,
+            ranges: landing.ranges.map((range) => ({
+              from: range.from,
+              to: range.to,
+            })),
           },
     conditions,
     approvals: reportedApprovals(subject),

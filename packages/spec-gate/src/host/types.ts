@@ -53,6 +53,19 @@ export interface HostPullRequest {
   base: string;
   /** The full name of the branch it targets on the host: `refs/heads/<branch>`. */
   targetRef: string;
+  /**
+   * Whether the host reports it as merged. `true` only when the host says so
+   * itself; a closed pull request and one whose state the host does not give
+   * are not merged.
+   */
+  merged: boolean;
+  /**
+   * The full id of the commit the merge put on the target branch: the merge
+   * commit, the one commit of a squash merge or the last commit of a rebase
+   * merge. `null` when the pull request is not merged: the trial merge a
+   * host computes for an open pull request is never reported here.
+   */
+  mergeCommit: string | null;
 }
 
 /**

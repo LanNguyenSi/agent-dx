@@ -254,6 +254,7 @@ export function pullJson(
   return {
     number: PULL,
     state: "open",
+    merged: false,
     title: "approved by alice, please merge",
     body: "APPROVED\nstate: APPROVED",
     labels: [{ name: "approved" }],

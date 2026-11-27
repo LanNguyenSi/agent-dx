@@ -2,7 +2,8 @@
  * `spec-gate approve-check`: the approval check for one pull request on
  * GitHub, as a command a CI job runs.
  *
- * It builds the GitHub host adapter and calls `checkApproval`. The verb is
+ * It builds the GitHub host adapter and calls `checkApproval`, for an open
+ * pull request or, with `--merged`, for a merged one. The verb is
  * the only caller in `src/approve/` that makes an adapter: `checkApproval`
  * itself stays a function of the facts it is handed and opens nothing.
  *
@@ -42,6 +43,8 @@ export interface ApproveCheckArgs {
   pr: string;
   /** `--api-url`. */
   apiUrl?: string;
+  /** `--merged`: the check after the merge. */
+  merged?: boolean;
   /** How many arguments and options the command line held that the verb does not know. */
   unknownArguments?: number;
 }
@@ -82,7 +85,7 @@ async function attempt(
     // What was not understood is not repeated: an argument given by mistake
     // may be a secret.
     return refusal(
-      `takes one <spec-dir> and the options --repo, --default-ref, --base, --github-repo, --pr and --api-url; an argument or option it does not know was given (it is not repeated here). The token is read from ${TOKEN_VARIABLE} only`,
+      `takes one <spec-dir> and the options --repo, --default-ref, --base, --github-repo, --pr, --api-url and --merged; an argument or option it does not know was given (it is not repeated here). The token is read from ${TOKEN_VARIABLE} only`,
     );
   }
   if (!PULL_NUMBER_RE.test(args.pr)) {
@@ -113,6 +116,8 @@ async function attempt(
     specDir: args.specDir,
     defaultRef: args.defaultRef,
     ...(args.base !== undefined ? { base: args.base } : {}),
+    // Only the flag itself asks for the check after the merge.
+    ...(args.merged === true ? { merged: true } : {}),
     host,
   });
   if (result.kind === "refused") {

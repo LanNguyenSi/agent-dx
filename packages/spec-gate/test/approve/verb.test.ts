@@ -126,6 +126,40 @@ describe("runApproveCheck: what it hands on", () => {
     await run({ ...ARGS, base: "b".repeat(40) }, ENV, using);
     expect(using.seen.requests[0]!.base).toBe("b".repeat(40));
   });
+
+  it("without --merged the request names no mode: the check judges an open pull request", async () => {
+    for (const args of [ARGS, { ...ARGS, merged: false }]) {
+      const using = seams();
+      await run(args, ENV, using);
+      expect(Object.keys(using.seen.requests[0]!)).not.toContain("merged");
+    }
+  });
+
+  it("hands --merged to the check as merged true, with and without --base", async () => {
+    const using = seams();
+    await run({ ...ARGS, merged: true }, ENV, using);
+    expect(using.seen.requests).toEqual([
+      {
+        repo: "/work/repo",
+        specDir: "specs/s1",
+        defaultRef: "refs/remotes/origin/main",
+        merged: true,
+        host: HOST,
+      },
+    ]);
+    const both = seams();
+    await run({ ...ARGS, merged: true, base: "b".repeat(40) }, ENV, both);
+    expect(both.seen.requests[0]).toMatchObject({
+      merged: true,
+      base: "b".repeat(40),
+    });
+  });
+
+  it("a value of merged that only reads as true is not the flag", async () => {
+    const using = seams();
+    await run({ ...ARGS, merged: "true" as never }, ENV, using);
+    expect(Object.keys(using.seen.requests[0]!)).not.toContain("merged");
+  });
 });
 
 describe("runApproveCheck: exit codes", () => {

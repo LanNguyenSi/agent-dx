@@ -116,4 +116,4 @@ The code lives in `src/canonical/`.
 
 ## Approval
 
-Whether a proposed spec counts as approved is derived by `checkApproval` in `src/approve/` from the facts a host adapter (`src/host/`) supplies and from git; `spec-gate approve-check` runs it for a pull request on GitHub. The conditions, the report and the limits are described in [docs/approve.md](docs/approve.md).
+Whether a proposed spec counts as approved is derived by `checkApproval` in `src/approve/` from the facts a host adapter (`src/host/`) supplies and from git; `spec-gate approve-check` runs it for a pull request on GitHub. After the merge, `spec-gate approve-check --merged` checks from the tip of the default branch whether what the merged pull request left there is the spec that was approved. The conditions, the report and the limits are described in [docs/approve.md](docs/approve.md).
