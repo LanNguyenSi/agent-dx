@@ -17,12 +17,20 @@
  * - `single-commit`: the merge commit has one parent and the head commit of
  *   the pull request is not in its history, as after a squash merge and
  *   after a rebase merge. A squash merge puts the whole pull request into
- *   that one commit. A rebase merge puts only its last commit there; the
- *   commits before it sit further down the first-parent chain, and git does
- *   not say where they begin. So a second range is measured as well: from
- *   the one merge base of the head commit with the first parent to the head
- *   commit, which is what the reviewed commits change, whichever of them
- *   landed in which commit.
+ *   that one commit. A rebase merge replays its commits one by one and the
+ *   host names the last; the others are the commits before it on the
+ *   first-parent chain. Git does not say which of the two happened, and no
+ *   comparison of trees does: a replay can undo a change of the default
+ *   branch in one commit that an earlier commit repeated, so that neither
+ *   the last commit nor the reviewed commits as a whole show it. A replay
+ *   never makes more commits than the reviewed range holds, so every one of
+ *   the last `commits` steps of the first-parent chain is measured on its
+ *   own, `commits` being the number of commits between the reviewed base
+ *   and the head. After a squash merge the steps before the last are
+ *   commits of the default branch itself, and what they change is counted
+ *   as well: the check cannot tell them from replayed commits. The range
+ *   from the reviewed base (the one merge base of the head commit with the
+ *   first parent) to the head commit is measured too.
  *
  * Every other shape is `merge-shape-unknown`, and nothing is measured: a
  * head commit that is itself on the default branch without such a merge
@@ -33,7 +41,12 @@
  */
 import type { HostPullRequest } from "../host/index.js";
 import { isAncestor, isCommit } from "../lint/git/index.js";
-import { commitParents, mergeBases } from "./git.js";
+import {
+  commitParents,
+  commitsBetween,
+  firstParentChain,
+  mergeBases,
+} from "./git.js";
 import type { FailureCode, MergeShape } from "./types.js";
 
 /** A range of the merge: what differs between the trees of two commits. */
@@ -50,9 +63,27 @@ export interface Landing {
   shape: MergeShape;
   /** `single-commit` only: the one merge base of the head commit and `firstParent`. */
   reviewedBase: string | null;
-  /** What is measured: `firstParent` to `merge`, and for `single-commit` also `reviewedBase` to the head commit. */
+  /**
+   * How many steps of the first-parent chain are measured: 1 for
+   * `merge-commit`, the number of commits from `reviewedBase` to the head
+   * for `single-commit`.
+   */
+  commits: number;
+  /** Where the measured steps begin: the commit `commits` first-parent steps below `merge`. */
+  landedFrom: string;
+  /**
+   * What is measured: every first-parent step from `landedFrom` to `merge`,
+   * the last step first, and for `single-commit` also `reviewedBase` to the
+   * head commit.
+   */
   ranges: MergeRange[];
 }
+
+/**
+ * The most commits a pull request merged into one commit or replayed may
+ * hold. A longer one is not measured and not approved.
+ */
+export const MAX_MERGED_COMMITS = 50;
 
 /** The codes of a landing that could not be derived. */
 export type LandingCode = Extract<
@@ -87,6 +118,7 @@ export function landingOf(
   repo: string,
   pullRequest: Pick<HostPullRequest, "head" | "merged" | "mergeCommit">,
   defaultCommit: string,
+  maxCommits: number = MAX_MERGED_COMMITS,
 ): LandingResult {
   if (pullRequest.merged !== true) {
     return no(
@@ -126,6 +158,8 @@ export function landingOf(
         firstParent,
         shape: "merge-commit",
         reviewedBase: null,
+        commits: 1,
+        landedFrom: firstParent,
         ranges: [{ from: firstParent, to: merge }],
       },
     };
@@ -163,6 +197,25 @@ export function landingOf(
     );
   }
   const reviewedBase = bases[0]!;
+  // A replay puts at most one commit on the branch per reviewed commit.
+  const commits = commitsBetween(repo, reviewedBase, head, maxCommits + 1);
+  if (commits > maxCommits) {
+    return no(
+      "merge-shape-unknown",
+      `the pull request holds more than ${maxCommits} commits; a squash or rebase merge of that many is not measured`,
+    );
+  }
+  const chain = firstParentChain(repo, merge, commits + 1);
+  if (chain.length < commits + 1) {
+    return no(
+      "merge-shape-unknown",
+      `the first-parent history of the merge commit holds fewer than the ${commits} commits of the pull request; ${NOT_TOLD}`,
+    );
+  }
+  const steps: MergeRange[] = [];
+  for (let i = 0; i < commits; i += 1) {
+    steps.push({ from: chain[i + 1]!, to: chain[i]! });
+  }
   return {
     ok: true,
     landing: {
@@ -170,10 +223,9 @@ export function landingOf(
       firstParent,
       shape: "single-commit",
       reviewedBase,
-      ranges: [
-        { from: firstParent, to: merge },
-        { from: reviewedBase, to: head },
-      ],
+      commits,
+      landedFrom: chain[commits]!,
+      ranges: [...steps, { from: reviewedBase, to: head }],
     },
   };
 }

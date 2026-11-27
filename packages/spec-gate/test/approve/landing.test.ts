@@ -3,9 +3,14 @@
  * head and the merge commit the host reports. The shapes git can tell give
  * ranges; every other shape gives none.
  */
+import fs from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  MAX_MERGED_COMMITS,
   commitParents,
+  commitsBetween,
+  firstParentChain,
+  isShallow,
   landingOf,
   type LandingResult,
 } from "../../src/approve/index.js";
@@ -117,6 +122,73 @@ describe("commitParents", { timeout: 60_000 }, () => {
   });
 });
 
+describe(
+  "firstParentChain, commitsBetween, isShallow",
+  { timeout: 60_000 },
+  () => {
+    it("lists a commit and its first parents, never the second parent of a merge, and stops at the count or at the root", async () => {
+      const m = await land(await build(), "merge-commit");
+      const first = await m.repo.sh("rev-parse", `${m.merge}^1`);
+      const below = await m.repo.sh("rev-parse", `${first}^1`);
+      expect(firstParentChain(m.dir, m.merge, 1)).toEqual([m.merge]);
+      expect(firstParentChain(m.dir, m.merge, 3)).toEqual([
+        m.merge,
+        first,
+        below,
+      ]);
+      const all = firstParentChain(m.dir, m.merge, 99);
+      expect(all).not.toContain(m.head);
+      expect(all.at(-1)).toBe(
+        await m.repo.sh("rev-list", "--max-parents=0", m.merge),
+      );
+      for (const bad of [0, -1, 1.5, Number.NaN]) {
+        expect(() => firstParentChain(m.dir, m.merge, bad)).toThrow(
+          LintGitError,
+        );
+      }
+      expect(() => firstParentChain(m.dir, "HEAD", 2)).toThrow(LintGitError);
+      expect(() => firstParentChain(m.dir, NO_COMMIT, 2)).toThrow(LintGitError);
+    });
+
+    it("counts the commits between two commits, merges included, up to the cap", async () => {
+      const s = await build();
+      expect(commitsBetween(s.dir, s.c1, s.head, 99)).toBe(2);
+      expect(commitsBetween(s.dir, s.head, s.c1, 99)).toBe(0);
+      expect(commitsBetween(s.dir, s.c1, s.head, 1)).toBe(1);
+      await s.repo.checkout("main");
+      const newer = await s.repo.commit({ "more.txt": "m\n" }, "main moves");
+      await s.repo.checkout("pr");
+      await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge main", newer);
+      // The merge commit counts; the commit of main it merged does not.
+      expect(commitsBetween(s.dir, newer, await s.repo.head(), 99)).toBe(3);
+      for (const bad of [0, -1, 1.5]) {
+        expect(() => commitsBetween(s.dir, s.c1, s.head, bad)).toThrow(
+          LintGitError,
+        );
+      }
+      expect(() => commitsBetween(s.dir, "main", s.head, 9)).toThrow(
+        LintGitError,
+      );
+      expect(() => commitsBetween(s.dir, s.c1, "pr", 9)).toThrow(LintGitError);
+      expect(() => commitsBetween(s.dir, NO_COMMIT, s.head, 9)).toThrow(
+        LintGitError,
+      );
+    });
+
+    it("tells a full repository from a shallow one", async () => {
+      const s = await build();
+      expect(isShallow(s.dir)).toBe(false);
+      const clone = `${s.dir}-shallow`;
+      await s.repo.sh("clone", "-q", "--depth", "1", `file://${s.dir}`, clone);
+      try {
+        expect(isShallow(clone)).toBe(true);
+      } finally {
+        fs.rmSync(clone, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
 describe("landingOf: the shapes git can tell", { timeout: 60_000 }, () => {
   it("a merge commit whose second parent is the head: one range, from the first parent", async () => {
     const m = await land(await build(), "merge-commit");
@@ -128,6 +200,8 @@ describe("landingOf: the shapes git can tell", { timeout: 60_000 }, () => {
         firstParent: first,
         shape: "merge-commit",
         reviewedBase: null,
+        commits: 1,
+        landedFrom: first,
         ranges: [{ from: first, to: m.merge }],
       },
     });
@@ -135,9 +209,10 @@ describe("landingOf: the shapes git can tell", { timeout: 60_000 }, () => {
     expect(seam.asked).toEqual([]);
   });
 
-  it("a squash merge: the merge commit from its parent, and the reviewed commits from their merge base with that parent", async () => {
+  it("a squash merge of two commits: two first-parent steps below the merge commit, and the reviewed commits from their merge base with its parent", async () => {
     const m = await land(await build(), "squash");
     const first = await m.repo.sh("rev-parse", `${m.merge}^1`);
+    const second = await m.repo.sh("rev-parse", `${m.merge}~2`);
     expect(landingOf(m.dir, merged(m.head, m.merge), m.landed)).toEqual({
       ok: true,
       landing: {
@@ -145,13 +220,63 @@ describe("landingOf: the shapes git can tell", { timeout: 60_000 }, () => {
         firstParent: first,
         shape: "single-commit",
         reviewedBase: m.c1,
+        commits: 2,
+        landedFrom: second,
         ranges: [
           { from: first, to: m.merge },
+          { from: second, to: first },
           { from: m.c1, to: m.head },
         ],
       },
     });
     expect(seam.asked).toEqual([[m.head, first]]);
+  });
+
+  it("a pull request of one commit: one step", async () => {
+    const s = await build({ propose: false });
+    const m = await land(s, "squash");
+    const result = landingOf(m.dir, merged(m.head, m.merge), m.landed);
+    expect(result).toMatchObject({
+      ok: true,
+      landing: {
+        commits: 1,
+        landedFrom: await m.repo.sh("rev-parse", `${m.merge}~1`),
+      },
+    });
+    expect(result.ok && result.landing.ranges).toHaveLength(2);
+  });
+
+  it("a pull request with more commits than the cap: merge-shape-unknown, at the cap it is measured", async () => {
+    const m = await land(await build(), "squash");
+    expect(MAX_MERGED_COMMITS).toBe(50);
+    expect(
+      refusal(landingOf(m.dir, merged(m.head, m.merge), m.landed, 1)),
+    ).toEqual({
+      code: "merge-shape-unknown",
+      message:
+        "the pull request holds more than 1 commits; a squash or rebase merge of that many is not measured",
+    });
+    expect(landingOf(m.dir, merged(m.head, m.merge), m.landed, 2).ok).toBe(
+      true,
+    );
+  });
+
+  it("a first-parent history below the merge commit that is shorter than the pull request: merge-shape-unknown", async () => {
+    const s = await build();
+    await s.repo.commit({ "notes.txt": "n\n" }, "notes");
+    const head = await s.repo.head();
+    // main holds two commits; the squash is its third, the pull request has three.
+    await s.repo.checkout("main");
+    await s.repo.sh("merge", "-q", "--squash", "pr");
+    const merge = await s.repo.commit({}, "squash pr");
+    expect(commitsBetween(s.dir, s.c1, head, 99)).toBe(3);
+    expect(firstParentChain(s.dir, merge, 99)).toHaveLength(3);
+    expect(refusal(landingOf(s.dir, merged(head, merge), merge))).toEqual({
+      code: "merge-shape-unknown",
+      message: `the first-parent history of the merge commit holds fewer than the 3 commits of the pull request; ${NOT_TOLD}`,
+    });
+    // One commit less in the pull request and the history is just long enough.
+    expect(landingOf(s.dir, merged(s.head, merge), merge).ok).toBe(true);
   });
 
   it("a rebase merge: the parent of the merge commit is a replayed commit, the reviewed base is where the branch started", async () => {

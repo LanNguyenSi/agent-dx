@@ -10,6 +10,7 @@ import {
   FAILURE_CODES,
   GAPS,
   MAX_LISTED_FINDINGS,
+  MAX_MERGED_COMMITS,
   MERGED_SUMMARIES,
   MERGE_SHAPES,
   TOKEN_VARIABLE,
@@ -164,6 +165,8 @@ describe('docs/approve.md, "After the merge"', () => {
       "merge-shape-unknown",
       "ambiguous-merge-base",
       "config-in-merge",
+      "spec-not-in-merge",
+      "shallow-repository",
       "digest-mismatch-after-merge",
       "checkout-not-default-tip",
       "review-commit-unavailable",
@@ -185,8 +188,16 @@ describe('docs/approve.md, "After the merge"', () => {
       "`HEAD` must be the commit `defaultRef` names",
       "an approver taken off the list on the default branch after the merge does not count",
       "The first range runs from the first parent of the merge commit to the merge commit",
-      "the one merge base of the head commit with the first parent to the head commit",
-      "A rebase merge puts only its last commit into the commit the host names",
+      "each of the last N first-parent steps below the merge commit, N being the number of commits between the reviewed base and the head commit",
+      "The reviewed base is the one merge base of the head commit with the first parent of the merge commit",
+      "Git does not say which of the two happened, and no comparison of the trees at both ends does",
+      "So every step is measured on its own",
+      "A replay makes at most one commit per commit of the pull request",
+      "a squash that follows a commit of the default branch that changed `.spec-gate/` or removed a proposed spec, within N - 1 commits, is not approved",
+      "a pull request of more than 50 commits is not measured",
+      "No merge is computed to say what the landed tree should be",
+      "The digest of the spec must differ between the start of the measured first-parent steps and the merge commit",
+      "a pull request that did not change this spec does not approve it",
       "This takes the place of `head-in-reference`",
       "the default branch was moved to it by fast-forward, or the branch was pushed there",
       "No range starts at `base`, and none at the base commit the host reports",
@@ -198,6 +209,18 @@ describe('docs/approve.md, "After the merge"', () => {
     }
   });
 
+  it("says that a shallow repository is refused in both modes, and why", () => {
+    const flat = doc.replace(/\s+/g, " ");
+    for (const phrase of [
+      "A shallow repository is refused before anything is measured, in both modes: conditions 2, 4, 7 and 8 are `shallow-repository`",
+      "`git-failed` when git cannot say whether it is shallow",
+      "A shallow repository is refused: conditions 2, 4, 7 and 8 are `shallow-repository` and the exit code is 1",
+    ]) {
+      expect(flat, phrase).toContain(phrase);
+    }
+    expect(MAX_MERGED_COMMITS).toBe(50);
+  });
+
   it("says what a job after the merge must do: the tip checked out, no shallow history, the head brought in", () => {
     const job = after
       .slice(after.indexOf("\n### In a job after the merge\n"))
@@ -205,7 +228,7 @@ describe('docs/approve.md, "After the merge"', () => {
     for (const phrase of [
       "never for a number taken from text",
       "Check out the commit `--default-ref` names, with the complete history of the default branch",
-      "The checkout must not be shallow",
+      "A shallow repository is refused (`shallow-repository`, exit 1)",
       "at a shallow boundary a commit shows no parents",
       "Bring the head commit of the pull request into the repository before the check",
       "The check never fetches",
@@ -221,8 +244,13 @@ describe('docs/approve.md, "After the merge"', () => {
       "the check after the merge compares the digest at the tip of the default branch with the digest at the commit of the approving review",
       "reports `merge-shape-unknown` and never approves",
       "Bindings after the merge: `bindings.yaml` and `bindings.log` are not part of the digest",
-      "Which pull request: the check after the merge takes the pull request the caller names",
+      "Which pull request, in the open mode: an approval of a commit counts for every spec in the tree of that commit",
+      "The check after the merge asks that the merge changed the digest of the spec (`spec-not-in-merge`); the open mode does not",
       "The merge commit and the head are the host's word",
+      "Named later by fewer commits than the pull request has, the steps can leave out the first commits of a rebase merge",
+      "A squash merge is measured like a rebase merge",
+      "After the merge the bindings are therefore compared neither with their log as it was merged before nor with the bindings of the approved head",
+      "neither is a later commit of the default branch that changes `bindings.yaml` without a log entry",
     ]) {
       expect(gaps, phrase).toContain(phrase);
     }
@@ -408,7 +436,7 @@ describe("the approval sources", () => {
     expect(text).not.toMatch(/\$\{token\}/);
   });
 
-  it("the only git arguments they write are a read of a tree, the merge bases of two commits and the parents of a commit", () => {
+  it("the only git arguments they write are reads: a tree, merge bases, parents, first parents, a count of commits and whether the repository is shallow", () => {
     const calls = sources.flatMap((file) =>
       [
         ...fs
@@ -416,23 +444,32 @@ describe("the approval sources", () => {
           .matchAll(/runGit\(\s*\w+,\s*\[([^\]]*)\]/g),
       ].map((m) => m[1]!.replace(/\s+/g, " ").trim()),
     );
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(6);
     expect(calls[0]).toMatch(
       /^"merge-base", "--all", "--end-of-options", a, b,?$/,
     );
     expect(calls[1]).toMatch(
       /^"rev-list", "--parents", "--max-count=1", "--end-of-options", commit,?$/,
     );
-    expect(calls[2]).toMatch(
+    expect(calls[2]).toBe(
+      '"rev-list", "--first-parent", `--max-count=${count}`, "--end-of-options", commit,',
+    );
+    expect(calls[3]).toBe(
+      '"rev-list", "--count", `--max-count=${cap}`, "--end-of-options", `${from}..${to}`,',
+    );
+    expect(calls[4]).toBe('"rev-parse", "--is-shallow-repository"');
+    expect(calls[5]).toMatch(
       /^"ls-tree", "-r", "-z", "--full-tree", "--end-of-options", commit, "--", prefix,?$/,
     );
-    // Every runGit call of these sources is one of the three above: none is
+    // No call merges, writes a tree or starts a merge driver.
+    for (const call of calls) expect(call).not.toMatch(/merge-tree|write/);
+    // Every runGit call of these sources is one of the six above: none is
     // written in a form the pattern does not see.
     const written = sources.reduce(
       (n, file) =>
         n + (fs.readFileSync(file, "utf8").match(/\brunGit\(/g) ?? []).length,
       0,
     );
-    expect(written).toBe(3);
+    expect(written).toBe(6);
   });
 });

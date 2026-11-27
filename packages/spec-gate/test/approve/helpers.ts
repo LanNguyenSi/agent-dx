@@ -20,6 +20,7 @@ import type {
   ReviewState,
 } from "../../src/host/index.js";
 import { proposeSpecDir } from "../../src/state/index.js";
+import { git } from "../canonical/helpers.js";
 import {
   COMMANDS_OK,
   REMOTE_MAIN,
@@ -279,6 +280,34 @@ export async function crissCross(
 /** How a test merges a pull request into the default branch. */
 export type MergeHow = "merge-commit" | "squash" | "rebase";
 
+/** The unrelated commits `land` puts on the default branch before a merge. */
+export const FILLERS = 5;
+
+/** The first-parent chain of `commit` in `dir`, `commit` first, `count` commits. */
+export async function chainOf(
+  dir: string,
+  commit: string,
+  count: number,
+): Promise<string[]> {
+  const out = await git(dir, [
+    "rev-list",
+    "--first-parent",
+    `--max-count=${count}`,
+    commit,
+  ]);
+  return out.split("\n");
+}
+
+/** The first-parent steps below `commit`, the last one first, as ranges. */
+export async function stepsOf(
+  dir: string,
+  commit: string,
+  steps: number,
+): Promise<{ from: string; to: string }[]> {
+  const chain = await chainOf(dir, commit, steps + 1);
+  return chain.slice(0, -1).map((to, i) => ({ from: chain[i + 1]!, to }));
+}
+
 /**
  * A merged pull request: the scenario after its merge. `head` stays the
  * head commit of the pull request, which the host reports and the reviews
@@ -297,10 +326,17 @@ export interface Landed extends Scenario {
  * parent is the head, one squashed commit, or the commits of the branch
  * replayed. The default ref is set to the result and `main` is checked out
  * there. The base the host reports stays `c1`, which is older than the
- * first parent of the merge.
+ * first parent of the merge: before the merge `main` moves on by
+ * `FILLERS` unrelated commits and one more, so that a pull request of up
+ * to that many commits has only unrelated commits of the default branch
+ * in the first-parent steps the check measures.
  */
 export async function land(s: Built, how: MergeHow): Promise<Built & Landed> {
   const head = await s.repo.sh("rev-parse", "pr");
+  await s.repo.checkout("main");
+  for (let i = 1; i <= FILLERS; i += 1) {
+    await s.repo.commit({ [`filler-${i}.txt`]: `${i}\n` }, `filler ${i}`);
+  }
   let merge: string;
   if (how === "squash") merge = await squashMerge(s.repo, "pr");
   else if (how === "rebase") merge = await rebaseMerge(s.repo, "pr");

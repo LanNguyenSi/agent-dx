@@ -34,11 +34,13 @@ import { git } from "../canonical/helpers.js";
 import { REMOTE_MAIN, SPEC_REL, cloneMain } from "../lint/git-helpers.js";
 import { scratch } from "../lint/helpers.js";
 import {
+  CONFIG,
   CONFIG_ONLY_BOB,
   STALE_OTHER,
   afterMerge,
   build,
   check,
+  chainOf,
   checkLanded,
   codes,
   cond,
@@ -55,6 +57,7 @@ import {
   review,
   squashEdited,
   squashWithOwnSettings,
+  stepsOf,
   type Landed,
 } from "./helpers.js";
 
@@ -62,6 +65,8 @@ const seam = vi.hoisted(() => ({
   /** Called instead of `commitParents`; a value other than `undefined` is returned in its place. */
   // eslint-disable-next-line no-unused-vars
   commitParents: undefined as ((commit: string) => unknown) | undefined,
+  /** Called instead of `isShallow`; a value other than `undefined` is returned in its place. */
+  isShallow: undefined as (() => unknown) | undefined,
   /** The options of every run of the final lint. */
   lints: [] as unknown[],
   /** The git inputs of every run of the repository check. */
@@ -80,6 +85,12 @@ vi.mock("../../src/approve/git.js", async (original) => {
       return instead === undefined
         ? actual.commitParents(repo, commit)
         : (instead as string[]);
+    },
+    isShallow: (repo: string) => {
+      const instead = seam.isShallow?.();
+      return instead === undefined
+        ? actual.isShallow(repo)
+        : (instead as boolean);
     },
   };
 });
@@ -125,6 +136,7 @@ vi.mock("../../src/repo/index.js", async (original) => {
 
 beforeEach(() => {
   seam.commitParents = undefined;
+  seam.isShallow = undefined;
   seam.lints.length = 0;
   seam.repoChecks.length = 0;
   seam.configFindings = undefined;
@@ -164,6 +176,7 @@ describe("approved after the merge", { timeout: 60_000 }, () => {
       first_parent: expect.stringMatching(/^[0-9a-f]{40}$/),
       shape: "merge-commit",
       reviewed_base: null,
+      commits: 1,
       ranges: [{ from: report.merge!.first_parent, to: MERGE.merge }],
     });
     const parents = await parentsOf(MERGE, MERGE.merge);
@@ -204,8 +217,11 @@ describe("approved after the merge", { timeout: 60_000 }, () => {
           first_parent: expect.stringMatching(/^[0-9a-f]{40}$/),
           shape: "single-commit",
           reviewed_base: SQUASH.c1,
+          // The pull request has two commits: two first-parent steps are
+          // measured, the squashed commit and the commit before it.
+          commits: 2,
           ranges: [
-            { from: expect.any(String), to: SQUASH.merge },
+            ...(await stepsOf(SQUASH.dir, SQUASH.merge, 2)),
             { from: SQUASH.c1, to: SQUASH.head },
           ],
         },
@@ -236,7 +252,7 @@ describe("approved after the merge", { timeout: 60_000 }, () => {
     expect(host.calls).not.toContain("ciRunStatus");
   });
 
-  it("a rebase merge of two commits: the last one and the reviewed commits are measured", async () => {
+  it("a rebase merge of two commits: both replayed commits and the reviewed commits are measured", async () => {
     const report = await checkLanded(REBASE);
     expect(codes(report)).toEqual(ALL_OK);
     expect(report.approved).toBe(true);
@@ -244,11 +260,13 @@ describe("approved after the merge", { timeout: 60_000 }, () => {
       commit: REBASE.merge,
       shape: "single-commit",
       reviewed_base: REBASE.c1,
+      commits: 2,
     });
     expect(report.merge!.ranges).toEqual([
-      { from: report.merge!.first_parent, to: REBASE.merge },
+      ...(await stepsOf(REBASE.dir, REBASE.merge, 2)),
       { from: REBASE.c1, to: REBASE.head },
     ]);
+    expect(report.merge!.ranges[0]!.from).toBe(report.merge!.first_parent);
     // The first parent is the first replayed commit, not the default branch
     // before the pull request.
     expect(report.merge!.first_parent).not.toBe(REBASE.c1);
@@ -259,7 +277,7 @@ describe("approved after the merge", { timeout: 60_000 }, () => {
     expect(report.conditions.map((c) => c.message)).toEqual([
       "1 approving review stands on the head commit",
       "alice approved the head commit, is in approvers, is not the author and is not an agent identity",
-      "the digest at the tip of the default branch equals the digest at the commit of every approving review considered",
+      "the digest at the tip of the default branch equals the digest at the commit of every approving review considered, and the merge changed the digest of this spec",
       "the status at the tip of the default branch is proposed and the final lint has no error",
       "agent_identities is not empty and shares no account with approvers",
       "the host enforces a review for specs/ and .spec-gate/",
@@ -443,19 +461,54 @@ describe(
       });
     });
 
-    it("an earlier commit of the default branch as merge commit is measured as what it is: the spec did not land there", async () => {
+    it("the host names the second commit of the repository: its first-parent history is shorter than the pull request, merge-shape-unknown", async () => {
       // The settings commit has one parent and the head is not in its
-      // history, so it reads as a single commit; the ranges are its own.
+      // history, so it reads as a single commit; three commits lie between
+      // the merge base and the head, and one step lies below the commit.
       const report = await checkLanded(SQUASH, {
         pullRequest: landedPull(SQUASH, { mergeCommit: SQUASH.c1 }),
       });
-      expect(report.merge).toMatchObject({
-        commit: SQUASH.c1,
-        shape: "single-commit",
+      expect(report.merge).toBeNull();
+      for (const condition of [2, 7, 8] as const) {
+        expect(cond(report, condition)).toMatchObject({
+          ok: false,
+          code: "merge-shape-unknown",
+          message:
+            "the first-parent history of the merge commit holds fewer than the 3 commits of the pull request; where the pull request begins on the default branch cannot be told from git, so nothing is measured",
+        });
+      }
+      expect(report.approved).toBe(false);
+    });
+
+    it("the host names a later commit of the default branch, and the steps below it still hold the squash with its own settings: config-in-merge", async () => {
+      const m = await afterMerge(await squashWithOwnSettings(), {
+        "later.txt": "later\n",
       });
-      // That commit wrote the settings: they are not trusted.
+      const honest = await checkLanded(m);
+      expect(failing(honest)).toEqual([2, 7]);
+      const report = await checkLanded(m, {
+        pullRequest: landedPull(m, { mergeCommit: m.landed }),
+      });
+      // Two commits in the pull request, two steps below the commit the
+      // host names: the second one is the squashed commit.
+      expect(report.merge!.ranges[1]!.to).toBe(m.merge);
       expect(cond(report, 2).code).toBe("config-in-merge");
-      expect(cond(report, 7).code).toBe("spec-changes-config");
+      expect(report.approved).toBe(false);
+    });
+
+    it("the host names a commit so much later that no measured step holds the spec: spec-not-in-merge", async () => {
+      let m = await squashWithOwnSettings();
+      m = await afterMerge(m, { "later-1.txt": "1\n" });
+      m = await afterMerge(m, { "later-2.txt": "2\n" });
+      const report = await checkLanded(m, {
+        pullRequest: landedPull(m, { mergeCommit: m.landed }),
+      });
+      // The steps that are measured hold no change of the settings: only
+      // that the spec did not land in them refuses the approval.
+      expect(cond(report, 2)).toMatchObject({ ok: true });
+      expect(cond(report, 7)).toMatchObject({ ok: true });
+      expect(cond(report, 3).code).toBe("spec-not-in-merge");
+      expect(failing(report)).toEqual([3]);
       expect(report.approved).toBe(false);
     });
   },
@@ -516,7 +569,34 @@ describe(
   "condition 2 after the merge: the settings at the tip of the default branch",
   { timeout: 60_000 },
   () => {
-    it("an approver revoked on the default branch after the merge does not count: approver-not-qualified", async () => {
+    it.each([
+      ["without a base commit", false],
+      ["with the base commit given, where the approver still was one", true],
+    ])(
+      "an approver revoked on the default branch after the merge does not count, %s: approver-not-qualified",
+      async (_how, withBase) => {
+        const m = await afterMerge(await land(await build(), "squash"), {
+          ".spec-gate/config.yaml": ONLY_BOB,
+        });
+        // At the base commit the settings still name alice.
+        expect(
+          await git(m.dir, ["show", `${m.c1}:.spec-gate/config.yaml`]),
+        ).toContain("Alice");
+        const report = await checkLanded(m, {}, withBase ? { base: m.c1 } : {});
+        expect(report.reference).toBe(withBase ? m.c1 : m.landed);
+        expect(report.default_commit).toBe(m.landed);
+        expect(cond(report, 2)).toMatchObject({
+          ok: false,
+          code: "approver-not-qualified",
+          message:
+            "no approver of the head commit counts: alice (not-allowlisted)",
+        });
+        expect(failing(report)).toEqual([2]);
+        expect(report.approved).toBe(false);
+      },
+    );
+
+    it("an approver revoked on the default branch after the merge: the change is in no range of the merge", async () => {
       const m = await afterMerge(await land(await build(), "squash"), {
         ".spec-gate/config.yaml": ONLY_BOB,
       });
@@ -595,7 +675,7 @@ describe(
           ok: false,
           code: "config-in-merge",
           message:
-            "the merged pull request changes 1 path under .spec-gate/: the settings at the tip of the default branch may be its own, and who may approve is not taken from them",
+            "1 path under .spec-gate/ differs over a range of the merge: the settings at the tip of the default branch may be the pull request's own, and who may approve is not taken from them",
         });
         expect(cond(report, 7)).toEqual({
           condition: 7,
@@ -603,13 +683,25 @@ describe(
           ok: false,
           code: "spec-changes-config",
           message:
-            "the merged pull request changes 1 path under .spec-gate/; a change there is a pull request of its own",
+            "1 path under .spec-gate/ differs over a range of the merge; a change there is a pull request of its own",
         });
         expect(failing(report)).toEqual([2, 7]);
         expect(report.approved).toBe(false);
         // Nothing differs between the base the host reports and the merge
-        // commit, and nothing between the reviewed base and the head: only
-        // the first parent shows the change.
+        // commit, between the reviewed base and the head, or between the
+        // start of the measured steps and the merge commit: only the steps,
+        // one by one, show the change.
+        expect(report.merge!.commits).toBe(2);
+        expect(
+          await git(m.dir, [
+            "diff",
+            "--name-only",
+            report.merge!.ranges[1]!.from,
+            m.merge,
+            "--",
+            ".spec-gate",
+          ]),
+        ).toBe("");
         expect(report.pull_request!.base).toBe(m.c1);
         expect(report.merge!.reviewed_base).toBe(m.c1);
         expect(report.reference).toBe(withBase ? m.c1 : m.landed);
@@ -630,12 +722,12 @@ describe(
       expect(cond(report, 2).code).toBe("config-in-merge");
       // One path, although two ranges show it.
       expect(cond(report, 7).message).toBe(
-        "the merged pull request changes 1 path under .spec-gate/; a change there is a pull request of its own",
+        "1 path under .spec-gate/ differs over a range of the merge; a change there is a pull request of its own",
       );
       expect(failing(report)).toEqual([2, 7]);
     });
 
-    it("a rebase merge whose earlier commit names its own approver: the last commit is clean, the reviewed commits are not", async () => {
+    it("a rebase merge whose earlier commit names its own approver: the last commit is clean, an earlier step and the reviewed commits are not", async () => {
       const s = await build();
       await s.repo.commit(
         { ".spec-gate/config.yaml": WITH_MALLORY },
@@ -647,7 +739,10 @@ describe(
         reviews: [review("mallory", "APPROVED", m.head)],
       });
       // The range of the merge commit alone holds no change of the settings.
-      const [last, reviewed] = report.merge!.ranges;
+      expect(report.merge!.commits).toBe(4);
+      expect(report.merge!.ranges).toHaveLength(5);
+      const last = report.merge!.ranges[0];
+      const reviewed = report.merge!.ranges.at(-1);
       expect(last).toEqual({ from: report.merge!.first_parent, to: m.merge });
       expect(reviewed).toEqual({ from: m.c1, to: m.head });
       expect(await m.repo.sh("diff", "--name-only", last!.from, last!.to)).toBe(
@@ -952,8 +1047,10 @@ describe("condition 8 after the merge", { timeout: 60_000 }, () => {
     await s.repo.commit({ [STALE_OTHER]: null }, "delete a spec");
     await s.repo.commit({ "notes.txt": "a last commit\n" }, "notes");
     const m = await land(s, "rebase");
+    seam.repoChecks.length = 0;
     const report = await checkLanded(m);
-    expect(seam.repoChecks).toHaveLength(2);
+    // Four commits in the pull request: four steps and the reviewed range.
+    expect(seam.repoChecks).toHaveLength(5);
     expect(cond(report, 8)).toMatchObject({
       ok: false,
       code: "repo-check-findings",
@@ -984,9 +1081,10 @@ describe("condition 8 after the merge", { timeout: 60_000 }, () => {
     await s.repo.commit({ [A]: null }, "delete a spec");
     await s.repo.commit({ [Z]: null }, "delete another spec");
     const m = await land(s, "rebase");
+    seam.repoChecks.length = 0;
     const report = await checkLanded(m);
     expect((seam.repoChecks as GitInputs[]).map((range) => range.head)).toEqual(
-      [m.merge, m.head],
+      [...(await chainOf(m.dir, m.merge, 4)), m.head],
     );
     expect(cond(report, 8).message).toBe(
       `the repository check reports 2 findings: spec-removed ${JSON.stringify(A)}, spec-removed ${JSON.stringify(Z)}`,
@@ -1071,14 +1169,117 @@ describe("a shape git cannot tell", { timeout: 60_000 }, () => {
       spec: path.join(clone, SPEC_REL),
     });
     expect(report.head).toBe(m.landed);
-    for (const condition of [7, 8] as const) {
-      expect(cond(report, condition).code).toBe("merge-shape-unknown");
-      expect(cond(report, condition).message).toContain("has 0 parents");
+    for (const condition of [2, 4, 7, 8] as const) {
+      expect(cond(report, condition)).toEqual({
+        condition,
+        name: CONDITIONS[condition - 1]!.name,
+        ok: false,
+        code: "shallow-repository",
+        message:
+          "the repository is shallow: its history ends at a boundary, where a commit shows no parents and a merge base can be older than the true one. Nothing is measured in it; the job must check out the full history",
+      });
     }
-    // The base the host reports is behind the boundary as well.
-    expect(cond(report, 2).code).toBe("base-not-on-default");
+    expect(failing(report)).toEqual([2, 3, 4, 7, 8]);
     expect(report.merge).toBeNull();
     expect(report.approved).toBe(false);
+    expect(seam.repoChecks).toEqual([]);
+  });
+
+  it("a shallow clone that holds the merge commit, its parents and the head of the pull request: refused all the same", async () => {
+    const m = await land(await build(), "squash");
+    const clone = path.join(scratch(), "shallow");
+    await git(scratch(), [
+      "clone",
+      "-q",
+      "--depth",
+      "8",
+      "--branch",
+      "main",
+      `file://${m.dir}`,
+      clone,
+    ]);
+    await git(clone, [
+      "fetch",
+      "-q",
+      "--depth",
+      "3",
+      "origin",
+      "pr:refs/remotes/origin/pr",
+    ]);
+    expect(await git(clone, ["rev-parse", "--is-shallow-repository"])).toBe(
+      "true",
+    );
+    // The head, the first parent and a merge base are all there.
+    expect(await git(clone, ["cat-file", "-t", m.head])).toBe("commit");
+    expect(await git(clone, ["merge-base", m.head, `${m.merge}~1`])).toMatch(
+      /^[0-9a-f]{40}$/,
+    );
+    const report = await checkLanded({
+      ...m,
+      dir: clone,
+      spec: path.join(clone, SPEC_REL),
+    });
+    for (const condition of [2, 4, 7, 8] as const) {
+      expect(cond(report, condition).code).toBe("shallow-repository");
+    }
+    expect(failing(report)).toEqual([2, 4, 7, 8]);
+    expect(report.approved).toBe(false);
+  });
+
+  it("the open mode refuses a shallow repository as well, for every condition that reads ancestry", async () => {
+    const s = await build();
+    const clone = path.join(scratch(), "shallow");
+    await git(scratch(), [
+      "clone",
+      "-q",
+      "--depth",
+      "3",
+      "--branch",
+      "pr",
+      `file://${s.dir}`,
+      clone,
+    ]);
+    await git(clone, ["update-ref", REMOTE_MAIN, s.c1]);
+    expect(await git(clone, ["rev-parse", "--is-shallow-repository"])).toBe(
+      "true",
+    );
+    const report = await check({
+      ...s,
+      dir: clone,
+      spec: path.join(clone, SPEC_REL),
+    });
+    expect(report.mode).toBe("open");
+    for (const condition of [2, 4, 7, 8] as const) {
+      expect(cond(report, condition).code).toBe("shallow-repository");
+    }
+    expect(failing(report)).toEqual([2, 4, 7, 8]);
+    expect(report.approved).toBe(false);
+    // The same commits in the full repository are approved.
+    expect((await check(s)).approved).toBe(true);
+  });
+
+  it("git cannot say whether the repository is shallow: git-failed, in both modes", async () => {
+    seam.isShallow = () => {
+      throw new LintGitError("git-failed", "git could not be run");
+    };
+    const merged = await checkLanded(SQUASH);
+    const s = await build();
+    const open = await check(s);
+    for (const report of [merged, open]) {
+      for (const condition of [2, 4, 7, 8] as const) {
+        expect(cond(report, condition)).toMatchObject({
+          ok: false,
+          code: "git-failed",
+          message:
+            "the repository could not be read (git-failed); whether its history is complete is not known",
+        });
+      }
+      expect(report.approved).toBe(false);
+    }
+    seam.isShallow = () => {
+      throw new TypeError("a bug");
+    };
+    await expect(checkLanded(SQUASH)).rejects.toThrow("a bug");
   });
 
   it("a range that could not be compared: git-failed for conditions 2 and 7, and the settings are not trusted", async () => {
@@ -1156,6 +1357,260 @@ describe("a shape git cannot tell", { timeout: 60_000 }, () => {
     await expect(checkLanded(SQUASH)).rejects.toThrow("a bug");
   });
 });
+
+describe(
+  "a pull request of several commits, squashed or replayed",
+  { timeout: 120_000 },
+  () => {
+    /** The settings change under `.spec-gate/` over `range` of `dir`, as path names. */
+    const settingsDiff = (dir: string, range: { from: string; to: string }) =>
+      git(dir, [
+        "diff",
+        "--name-only",
+        range.from,
+        range.to,
+        "--",
+        ".spec-gate",
+      ]);
+
+    it("a rebase merge whose commits repeat a change of the default branch and then undo it: the replay undoes it on the default branch, not approved", async () => {
+      const s = await build();
+      await s.repo.checkout("main");
+      await s.repo.commit(
+        { ".spec-gate/config.yaml": ONLY_BOB },
+        "alice and dev are no approvers any more",
+      );
+      await s.repo.checkout("pr");
+      await s.repo.commit(
+        { ".spec-gate/config.yaml": ONLY_BOB },
+        "sync settings from main",
+      );
+      await s.repo.commit(
+        { ".spec-gate/config.yaml": CONFIG },
+        "undo the sync",
+      );
+      await s.repo.commit({ "notes.txt": "a last commit\n" }, "notes");
+      const m = await land(s, "rebase");
+      // The replay put the revoked approver back on the default branch.
+      expect(
+        await git(m.dir, ["show", `${m.landed}:.spec-gate/config.yaml`]),
+      ).toContain("Alice");
+      const report = await checkLanded(m);
+      expect(report.approvals[0]!.problem).toBeNull();
+      // Neither the last replayed commit nor the reviewed commits as a
+      // whole show a change of the settings: a step in between does.
+      const ranges = report.merge!.ranges;
+      expect(report.merge!.commits).toBe(5);
+      expect(ranges).toHaveLength(6);
+      expect(await settingsDiff(m.dir, ranges[0]!)).toBe("");
+      expect(await settingsDiff(m.dir, ranges.at(-1)!)).toBe("");
+      expect(cond(report, 2).code).toBe("config-in-merge");
+      expect(cond(report, 7)).toMatchObject({
+        ok: false,
+        code: "spec-changes-config",
+        message:
+          "1 path under .spec-gate/ differs over a range of the merge; a change there is a pull request of its own",
+      });
+      expect(failing(report)).toEqual([2, 7]);
+      expect(report.approved).toBe(false);
+    });
+
+    it("the same when no commit becomes empty in the replay: not approved", async () => {
+      const s = await build();
+      await s.repo.checkout("main");
+      await s.repo.commit(
+        { ".spec-gate/config.yaml": ONLY_BOB },
+        "alice and dev are no approvers any more",
+      );
+      await s.repo.checkout("pr");
+      await s.repo.commit(
+        { ".spec-gate/config.yaml": ONLY_BOB, "notes0.txt": "zero\n" },
+        "sync settings, first notes",
+      );
+      await s.repo.commit(
+        { ".spec-gate/config.yaml": CONFIG, "notes1.txt": "one\n" },
+        "more notes",
+      );
+      await s.repo.commit({ "notes.txt": "a last commit\n" }, "notes");
+      const m = await land(s, "rebase");
+      expect(
+        await git(m.dir, ["show", `${m.landed}:.spec-gate/config.yaml`]),
+      ).toContain("Alice");
+      const report = await checkLanded(m);
+      expect(await settingsDiff(m.dir, report.merge!.ranges.at(-1)!)).toBe("");
+      expect(failing(report)).toEqual([2, 7]);
+      expect(cond(report, 2).code).toBe("config-in-merge");
+      expect(report.approved).toBe(false);
+    });
+
+    it("a rebase merge whose commits add a spec the default branch gained and then delete it: the replay deletes it on the default branch, not approved", async () => {
+      const s = await build();
+      await s.repo.checkout("main");
+      const gained = await s.repo.commit(
+        { [STALE_OTHER]: otherSpec("other-spec") },
+        "another proposed spec lands on main",
+      );
+      await s.repo.checkout("pr");
+      await s.repo.commit(
+        { [STALE_OTHER]: otherSpec("other-spec") },
+        "another proposed spec lands on main",
+      );
+      await s.repo.commit({ [STALE_OTHER]: null }, "drop it again");
+      await s.repo.commit({ "notes.txt": "a last commit\n" }, "notes");
+      const m = await land(s, "rebase");
+      const has = (commit: string) =>
+        git(m.dir, ["ls-tree", "--name-only", commit, STALE_OTHER]);
+      expect(await has(gained)).toBe(STALE_OTHER);
+      expect(await has(m.landed)).toBe("");
+      const report = await checkLanded(m);
+      expect(cond(report, 8)).toMatchObject({
+        ok: false,
+        code: "repo-check-findings",
+        message: `the repository check reports 1 finding: spec-removed ${JSON.stringify(STALE_OTHER)}`,
+      });
+      expect(failing(report)).toEqual([8]);
+      expect(report.approved).toBe(false);
+    });
+
+    it("a squash merge of a pull request of four commits: approved, four steps measured", async () => {
+      const s = await build();
+      await s.repo.commit({ "notes-1.txt": "one\n" }, "notes");
+      await s.repo.commit({ "notes-2.txt": "two\n" }, "more notes");
+      const m = await land(s, "squash");
+      const report = await checkLanded(m);
+      expect(codes(report)).toEqual(ALL_OK);
+      expect(report.approved).toBe(true);
+      expect(report.merge).toMatchObject({
+        shape: "single-commit",
+        commits: 4,
+      });
+      expect(report.merge!.ranges).toEqual([
+        ...(await stepsOf(m.dir, m.merge, 4)),
+        { from: m.c1, to: m.head },
+      ]);
+    });
+
+    it("a rebase merge of a pull request of four commits onto a default branch that moved: approved", async () => {
+      const s = await build();
+      await s.repo.commit({ "notes-1.txt": "one\n" }, "notes");
+      await s.repo.commit({ "notes-2.txt": "two\n" }, "more notes");
+      const m = await land(s, "rebase");
+      const report = await checkLanded(m);
+      expect(codes(report)).toEqual(ALL_OK);
+      expect(report.approved).toBe(true);
+      expect(report.merge).toMatchObject({
+        shape: "single-commit",
+        commits: 4,
+      });
+      // The four steps are the four replayed commits: the step below them
+      // is a commit of the default branch.
+      const below = report.merge!.ranges[3]!.from;
+      expect(await git(m.dir, ["log", "-1", "--format=%s", below])).toBe(
+        "elsewhere",
+      );
+    });
+
+    it("a squash right after a commit of the default branch that changed the settings: that commit is among the measured steps and counts, not approved", async () => {
+      // Git does not tell a squash from the last commit of a replay, so the
+      // step before a squash of two commits is measured as if it were one.
+      const s = await build();
+      await s.repo.checkout("main");
+      await s.repo.commit(
+        { ".spec-gate/config.yaml": WITH_MALLORY },
+        "the default branch adds an approver",
+      );
+      await s.repo.sh("merge", "-q", "--squash", "pr");
+      const merge = await s.repo.commit({}, "squash pr");
+      await s.repo.setRef(REMOTE_MAIN, merge);
+      const report = await checkLanded({ ...s, merge, landed: merge });
+      expect(await settingsDiff(s.dir, report.merge!.ranges[0]!)).toBe("");
+      expect(await settingsDiff(s.dir, report.merge!.ranges[1]!)).toBe(
+        ".spec-gate/config.yaml",
+      );
+      expect(failing(report)).toEqual([2, 7]);
+      expect(cond(report, 2).code).toBe("config-in-merge");
+    });
+  },
+);
+
+describe(
+  "the merge must be the one that brought the spec",
+  { timeout: 120_000 },
+  () => {
+    it("a later pull request that only edits another file, approved and squashed: spec-not-in-merge", async () => {
+      const first = await land(await build(), "squash");
+      await first.repo.checkout("pr2", first.landed);
+      const head = await first.repo.commit({ "README.md": "two\n" }, "typo");
+      await first.repo.checkout("main");
+      await first.repo.commit({ "between.txt": "x\n" }, "between");
+      await first.repo.sh("merge", "-q", "--squash", "pr2");
+      const merge = await first.repo.commit({}, "squash pr2");
+      await first.repo.setRef(REMOTE_MAIN, merge);
+      const later: Landed = { ...first, head, merge, landed: merge };
+      const report = await checkLanded(later, {
+        pullRequest: landedPull(later, { base: first.landed }),
+      });
+      expect(cond(report, 3)).toEqual({
+        condition: 3,
+        name: "digest-unchanged",
+        ok: false,
+        code: "spec-not-in-merge",
+        message:
+          "the merge of the pull request did not change the digest of this spec: its approval is not an approval of this spec, whatever its head holds",
+      });
+      // Its head holds the spec, with the approved digest, and alice
+      // approved that head: nothing else fails.
+      expect(failing(report)).toEqual([3]);
+      expect(report.approved).toBe(false);
+    });
+
+    it("a later pull request of two commits squashed right after the spec landed: the measured steps hold the spec, the reviewed commits do not change it, spec-not-in-merge", async () => {
+      const first = await land(await build(), "squash");
+      await first.repo.checkout("pr2", first.landed);
+      await first.repo.commit({ "README.md": "two\n" }, "typo");
+      const head = await first.repo.commit({ "README.md": "three\n" }, "typo");
+      await first.repo.checkout("main");
+      await first.repo.sh("merge", "-q", "--squash", "pr2");
+      const merge = await first.repo.commit({}, "squash pr2");
+      await first.repo.setRef(REMOTE_MAIN, merge);
+      const later: Landed = { ...first, head, merge, landed: merge };
+      const report = await checkLanded(later, {
+        pullRequest: landedPull(later, { base: first.landed }),
+      });
+      // The second measured step is the commit that brought the spec.
+      expect(report.merge!.ranges[1]!.to).toBe(first.merge);
+      expect(report.merge!.reviewed_base).toBe(first.landed);
+      expect(cond(report, 3).code).toBe("spec-not-in-merge");
+      expect(failing(report)).toEqual([3]);
+    });
+
+    it("a later pull request merged with a merge commit that does not touch the spec: spec-not-in-merge", async () => {
+      const first = await land(await build(), "squash");
+      await first.repo.checkout("pr2", first.landed);
+      const head = await first.repo.commit({ "README.md": "two\n" }, "typo");
+      await first.repo.checkout("main");
+      await first.repo.sh("merge", "-q", "--no-ff", "-m", "merge pr2", head);
+      const merge = await first.repo.head();
+      await first.repo.setRef(REMOTE_MAIN, merge);
+      const later: Landed = { ...first, head, merge, landed: merge };
+      const report = await checkLanded(later, {
+        pullRequest: landedPull(later, { base: first.landed }),
+      });
+      expect(report.merge!.shape).toBe("merge-commit");
+      expect(cond(report, 3).code).toBe("spec-not-in-merge");
+      expect(failing(report)).toEqual([3]);
+    });
+
+    it("the pull request that brought the spec passes, for each way it was merged", async () => {
+      for (const m of [MERGE, SQUASH, REBASE]) {
+        expect(cond(await checkLanded(m), 3)).toMatchObject({
+          ok: true,
+          code: "ok",
+        });
+      }
+    });
+  },
+);
 
 describe("the open mode is unchanged", { timeout: 60_000 }, () => {
   it("reports its mode and no merge", async () => {

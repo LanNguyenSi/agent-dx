@@ -52,6 +52,7 @@ import {
 import { readHostFacts, type Fact, type HostFacts } from "./facts.js";
 import { landingOf, type Landing, type LandingResult } from "./landing.js";
 import {
+  isShallow,
   mergeBases,
   specCommandsAt,
   specDigestAt,
@@ -110,6 +111,14 @@ interface Subject {
   git: GitInputs;
   /** `merged` for the check after the merge. */
   mode: ApproveMode;
+  /**
+   * Why the history of the repository cannot be relied on (it is shallow,
+   * or git could not say), or `null`. Every condition that reads ancestry
+   * fails with it.
+   */
+  history: Failure | null;
+  /** After the merge: where the pull request landed, when that could be derived. */
+  landing: Landing | null;
   /** The commit `defaultRef` names. */
   defaultCommit: string;
   /**
@@ -235,6 +244,7 @@ function approvalAtHead(s: Subject): Outcome {
 
 /** 2: an approver of the head is allowed, by settings the pull request cannot write. */
 function approverAllowed(s: Subject): Outcome {
+  if (s.history !== null) return s.history;
   if (!s.facts.pullRequest.ok) return HOST_FAILED("the pull request");
   if (!s.standing.ok) return HOST_FAILED("the reviews");
   const config = s.config;
@@ -278,7 +288,7 @@ function approverAllowed(s: Subject): Outcome {
     if (changed.length > 0) {
       return fails(
         "config-in-merge",
-        `the merged pull request changes ${count(changed.length, "path", "paths")} under .spec-gate/: the settings at the tip of the default branch may be its own, and who may approve is not taken from them`,
+        `${count(changed.length, "path", "paths")} under .spec-gate/ ${changed.length === 1 ? "differs" : "differ"} over a range of the merge: the settings at the tip of the default branch may be the pull request's own, and who may approve is not taken from them`,
       );
     }
   } else if (isAncestor(s.git.repo, s.git.head, s.defaultCommit)) {
@@ -364,10 +374,35 @@ function digestUnchanged(s: Subject, headDigest: string | null): Outcome {
           );
     }
   }
+  if (s.landing !== null && !broughtBy(s, s.landing)) {
+    return fails(
+      "spec-not-in-merge",
+      "the merge of the pull request did not change the digest of this spec: its approval is not an approval of this spec, whatever its head holds",
+    );
+  }
   return holds(
     s.mode === "merged"
-      ? "the digest at the tip of the default branch equals the digest at the commit of every approving review considered"
+      ? "the digest at the tip of the default branch equals the digest at the commit of every approving review considered, and the merge changed the digest of this spec"
       : "the digest at the head equals the digest at the commit of every approving review considered",
+  );
+}
+
+/**
+ * Whether the merged pull request is the one that brought this spec: the
+ * digest of the spec differs between the start of the measured first-parent
+ * steps and the merge commit and, where the reviewed commits are not in the
+ * history of the merge commit, between the reviewed base and the head. No
+ * digest at the start (the spec was not there, or did not parse) counts as
+ * another digest than one at the end.
+ */
+function broughtBy(s: Subject, landing: Landing): boolean {
+  const digestAt = (commit: string) =>
+    specDigestAt(s.git.repo, commit, s.specPath);
+  if (digestAt(landing.landedFrom) === digestAt(landing.merge)) return false;
+  return (
+    landing.reviewedBase === null ||
+    s.approvedHead === null ||
+    digestAt(landing.reviewedBase) !== digestAt(s.approvedHead)
   );
 }
 
@@ -407,6 +442,7 @@ function proposedAndClean(
       `the spec directory of the work tree is not, byte for byte, the one ${whereOf(s)} holds; the lint would judge other files`,
     );
   }
+  if (s.history !== null) return s.history;
   // After the merge the lint measures nothing from the pull request, so no
   // range is needed for it.
   if (s.mode === "open" && !s.spans.ok) return s.spans.outcome;
@@ -562,6 +598,31 @@ function measureOf(git: GitInputs, defaultCommit: string): Measure {
   };
 }
 
+/**
+ * Why the history of `repo` cannot be relied on, or `null` when it can. In a
+ * shallow repository a commit at the boundary shows no parents and a merge
+ * base can be older than the true one, from which a file put back to its
+ * older text shows no change: nothing is measured there.
+ */
+function historyProblem(repo: string): Failure | null {
+  let shallow: boolean;
+  try {
+    shallow = isShallow(repo);
+  } catch (err) {
+    if (!(err instanceof LintGitError)) throw err;
+    return fails(
+      "git-failed",
+      `the repository could not be read (${err.code}); whether its history is complete is not known`,
+    );
+  }
+  return shallow
+    ? fails(
+        "shallow-repository",
+        "the repository is shallow: its history ends at a boundary, where a commit shows no parents and a merge base can be older than the true one. Nothing is measured in it; the job must check out the full history",
+      )
+    : null;
+}
+
 /** The one range of the open mode: from the measuring base to the head. */
 function openSpans(measure: Measure): Spans {
   return measure.ok ? { ok: true, ranges: [measure.git] } : measure;
@@ -668,7 +729,9 @@ function configUntouched(s: Subject): Outcome {
   if (changed.length > 0) {
     return fails(
       "spec-changes-config",
-      `the ${s.mode === "merged" ? "merged pull request" : "pull request"} changes ${count(changed.length, "path", "paths")} under .spec-gate/; a change there is a pull request of its own`,
+      s.mode === "merged"
+        ? `${count(changed.length, "path", "paths")} under .spec-gate/ ${changed.length === 1 ? "differs" : "differ"} over a range of the merge; a change there is a pull request of its own`
+        : `the pull request changes ${count(changed.length, "path", "paths")} under .spec-gate/; a change there is a pull request of its own`,
     );
   }
   return holds(
@@ -828,10 +891,19 @@ export async function checkApproval(
 
   const facts = await readHostFacts(request.host);
   const pull = facts.pullRequest.ok ? facts.pullRequest.value : null;
+  const history = historyProblem(git.repo);
+  // In a history that cannot be relied on nothing is derived and nothing
+  // is measured.
   const landed =
-    mode === "merged" ? landedOf(git.repo, pull, defaultCommit) : null;
+    mode === "merged" && history === null
+      ? landedOf(git.repo, pull, defaultCommit)
+      : null;
   const spans: Spans =
-    landed === null ? openSpans(measureOf(git, defaultCommit)) : landed.spans;
+    history !== null
+      ? { ok: false, outcome: history }
+      : landed === null
+        ? openSpans(measureOf(git, defaultCommit))
+        : landed.spans;
   // Who may approve is what the default branch says now, with or without a
   // base commit: an approver revoked there after the pull request base, or
   // an account made an agent identity there, must not count. The base is
@@ -860,6 +932,8 @@ export async function checkApproval(
     specPath,
     git,
     mode,
+    history,
+    landing: landed?.landing ?? null,
     defaultCommit,
     at,
     spans,
@@ -959,6 +1033,7 @@ export async function checkApproval(
             first_parent: landing.firstParent,
             shape: landing.shape,
             reviewed_base: landing.reviewedBase,
+            commits: landing.commits,
             ranges: landing.ranges.map((range) => ({
               from: range.from,
               to: range.to,

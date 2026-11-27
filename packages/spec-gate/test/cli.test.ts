@@ -1144,8 +1144,8 @@ describe("spec-gate approve-check --merged", { timeout: 60_000 }, () => {
 
   it.each([
     ["merge-commit", "merge-commit", 1],
-    ["squash", "single-commit", 2],
-    ["rebase", "single-commit", 2],
+    ["squash", "single-commit", 3],
+    ["rebase", "single-commit", 3],
   ] as const)(
     "exits 0 for a pull request merged by %s: approved at the tip of the default branch",
     async (how, shape, ranges) => {
@@ -1257,6 +1257,16 @@ describe("spec-gate approve-check --merged", { timeout: 60_000 }, () => {
     expect(code).toBe(1);
     expect(failing(report)).toEqual([2]);
     expect(cond(report, 2).code).toBe("approver-not-qualified");
+  });
+
+  it("exits 1 for the same with --base at a commit where the approver still was one: the settings are the tip's", async () => {
+    const { code, report } = await merged(REVOKED, ["--base", REVOKED.c1]);
+    expect(code).toBe(1);
+    expect(report.reference).toBe(REVOKED.c1);
+    expect(report.default_commit).toBe(REVOKED.landed);
+    expect(failing(report)).toEqual([2]);
+    expect(cond(report, 2).code).toBe("approver-not-qualified");
+    expect(report.approvals[0]!.problem).toBe("not-allowlisted");
   });
 
   it("exits 1 when the host fails: host-failed for the conditions that need the pull request, never a pass", async () => {

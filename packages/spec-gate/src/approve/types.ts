@@ -74,7 +74,7 @@ export type ConditionName = (typeof CONDITIONS)[number]["name"];
 export const MERGED_SUMMARIES: Record<ConditionNumber, string> = {
   1: "The host reports the pull request as merged, and an approving review stands on the head commit the host reports for it.",
   2: "An approver of that head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the tip of the default branch, the pull request targeted the default branch, its merge commit is on the default branch and no range of the merge changes a path under `.spec-gate/`.",
-  3: "The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered.",
+  3: "The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered, and the merge changed the digest of this spec.",
   4: "The spec is `proposed` at the tip of the default branch, the checkout is at that commit, the spec directory of the work tree is the one it holds, and the final lint has no error.",
   5: "`agent_identities` is not empty and shares no account with `approvers`.",
   6: "The host enforces a review for `specs/` and for `.spec-gate/`, and reports the last change under `.spec-gate/`.",
@@ -105,6 +105,7 @@ export const FAILURE_CODES = {
   "merge-not-on-default": [2, 7, 8],
   "head-unavailable": [2, 7, 8],
   "merge-shape-unknown": [2, 7, 8],
+  "shallow-repository": [2, 4, 7, 8],
   "head-mismatch": [1],
   "no-approval": [1, 2, 3],
   "approval-stale": [1],
@@ -120,6 +121,7 @@ export const FAILURE_CODES = {
   "review-digest-unavailable": [3],
   "digest-mismatch": [3],
   "digest-mismatch-after-merge": [3],
+  "spec-not-in-merge": [3],
   "spec-unreadable": [4],
   "status-not-proposed": [4],
   "checkout-not-default-tip": [4],
@@ -207,7 +209,17 @@ export interface ReportedMerge {
    * request and `first_parent`. `null` for `merge-commit`.
    */
   reviewed_base: string | null;
-  /** The ranges conditions 2, 7 and 8 measured, each from one commit to another. */
+  /**
+   * How many steps of the first-parent chain below `commit` were measured:
+   * 1 for `merge-commit`, the number of commits from `reviewed_base` to the
+   * head for `single-commit`.
+   */
+  commits: number;
+  /**
+   * The ranges conditions 2, 7 and 8 measured, each from one commit to
+   * another: the first-parent steps, the last one first, then for
+   * `single-commit` the range from `reviewed_base` to the head.
+   */
   ranges: { from: string; to: string }[];
 }
 

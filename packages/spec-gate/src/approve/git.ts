@@ -251,6 +251,96 @@ export function commitParents(repo: string, commit: string): string[] {
   return ids.slice(1);
 }
 
+/**
+ * `commit` and the commits below it along first parents, `commit` first, at
+ * most `count` of them; fewer when the history ends before. The first-parent
+ * chain of a commit on a branch is what the branch held, step by step.
+ */
+export function firstParentChain(
+  repo: string,
+  commit: string,
+  count: number,
+): string[] {
+  if (!COMMIT_RE.test(commit) || !Number.isSafeInteger(count) || count < 1) {
+    throw new LintGitError(
+      "not-a-commit",
+      "a value is not a full commit id (40 or 64 lower-case hex digits)",
+    );
+  }
+  const run = runGit(repo, [
+    "rev-list",
+    "--first-parent",
+    `--max-count=${count}`,
+    "--end-of-options",
+    commit,
+  ]);
+  const ids = run.stdout.toString("utf8").replace(/\n$/, "").split("\n");
+  if (
+    run.status !== 0 ||
+    ids.length > count ||
+    ids[0] !== commit ||
+    ids.some((id) => !COMMIT_RE.test(id))
+  ) {
+    throw new LintGitError(
+      "git-failed",
+      "git could not list the first parents of a commit",
+    );
+  }
+  return ids;
+}
+
+/**
+ * How many commits are in the history of `to` and not in the history of
+ * `from`, counted up to `cap`: the answer `cap` means "that many or more".
+ */
+export function commitsBetween(
+  repo: string,
+  from: string,
+  to: string,
+  cap: number,
+): number {
+  if (
+    !COMMIT_RE.test(from) ||
+    !COMMIT_RE.test(to) ||
+    !Number.isSafeInteger(cap) ||
+    cap < 1
+  ) {
+    throw new LintGitError(
+      "not-a-commit",
+      "a value is not a full commit id (40 or 64 lower-case hex digits)",
+    );
+  }
+  const run = runGit(repo, [
+    "rev-list",
+    "--count",
+    `--max-count=${cap}`,
+    "--end-of-options",
+    `${from}..${to}`,
+  ]);
+  const text = run.stdout.toString("utf8");
+  if (run.status !== 0 || !/^(0|[1-9][0-9]{0,8})\n$/.test(text)) {
+    throw new LintGitError("git-failed", "git could not count commits");
+  }
+  return Number(text);
+}
+
+/**
+ * Whether the repository is shallow: its history ends at a boundary below
+ * which git holds no commits. There a commit shows no parents, and a merge
+ * base can be an older commit than the one the full history has.
+ */
+export function isShallow(repo: string): boolean {
+  const run = runGit(repo, ["rev-parse", "--is-shallow-repository"]);
+  const text = run.stdout.toString("utf8");
+  if (run.status !== 0 || (text !== "true\n" && text !== "false\n")) {
+    throw new LintGitError(
+      "git-failed",
+      "git could not say whether the repository is shallow",
+    );
+  }
+  return text === "true\n";
+}
+
 /** The modes of a regular file in a git tree. */
 const FILE_MODES = new Set(["100644", "100755"]);
 
