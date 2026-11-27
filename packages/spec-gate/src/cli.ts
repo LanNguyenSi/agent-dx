@@ -11,7 +11,14 @@ import {
 import { IntakeError } from "./intake/index.js";
 import { ACKS_FILE, lintSpecDir, writeAck } from "./lint/index.js";
 import { repoCheck } from "./repo/index.js";
-import { bindSpecDir, proposeSpecDir } from "./state/index.js";
+import {
+  answerSpecDir,
+  bindSpecDir,
+  proposeSpecDir,
+  questionsSpecDir,
+  statusSpecDir,
+  type AnswerRequest,
+} from "./state/index.js";
 import { runTriage } from "./triage/index.js";
 import {
   ExportError,
@@ -513,6 +520,122 @@ program
       }
     },
   );
+
+// `questions`, `answer` and `status` follow the exit codes of `lint` and
+// `lint-ack`: `questions` exits 0 with no unanswered question and 1 with
+// one listed; `answer` exits 0 when the answer was written; `status` exits
+// 0 for a report; every one exits 2 for a usage error and every refusal.
+program
+  .command("questions")
+  .description(
+    "print one JSON line (spec-gate-questions/1) with a spec's unanswered questions in ID order " +
+      "and their counts; exits 0 with none unanswered, 1 with one listed, 2 on usage errors or a file that does not load",
+  )
+  .argument(
+    "<spec-dir>",
+    "directory with spec.md and an optional questions.json",
+  )
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action((specDir: string) => {
+    const result = questionsSpecDir(specDir);
+    if (!result.ok) {
+      process.stderr.write(`${result.message}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    process.stdout.write(`${JSON.stringify(result.report)}\n`);
+    process.exitCode = result.report.counts.unanswered > 0 ? 1 : 0;
+  });
+
+program
+  .command("answer")
+  .description(
+    "append one answer to <spec-dir>/questions.json for a draft spec, with the time taken from the clock " +
+      "and the channel, author and optional comment URL recorded as provenance; exits 0 when written, 2 on any refusal",
+  )
+  .argument(
+    "<spec-dir>",
+    "directory that is specs/<name> with a draft spec.md and a questions.json",
+  )
+  .argument("<question-id>", "the QN-<n> question to answer")
+  .option("--answer <text>", "the answer text")
+  .option("--option <label>", "the label of the chosen option; needs --answer")
+  .option(
+    "--accept-recommended",
+    "answer with the question's recommended option; needs a divergence question that carries one",
+  )
+  .addOption(
+    new Option("--channel <channel>", "where the answer was given")
+      .choices(["file", "chat", "comment"])
+      .makeOptionMandatory(),
+  )
+  .requiredOption("--author <login>", "the login of the person who answered")
+  .option(
+    "--comment-url <url>",
+    "the https URL of the comment that recorded the answer; needs --channel comment",
+  )
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action(
+    (
+      specDir: string,
+      questionId: string,
+      opts: {
+        answer?: string;
+        option?: string;
+        acceptRecommended?: boolean;
+        channel: string;
+        author: string;
+        commentUrl?: string;
+      },
+    ) => {
+      const request: AnswerRequest = {
+        question: questionId,
+        channel: opts.channel,
+        author: opts.author,
+        ...(opts.answer !== undefined ? { answer: opts.answer } : {}),
+        ...(opts.option !== undefined ? { option: opts.option } : {}),
+        ...(opts.acceptRecommended === true ? { acceptRecommended: true } : {}),
+        ...(opts.commentUrl !== undefined
+          ? { commentUrl: opts.commentUrl }
+          : {}),
+      };
+      const result = answerSpecDir(specDir, request);
+      if (!result.ok) {
+        process.stderr.write(`${result.message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      process.stdout.write(
+        `answered ${result.question} (answer ${result.answers})\n`,
+      );
+    },
+  );
+
+program
+  .command("status")
+  .description(
+    "print one offline JSON line (spec-gate-status/1) with a spec's status, triage class stored and derived, " +
+      "question counts, open residuals, bindings by status, bindings.log entry count and propose commit, and ack count; " +
+      "a file that does not load is null with its code listed; exits 0 for a report, 2 on usage errors",
+  )
+  .argument("<spec-dir>", "directory with spec.md")
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action((specDir: string) => {
+    const result = statusSpecDir(specDir);
+    if (!result.ok) {
+      process.stderr.write(`${result.message}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    process.stdout.write(`${JSON.stringify(result.report)}\n`);
+    process.exitCode = 0;
+  });
 
 try {
   await program.parseAsync();
