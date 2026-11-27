@@ -256,7 +256,7 @@ removes its `bindings.log` is not approved.
 
 - The work tree is not asked. A spec the head deletes stays deleted when the
   file is restored in the work tree without a commit, and a spec the head
-  holds is not missed because the work tree lacks it.
+  holds is not a finding when the work tree lacks it.
 - The whole tree is walked, not only `specs/`: a protected `spec.md` anywhere
   counts, as for `repo-check`.
 - The diff base is the merge base, not the tip of the default branch: a spec

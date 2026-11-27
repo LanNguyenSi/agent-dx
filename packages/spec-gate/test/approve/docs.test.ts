@@ -9,6 +9,7 @@ import {
   CONDITIONS,
   FAILURE_CODES,
   GAPS,
+  MAX_LISTED_FINDINGS,
   TOKEN_VARIABLE,
 } from "../../src/approve/index.js";
 import {
@@ -40,6 +41,12 @@ describe("docs/approve.md", () => {
     expect(CONDITIONS.map((c) => c.condition)).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8,
     ]);
+  });
+
+  it("gives the number of findings a message of condition 8 lists", () => {
+    expect(section(8)).toContain(
+      `for the first ${MAX_LISTED_FINDINGS} in the order of the repository check`,
+    );
   });
 
   it("names every failure code in the section of each condition that uses it, and only there", () => {

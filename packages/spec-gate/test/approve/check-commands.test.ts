@@ -27,12 +27,14 @@ const staticRow = (id: string, name: string): string =>
 
 /**
  * A set whose file order is not the order of the names: the selector
- * command first, a command no row names last.
+ * command first, a command no row names last. The name of the selector
+ * command sorts between the two names the rows use, so a list that is not
+ * sorted shows.
  */
 const SET =
   'discovery:\n  argv: ["npx", "vitest", "list"]\n' +
   "commands:\n" +
-  '  unit:\n    argv: ["npx", "vitest", "run", "-t", "{selector}"]\n' +
+  '  run-one:\n    argv: ["npx", "vitest", "run", "-t", "{selector}"]\n' +
   '  typecheck:\n    argv: ["npm", "run", "typecheck"]\n' +
   '  lint:\n    argv: ["npm", "run", "lint"]\n' +
   '  build:\n    argv: ["npm", "run", "build"]\n';
@@ -47,8 +49,8 @@ describe("the commands of the report", { timeout: 60_000 }, () => {
     const report = await check(s);
     expect(report.commands).toEqual([
       { name: "lint", argv: ["npm", "run", "lint"] },
+      { name: "run-one", argv: ["npx", "vitest", "run", "-t", "{selector}"] },
       { name: "typecheck", argv: ["npm", "run", "typecheck"] },
-      { name: "unit", argv: ["npx", "vitest", "run", "-t", "{selector}"] },
     ]);
     expect(report.gaps).toEqual([COLDREAD]);
     expect(codes(report)).toEqual(Array(8).fill("ok"));
@@ -148,8 +150,8 @@ describe("specCommandsAt", { timeout: 60_000 }, () => {
     ok: true,
     commands: [
       { name: "lint", argv: ["npm", "run", "lint"] },
+      { name: "run-one", argv: ["npx", "vitest", "run", "-t", "{selector}"] },
       { name: "typecheck", argv: ["npm", "run", "typecheck"] },
-      { name: "unit", argv: ["npx", "vitest", "run", "-t", "{selector}"] },
     ],
   };
 
