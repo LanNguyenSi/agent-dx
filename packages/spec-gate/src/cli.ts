@@ -665,7 +665,8 @@ program
   )
   .option(
     "--base <commit>",
-    "full commit id of the pull request base, as for lint; it must be the base the host reports",
+    "full commit id of the pull request base; it must lie on --default-ref and be the base the host reports. " +
+      "Nothing is measured from it",
   )
   .requiredOption(
     "--github-repo <owner/name>",

@@ -241,8 +241,9 @@ repository-relative and the report holds no absolute path. Exit codes: 0
 without findings, 1 with findings, 2 on a usage error (a missing `--repo`, no
 `--default-ref` and no `--base`, a git input that does not resolve) or a git
 read that fails. The code lives in `src/repo/`. `spec-gate approve-check` runs
-this check as its condition 8, over the git inputs it was given (see
-[approve.md](approve.md)); that does not replace the run on every pull request.
+this check as its condition 8, from the one merge base of `HEAD` and the
+default commit and never from `--base` (see [approve.md](approve.md)); that
+does not replace the run on every pull request.
 
 ## Git inputs
 

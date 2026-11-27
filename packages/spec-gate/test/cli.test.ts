@@ -21,6 +21,8 @@ import {
   failing,
   keep,
   otherSpec,
+  crissCross,
+  relogged,
   staleBase,
   STALE_OTHER,
   type Scenario,
@@ -324,6 +326,17 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
   let STALE_SPEC: Scenario;
   /** As `STALE_SPEC`, with the settings put back to their text at the stale base. */
   let STALE_CONFIG: Scenario;
+  /**
+   * A second pull request (base as the host reports it: the commit before the
+   * spec was merged) that replaces the merged `bindings.log` through draft and
+   * a second propose.
+   */
+  let RELOGGED: Scenario;
+  /**
+   * The head has two merge bases with the default branch and deletes a spec
+   * only one of them holds; by which of the two was committed last.
+   */
+  let CROSSED: Record<"side" | "default", Scenario>;
 
   const OTHER = "specs/other/spec.md";
 
@@ -375,7 +388,12 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
 
     STALE_SPEC = keep(await staleBase("spec-deleted"));
     STALE_CONFIG = keep(await staleBase("config-restored"));
-  }, 120_000);
+    RELOGGED = keep(await relogged());
+    CROSSED = {
+      side: keep(await crissCross("spec-deleted", "side")),
+      default: keep(await crissCross("spec-deleted", "default")),
+    };
+  }, 180_000);
 
   afterAll(async () => {
     await stub.close();
@@ -667,9 +685,50 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
       expect(report.reference).toBe(STALE_CONFIG.c1);
       expect(report.default_commit).not.toBe(STALE_CONFIG.c1);
       expect(cond(report, 7).code).toBe("spec-changes-config");
-      expect(failing(report)).toEqual([7]);
+      // The final lint measures from the default branch as well.
+      expect(failing(report)).toEqual([4, 7]);
       expect(report.approved).toBe(false);
     });
+
+    it("condition 4 fails, exit 1, with a stale --base: a merged bindings.log is replaced through draft and a second propose", async () => {
+      hostOf(RELOGGED);
+      const overs: Record<string, string>[] = [{ "--base": RELOGGED.c1 }, {}];
+      for (const over of overs) {
+        const run = await approveCheck(argsFor(RELOGGED, over));
+        expect(run.code).toBe(1);
+        const report = reportOf(run);
+        expect(report.default_commit).not.toBe(RELOGGED.c1);
+        expect(cond(report, 4)).toMatchObject({
+          code: "lint-errors",
+          message: expect.stringContaining("bindings-log"),
+        });
+        expect(failing(report)).toEqual([4]);
+        expect(report.approved).toBe(false);
+      }
+    });
+
+    it.each([["side"], ["default"]] as const)(
+      "conditions 4, 7 and 8 fail, exit 1, with two merge bases (the %s commit committed last): the head deletes a spec one of them lacks",
+      async (later) => {
+        const s = CROSSED[later];
+        hostOf(s);
+        const overs: Record<string, string>[] = [{}, { "--base": s.c1 }];
+        for (const over of overs) {
+          const run = await approveCheck(argsFor(s, over));
+          expect(run.code).toBe(1);
+          const report = reportOf(run);
+          for (const condition of [4, 7, 8] as const) {
+            expect(cond(report, condition)).toMatchObject({
+              ok: false,
+              code: "ambiguous-merge-base",
+              message: expect.stringContaining("2 merge bases"),
+            });
+          }
+          expect(failing(report)).toEqual([4, 7, 8]);
+          expect(report.approved).toBe(false);
+        }
+      },
+    );
 
     it("exits 1 when the host answers with an error, and nothing it said is printed", async () => {
       stub.on(REVIEWS_PATH, { status: 500, json: { message: "boom" } });

@@ -171,6 +171,109 @@ export async function staleBase(
   return { ...s, head, newer };
 }
 
+/** The bindings the `relogged` pull request writes in place of the merged ones. */
+export const OTHER_BINDINGS = BIND_BINDINGS.replace(
+  "selector: login works",
+  "selector: login still works",
+);
+
+/**
+ * A second pull request that replaces a merged `bindings.log`: the spec is
+ * proposed and merged into the default branch (`newer`, where the default
+ * ref is set); the branch `pr2` starts at `c1`, which the host reports as
+ * its base, merges the default branch, commits the spec back to `draft`
+ * without its log and with other bindings, and proposes again with the base
+ * `c1`. Measured from `c1` there is no merged log to compare with, so that
+ * propose writes; measured from the default branch the log was replaced.
+ */
+export async function relogged(): Promise<Built & { newer: string }> {
+  const s = await build();
+  await s.repo.checkout("main");
+  await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge the spec", s.head);
+  const newer = await s.repo.head();
+  await s.repo.setRef(REMOTE_MAIN, newer);
+  await s.repo.checkout("pr2", s.c1);
+  await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge the default", newer);
+  const file = path.join(s.spec, "spec.md");
+  const text = fs.readFileSync(file, "utf8");
+  if (!/^status: proposed$/m.test(text)) {
+    throw new Error("the merged spec is not proposed");
+  }
+  fs.writeFileSync(file, text.replace(/^status: proposed$/m, "status: draft"));
+  await s.repo.commit(
+    {
+      [`${SPEC_REL}/bindings.log`]: null,
+      [`${SPEC_REL}/bindings.yaml`]: OTHER_BINDINGS,
+    },
+    "back to draft, without the log",
+  );
+  const result = proposeSpecDir(s.spec, { repo: s.dir, base: s.c1 });
+  if (result.kind !== "written") {
+    throw new Error(
+      `the second propose did not write: ${JSON.stringify(result)}`,
+    );
+  }
+  const head = await commitSpec(s.repo, "propose again");
+  return { ...s, head, newer };
+}
+
+/**
+ * A pull request whose head has two merge bases with the default branch:
+ * the default branch gains a commit `d1` and merges a side commit `s1`; the
+ * branch `pr` merges `s1` and `d1` separately, so neither is an ancestor of
+ * the other and both are merge bases of the head and the default commit
+ * `newer`. `later` says which of the two is committed last, so that both
+ * orders are covered whichever one git's plain `merge-base` prints.
+ *
+ * - `spec-deleted`: `d1` adds a proposed spec and the pull request deletes
+ *   it. The tree of `s1` does not hold it;
+ * - `config-restored`: `d1` takes `dev` off the approvers and the pull
+ *   request puts the settings back to their text at `c1`, which is their
+ *   text at `s1`.
+ */
+export async function crissCross(
+  kind: "spec-deleted" | "config-restored",
+  later: "side" | "default",
+): Promise<Built & { newer: string; bases: [string, string] }> {
+  const s = await build();
+  const onDefault = async (): Promise<string> => {
+    await s.repo.checkout("main");
+    return s.repo.commit(
+      kind === "config-restored"
+        ? { ".spec-gate/config.yaml": CONFIG_WITHOUT_DEV }
+        : { [STALE_OTHER]: otherSpec("other-spec") },
+      "the default branch moves on",
+    );
+  };
+  const onSide = async (): Promise<string> => {
+    await s.repo.checkout("side", s.c1);
+    return s.repo.commit({ "side.txt": "side\n" }, "a side commit");
+  };
+  let d1: string;
+  let s1: string;
+  if (later === "side") {
+    d1 = await onDefault();
+    s1 = await onSide();
+  } else {
+    s1 = await onSide();
+    d1 = await onDefault();
+  }
+  await s.repo.checkout("main");
+  await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge the side", s1);
+  const newer = await s.repo.head();
+  await s.repo.setRef(REMOTE_MAIN, newer);
+  await s.repo.checkout("pr");
+  await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge the side", s1);
+  await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge the default", d1);
+  const head = await s.repo.commit(
+    kind === "config-restored"
+      ? { ".spec-gate/config.yaml": CONFIG }
+      : { [STALE_OTHER]: null },
+    kind === "config-restored" ? "put the settings back" : "delete the spec",
+  );
+  return { ...s, head, newer, bases: [d1, s1] };
+}
+
 /** Proposes the draft at `HEAD` and commits the result. */
 export async function propose(repo: Repo): Promise<string> {
   const result = proposeSpecDir(repo.spec, {

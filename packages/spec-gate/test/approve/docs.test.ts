@@ -43,15 +43,42 @@ describe("docs/approve.md", () => {
     ]);
   });
 
-  it("says that conditions 7 and 8 measure from the merge base with the default branch, not from the base commit", () => {
-    for (const condition of [7, 8]) {
-      expect(section(condition)).toContain(
-        "`merge-base(HEAD, default commit)`",
-      );
+  it("says that conditions 4, 7 and 8 measure from one base, which is never the base commit", () => {
+    const from = doc.indexOf("\n### The measuring base\n");
+    expect(from).toBeGreaterThan(-1);
+    const measuring = doc.slice(from, doc.indexOf("\n### 1. ", from));
+    for (const phrase of [
+      "the one merge base of `HEAD` and the default commit",
+      "`git merge-base --all`",
+      "It is not taken from `base`",
+      "The lint is given `repo` and `defaultRef`",
+      "- more than one merge base: `ambiguous-merge-base`",
+      "The check does not pick and does not run the lint",
+      "- no merge base, or a read that fails: `git-failed`",
+    ]) {
+      expect(measuring, phrase).toContain(phrase);
     }
-    expect(section(7)).toContain("It is not taken from `base`");
-    expect(section(8)).toContain("whether `base` is given or not");
-    expect(doc).not.toContain("merge-base(HEAD, reference commit)");
+    for (const condition of [4, 7, 8]) {
+      expect(section(condition)).toContain('"The measuring base"');
+    }
+    expect(section(4)).toContain("never\n  with `--base`");
+    expect(section(8)).toContain("whether `base` is given\nor not");
+    // What the earlier texts said, and no text may say again.
+    for (const gone of [
+      "handed to the final lint unchanged",
+      "merge-base(HEAD, reference commit)",
+      "with the git inputs as given",
+      "the reference commit of the final lint",
+      "keeps the base it was",
+    ]) {
+      expect(doc, gone).not.toContain(gone);
+    }
+    expect(doc).toContain(
+      "The final lint is given\n`repo` and `defaultRef` only, never `base`",
+    );
+    expect(doc).toContain(
+      "| `reference` | the base commit that is compared with the base the host reports",
+    );
   });
 
   it("gives the number of findings a message of condition 8 lists", () => {
@@ -257,7 +284,7 @@ describe("the approval sources", () => {
     expect(text).not.toMatch(/\$\{token\}/);
   });
 
-  it("the only git arguments they write are a read of a tree", () => {
+  it("the only git arguments they write are a read of a tree and the merge bases of two commits", () => {
     const calls = sources.flatMap((file) =>
       [
         ...fs
@@ -265,9 +292,20 @@ describe("the approval sources", () => {
           .matchAll(/runGit\(\s*\w+,\s*\[([^\]]*)\]/g),
       ].map((m) => m[1]!.replace(/\s+/g, " ").trim()),
     );
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0]).toMatch(
+      /^"merge-base", "--all", "--end-of-options", a, b,?$/,
+    );
+    expect(calls[1]).toMatch(
       /^"ls-tree", "-r", "-z", "--full-tree", "--end-of-options", commit, "--", prefix,?$/,
     );
+    // Every runGit call of these sources is one of the two above: none is
+    // written in a form the pattern does not see.
+    const written = sources.reduce(
+      (n, file) =>
+        n + (fs.readFileSync(file, "utf8").match(/\brunGit\(/g) ?? []).length,
+      0,
+    );
+    expect(written).toBe(2);
   });
 });

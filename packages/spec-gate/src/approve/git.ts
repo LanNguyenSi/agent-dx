@@ -1,7 +1,8 @@
 /**
  * The git reads of the approval check that no other module has: the digest
- * of a spec as a commit holds it, and whether the spec directory of the work
- * tree is the one the head commit holds.
+ * of a spec as a commit holds it, whether the spec directory of the work
+ * tree is the one the head commit holds, and every merge base of two
+ * commits.
  *
  * Every git call goes through `runGit` of the lint or through the digest's
  * own readers, so the hardening of `canonical/git-hardening.ts` applies:
@@ -176,6 +177,40 @@ export function specCommandsAt(
       return { ok: false, problem: "git-failed" };
     throw err;
   }
+}
+
+/**
+ * Every merge base of the commits `a` and `b`: each common ancestor that no
+ * other common ancestor descends from, as full commit ids in the order git
+ * lists them. No entry when the two share no history. Histories that
+ * crossed (each side merged a commit of the other that the other reached on
+ * its own) have more than one, and git's plain `merge-base` then prints one
+ * of them; a caller that needs one commit to measure a change from must
+ * know that there are several.
+ */
+export function mergeBases(repo: string, a: string, b: string): string[] {
+  if (!COMMIT_RE.test(a) || !COMMIT_RE.test(b)) {
+    throw new LintGitError(
+      "not-a-commit",
+      "a value is not a full commit id (40 or 64 lower-case hex digits)",
+    );
+  }
+  const run = runGit(repo, ["merge-base", "--all", "--end-of-options", a, b]);
+  // Exit 1 with no output is git's answer for two histories without a
+  // common commit.
+  if (run.status === 1 && run.stdout.length === 0) return [];
+  const ids = run.stdout
+    .toString("utf8")
+    .split("\n")
+    .filter((line) => line !== "");
+  if (
+    run.status !== 0 ||
+    ids.length === 0 ||
+    ids.some((id) => !COMMIT_RE.test(id))
+  ) {
+    throw new LintGitError("git-failed", "git could not find the merge bases");
+  }
+  return ids;
 }
 
 /** The modes of a regular file in a git tree. */

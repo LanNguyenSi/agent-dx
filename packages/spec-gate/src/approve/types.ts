@@ -74,6 +74,7 @@ export const OK_CODE = "ok";
 export const FAILURE_CODES = {
   "host-failed": [1, 2, 3, 6],
   "git-failed": [2, 3, 4, 7, 8],
+  "ambiguous-merge-base": [4, 7, 8],
   "head-mismatch": [1],
   "no-approval": [1, 2, 3],
   "approval-stale": [1],
@@ -171,9 +172,10 @@ export interface ApproveReport {
   /** The commit that was checked: `HEAD` of the repository. */
   head: string;
   /**
-   * The reference commit of the final lint: `base` when given, else
-   * `default_commit`. Conditions 7 and 8 measure from the merge base of
-   * `head` with `default_commit`.
+   * The base commit that is compared with the base the host reports: `base`
+   * when given, else `default_commit`. No condition measures from it;
+   * conditions 4, 7 and 8 measure from the one merge base of `head` and
+   * `default_commit`.
    */
   reference: string;
   /** The commit the default ref names: the settings were read there. */

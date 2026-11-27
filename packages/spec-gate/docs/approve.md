@@ -32,16 +32,16 @@ tree.
 | `repo` | the trusted checkout root, as `--repo` of the lint: never discovered from the spec directory |
 | `specDir` | the spec directory, `specs/<name>` inside `repo` |
 | `defaultRef` | the full name of the ref that holds the default branch in `repo` (for example `refs/remotes/origin/main`), as `--default-ref` of the lint; required |
-| `base` | the full id of the pull request base commit, as `--base` of the lint; optional |
+| `base` | the full id of the pull request base commit; optional. It is only compared with the base the host reports, and no condition measures from it |
 | `host` | the host adapter |
 
 `repo`, `defaultRef` and `base` are resolved exactly as the lint resolves its
-git inputs, and are handed to the final lint unchanged. The reference commit
-is `base` when given, else the commit `defaultRef` names; it is the reference
-of the lint and the start of the lint's diff base, and nothing else.
-Conditions 7 and 8 do not measure from it: their diff base is the merge base
-of the head with the commit `defaultRef` names, whether `base` is given or
-not (see "7. Nothing under `.spec-gate/` changes"). The settings
+git inputs: `base` must be the full id of a commit and lie on the default
+ref. That is all `base` is checked for, and it has one use: condition 2
+compares it with the base commit the host reports. The final lint is given
+`repo` and `defaultRef` only, never `base`. What the pull request changes is
+measured from one commit, the measuring base (see "The measuring base"),
+whether `base` is given or not. The settings
 (`approvers`, `agent_identities`) are always read at the commit `defaultRef`
 names, the tip of the default branch, whether `base` is given or not. The head
 is `HEAD` of `repo`: the checkout must be at the head commit of the pull
@@ -87,6 +87,44 @@ A condition that could not be evaluated does not hold. A host method that
 throws, rejects or returns a value outside its type gives `host-failed` for
 every condition that needed the fact; a git read that fails gives
 `git-failed`. Neither is ever a pass.
+
+### The measuring base
+
+Three conditions measure what the pull request changes: the final lint of
+condition 4 (its rules `bindings-log` and `spec-changes-config`, and the
+ancestry rules for `base_commit` and `commands_ref`), the change under
+`.spec-gate/` of condition 7 and the repository check of condition 8. All
+three measure from one commit, derived once for the check: the measuring
+base. It is the one merge base of `HEAD` and the default commit, the commit
+`defaultRef` names, read with `git merge-base --all`.
+
+It is not taken from `base`. A base commit says where the pull request
+started, and a host can report one that is older than a commit of the
+default branch the head has merged since. Measured from that older commit, a
+settings file the pull request puts back to its old text shows no change, a
+spec the default branch gained in between and the pull request deletes is not
+in the tree the repository check starts from, and a `bindings.log` merged in
+between is not there for the lint to compare with, so a second propose can
+replace it. Merging such a pull request would still undo, delete or replace
+what the default branch holds. Measured from the default branch, all three
+show.
+
+The lint is given `repo` and `defaultRef`. It resolves its reference to the
+default commit and its diff base to the merge base of `HEAD` with it, which
+is the measuring base whenever there is exactly one.
+
+When there is not exactly one, nothing is measured and conditions 4, 7 and 8
+do not hold:
+
+- more than one merge base: `ambiguous-merge-base`. This happens when the
+  histories crossed: the default branch and the pull request branch each
+  merged a commit the other one reached on its own. git's plain `merge-base`
+  then prints one of them, and the check cannot rely on which: from one whose
+  tree lacks a spec, the deletion of that spec does not show although a merge
+  makes it. The check does not pick and does not run the lint. Merging
+  the tip of the default branch into the pull request branch, or rebasing
+  onto it, leaves one merge base;
+- no merge base, or a read that fails: `git-failed`.
 
 ### 1. An approving review on the head
 
@@ -205,13 +243,18 @@ nothing is fetched), `review-digest-unavailable`, `digest-mismatch`,
   tree, so its verdict is about the head only when the two are the same. An
   edited, added or removed file fails this, and so does a file the repository
   ignores, a link, and a checkout that rewrites line ends.
-- The final lint (`lint --final` with the git inputs as given, run in
-  process) has no error (`lint-errors`, with the rule ids; `lint-failed` when
-  it cannot run). Warnings do not count.
+- There is a measuring base (`ambiguous-merge-base` and `git-failed`
+  otherwise, see "The measuring base"); the lint does not run without one.
+- The final lint (`lint --final` with `--repo` and `--default-ref`, never
+  with `--base`, run in process) has no error (`lint-errors`, with the rule
+  ids; `lint-failed` when it cannot run). Warnings do not count. The lint so
+  measures from the measuring base: a `bindings.log` merged on the default
+  branch is compared with the one at the head whatever base the host reports.
 - `HEAD` is still the commit the check started at (`head-moved`).
 
 Codes: `spec-unreadable`, `status-not-proposed`, `worktree-not-head`,
-`lint-failed`, `lint-errors`, `head-moved`, `git-failed`.
+`ambiguous-merge-base`, `lint-failed`, `lint-errors`, `head-moved`,
+`git-failed`.
 
 ### 5. Agent identities are set apart
 
@@ -238,40 +281,29 @@ Codes: `host-failed`, `approval-not-enforced`.
 
 ### 7. Nothing under `.spec-gate/` changes
 
-No path under `.spec-gate/` differs between the diff base and the head. This
-is the lint rule `spec-changes-config`, called as it is: the first path
-component is compared without regard to case.
+No path under `.spec-gate/` differs between the measuring base and the head
+(see "The measuring base"). This is the lint rule `spec-changes-config`,
+called as it is: the first path component is compared without regard to
+case.
 
-The diff base of this condition and of condition 8 is
-`merge-base(HEAD, default commit)`, the default commit being the one
-`defaultRef` names. It is not taken from `base`. A base commit says where the
-pull request started, and a host can report one that is older than a commit
-of the default branch the head has merged since. Measured from that older
-commit, a settings file the pull request puts back to its old text shows no
-change, although merging the pull request would undo what the default branch
-decided in between (an approver taken off the list, for one). Measured from
-the default branch it shows. `base` must be the default commit or an ancestor
-of it, so this diff base is never the older of the two.
+A settings file the pull request puts back to its text at an older base is a
+change: merging the pull request would undo what the default branch decided
+in between (an approver taken off the list, for one). A change the default
+branch made itself does not count, before or after the pull request merged
+it. The final lint of condition 4 runs the same rule from the same base, so
+a change here fails condition 4 as well.
 
-A change the default branch made itself does not count, before or after the
-pull request merged it. The final lint of condition 4 keeps the base it was
-given: with a base older than a merged default commit that changed the
-settings, its own `spec-changes-config` reports that change and condition 4
-fails, while this condition holds. When the merge base with the default
-commit cannot be found, the condition is `git-failed`.
-
-Codes: `spec-changes-config`, `git-failed`.
+Codes: `spec-changes-config`, `ambiguous-merge-base`, `git-failed`.
 
 ### 8. The repository check is clean
 
 The repository check (see "Repository check" in [lint.md](lint.md)) has no
 finding. It is `checkRepository`, the function behind `spec-gate repo-check`,
-called as it is over the tree of the diff base and the tree of the head, both
-read from git. The diff base is the one of condition 7,
-`merge-base(HEAD, default commit)`, whether `base` is given or not: a spec the
-default branch gained after the base the host reports, which the head has
-merged and then deletes, is in the tree the walk starts from. So a pull
-request that carries an approved spec and, beside it,
+called as it is over the tree of the measuring base and the tree of the head
+(see "The measuring base"), both read from git, whether `base` is given
+or not: a spec the default branch gained after the base the host reports,
+which the head has merged and then deletes, is in the tree the walk starts
+from. So a pull request that carries an approved spec and, beside it,
 deletes another proposed spec, changes its id, puts it back to `draft` or
 removes its `bindings.log` is not approved.
 
@@ -280,9 +312,9 @@ removes its `bindings.log` is not approved.
   holds is not a finding when the work tree lacks it.
 - The whole tree is walked, not only `specs/`: a protected `spec.md` anywhere
   counts, as for `repo-check`.
-- The diff base is the merge base, not the tip of the default branch: a spec
-  merged there after the pull request forked, which the head has not merged,
-  is not counted as removed.
+- The walk starts at the measuring base, not at the tip of the default
+  branch: a spec merged there after the pull request forked, which the head
+  has not merged, is not counted as removed.
 
 A finding is `repo-check-findings`. The message gives the number of findings
 and, for the first 20 in the order of the repository check (by path, then
@@ -294,7 +326,8 @@ This condition covers the pull requests `approve-check` runs on. A pull
 request without a spec to approve deletes a spec just as well, so
 `repo-check` still runs on every pull request.
 
-Codes: `repo-check-findings`, `tree-too-large`, `git-failed`.
+Codes: `repo-check-findings`, `tree-too-large`, `ambiguous-merge-base`,
+`git-failed`.
 
 ## Report
 
@@ -310,7 +343,7 @@ time, no absolute path, and nothing a host adapter threw.
 | `approved` | true only when every condition holds |
 | `approve_reported` | true when an approving review stands on the head (condition 1 holds) and condition 5 is `approval-not-verifiable` or condition 6 is `approval-not-enforced`: an approve was seen, an approval is not claimed. Never true together with `approved` |
 | `head` | the commit that was checked |
-| `reference` | the reference commit of the final lint: `base` when given, else `default_commit`. Conditions 7 and 8 measure from the merge base of `head` with `default_commit` |
+| `reference` | the base commit that is compared with the base the host reports: `base` when given, else `default_commit`. No condition measures from it; conditions 4, 7 and 8 measure from the one merge base of `head` and `default_commit` |
 | `default_commit` | the commit `defaultRef` names; the settings were read there |
 | `digest` | the digest of the spec at the head, or `null` |
 | `pull_request` | `number`, `author`, `head`, `base`, `target_ref` as the host reports them, or `null` when the host failed |
@@ -440,10 +473,13 @@ The permissions the token needs are listed under "Token and permissions".
 - Fetch the default branch with its history before the check. The check
   never fetches: it needs the commit `--default-ref` names (for example
   `refs/remotes/origin/main`) and the merge base of that commit and the head.
-- `--base` is optional. When given, it must be the base commit the host
-  reports for the pull request (`base-mismatch` otherwise). It sets the
-  reference of the final lint; conditions 7 and 8 measure from the default
-  branch with and without it.
+- `--base` is optional. When given, it must lie on the default ref and be
+  the base commit the host reports for the pull request (`base-mismatch`
+  otherwise). Nothing is measured from it: the report is the same with and
+  without it, but for `reference` and condition 2.
+- When the report says `ambiguous-merge-base`, merge the tip of the default
+  branch into the pull request branch (or rebase onto it) and run the check
+  on the new head.
 - For a host other than github.com, give its API root as `--api-url`.
 - Whether the pull request can change the job that runs the check is a
   property of the host setup, outside this command.
