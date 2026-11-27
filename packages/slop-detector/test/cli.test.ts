@@ -740,3 +740,86 @@ describe("cli check explicit targets and symbolic links", () => {
     );
   });
 });
+
+// `--config` through a symbolic link, built CLI, working directory under
+// os.tmpdir() (an alias of its real path on macOS).
+describe("cli check --config and symbolic links", () => {
+  const builtEntry = path.join(packageRoot, "dist", "cli.js");
+  const fragment = "SECRET-FRAGMENT-QX7";
+  let base: string;
+  let work: string;
+  let outside: string;
+
+  beforeAll(() => {
+    ensureBuilt();
+    base = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cli-cfg-"));
+    work = path.join(base, "work");
+    outside = path.join(base, "outside");
+    fs.mkdirSync(work);
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(work, "a.md"), "# A\n\nPlain text.\n");
+    fs.writeFileSync(
+      path.join(work, "real.yml"),
+      "packs:\n  agent-tics: true\n",
+    );
+    fs.writeFileSync(path.join(outside, "secret.yml"), `packs: [${fragment}\n`);
+    fs.writeFileSync(path.join(outside, "secret.json"), `{"${fragment}": `);
+    fs.writeFileSync(
+      path.join(outside, "ok.yml"),
+      "packs:\n  agent-tics: true\n",
+    );
+    fs.symlinkSync(
+      path.join(outside, "secret.yml"),
+      path.join(work, "slop.config.yml"),
+    );
+    fs.symlinkSync(
+      path.join(outside, "secret.json"),
+      path.join(work, "slop.config.json"),
+    );
+    fs.symlinkSync("real.yml", path.join(work, "alias.yml"));
+  }, 180_000);
+
+  afterAll(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  function runBuilt(args: string[]) {
+    return spawnSync(
+      process.execPath,
+      [builtEntry, "check", "--format", "json", ...args, "a.md"],
+      { cwd: work, encoding: "utf8" },
+    );
+  }
+
+  for (const name of ["slop.config.yml", "slop.config.json"]) {
+    it(`a ${name} spelled inside that resolves outside is refused (exit 2) without quoting it`, () => {
+      const r = runBuilt(["--config", name]);
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toBe(
+        `slop-detector: refusing --config ${name}: resolves outside the working directory (symbolic link)\n`,
+      );
+      expect(r.stderr).not.toContain(fragment);
+    });
+  }
+
+  it("an in-tree config symlink is loaded as before", () => {
+    const r = runBuilt(["--config", "alias.yml"]);
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout).filesScanned).toBe(1);
+  });
+
+  it("a config spelled outside the working directory is the caller's choice and is read", () => {
+    const ok = runBuilt(["--config", path.join("..", "outside", "ok.yml")]);
+    expect(ok.status).toBe(0);
+    const bad = runBuilt(["--config", path.join(outside, "secret.yml")]);
+    expect(bad.status).toBe(2);
+    expect(bad.stderr).not.toContain("refusing");
+  });
+
+  it("a missing config still reports not found", () => {
+    const r = runBuilt(["--config", "nope.yml"]);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("Config file not found");
+  });
+});

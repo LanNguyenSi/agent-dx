@@ -4,13 +4,17 @@ import path from "node:path";
 /**
  * True when `target` is `root` itself or lies below it, compared on whole
  * path segments: `/x/repo2` is not inside `/x/repo`. Both arguments are
- * taken as given (no resolving, no realpath), so callers that care about
- * symbolic links pass real paths, see `resolvesInside`.
+ * normalised with `path.resolve` first (a relative one against the process
+ * working directory), so `..` segments and a trailing separator cannot
+ * change the answer; no symbolic link is followed, so callers that care
+ * about links pass real paths, see `resolvesInside`.
  */
 export function isInside(root: string, target: string): boolean {
-  if (target === root) return true;
-  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-  return target.startsWith(prefix);
+  const r = path.resolve(root);
+  const t = path.resolve(target);
+  if (t === r) return true;
+  const prefix = r.endsWith(path.sep) ? r : r + path.sep;
+  return t.startsWith(prefix);
 }
 
 /** `fs.realpathSync.native`, or undefined when the path cannot be resolved. */

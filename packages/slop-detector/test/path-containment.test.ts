@@ -27,6 +27,19 @@ describe("isInside", () => {
     expect(isInside("/x/repo", "/etc/passwd")).toBe(false);
   });
 
+  it("normalises `..` segments before comparing", () => {
+    expect(isInside("/x/repo", "/x/repo/../etc")).toBe(false);
+    expect(isInside("/x/repo", "/x/repo/docs/../../repo2")).toBe(false);
+    expect(isInside("/x/repo", "/x/repo/docs/..")).toBe(true);
+    expect(isInside("/x/repo/sub/..", "/x/repo/a.md")).toBe(true);
+  });
+
+  it("ignores a trailing separator on either side", () => {
+    expect(isInside("/x/repo", "/x/repo/")).toBe(true);
+    expect(isInside("/x/repo/", "/x/repo")).toBe(true);
+    expect(isInside("/x/repo/", "/x/repo2/")).toBe(false);
+  });
+
   it("treats the filesystem root as containing everything", () => {
     expect(isInside("/", "/etc/passwd")).toBe(true);
   });

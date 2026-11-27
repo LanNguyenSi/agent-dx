@@ -129,6 +129,7 @@ async function runCheck(
   command: Command,
 ): Promise<void> {
   const opts = normalizeOpts(rawOpts);
+  if (opts.config) refuseConfigOutside(opts.config);
   const config = opts.config ? loadConfig(opts.config) : defaultConfig();
   const packFilter = opts.pack && opts.pack.length > 0 ? opts.pack : undefined;
   const packs = packsByFilter(packFilter);
@@ -260,6 +261,24 @@ async function runCheck(
   // large payload written to a pipe is flushed asynchronously, and an
   // immediate exit cuts it at the pipe buffer.
   process.exitCode = summary.blockCount > 0 ? 1 : 0;
+}
+
+/**
+ * A `--config` spelled inside the working directory is usually repository
+ * content: when a symbolic link along it leads out of the working
+ * directory, the run stops (exit 2) before the file is read, and the
+ * message names the path only, never any of its content. A config spelled
+ * outside (a central `../shared/slop.config.yml`) is the caller's choice
+ * and is read as given; a missing file is left to `loadConfig`.
+ */
+function refuseConfigOutside(configPath: string): void {
+  const cwd = process.cwd();
+  const resolved = path.resolve(configPath);
+  if (!isInside(cwd, resolved) || !fs.existsSync(resolved)) return;
+  if (resolvesInside(cwd, resolved)) return;
+  throw new Error(
+    `refusing --config ${configPath}: resolves outside the working directory (symbolic link)`,
+  );
 }
 
 function normalizeOpts(raw: unknown): CheckOpts {

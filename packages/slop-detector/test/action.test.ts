@@ -20,6 +20,7 @@ import {
   selectChangedFiles,
   skipAnnotation,
   type FileClass,
+  workspaceRelative,
 } from "../src/action/run.js";
 import type { Severity, Violation } from "../src/types.js";
 import { ensureBuilt } from "./built-cli.js";
@@ -382,6 +383,40 @@ describe("runAction changed-files-only on a real workspace", () => {
     expect(runAction({ ...prEnv, GITHUB_WORKSPACE: root }, h.deps)).toBe(0);
     expect(h.calls).toHaveLength(1);
     expect(h.out.join("")).toContain("slop-detector: no changed files to scan");
+  });
+});
+
+describe("workspaceRelative", () => {
+  it("makes a path inside the workspace relative, keeps any other path as given", () => {
+    expect(workspaceRelative("/w/repo/docs", "/w/repo")).toBe("docs");
+    expect(workspaceRelative("/w/repo/docs/../src", "/w/repo")).toBe("src");
+    expect(workspaceRelative("/w/repo", "/w/repo")).toBe(".");
+    expect(workspaceRelative("docs", "/w/repo")).toBe("docs");
+    expect(workspaceRelative(".", "/w/repo")).toBe(".");
+    expect(workspaceRelative("/w/repo2/docs", "/w/repo")).toBe("/w/repo2/docs");
+    expect(workspaceRelative("/elsewhere/x.yml", "/w/repo")).toBe(
+      "/elsewhere/x.yml",
+    );
+  });
+
+  it("also accepts the workspace spelled through its real path", () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "slop-wsrel-"));
+    try {
+      const real = fs.realpathSync.native(base);
+      const link = `${base}-link`;
+      fs.symlinkSync(base, link);
+      try {
+        expect(workspaceRelative(path.join(real, "docs"), link)).toBe("docs");
+        expect(workspaceRelative(path.join(link, "docs"), link)).toBe("docs");
+        expect(workspaceRelative(path.join(base, "docs"), real)).toBe(
+          base === real ? "docs" : path.join(base, "docs"),
+        );
+      } finally {
+        fs.unlinkSync(link);
+      }
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 });
 
@@ -776,5 +811,78 @@ describe("action entrypoint subprocess with symlinked targets", () => {
     expect(r.status).toBe(0);
     expect(r.stdout).not.toContain("skipped");
     expect(r.stdout).toMatch(/^slop-detector: 2 file\(s\) scanned,/m);
+  });
+
+  // GITHUB_WORKSPACE is spelled through os.tmpdir() here, which on macOS is
+  // an alias (/var/folders/...) of the real /private/var/... path the CLI
+  // sees as its working directory.
+  it("an absolute `path` input spelled through the workspace as given is skipped, never read", () => {
+    const modes: Record<string, string>[] = [
+      {},
+      { INPUT_CHANGED_FILES_ONLY: "true" },
+    ];
+    for (const mode of modes) {
+      const r = runEntry({ INPUT_PATH: path.join(repo, "docs"), ...mode });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain(
+        "::warning title=slop-detector::skipped docs: resolves outside the working directory (symbolic link)\n",
+      );
+      expect(r.stdout).not.toContain("::error");
+      expect(r.stdout).not.toContain("/Users/someone");
+    }
+  });
+
+  it("an absolute `path` input spelled through the workspace's real path is skipped, never read", () => {
+    const r = runEntry({
+      INPUT_PATH: path.join(fs.realpathSync.native(repo), "docs"),
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(
+      "::warning title=slop-detector::skipped docs: resolves outside the working directory (symbolic link)\n",
+    );
+    expect(r.stdout).not.toContain("::error file=");
+    expect(r.stdout).not.toContain("/Users/someone");
+  });
+
+  describe("a `config` input that is a symlink out of the workspace", () => {
+    const fragment = "SECRET-FRAGMENT-QX7";
+
+    beforeAll(() => {
+      const outside = path.join(base, "outside");
+      fs.writeFileSync(
+        path.join(outside, "secret.yml"),
+        `packs: [${fragment}\n`,
+      );
+      fs.writeFileSync(path.join(outside, "secret.json"), `{"${fragment}": `);
+      fs.symlinkSync(
+        path.join(outside, "secret.yml"),
+        path.join(repo, "slop.config.yml"),
+      );
+      fs.symlinkSync(
+        path.join(outside, "secret.json"),
+        path.join(repo, "slop.config.json"),
+      );
+    });
+
+    for (const name of ["slop.config.yml", "slop.config.json"]) {
+      it(`${name}: refused with exit 2, the error names the path and quotes no content`, () => {
+        for (const spelled of [
+          name,
+          path.join(repo, name),
+          path.join(fs.realpathSync.native(repo), name),
+        ]) {
+          const r = runEntry({ INPUT_CONFIG: spelled });
+          expect(r.status).toBe(2);
+          expect(r.stdout).toMatch(
+            new RegExp(
+              `^::error title=slop-detector::.*refusing --config ${name.replace(/\./g, "\\.")}: resolves outside the working directory`,
+              "m",
+            ),
+          );
+          expect(r.stdout).not.toContain(fragment);
+          expect(r.stderr).not.toContain(fragment);
+        }
+      });
+    }
   });
 });

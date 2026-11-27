@@ -65,7 +65,7 @@ A composite action builds this package from the checkout at the action's ref and
 | --- | --- | --- |
 | `path` | `.` | File or directory to scan. |
 | `pack` | none | Comma-separated pack ids, passed as repeated `--pack`. An unknown id fails the step (exit 2). |
-| `config` | none | Path to a `slop.config.yml` / `.json`. |
+| `config` | none | Path to a `slop.config.yml` / `.json`. A config inside the workspace that is a symbolic link leading outside it fails the step (exit 2) without being read. |
 | `severity-threshold` | `block` | Fail at or above this severity: `block`, `warn` or `info`. Any other value fails the step. |
 | `changed-files-only` | `false` | On `pull_request` and `pull_request_target` events, scan only files from `git diff --name-only <base>...<head>` that still exist as regular files inside the workspace (needs a checkout with enough history, for example `fetch-depth: 0`); a changed symbolic link is never followed and gets a `::warning` annotation, a file whose real path leaves the workspace gets a `::warning`, a non-regular entry such as a submodule gets a `::notice`, and none of them is scanned; on other events the input is ignored with a notice and the full `path` is scanned. |
 

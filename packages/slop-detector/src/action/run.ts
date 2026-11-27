@@ -213,6 +213,26 @@ export function parseNulList(stdout: string): string[] {
   return parts;
 }
 
+/**
+ * The spelling of an input path (`path`, `config`) handed to the CLI, which
+ * runs with the workspace as its working directory. A path that lies
+ * lexically inside the workspace, spelled either as `root` was given or
+ * through its real path (a symlinked GITHUB_WORKSPACE, `/tmp` against
+ * `/private/tmp`), is passed relative to the workspace, so the CLI's
+ * inside-the-working-directory rules see it as spelled inside and never
+ * follow a symbolic link out of the checkout. Any other path is passed as
+ * given.
+ */
+export function workspaceRelative(p: string, root: string): string {
+  const abs = path.resolve(root, p);
+  for (const base of [root, realPath(root)]) {
+    if (base === undefined || !isInside(base, abs)) continue;
+    const rel = path.relative(path.resolve(base), abs);
+    return rel === "" ? "." : rel;
+  }
+  return p;
+}
+
 /** Make the `path` input repo-relative (posix) against the repo root. */
 export function repoRelativeScanPath(scanPath: string, root: string): string {
   const abs = path.isAbsolute(scanPath)
@@ -271,7 +291,7 @@ function changedFilesFromEvent(
     deps.write(
       "::notice title=slop-detector::changed-files-only ignored: not a pull_request event\n",
     );
-    return [scanPath];
+    return [workspaceRelative(scanPath, root)];
   }
   if (!eventPath) fail("GITHUB_EVENT_PATH is not set", 2);
   let event: {
@@ -364,7 +384,7 @@ function runActionInner(env: NodeJS.ProcessEnv, deps: ActionDeps): number {
 
   const targets = changedOnly
     ? changedFilesFromEvent(env, root, scanPath, deps)
-    : [scanPath];
+    : [workspaceRelative(scanPath, root)];
   if (targets.length === 0) {
     deps.write("slop-detector: no changed files to scan\n");
     return 0;
@@ -372,7 +392,7 @@ function runActionInner(env: NodeJS.ProcessEnv, deps: ActionDeps): number {
 
   const args = [deps.cliPath, "check", "--format", "json"];
   for (const p of packs) args.push("--pack", p);
-  if (config !== "") args.push("--config", config);
+  if (config !== "") args.push("--config", workspaceRelative(config, root));
   args.push("--", ...targets);
 
   const res = deps.spawn(process.execPath, args, { cwd: root });
