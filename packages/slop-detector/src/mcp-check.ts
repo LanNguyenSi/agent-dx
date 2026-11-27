@@ -7,6 +7,7 @@ import fs from "node:fs";
 import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { packsByFilter } from "./packs/registry.js";
+import { sanitizeForTerminal } from "./util/terminal.js";
 import { resolvePatternAnchor } from "./util/pattern-anchor.js";
 import type { CheckSummary, Severity, Violation } from "./types.js";
 
@@ -99,7 +100,7 @@ const SEVERITY_LABEL: Record<Severity, string> = {
  */
 export function renderSummary(summary: CheckSummary): string {
   const lead: string[] = (summary.warnings ?? []).map(
-    (w) => `slop-detector: warning: ${w}`,
+    (w) => `slop-detector: warning: ${sanitizeForTerminal(w)}`,
   );
   if (summary.violations.length === 0) {
     lead.push(`slop-detector: clean (${summary.filesScanned} file(s) scanned)`);
@@ -113,10 +114,10 @@ export function renderSummary(summary: CheckSummary): string {
   }
   const lines: string[] = [...lead];
   for (const [filePath, vs] of byFile) {
-    lines.push(filePath);
+    lines.push(sanitizeForTerminal(filePath));
     for (const v of vs) {
       lines.push(
-        `  ${SEVERITY_LABEL[v.severity]} ${v.line}:${v.column}  ${v.ruleId}  ${v.message}`,
+        `  ${SEVERITY_LABEL[v.severity]} ${v.line}:${v.column}  ${sanitizeForTerminal(v.ruleId)}  ${sanitizeForTerminal(v.message)}`,
       );
     }
   }

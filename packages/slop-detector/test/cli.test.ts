@@ -550,3 +550,36 @@ describe("cli check -f json into a pipe", () => {
     }
   }, 30_000);
 });
+
+describe("cli check escapes terminal control characters in text output", () => {
+  let dir: string;
+  let file: string;
+  const raw = '<invoke name="a\x1b]52;c;aGk=\x07">';
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cli-esc-"));
+    file = path.join(dir, "note.md");
+    fs.writeFileSync(file, `${raw}\n`);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("text output carries a visible escape, no ESC or BEL byte", () => {
+    const r = runCli(["check", file, "--pack", "agent-tics"]);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("\\x1b]52;c;aGk=\\x07");
+    expect(r.stdout).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+  });
+
+  it("json output keeps the raw match", () => {
+    const r = runCli(["check", file, "--pack", "agent-tics", "-f", "json"]);
+    expect(r.status).toBe(1);
+    const parsed = JSON.parse(r.stdout) as {
+      violations: Array<{ matched: string; message: string }>;
+    };
+    expect(parsed.violations[0]!.matched).toBe(raw);
+    expect(parsed.violations[0]!.message).toContain(raw);
+  });
+});
