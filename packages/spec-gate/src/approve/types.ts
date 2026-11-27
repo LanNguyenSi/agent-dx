@@ -51,13 +51,13 @@ export const CONDITIONS = [
     condition: 7,
     name: "config-untouched",
     summary:
-      "No file under `.spec-gate/` differs between the diff base and the head.",
+      "No file under `.spec-gate/` differs between the merge base of the head with the default branch and the head.",
   },
   {
     condition: 8,
     name: "repo-check-clean",
     summary:
-      "The repository check has no finding between the diff base and the head: no protected spec disappears, changes its id, goes back to `draft` or loses its log.",
+      "The repository check has no finding between the merge base of the head with the default branch and the head: no protected spec disappears, changes its id, goes back to `draft` or loses its log.",
   },
 ] as const;
 
@@ -170,7 +170,11 @@ export interface ApproveReport {
   approve_reported: boolean;
   /** The commit that was checked: `HEAD` of the repository. */
   head: string;
-  /** The reference commit of the final lint and of the diff base: `base` when given, else `default_commit`. */
+  /**
+   * The reference commit of the final lint: `base` when given, else
+   * `default_commit`. Conditions 7 and 8 measure from the merge base of
+   * `head` with `default_commit`.
+   */
   reference: string;
   /** The commit the default ref names: the settings were read there. */
   default_commit: string;

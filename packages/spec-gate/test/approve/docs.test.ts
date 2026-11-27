@@ -43,6 +43,17 @@ describe("docs/approve.md", () => {
     ]);
   });
 
+  it("says that conditions 7 and 8 measure from the merge base with the default branch, not from the base commit", () => {
+    for (const condition of [7, 8]) {
+      expect(section(condition)).toContain(
+        "`merge-base(HEAD, default commit)`",
+      );
+    }
+    expect(section(7)).toContain("It is not taken from `base`");
+    expect(section(8)).toContain("whether `base` is given or not");
+    expect(doc).not.toContain("merge-base(HEAD, reference commit)");
+  });
+
   it("gives the number of findings a message of condition 8 lists", () => {
     expect(section(8)).toContain(
       `for the first ${MAX_LISTED_FINDINGS} in the order of the repository check`,
@@ -163,6 +174,11 @@ describe('docs/approve.md, "Commands" and "CLI"', () => {
       "| 1 | a report whose `approved` is not `true`",
       "| 2 | no report:",
       "Only exit 0 means approved",
+      "- `--version` and `-V` anywhere on the command line",
+      "a job must also require the JSON line with `approved: true` on stdout",
+      "`--help` and `-h` among the arguments of the\nverb are no help request",
+      "Arguments before the verb name are\nhandled by the program",
+      "the exit code is 1 with an\nempty stdout",
       `environment variable \`${TOKEN_VARIABLE}\``,
       "There is no option for it",
       "Check out the head commit of the pull request, not a merge of it",

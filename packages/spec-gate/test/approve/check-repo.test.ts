@@ -19,6 +19,8 @@ import {
   failing,
   keep,
   otherSpec,
+  staleBase,
+  STALE_OTHER,
   type Built,
   type Scenario,
 } from "./helpers.js";
@@ -81,7 +83,7 @@ describe("condition 8: the repository check", { timeout: 60_000 }, () => {
       ok: true,
       code: "ok",
       message:
-        "no protected spec of the diff base disappears, changes its id, goes back to draft or loses its log at the head",
+        "no protected spec of the merge base with the default branch disappears, changes its id, goes back to draft or loses its log at the head",
     });
     expect(report.approved).toBe(true);
     expect(seam.seen).toEqual([
@@ -207,18 +209,42 @@ describe("condition 8: the repository check", { timeout: 60_000 }, () => {
     expect(report.approved).toBe(true);
   });
 
-  it("with a base commit given, the check runs from that base", async () => {
-    const s = await after(await withOther(), { [OTHER]: null });
+  it("with a base commit given, the diff base is still the merge base with the default branch: a spec the default branch gained after that base and the pull request deletes is a finding", async () => {
+    const s = await staleBase("spec-deleted");
     const report = await check(s, {}, { base: s.c1 });
+    // The lint keeps the base it was given; the repository check does not.
+    expect(report.reference).toBe(s.c1);
     expect(seam.seen).toEqual([
       {
         repo: fs.realpathSync(s.dir),
-        reference: s.c1,
-        diffBase: s.c1,
+        reference: s.newer,
+        diffBase: s.newer,
         head: s.head,
       },
     ]);
+    expect(cond(report, 8)).toMatchObject({
+      ok: false,
+      code: "repo-check-findings",
+      message: `the repository check reports 1 finding: spec-removed "${STALE_OTHER}"`,
+    });
     expect(failing(report)).toEqual([8]);
+    expect(report.approved).toBe(false);
+  });
+
+  it("the same pull request without a base commit: the same finding", async () => {
+    const s = await staleBase("spec-deleted");
+    const report = await check(s);
+    expect(failing(report)).toEqual([8]);
+    expect(report.approved).toBe(false);
+  });
+
+  it("a pull request that merged a newer default commit and deletes nothing is approved, with and without the base commit", async () => {
+    const s = await staleBase("merged-only");
+    for (const over of [{ base: s.c1 }, {}]) {
+      const report = await check(s, {}, over);
+      expect(codes(report)).toEqual(Array(8).fill("ok"));
+      expect(report.approved).toBe(true);
+    }
   });
 });
 

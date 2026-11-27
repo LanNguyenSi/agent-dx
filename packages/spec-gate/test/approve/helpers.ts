@@ -124,6 +124,53 @@ export function otherSpec(id: string, status = "proposed"): string {
     .replace(/^status: .*$/m, `status: ${status}`);
 }
 
+/** The second, proposed spec of the stale-base scenarios. */
+export const STALE_OTHER = "specs/other/spec.md";
+
+/** The settings of the default branch once `dev` is no approver any more. */
+export const CONFIG_WITHOUT_DEV =
+  "approvers: [Alice, bob]\nagent_identities: [Spec-Bot]\n";
+
+/**
+ * A pull request whose base, as the host reports it, is older than a commit
+ * of the default branch its head has merged: the default branch moves on by
+ * `files` after `c1`, the default ref is set there, and the branch `pr`
+ * merges that commit. `c1` stays the base the host reports (`tip` is not
+ * set); `newer` is the commit the default ref names.
+ *
+ * - `merged-only`: the pull request does nothing after the merge;
+ * - `spec-deleted`: the default branch gained a proposed spec, and the pull
+ *   request deletes it after the merge;
+ * - `config-merged`: the default branch took `dev` off the approvers, and
+ *   the pull request does nothing after the merge;
+ * - `config-restored`: as before, and the pull request puts
+ *   `.spec-gate/config.yaml` back to its text at `c1`.
+ */
+export async function staleBase(
+  kind: "merged-only" | "spec-deleted" | "config-merged" | "config-restored",
+): Promise<Built & { newer: string }> {
+  const s = await build();
+  const gained: Record<string, string> =
+    kind === "config-merged" || kind === "config-restored"
+      ? { ".spec-gate/config.yaml": CONFIG_WITHOUT_DEV }
+      : { [STALE_OTHER]: otherSpec("other-spec") };
+  await s.repo.checkout("main");
+  const newer = await s.repo.commit(gained, "the default branch moves on");
+  await s.repo.setRef(REMOTE_MAIN, newer);
+  await s.repo.checkout("pr");
+  await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge the default", newer);
+  let head = await s.repo.head();
+  if (kind === "spec-deleted") {
+    head = await s.repo.commit({ [STALE_OTHER]: null }, "delete the spec");
+  } else if (kind === "config-restored") {
+    head = await s.repo.commit(
+      { ".spec-gate/config.yaml": CONFIG },
+      "put the settings back",
+    );
+  }
+  return { ...s, head, newer };
+}
+
 /** Proposes the draft at `HEAD` and commits the result. */
 export async function propose(repo: Repo): Promise<string> {
   const result = proposeSpecDir(repo.spec, {

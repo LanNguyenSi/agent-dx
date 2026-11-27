@@ -643,7 +643,9 @@ program
 // The token is read from the environment and has no option. An option the
 // verb does not know is counted here and refused by the verb itself, so
 // commander never repeats it on stderr: a token given as `--token=...` by
-// mistake is not printed.
+// mistake is not printed. The verb has no help option of its own, so
+// `--help` among its arguments is such an option and exits 2 instead of 0;
+// `spec-gate help approve-check` prints the help.
 program
   .command("approve-check")
   .description(
@@ -674,6 +676,7 @@ program
     "--api-url <url>",
     "the API root of the host (default: https://api.github.com); https, or http for a loopback host",
   )
+  .helpOption(false)
   .allowUnknownOption()
   .allowExcessArguments(true)
   .exitOverride((err: CommanderError) => {
@@ -714,10 +717,11 @@ program
 try {
   await program.parseAsync();
 } catch (err) {
-  // Only `intake file`, `lint`, `lint-ack`, `propose`, `bind`,
-  // `repo-check` and `export` have exitOverride, so every CommanderError comes from one
-  // of them: help and version keep their exit code 0, a usage error exits 2;
-  // anything else is an unexpected exception and also exits 2.
+  // Only `intake file`, `lint`, `lint-ack`, `propose`, `bind`, `repo-check`,
+  // `export`, `questions`, `answer`, `status` and `approve-check` have
+  // exitOverride, so every CommanderError comes from one of them: help and
+  // version keep their exit code 0, a usage error exits 2; anything else is
+  // an unexpected exception and also exits 2.
   if (err instanceof CommanderError) {
     // commander has already written the usage message to stderr.
     process.exitCode = err.exitCode === 0 ? 0 : 2;

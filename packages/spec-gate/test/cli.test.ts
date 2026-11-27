@@ -21,6 +21,8 @@ import {
   failing,
   keep,
   otherSpec,
+  staleBase,
+  STALE_OTHER,
   type Scenario,
 } from "./approve/helpers.js";
 import { runBounded, type Run } from "./canonical/helpers.js";
@@ -315,6 +317,13 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
   let SPEC_DELETED: Scenario;
   /** The checkout is at a merge of the head with the default branch, which moved on. */
   let MERGED: Scenario;
+  /**
+   * The host reports a base older than a default commit the head merged; that
+   * commit added a proposed spec, and the pull request deletes it.
+   */
+  let STALE_SPEC: Scenario;
+  /** As `STALE_SPEC`, with the settings put back to their text at the stale base. */
+  let STALE_CONFIG: Scenario;
 
   const OTHER = "specs/other/spec.md";
 
@@ -363,6 +372,9 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
     await merge.repo.sh("checkout", "-q", "--detach", merge.head);
     await merge.repo.sh("merge", "-q", "--no-ff", "-m", "merge", tip);
     MERGED = keep({ ...merge, tip });
+
+    STALE_SPEC = keep(await staleBase("spec-deleted"));
+    STALE_CONFIG = keep(await staleBase("config-restored"));
   }, 120_000);
 
   afterAll(async () => {
@@ -627,6 +639,38 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
       expect(failing(report)).toEqual([8]);
     });
 
+    it("condition 8 fails, exit 1, with a stale --base: a spec the default branch gained after the base and the pull request deletes", async () => {
+      hostOf(STALE_SPEC);
+      const run = await approveCheck(
+        argsFor(STALE_SPEC, { "--base": STALE_SPEC.c1 }),
+      );
+      expect(run.code).toBe(1);
+      const report = reportOf(run);
+      expect(report.reference).toBe(STALE_SPEC.c1);
+      expect(report.pull_request).toMatchObject({ base: STALE_SPEC.c1 });
+      expect(report.default_commit).not.toBe(STALE_SPEC.c1);
+      expect(cond(report, 8)).toMatchObject({
+        code: "repo-check-findings",
+        message: `the repository check reports 1 finding: spec-removed "${STALE_OTHER}"`,
+      });
+      expect(failing(report)).toEqual([8]);
+      expect(report.approved).toBe(false);
+    });
+
+    it("condition 7 fails, exit 1, with a stale --base: the settings are put back to their text at the base", async () => {
+      hostOf(STALE_CONFIG);
+      const run = await approveCheck(
+        argsFor(STALE_CONFIG, { "--base": STALE_CONFIG.c1 }),
+      );
+      expect(run.code).toBe(1);
+      const report = reportOf(run);
+      expect(report.reference).toBe(STALE_CONFIG.c1);
+      expect(report.default_commit).not.toBe(STALE_CONFIG.c1);
+      expect(cond(report, 7).code).toBe("spec-changes-config");
+      expect(failing(report)).toEqual([7]);
+      expect(report.approved).toBe(false);
+    });
+
     it("exits 1 when the host answers with an error, and nothing it said is printed", async () => {
       stub.on(REVIEWS_PATH, { status: 500, json: { message: "boom" } });
       const report = await notApproved(S);
@@ -713,12 +757,76 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
       await refused(argsFor(S, {}, TOKEN));
     });
 
-    it("has no option in the help", async () => {
-      const run = await approveCheck(["approve-check", "--help"]);
+    it("has no option in the help, which `spec-gate help approve-check` prints", async () => {
+      const run = await approveCheck(["help", "approve-check"]);
       expect(run.code).toBe(0);
       expect(run.stdout).toContain("--github-repo");
       expect(run.stdout).toContain("GITHUB_TOKEN");
       expect(run.stdout).not.toContain("--token");
+      expect(run.stdout).not.toContain("--help");
+    });
+
+    it("placed before the verb name by mistake, an option is handled by the program: it is echoed, with exit 1 and no report", async () => {
+      // The documented limit. Not the test token: the scan of every run
+      // would fail on it, which is the point of the limit.
+      const run = await approveCheck(
+        ["--token=some-value", ...argsFor(S)],
+        null,
+      );
+      expect(run.code).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain(
+        "error: unknown option '--token=some-value'",
+      );
+      expect(stub.hits).toEqual([]);
+    });
+  });
+
+  describe("exit 0 without a report", () => {
+    it.each([["--help"], ["-h"]])(
+      "%s among the arguments of the verb is no help request: exit 2",
+      async (flag) => {
+        for (const args of [
+          [...argsFor(S), flag],
+          ["approve-check", flag, ...argsFor(S).slice(1)],
+        ]) {
+          const stderr = await refused(args);
+          expect(stderr).toContain("an argument or option it does not know");
+        }
+      },
+    );
+
+    it.each([["--version"], ["-V"]])(
+      "%s among the arguments of the verb prints the version and exits 0, with no JSON line: the program handles it",
+      async (flag) => {
+        const run = await approveCheck([...argsFor(S), flag]);
+        expect(run.code).toBe(0);
+        expect(run.stdout).toBe(`${pkg.version}\n`);
+        expect(run.stdout).not.toContain("approved");
+        expect(stub.hits).toEqual([]);
+      },
+    );
+
+    it("a job that asks for the JSON line with approved true is not fooled by them", async () => {
+      const approved = (stdout: string): boolean => {
+        try {
+          return (
+            (JSON.parse(stdout) as { approved?: unknown }).approved === true
+          );
+        } catch {
+          return false;
+        }
+      };
+      expect(approved((await approveCheck(argsFor(S))).stdout)).toBe(true);
+      for (const args of [
+        [...argsFor(S), "--version"],
+        ["help", "approve-check"],
+        ["--help"],
+      ]) {
+        const run = await approveCheck(args);
+        expect(run.code).toBe(0);
+        expect(approved(run.stdout)).toBe(false);
+      }
     });
   });
 

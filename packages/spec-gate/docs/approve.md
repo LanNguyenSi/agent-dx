@@ -36,10 +36,12 @@ tree.
 | `host` | the host adapter |
 
 `repo`, `defaultRef` and `base` are resolved exactly as the lint resolves its
-git inputs, and are handed to the final lint unchanged; the repository check
-of condition 8 runs over the commits they resolve to. The reference commit
+git inputs, and are handed to the final lint unchanged. The reference commit
 is `base` when given, else the commit `defaultRef` names; it is the reference
-of the lint and the start of the diff base, and nothing else. The settings
+of the lint and the start of the lint's diff base, and nothing else.
+Conditions 7 and 8 do not measure from it: their diff base is the merge base
+of the head with the commit `defaultRef` names, whether `base` is given or
+not (see "7. Nothing under `.spec-gate/` changes"). The settings
 (`approvers`, `agent_identities`) are always read at the commit `defaultRef`
 names, the tip of the default branch, whether `base` is given or not. The head
 is `HEAD` of `repo`: the checkout must be at the head commit of the pull
@@ -78,8 +80,8 @@ holds) and a `message`.
 | 4 | `proposed-and-clean` | the spec is `proposed` at the head, the spec directory of the work tree is the one the head holds, and the final lint has no error |
 | 5 | `agent-identities-separate` | `agent_identities` is not empty and shares no account with `approvers` |
 | 6 | `review-enforced` | the host enforces a review for `specs/` and for `.spec-gate/`, and reports the last change under `.spec-gate/` |
-| 7 | `config-untouched` | no file under `.spec-gate/` differs between the diff base and the head |
-| 8 | `repo-check-clean` | the repository check has no finding between the diff base and the head: no protected spec disappears, changes its id, goes back to `draft` or loses its log |
+| 7 | `config-untouched` | no file under `.spec-gate/` differs between the merge base of the head with the default branch and the head |
+| 8 | `repo-check-clean` | the repository check has no finding between the merge base of the head with the default branch and the head: no protected spec disappears, changes its id, goes back to `draft` or loses its log |
 
 A condition that could not be evaluated does not hold. A host method that
 throws, rejects or returns a value outside its type gives `host-failed` for
@@ -236,11 +238,27 @@ Codes: `host-failed`, `approval-not-enforced`.
 
 ### 7. Nothing under `.spec-gate/` changes
 
-No path under `.spec-gate/` differs between the diff base
-(`merge-base(HEAD, reference commit)`) and the head. This is the lint rule
-`spec-changes-config`, called as it is: the first path component is compared
-without regard to case, and a change made only on the default branch after
-the fork does not count.
+No path under `.spec-gate/` differs between the diff base and the head. This
+is the lint rule `spec-changes-config`, called as it is: the first path
+component is compared without regard to case.
+
+The diff base of this condition and of condition 8 is
+`merge-base(HEAD, default commit)`, the default commit being the one
+`defaultRef` names. It is not taken from `base`. A base commit says where the
+pull request started, and a host can report one that is older than a commit
+of the default branch the head has merged since. Measured from that older
+commit, a settings file the pull request puts back to its old text shows no
+change, although merging the pull request would undo what the default branch
+decided in between (an approver taken off the list, for one). Measured from
+the default branch it shows. `base` must be the default commit or an ancestor
+of it, so this diff base is never the older of the two.
+
+A change the default branch made itself does not count, before or after the
+pull request merged it. The final lint of condition 4 keeps the base it was
+given: with a base older than a merged default commit that changed the
+settings, its own `spec-changes-config` reports that change and condition 4
+fails, while this condition holds. When the merge base with the default
+commit cannot be found, the condition is `git-failed`.
 
 Codes: `spec-changes-config`, `git-failed`.
 
@@ -248,9 +266,12 @@ Codes: `spec-changes-config`, `git-failed`.
 
 The repository check (see "Repository check" in [lint.md](lint.md)) has no
 finding. It is `checkRepository`, the function behind `spec-gate repo-check`,
-called as it is over the git inputs of this check: the tree of the diff base
-(`merge-base(HEAD, reference commit)`) and the tree of the head, both read
-from git. So a pull request that carries an approved spec and, beside it,
+called as it is over the tree of the diff base and the tree of the head, both
+read from git. The diff base is the one of condition 7,
+`merge-base(HEAD, default commit)`, whether `base` is given or not: a spec the
+default branch gained after the base the host reports, which the head has
+merged and then deletes, is in the tree the walk starts from. So a pull
+request that carries an approved spec and, beside it,
 deletes another proposed spec, changes its id, puts it back to `draft` or
 removes its `bindings.log` is not approved.
 
@@ -260,7 +281,8 @@ removes its `bindings.log` is not approved.
 - The whole tree is walked, not only `specs/`: a protected `spec.md` anywhere
   counts, as for `repo-check`.
 - The diff base is the merge base, not the tip of the default branch: a spec
-  merged there after the pull request forked is not counted as removed.
+  merged there after the pull request forked, which the head has not merged,
+  is not counted as removed.
 
 A finding is `repo-check-findings`. The message gives the number of findings
 and, for the first 20 in the order of the repository check (by path, then
@@ -288,7 +310,7 @@ time, no absolute path, and nothing a host adapter threw.
 | `approved` | true only when every condition holds |
 | `approve_reported` | true when an approving review stands on the head (condition 1 holds) and condition 5 is `approval-not-verifiable` or condition 6 is `approval-not-enforced`: an approve was seen, an approval is not claimed. Never true together with `approved` |
 | `head` | the commit that was checked |
-| `reference` | the reference commit of the final lint and of the diff base: `base` when given, else `default_commit` |
+| `reference` | the reference commit of the final lint: `base` when given, else `default_commit`. Conditions 7 and 8 measure from the merge base of `head` with `default_commit` |
 | `default_commit` | the commit `defaultRef` names; the settings were read there |
 | `digest` | the digest of the spec at the head, or `null` |
 | `pull_request` | `number`, `author`, `head`, `base`, `target_ref` as the host reports them, or `null` when the host failed |
@@ -363,10 +385,25 @@ and calls `checkApproval` once. The code is `runApproveCheck` in
 Only exit 0 means approved. A job that reads "the command ran" as a pass is
 wrong for 1 and for 2 alike.
 
-`--help` prints the usage and exits 0, as for every verb, and checks nothing.
-A job that takes the spec directory from the pull request (a changed path)
-passes it after `--`, so that a value which starts with `-` is read as the
-directory and refused, not as an option.
+Exit 0 without a report exists, and a job must not read it as an approval:
+
+- `--version` and `-V` anywhere on the command line, among the arguments of
+  the verb too, print the version and exit 0. They are options of the
+  program, which reads them before the verb does.
+- `spec-gate help approve-check` and `spec-gate --help` print help and exit 0.
+
+So a job must also require the JSON line with `approved: true` on stdout;
+help and version print none. `--help` and `-h` among the arguments of the
+verb are no help request: the verb has no help option of its own, they are
+arguments it does not know, and the exit code is 2. A job that takes the spec
+directory from the pull request (a changed path) passes it after `--`, so
+that a value which starts with `-` is read as the directory and refused, not
+as an option.
+
+All of this holds from the verb name on. Arguments before the verb name are
+handled by the program, not by the verb: an option the program does not know
+there is repeated on stderr with the usage, and the exit code is 1 with an
+empty stdout, not 2.
 
 A host that answers with an error or cannot be reached is not a refusal: the
 conditions that needed its facts are `host-failed`, the report is printed and
@@ -384,8 +421,10 @@ The token is not printed:
   the host that repeats it (see "Errors and limits");
 - a refusal names the input that is wrong and never its value;
 - an argument or option the verb does not know is refused without being
-  repeated on stderr, so a token passed as `--token=...` by mistake is not
-  printed either;
+  repeated on stderr, so a token passed as `--token=...` by mistake after the
+  verb name is not printed either. Before the verb name the program handles
+  the argument and repeats it on stderr (see "Exit codes"): a token put
+  there by mistake is printed;
 - before anything is written, both outputs are searched for the token, as it
   is and as a JSON text holds it. An output that holds it is withheld as a
   whole and the verb exits 2.
@@ -402,7 +441,9 @@ The permissions the token needs are listed under "Token and permissions".
   never fetches: it needs the commit `--default-ref` names (for example
   `refs/remotes/origin/main`) and the merge base of that commit and the head.
 - `--base` is optional. When given, it must be the base commit the host
-  reports for the pull request (`base-mismatch` otherwise).
+  reports for the pull request (`base-mismatch` otherwise). It sets the
+  reference of the final lint; conditions 7 and 8 measure from the default
+  branch with and without it.
 - For a host other than github.com, give its API root as `--api-url`.
 - Whether the pull request can change the job that runs the check is a
   property of the host setup, outside this command.

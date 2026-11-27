@@ -24,6 +24,7 @@ import {
   LintGitError,
   isAncestor,
   isCommit,
+  mergeBase,
   resolveHead,
   resolveRef,
 } from "../lint/git/index.js";
@@ -388,7 +389,34 @@ function reviewEnforced(s: Subject): Outcome {
   return holds(`the host enforces a review for ${REVIEW_PATHS.join(" and ")}`);
 }
 
-/** 7: the pull request changes nothing under `.spec-gate/`, judged as the lint judges it. */
+/**
+ * The git inputs of conditions 7 and 8: the head against the tip of the
+ * default branch, whatever base commit was given.
+ *
+ * The diff base is `merge-base(head, default commit)`. A base commit only
+ * says where the pull request started; the host can report one that is
+ * older than a default commit the head has merged since. Measured from that
+ * older commit, a file the pull request puts back to its old content shows
+ * no change, and a spec the default branch gained in between is not in the
+ * tree the walk starts from. Measured from the default branch, both show.
+ * A base commit is an ancestor of the default commit (the git inputs refuse
+ * any other), so this diff base is never the older one.
+ */
+function againstDefault(s: Subject): GitInputs {
+  const diffBase = mergeBase(s.git.repo, s.git.head, s.defaultCommit);
+  if (diffBase === null) {
+    throw new LintGitError(
+      "git-failed",
+      "the head and the default commit share no history",
+    );
+  }
+  return { ...s.git, reference: s.defaultCommit, diffBase };
+}
+
+/**
+ * 7: the pull request changes nothing under `.spec-gate/`, judged by the
+ * rule of the lint over the diff base of `againstDefault`.
+ */
 function configUntouched(s: Subject): Outcome {
   const absent = { state: "absent" } as const;
   const ctx: RuleContext = {
@@ -403,7 +431,7 @@ function configUntouched(s: Subject): Outcome {
     status: null,
     profile: "full",
     mode: "final",
-    git: s.git,
+    git: againstDefault(s),
   };
   const findings = checkSpecChangesConfig(ctx);
   if (findings.some((finding) => finding.code !== "spec-changes-config")) {
@@ -419,7 +447,7 @@ function configUntouched(s: Subject): Outcome {
     );
   }
   return holds(
-    "no file under .spec-gate/ differs between the diff base and the head",
+    "no file under .spec-gate/ differs between the merge base with the default branch and the head",
   );
 }
 
@@ -429,13 +457,13 @@ export const MAX_LISTED_FINDINGS = 20;
 /**
  * 8: the repository check has no finding, judged as `repo-check` judges it.
  *
- * It runs over the git inputs the lint got: the trees of the diff base and
- * of the head, both read from git. The work tree is not asked, so a spec
- * the head deletes stays deleted whatever the checkout holds, and the walk
- * covers the whole tree, not only `specs/`.
+ * It runs over the diff base of `againstDefault` and the head, both trees
+ * read from git. The work tree is not asked, so a spec the head deletes
+ * stays deleted whatever the checkout holds, and the walk covers the whole
+ * tree, not only `specs/`.
  */
 function repoCheckClean(s: Subject): Outcome {
-  const { findings } = checkRepository(s.git);
+  const { findings } = checkRepository(againstDefault(s));
   if (findings.some((finding) => finding.code === "tree-too-large")) {
     return fails(
       "tree-too-large",
@@ -455,7 +483,7 @@ function repoCheckClean(s: Subject): Outcome {
     );
   }
   return holds(
-    "no protected spec of the diff base disappears, changes its id, goes back to draft or loses its log at the head",
+    "no protected spec of the merge base with the default branch disappears, changes its id, goes back to draft or loses its log at the head",
   );
 }
 
