@@ -8,10 +8,17 @@
  */
 import { markdownCell } from "../formats/markdown.js";
 import { CONTENT_RULES } from "./rules/content.js";
+import { EVIDENCE_RULES } from "./rules/evidence.js";
 import { FORM_RULES } from "./rules/form.js";
 import { BINDINGS_LOG_RULES } from "./rules/bindings-log.js";
 import { REF_RULES } from "./rules/refs.js";
-import type { RuleContext, RuleDef, SkipReason, SkippedRule } from "./types.js";
+import type {
+  InputName,
+  RuleContext,
+  RuleDef,
+  SkipReason,
+  SkippedRule,
+} from "./types.js";
 
 export const RULE_ID_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
@@ -25,7 +32,7 @@ const ENGINE_RULES: readonly RuleDef[] = [
     gated: false,
     ackable: false,
     summary:
-      "A required file is missing, or a file is a link, not a regular file, over the size limit, not UTF-8 or unreadable.",
+      "A required file is missing, or a file is a link, not a regular file, over the size limit, not UTF-8 or unreadable; a link, subdirectory or other non-regular entry under evidence/ is reported here too.",
     needs: [],
   },
   {
@@ -34,7 +41,8 @@ const ENGINE_RULES: readonly RuleDef[] = [
     profiles: BOTH,
     gated: false,
     ackable: false,
-    summary: "A file does not parse; carries the format error's code and path.",
+    summary:
+      "A file does not parse; carries the format error's code and path. An entry of evidence/ whose name is not TP-<n>.jsonl is reported here (code evidence-layout).",
     needs: [],
   },
   {
@@ -108,6 +116,7 @@ export const RULES: readonly RuleDef[] = [
   ...CONTENT_RULES,
   ...REF_RULES,
   ...BINDINGS_LOG_RULES,
+  ...EVIDENCE_RULES,
 ];
 
 export function findRule(
@@ -131,8 +140,11 @@ export function skipReason(rule: RuleDef, ctx: RuleContext): SkipReason | null {
   if (!rule.profiles.includes(ctx.profile)) return "profile";
   if (rule.gated && !gateOpen(ctx)) return "gate";
   if (rule.needsGit === true && ctx.git === undefined) return "no-git";
-  const needed = rule.needs.map((name) => ctx.inputs[name].state);
-  const used = (rule.uses ?? []).map((name) => ctx.inputs[name].state);
+  // A synthetic context (see `LintInputs.evidence`) may leave an input out;
+  // a missing entry reads as absent.
+  const stateOf = (name: InputName) => ctx.inputs[name]?.state ?? "absent";
+  const needed = rule.needs.map(stateOf);
+  const used = (rule.uses ?? []).map(stateOf);
   if ([...needed, ...used].includes("failed")) return "input-failed";
   if (needed.includes("absent")) return "input-absent";
   return null;

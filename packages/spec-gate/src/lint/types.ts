@@ -8,6 +8,7 @@
  */
 import type {
   Bindings,
+  EvidenceEnvelope,
   Questions,
   Spec,
   SpecGateConfig,
@@ -90,8 +91,18 @@ export const INPUT_NAMES = [
   "questions",
   "triage",
   "meta",
+  "evidence",
 ] as const;
 export type InputName = (typeof INPUT_NAMES)[number];
+
+/**
+ * The parsed `evidence/` directory: test-plan row ID to the envelopes of
+ * its `TP-<n>.jsonl`, in file-name order. `absent` when the directory is
+ * not there; `failed` when any entry of it is a layout violation or any
+ * file could not be read or parsed, so a broken file gives its own `file`
+ * or `format` findings and no follow-up evidence findings.
+ */
+export type EvidenceFiles = Record<string, EvidenceEnvelope[]>;
 
 export interface LintInputs {
   spec: Loaded<Spec>;
@@ -100,6 +111,12 @@ export interface LintInputs {
   questions: Loaded<Questions>;
   triage: Loaded<Triage>;
   meta: Loaded<LintSourceMeta>;
+  /**
+   * The loader fills this for every run. A synthetic context outside the
+   * lint runner (the approval check's `spec-changes-config` call) may
+   * leave it out; a missing entry reads as `absent`.
+   */
+  evidence?: Loaded<EvidenceFiles>;
 }
 
 /**

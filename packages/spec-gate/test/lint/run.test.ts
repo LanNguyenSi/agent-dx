@@ -110,7 +110,9 @@ describe("an ackable rule must name its target", () => {
 /**
  * The rules the registry itself skips in a plain run: three gated at
  * `draft` (one of them, bindings-log, also needs a repository and runs in
- * both profiles) and four that need a repository.
+ * both profiles), four reference-state rules that need a repository, and
+ * stale-evidence, which needs a repository and runs in the full profile
+ * only.
  */
 const NEEDS_GIT = new Set([
   "base-commit-not-ancestor",
@@ -124,6 +126,7 @@ const REGISTRY_SKIPS = new Set([
   "residual-open",
   ...GATED_IN_BOTH_PROFILES,
   ...NEEDS_GIT,
+  "stale-evidence",
 ]);
 
 /** Skips of rules other than the ones the registry itself skips in a plain run. */
@@ -176,6 +179,7 @@ describe("ack-unused only for a rule that was evaluated", () => {
     expect(final.acked.map((f) => f.rule)).toEqual(["custom-rule"]);
     // only the rules that need a repository are left skipped under --final
     expect(final.skipped.map((s) => s.reason)).toEqual([
+      "no-git",
       "no-git",
       "no-git",
       "no-git",
@@ -354,7 +358,7 @@ describe("ack-unused only for a rule that was evaluated", () => {
 });
 
 describe("the skipped list", () => {
-  it("holds the two status-gated rules and the four rules that need a repository when everything else ran", () => {
+  it("holds the two status-gated rules and the five rules that need a repository when everything else ran", () => {
     expect(lint(specDir(), RULES).skipped).toEqual([
       { rule: "base-commit-not-ancestor", reason: "no-git" },
       { rule: "binding-status", reason: "gate" },
@@ -362,6 +366,7 @@ describe("the skipped list", () => {
       { rule: "commands-ref-not-ancestor", reason: "no-git" },
       { rule: "residual-open", reason: "gate" },
       { rule: "spec-changes-config", reason: "no-git" },
+      { rule: "stale-evidence", reason: "no-git" },
       { rule: "static-command-unknown", reason: "no-git" },
     ]);
   });

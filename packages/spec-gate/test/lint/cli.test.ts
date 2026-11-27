@@ -54,6 +54,7 @@ describe("spec-gate lint", () => {
         { rule: "commands-ref-not-ancestor", reason: "no-git" },
         { rule: "residual-open", reason: "gate" },
         { rule: "spec-changes-config", reason: "no-git" },
+        { rule: "stale-evidence", reason: "no-git" },
         { rule: "static-command-unknown", reason: "no-git" },
       ],
       counts: { errors: 0, warnings: 0, acked: 0 },

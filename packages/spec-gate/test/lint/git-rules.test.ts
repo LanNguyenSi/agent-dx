@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { expectedCommandsDigest } from "../../src/formats/index.js";
 import { RULES, type RuleDef } from "../../src/lint/index.js";
 import {
   COMMANDS_OK,
   COMMANDS_WITH_LINT,
+  COMMANDS_WITH_SELECTOR,
+  EVIDENCE_BINDINGS,
+  EVIDENCE_PLAN,
   REMOTE_MAIN,
   Repo,
+  SPEC_REL,
   STATIC_PLAN,
   gitCase,
   lintIn,
@@ -818,6 +823,312 @@ describe("bindings-log", { timeout: 60_000 }, () => {
       return lintGit(repo);
     },
   );
+});
+
+describe("stale-evidence", () => {
+  const SELECTOR_TEMPLATE = ["npx", "vitest", "run", "-t", "{selector}"];
+  const TYPECHECK_TEMPLATE = ["npm", "run", "typecheck"];
+  const SELECTOR_DIGEST = expectedCommandsDigest(SELECTOR_TEMPLATE);
+  const TYPECHECK_DIGEST = expectedCommandsDigest(TYPECHECK_TEMPLATE);
+  const FOREIGN = "f".repeat(40);
+
+  const envelope = (
+    commit: string,
+    digest: string,
+    over: Record<string, unknown> = {},
+  ) =>
+    `${JSON.stringify({
+      schema_version: 1,
+      phase: "baseline",
+      producer: "host",
+      time: "2000-01-31T12:00:00Z",
+      commit,
+      dirty: false,
+      commands_digest: digest,
+      selector: null,
+      command: SELECTOR_TEMPLATE,
+      exit: 0,
+      result: "pass",
+      ...over,
+    })}\n`;
+
+  const cleanTp2 = (commit: string) =>
+    envelope(commit, SELECTOR_DIGEST, { selector: "login works" });
+  const cleanTp3 = (commit: string) => envelope(commit, TYPECHECK_DIGEST);
+
+  async function evidenceHistory(): Promise<{ repo: Repo; c1: string }> {
+    const repo = await Repo.create();
+    await repo.commit({ "README.md": "one\n" }, "init");
+    const c1 = await repo.commit(
+      { ".spec-gate/commands.yaml": COMMANDS_WITH_SELECTOR },
+      "commands",
+    );
+    await repo.setRef(REMOTE_MAIN, c1);
+    await repo.checkout("pr", c1);
+    return { repo, c1 };
+  }
+
+  function specWithEvidence(ref: string, files: Record<string, string>) {
+    return {
+      ...specFiles({ base: ref, ref, plan: EVIDENCE_PLAN }),
+      [`${SPEC_REL}/bindings.yaml`]: EVIDENCE_BINDINGS,
+      ...files,
+    };
+  }
+
+  gitCase(
+    "stale-evidence",
+    "pass",
+    "clean baseline envelopes; a closure envelope with a foreign commit, digest, selector and dirty flag is never stale",
+    async () => {
+      const { repo, c1 } = await evidenceHistory();
+      await repo.commit(
+        specWithEvidence(c1, {
+          [`${SPEC_REL}/evidence/TP-2.jsonl`]:
+            cleanTp2(c1) +
+            envelope(
+              FOREIGN,
+              "f".repeat(64),
+              { phase: "closure", dirty: true, selector: "bogus", result: "fail" },
+            ),
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+        }),
+        "spec and evidence",
+      );
+      return lintIn(repo, DEFAULT);
+    },
+  );
+
+  async function oneTp2Change(
+    tp2Line: string,
+  ): Promise<ReturnType<typeof lintIn>> {
+    const { repo, c1 } = await evidenceHistory();
+    await repo.commit(
+      specWithEvidence(c1, {
+        [`${SPEC_REL}/evidence/TP-2.jsonl`]: tp2Line,
+        [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+      }),
+      "spec and evidence",
+    );
+    return lintIn(repo, DEFAULT);
+  }
+
+  const staleAt = (code: string) =>
+    expect.objectContaining({
+      level: "warning",
+      file: "evidence/TP-2.jsonl",
+      path: "[0]",
+      line: 1,
+      id: "TP-2",
+      code,
+    });
+
+  gitCase(
+    "stale-evidence",
+    "fail",
+    "cause commit: the envelope commit is no longer the base_commit",
+    async () => {
+      const report = await oneTp2Change(
+        envelope(FOREIGN, SELECTOR_DIGEST, { selector: "login works" }),
+      );
+      expect(ofRule(report, "stale-evidence")).toEqual([staleAt("commit-mismatch")]);
+      return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
+    "fail",
+    "cause dirty: the envelope was gathered on a dirty work tree",
+    async () => {
+      const { repo, c1 } = await evidenceHistory();
+      await repo.commit(
+        specWithEvidence(c1, {
+          [`${SPEC_REL}/evidence/TP-2.jsonl`]: envelope(c1, SELECTOR_DIGEST, {
+            selector: "login works",
+            dirty: true,
+          }),
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+        }),
+        "spec and evidence",
+      );
+      const report = lintIn(repo, DEFAULT);
+      expect(ofRule(report, "stale-evidence")).toEqual([staleAt("dirty")]);
+      return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
+    "fail",
+    "cause digest: the digest of the command with the selector substituted in is not the digest of the command set at commands_ref",
+    async () => {
+      const { repo, c1 } = await evidenceHistory();
+      await repo.commit(
+        specWithEvidence(c1, {
+          [`${SPEC_REL}/evidence/TP-2.jsonl`]: envelope(
+            c1,
+            expectedCommandsDigest([
+              "npx",
+              "vitest",
+              "run",
+              "-t",
+              "login works",
+            ]),
+            { selector: "login works" },
+          ),
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+        }),
+        "spec and evidence",
+      );
+      const report = lintIn(repo, DEFAULT);
+      expect(ofRule(report, "stale-evidence")).toEqual([
+        staleAt("digest-mismatch"),
+      ]);
+      return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
+    "fail",
+    "cause selector: the envelope selector is not the row's binding selector",
+    async () => {
+      const { repo, c1 } = await evidenceHistory();
+      await repo.commit(
+        specWithEvidence(c1, {
+          [`${SPEC_REL}/evidence/TP-2.jsonl`]: envelope(c1, SELECTOR_DIGEST, {
+            selector: "login broken",
+          }),
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+        }),
+        "spec and evidence",
+      );
+      const report = lintIn(repo, DEFAULT);
+      expect(ofRule(report, "stale-evidence")).toEqual([
+        staleAt("selector-mismatch"),
+      ]);
+      return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
+    "fail",
+    "a commands_ref that failed the ancestry check: the digest is not judged and the rule says so once",
+    async () => {
+      const { repo } = await evidenceHistory();
+      const fork = await repo.commit({ "fork.txt": "f\n" }, "fork commands");
+      await repo.commit(
+        {
+          ...specWithEvidence(fork, {
+            [`${SPEC_REL}/evidence/TP-2.jsonl`]: cleanTp2(fork),
+            [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(fork),
+          }),
+        },
+        "spec naming the fork",
+      );
+      const report = lintIn(repo, DEFAULT);
+      expect(ofRule(report, "commands-ref-not-ancestor")).toHaveLength(1);
+      expect(ofRule(report, "stale-evidence")).toEqual([
+        expect.objectContaining({
+          file: "repo:.spec-gate/commands.yaml",
+          path: "$",
+          id: "commands",
+          code: "commands-ref-untrusted",
+        }),
+      ]);
+      return report;
+    },
+  );
+
+  gitCase(
+    "stale-evidence",
+    "fail",
+    "no command set at commands_ref: the digest is not judged and the rule says so once",
+    async () => {
+      const { repo, c1 } = await evidenceHistory();
+      // c1's parent holds no .spec-gate/commands.yaml; base_commit stays c1.
+      const c0 = await repo.sh("rev-parse", `${c1}^`);
+      await repo.commit(
+        {
+          ...specFiles({ base: c1, ref: c0, plan: EVIDENCE_PLAN }),
+          [`${SPEC_REL}/bindings.yaml`]: EVIDENCE_BINDINGS,
+          [`${SPEC_REL}/evidence/TP-2.jsonl`]: cleanTp2(c1),
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: cleanTp3(c1),
+        },
+        "spec naming the pre-commands commit",
+      );
+      const report = lintIn(repo, DEFAULT);
+      expect(ofRule(report, "stale-evidence")).toEqual([
+        expect.objectContaining({
+          file: "repo:.spec-gate/commands.yaml",
+          id: "commands",
+          code: "commands-file-missing",
+        }),
+      ]);
+      return report;
+    },
+  );
+
+  describe("the command set is read at commands_ref, not at the moved default tip", () => {
+    const NEW_TEMPLATE = ["npm", "run", "check"];
+    const NEW_DIGEST = expectedCommandsDigest(NEW_TEMPLATE);
+    const MOVED_COMMANDS = COMMANDS_WITH_SELECTOR.replace(
+      'argv: ["npm", "run", "typecheck"]',
+      `argv: ${JSON.stringify(NEW_TEMPLATE)}`,
+    );
+
+    async function movedTip(tp3Digest: string) {
+      const { repo, c1 } = await evidenceHistory();
+      await repo.commit(
+        specWithEvidence(c1, {
+          [`${SPEC_REL}/evidence/TP-2.jsonl`]: cleanTp2(c1),
+          [`${SPEC_REL}/evidence/TP-3.jsonl`]: envelope(c1, tp3Digest),
+        }),
+        "spec and evidence",
+      );
+      // The default branch moves on and changes the typecheck command.
+      await repo.checkout("main");
+      const c2 = await repo.commit(
+        { ".spec-gate/commands.yaml": MOVED_COMMANDS },
+        "commands move on",
+      );
+      await repo.setRef(REMOTE_MAIN, c2);
+      await repo.checkout("pr");
+      return { repo, c1, c2 };
+    }
+
+    gitCase(
+      "stale-evidence",
+      "pass",
+      "the digest of the command set at commands_ref stays fresh when the default tip changed the command",
+      async () => {
+        const { repo } = await movedTip(TYPECHECK_DIGEST);
+        const report = lintIn(repo, DEFAULT);
+        expect(ofRule(report, "base-commit-not-ancestor")).toEqual([]);
+        return report;
+      },
+    );
+
+    gitCase(
+      "stale-evidence",
+      "fail",
+      "the digest of the command set at the default tip is stale against commands_ref",
+      async () => {
+        const { repo } = await movedTip(NEW_DIGEST);
+        const report = lintIn(repo, DEFAULT);
+        expect(ofRule(report, "stale-evidence")).toEqual([
+          expect.objectContaining({
+            file: "evidence/TP-3.jsonl",
+            id: "TP-3",
+            code: "digest-mismatch",
+          }),
+        ]);
+        return report;
+      },
+    );
+  });
 });
 
 describe("rule coverage guard", () => {
