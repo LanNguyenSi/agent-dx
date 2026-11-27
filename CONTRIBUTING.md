@@ -127,7 +127,11 @@ Every package that `publish-npm.yml` publishes is released the same way:
    re-dispatched onto `latest`.
 
 okf-kit and agent-primitives add the package-specific steps below;
-orchestrator-workflow and friction-log need nothing beyond these steps.
+friction-log needs nothing beyond these steps. orchestrator-workflow adds one:
+in the release commit, move every `npx orchestrator-workflow@<version>` pin in
+the root `README.md`, `packages/orchestrator-workflow/README.md` and
+`packages/orchestrator-workflow/INSTALL-AGENT.md` to the new version. The pin
+test fails otherwise, and the tag cannot publish.
 
 ### Adding a published package
 

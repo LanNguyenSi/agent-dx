@@ -52,7 +52,7 @@ reinstall conflict check does.
 ### Manual and advanced CLI installation
 
 ```bash
-npx orchestrator-workflow init
+npx orchestrator-workflow@0.53.0 init
 ```
 
 Run it at the root of the target repository: **without a directory argument,
@@ -70,10 +70,10 @@ cannot infer safely.
 Non-interactive:
 
 ```bash
-npx orchestrator-workflow init --yes
-npx orchestrator-workflow init --harness claude,codex,opencode --models "implementer=sonnet,reviewer=opus" --yes
-npx orchestrator-workflow init --harness codex --routing ./routing.json --codex-catalog ./codex-catalog.json --tiers --yes
-npx orchestrator-workflow init --profile minimal --yes
+npx orchestrator-workflow@0.53.0 init --yes
+npx orchestrator-workflow@0.53.0 init --harness claude,codex,opencode --models "implementer=sonnet,reviewer=opus" --yes
+npx orchestrator-workflow@0.53.0 init --harness codex --routing ./routing.json --codex-catalog ./codex-catalog.json --tiers --yes
+npx orchestrator-workflow@0.53.0 init --profile minimal --yes
 ```
 
 A run is interactive only when `--yes` is absent and both stdin and stdout
@@ -93,7 +93,7 @@ recording `harnesses: []`. `none` combined with a real harness name
 picking one.
 
 ```bash
-npx orchestrator-workflow init --harness none --yes
+npx orchestrator-workflow@0.53.0 init --harness none --yes
 ```
 
 See [Install reference](docs/install-reference.md) for the exact re-run
@@ -165,7 +165,7 @@ and task-slicer. See [Role profile reference](docs/role-profile-reference.md)
 for the full trigger list.
 
 ```bash
-npx orchestrator-workflow init --profile minimal --yes
+npx orchestrator-workflow@0.53.0 init --profile minimal --yes
 ```
 
 Interactively (no `--yes`), the installer asks one additional question —
@@ -260,7 +260,7 @@ with are left alone.
 ## Uninstall
 
 ```bash
-npx orchestrator-workflow uninstall
+npx orchestrator-workflow@0.53.0 uninstall
 ```
 
 Removes exactly what `init` created, driven by the manifest's file hashes:
@@ -296,7 +296,7 @@ every flag, exit code, and fence-detection edge case.
 - [Model routing reference](docs/model-routing-reference.md): the default-model table, the `--routing` JSON shape, the Codex default routing table, opencode model resolution, and the effort-tiers mechanics.
 - [Operator-level install](docs/operator-install.md): the full `setup`/`apply`/`doctor`/`adopt` command reference.
 - [`validate-review-report` CLI reference](docs/validate-review-report.md): every flag, exit code, and fence-detection edge case.
-- [Curated knowledge bundle](docs/okf/index.md): the OKF-format reference docs for this package's own contracts and mechanics, at `docs/okf/`, the default location a repository falls back to when `knowledge` in `.ai/workflow/manifest.json` is unset.
+- [Curated knowledge bundle](https://github.com/LanNguyenSi/agent-dx/tree/master/packages/orchestrator-workflow/docs/okf): the OKF-format reference docs for this package's own contracts and mechanics, at `docs/okf/`, the default location a repository falls back to when `knowledge` in `.ai/workflow/manifest.json` is unset.
 - [agentic-coding-playbook](../agentic-coding-playbook): the extended role prompts and organizational guidance this kit's skill references.
 
 ## Development
