@@ -1809,6 +1809,28 @@ describe(
       expect(proposing.approved).toBe(false);
     });
 
+    it("a second pull request with the same commits, squashed later into a commit that changes nothing: its reviewed commits hold the spec, no measured step changes it, spec-not-in-merge", async () => {
+      let first = await land(await build(), "squash");
+      first = await afterMerge(first, { "later-1.txt": "1\n" });
+      first = await afterMerge(first, { "later-2.txt": "2\n" });
+      const again = await squashOnto(first, "pr", first.head);
+      const report = await checkLanded(again);
+      // Two steps, the empty squash and an unrelated commit: the spec is
+      // proposed with one digest at every end of them.
+      expect(report.merge!.commits).toBe(2);
+      expect(
+        await git(again.dir, [
+          "diff",
+          "--name-only",
+          `${again.merge}~1`,
+          again.merge,
+        ]),
+      ).toBe("");
+      expect(specDigestAt(again.dir, first.c1, SPEC_REL)).toBeNull();
+      expect(cond(report, 3).code).toBe("spec-not-in-merge");
+      expect(failing(report)).toEqual([3]);
+    });
+
     it("the pull request that brought the spec passes, for each way it was merged", async () => {
       for (const m of [MERGE, SQUASH, REBASE]) {
         expect(cond(await checkLanded(m), 3)).toMatchObject({
