@@ -779,10 +779,75 @@ test("runSync dry-run records the merge command and executes nothing", async () 
   assert.equal(result.actions.at(-1).command, "git merge --ff-only refs/remotes/origin/main");
 });
 
+test("runSync dry-run reports the branch before the planned checkout", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-dry-current-"));
+  const repo = setupClonedRepo(root, "feature-repo");
+  git(repo.repoPath, ["checkout", "-b", "feature"]);
+
+  const [result] = await runSync(
+    discoverRepositories(root, { includeCurrent: false, includeHidden: false }),
+    { protectedBranches: ["main"], includeDirty: false, dryRun: true }
+  );
+
+  assert.equal(result.outcome, "ok");
+  assert.equal(result.currentBranch, "feature");
+  assert.ok(
+    result.actions.some((action) => action.command === "git checkout --end-of-options main"),
+    JSON.stringify(result.actions)
+  );
+});
+
+test("runSync real run reports the target branch after checkout", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-real-current-"));
+  const repo = setupClonedRepo(root, "feature-repo");
+  git(repo.repoPath, ["checkout", "-b", "feature"]);
+
+  const [result] = await runSync(
+    discoverRepositories(root, { includeCurrent: false, includeHidden: false }),
+    { protectedBranches: ["main"], includeDirty: false, dryRun: false }
+  );
+
+  assert.equal(result.outcome, "ok");
+  assert.equal(result.currentBranch, "main");
+  assert.equal(git(repo.repoPath, ["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+});
+
+test("runSync dry-run on the target branch reports the target", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-batch-dry-ontarget-"));
+  setupClonedRepo(root, "main-repo");
+
+  const [result] = await runSync(
+    discoverRepositories(root, { includeCurrent: false, includeHidden: false }),
+    { protectedBranches: ["main"], includeDirty: false, dryRun: true }
+  );
+
+  assert.equal(result.outcome, "ok");
+  assert.equal(result.currentBranch, "main");
+});
+
 test("parseArgs --concurrency: absent, valid, equals form", () => {
   assert.equal(parseArgs(["fetch", "/tmp/ws"]).fetchConcurrency, undefined);
   assert.equal(parseArgs(["fetch", "/tmp/ws", "--concurrency", "3"]).fetchConcurrency, 3);
   assert.equal(parseArgs(["fetch", "/tmp/ws", "--concurrency=5"]).fetchConcurrency, 5);
+});
+
+test("parseArgs accepts the equals form only for value options", () => {
+  const parsed = parseArgs([
+    "status",
+    "--root=/tmp/ws",
+    "--protected=main,develop",
+    "--only=api",
+    "--exclude=legacy",
+    "--concurrency=4"
+  ]);
+  assert.equal(parsed.root, "/tmp/ws");
+  assert.deepEqual(parsed.protectedBranches, ["main", "develop"]);
+  assert.deepEqual(parsed.only, ["api"]);
+  assert.deepEqual(parsed.exclude, ["legacy"]);
+  assert.equal(parsed.fetchConcurrency, 4);
+
+  assert.throws(() => parseArgs(["sync", "--dry-run=1"]), /Unknown option: --dry-run=1/);
+  assert.throws(() => parseArgs(["sync", "--json=1"]), /Unknown option: --json=1/);
 });
 
 test("parseArgs --concurrency rejects 0, negatives and non-numeric values", () => {

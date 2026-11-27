@@ -816,7 +816,9 @@ async function syncRepository(repo, options, context = createRunContext()) {
     result
   );
 
-  result.currentBranch = targetBranch;
+  if (!options.dryRun) {
+    result.currentBranch = targetBranch;
+  }
   return result;
 }
 
