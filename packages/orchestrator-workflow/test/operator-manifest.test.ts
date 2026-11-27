@@ -1157,3 +1157,29 @@ describe("readOperatorManifest: defaults recorded without routing", () => {
     });
   });
 });
+
+describe("readOperatorManifest: model ids with internal whitespace or control characters", () => {
+  it("drops an operator default model holding an internal carriage return, as other invalid ids are", () => {
+    writeFileSync(
+      join(home, "manifest.json"),
+      JSON.stringify({
+        kit: "orchestrator-workflow",
+        schemaVersion: 1,
+        defaults: {
+          harnesses: ["claude"],
+          profile: "full",
+          tiers: false,
+          models: { implementer: "sonnet", reviewer: "son\rnet" },
+        },
+        targets: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    // The CR-carrying id never reaches the defaults; the role falls back
+    // to the downstream default the way every other invalid id does.
+    expect(readOperatorManifest(home)?.defaults.models).toEqual({
+      implementer: "sonnet",
+    });
+  });
+});

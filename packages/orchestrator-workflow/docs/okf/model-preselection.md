@@ -35,7 +35,7 @@ Five roles get a per-role model since 0.21.0 (four before it): `explorer`,
 (`Role` type and `ROLES`,
 `packages/orchestrator-workflow/src/models.ts:1-4#"export const ROLES: Role[] = ["`). The orchestrator
 itself is deliberately excluded from this map; it always runs on the
-session's main model (`src/models.ts:281-283#"not configured here."`, policy restated below). Since
+session's main model (`src/models.ts:294-296#"not configured here."`, policy restated below). Since
 0.15.0 every role in `ROLES` still gets a preselected model regardless of
 `--profile` (models are resolved before roles are filtered down to what the
 profile installs); see [install-fence-mechanics.md](install-fence-mechanics.md)
@@ -44,7 +44,7 @@ for how `--profile` scopes which roles get an actual subagent file: since
 `task-slicer` already were, via the same `MINIMAL_PROFILE_ROLES` set
 (`src/models.ts:38#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
 
-Defaults (`src/models.ts:285-290#"as Record<Role, string>;"`, derived from the class of each role's default tier in `ROLE_TIER_DEFS`, documented in
+Defaults (`src/models.ts:298-303#"as Record<Role, string>;"`, derived from the class of each role's default tier in `ROLE_TIER_DEFS`, documented in
 `packages/orchestrator-workflow/docs/model-routing-reference.md:24#"a second opinion at escalation, only useful when at least as strong"`):
 
 | Role | Default | Rationale (docs/model-routing-reference.md) |
@@ -71,11 +71,11 @@ below.
 
 1. **CLI input.** `orchestrator-workflow init` accepts `--models
    "role=model,role=model"`, parsed by `parseModelsSpec` on top of a base
-   map (`src/models.ts:106-134#"return result;"`). Unknown roles and malformed pairs throw;
-   each value is validated by `assertValidModelId`, which rejects empty
-   strings, leading/trailing whitespace, and any of `:"'#\n\\` since the
-   value is interpolated as a plain YAML scalar into subagent frontmatter
-   (`src/models.ts:91-101#"or a plain id like anthropic/claude-opus-4-8"`).
+   map (`src/models.ts:119-147#"return result;"`). Unknown roles and malformed pairs throw;
+   each value is validated by `assertValidModelId`: empty, trim, `:"'#\n\\`, plus every
+   whitespace/control char (`MODEL_ID_FORBIDDEN_CHARS`, shared with `assertModelId`
+   in `routing.ts`); the value lands in frontmatter as a plain YAML scalar
+   (`src/models.ts:100-114#"or a plain id like anthropic/claude-opus-4-8"`).
 2. **Base resolution + interactive fallback.** The CLI builds the base map
    as `DEFAULT_MODELS` overlaid with the *previous* manifest's models (if
    any), then applies `--models` on top; when running interactively with no
@@ -123,7 +123,7 @@ below.
 
 - **Claude Code.** `composeClaudeAgent` always emits a `model:` line;
   `claudeModelValue` is the identity function, so aliases and full ids pass
-  through unchanged (`src/models.ts:292-293#"return (MODEL_ALIASES as string[]).includes(value);"`, `src/init.ts:593-604#"disallowedTools: Edit, Write, NotebookEdit"`). Since
+  through unchanged (`src/models.ts:305-306#"return (MODEL_ALIASES as string[]).includes(value);"`, `src/init.ts:593-604#"disallowedTools: Edit, Write, NotebookEdit"`). Since
   0.22.0 it also always emits a pinned `effort:` line right after `model:`
   (`tierDef(role, DEFAULT_TIER[role]).effort`, `src/init.ts:597-600#"selection?.effort ?? tierDef(role, DEFAULT_TIER[role]).effort"`; medium for
   explorer/task-slicer/implementer, high for reviewer/advisor), covered in
@@ -243,23 +243,23 @@ counterpart, `--no-tiers`, so a re-run can explicitly turn a previously
 installed `tiers: true` back off; before the fix `--tiers` was one-way and
 the only route back to `tiers: false` was hand-editing the manifest.
 
-**Tier data (`src/models.ts:137-198#"large:"`).** `Tier` is
-`"low" | "medium" | "high" | "xhigh"` (`src/models.ts:142#"export type Tier ="`). `ROLE_TIERS` (`src/models.ts:149-154#"advisor: ["`) is
+**Tier data (`src/models.ts:150-211#"large:"`).** `Tier` is
+`"low" | "medium" | "high" | "xhigh"` (`src/models.ts:155#"export type Tier ="`). `ROLE_TIERS` (`src/models.ts:162-167#"advisor: ["`) is
 which tiers each role gets a variant for: explorer and task-slicer
 `low, medium, high`; implementer all four; reviewer `medium, high, xhigh`;
 since 0.21.0, advisor `high, xhigh` (the smallest tier list of any role:
 its default already sits at `high`, one step below the reviewer's default
 `--tiers` ceiling, so it only ever gets one variant, `-xhigh`).
-`DEFAULT_TIER` (`src/models.ts:162-167#"advisor:"`) is the tier each role's plain file already
+`DEFAULT_TIER` (`src/models.ts:175-180#"advisor:"`) is the tier each role's plain file already
 corresponds to (`medium` for explorer/task-slicer/implementer, `high` for
 reviewer and, since 0.21.0, advisor), the tier a variant is never rendered
 for since that would both collide with and duplicate the default file
 (`init.ts:1158-1161#"composeClaudeAgentVariant("` Claude Code,
 `init.ts:1240-1242#"const modelClass = def.modelClass;"` opencode, both a `continue` guarded by
 `tier === DEFAULT_TIER[role]`, role-generic code unchanged by the role
-addition). `ROLE_TIER_DEFS` (`src/models.ts:207-229#"advisor: {"`) maps each role and tier to a
-`ModelClass` (`"small" | "medium" | "large" | "xlarge"`, `src/models.ts:175#"export type ModelClass ="`) and its requested
-`effort` value (not always the tier's name: the implementer and reviewer `xhigh` variants run at `high`). `CLASS_MODELS` (`src/models.ts:195-199#"xlarge:"`) maps each
+addition). `ROLE_TIER_DEFS` (`src/models.ts:220-242#"advisor: {"`) maps each role and tier to a
+`ModelClass` (`"small" | "medium" | "large" | "xlarge"`, `src/models.ts:188#"export type ModelClass ="`) and its requested
+`effort` value (not always the tier's name: the implementer and reviewer `xhigh` variants run at `high`). `CLASS_MODELS` (`src/models.ts:208-212#"xlarge:"`) maps each
 class to a `ModelAlias`: `small`->`haiku`, `medium`->`sonnet`,
 `large`->`opus`, `xlarge`->`fable`. `Tier`, `ModelClass`, and all four maps are re-exported
 from `src/index.ts` since fix-round-1 (review finding L2), the same

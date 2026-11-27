@@ -3121,3 +3121,60 @@ describe("knowledge-bundle locations in the manifest", () => {
     expect(accepted).toBeGreaterThan(100);
   });
 });
+
+describe("model ids with internal whitespace or control characters", () => {
+  // Internal placement: a leading or trailing whitespace char is already
+  // rejected by the trim check, so this is what pins the new class check.
+  const FORBIDDEN: [string, string][] = [
+    ["carriage return", "\r"],
+    ["tab", "\t"],
+    ["vertical tab", "\v"],
+    ["form feed", "\f"],
+    ["NUL", "\0"],
+    ["DEL", "\u007f"],
+    ["space", " "],
+    ["line separator", "\u2028"],
+    ["paragraph separator", "\u2029"],
+  ];
+
+  it.each(FORBIDDEN)(
+    "rejects a --models value holding an internal %s",
+    (_label, char) => {
+      expect(() =>
+        parseModelsSpec(`reviewer=son${char}net`, DEFAULT_MODELS),
+      ).toThrow(/Invalid model id/);
+    },
+  );
+
+  it("drops a hand-edited manifest model holding an internal carriage return to the role default, and keeps the installed frontmatter parseable", async () => {
+    runInit(defaultOptions());
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    const seeded = JSON.parse(readFileSync(manifestPath, "utf8"));
+    seeded.models.reviewer = "son\rnet";
+    seeded.models.implementer = "haiku";
+    writeFileSync(manifestPath, `${JSON.stringify(seeded, null, 2)}\n`);
+
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "src/cli.ts", "init", target, "--yes"],
+      { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+    );
+    expect(result.status, result.stderr).toBe(0);
+
+    const rewritten = JSON.parse(readFileSync(manifestPath, "utf8"));
+    // The CR-carrying reviewer id is dropped like any other invalid id;
+    // the valid implementer override survives.
+    expect(rewritten.models.reviewer).toBe(DEFAULT_MODELS.reviewer);
+    expect(rewritten.models.implementer).toBe("haiku");
+
+    // The installed frontmatter stays a parseable YAML mapping: the
+    // `model:` line holds the default, not the injected CR.
+    const { parse: parseYaml } = await import("yaml");
+    const agentFile = readFileSync(
+      join(target, ".claude", "agents", "reviewer.md"),
+      "utf8",
+    );
+    const frontmatter = parseYaml(agentFile.split("---\n")[1]);
+    expect(frontmatter.model).toBe(DEFAULT_MODELS.reviewer);
+  });
+});

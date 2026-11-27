@@ -74,7 +74,7 @@ orchestrator to spawn the installed prompts under
 instead of improvising role text
 (`packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:63#"the [agentic-coding-playbook"`). Per-role
 default models (`DEFAULT_MODELS`,
-`packages/orchestrator-workflow/src/models.ts:285-290#"as Record<Role, string>;"`) are out of this doc's
+`packages/orchestrator-workflow/src/models.ts:298-303#"as Record<Role, string>;"`) are out of this doc's
 lane; see [model-preselection.md](model-preselection.md).
 
 ## Repository-bound verification sets
