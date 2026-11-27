@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { GITHUB_MAX_PAGES } from "../../src/host/index.js";
+import { conjunctIds } from "./conjunct-mutants.js";
 import {
   BASE,
   failing,
@@ -8,6 +9,7 @@ import {
   P,
   PULL_PATH,
   pullJson,
+  type Reply,
   REPOSITORY,
   reviewJson,
   sha,
@@ -521,4 +523,730 @@ describe("lastConfigCommit: reviews of that pull request that cannot be read", (
       );
     },
   );
+});
+
+/** The head of pull request 3, a commit it held before, and the hour of its reviews. */
+const D = sha("d");
+const E = sha("e");
+/**
+ * A review of pull request 3: at minute `when` of the hour before the merge
+ * (the merge is at 11:00:00), or at the time `when` of that day.
+ */
+const rv = (
+  login: string,
+  state: string,
+  commit: string,
+  when: number | string,
+  over: Record<string, unknown> = {},
+) =>
+  typeof when === "number"
+    ? reviewJson(login, state, commit, when, over)
+    : reviewJson(login, state, commit, 0, {
+        submitted_at: `2024-05-01T${when}Z`,
+        ...over,
+      });
+const ok = (login: string, commit: string, when: number | string) =>
+  rv(login, "APPROVED", commit, when);
+/** A pull request that only holds the commit: merged elsewhere, or still open. */
+const other = (number: number) =>
+  mergedPull({ number, merge_commit_sha: sha("e") });
+const open = (number: number) =>
+  mergedPull({ number, merged_at: null, merge_commit_sha: null });
+const SHAPE_OF_PULL = `github: GET ${PULLS_OF} answered 200 (a pull request has an unexpected shape)`;
+
+interface ConfigRow {
+  /** The commits the host lists for the path; one entry with the config commit when left out. */
+  commits?: unknown;
+  /** The pull requests of that commit; pull request 3, merged, when left out. */
+  pulls?: unknown[] | "endless";
+  /** The reviews of pull request 3: a list, a list without end, or a status. */
+  reviews?: unknown[] | "endless" | { status: number };
+  /** The fact, with the config commit when `commit` is left out, or the error. */
+  expect:
+    { commit?: string | null; approver: string | null } | { error: string };
+  /** Whether the reviews of pull request 3 are asked for at all. */
+  reviewsAsked?: boolean;
+}
+
+/**
+ * Every conjunct of the last change under `.spec-gate/`: the commit, the
+ * pull request that merged it, and which approval of that pull request
+ * counts. One row each; the row of an id fails when the change of that id in
+ * `conjunct-mutants.ts` is made to the source.
+ */
+const CONJUNCTS: {
+  id: string;
+  function: string;
+  conjunct: string;
+  row: ConfigRow;
+}[] = [
+  {
+    id: "C-CFG-01",
+    function: "lastConfigCommit",
+    conjunct: "commits that are no list are an error, not 'no commit'",
+    row: {
+      commits: { commits: [] },
+      expect: {
+        error: `github: GET ${COMMITS_PATH} answered 200 (not a list)`,
+      },
+    },
+  },
+  {
+    id: "C-CFG-02",
+    function: "lastConfigCommit",
+    conjunct: "no commit under the path: commit and approver are unknown",
+    row: { commits: [], expect: { commit: null, approver: null } },
+  },
+  {
+    id: "C-CFG-03",
+    function: "lastConfigCommit",
+    conjunct:
+      "the first commit the host lists is the last change, not a later entry",
+    row: {
+      commits: [{ sha: CONFIG }, { sha: sha("f") }],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-CFG-04",
+    function: "lastConfigCommit",
+    conjunct: "a commit that is no full commit id is an error",
+    row: {
+      commits: [{ sha: "ccccccc" }],
+      expect: {
+        error: `github: GET ${COMMITS_PATH} answered 200 (no commit id)`,
+      },
+    },
+  },
+  {
+    id: "C-CFG-05",
+    function: "lastConfigCommit",
+    conjunct: "a commit entry that is no object has no id",
+    row: {
+      commits: [CONFIG],
+      expect: {
+        error: `github: GET ${COMMITS_PATH} answered 200 (no commit id)`,
+      },
+    },
+  },
+  {
+    id: "C-CFG-06",
+    function: "lastConfigCommit",
+    conjunct: "without a pull request that merged the commit nobody is named",
+    row: {
+      pulls: [],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+    },
+  },
+  {
+    id: "C-CFG-07",
+    function: "lastConfigCommit",
+    conjunct:
+      "without a pull request that merged the commit the commit is still reported",
+    row: { pulls: [other(4)], expect: { commit: CONFIG, approver: null } },
+  },
+  {
+    id: "C-CFG-08",
+    function: "lastConfigCommit",
+    conjunct:
+      "a merged head that is no full commit id: unknown, and the reviews are not read",
+    row: {
+      pulls: [mergedPull({ head: { sha: "ddddddd" } })],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-CFG-09",
+    function: "mergedPullOf",
+    conjunct:
+      "a pull request without a head has no head: the merge commit does not stand in",
+    row: {
+      pulls: [mergedPull({ head: undefined })],
+      reviews: [ok("carol", CONFIG, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-CFG-10",
+    function: "lastConfigCommit",
+    conjunct:
+      "a merge time that cannot be read: unknown, and the reviews are not read",
+    row: {
+      pulls: [mergedPull({ merged_at: "yesterday" })],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-CFG-11",
+    function: "lastConfigCommit",
+    conjunct:
+      "reviews that cannot be read as reviews are unknown, not an error",
+    row: {
+      reviews: [
+        ok("carol", D, 1),
+        rv("bob", "COMMENTED", D, 2, { user: null }),
+      ],
+      expect: { approver: null },
+    },
+  },
+  {
+    id: "C-CFG-12",
+    function: "lastConfigCommit",
+    conjunct:
+      "reviews that cannot be read as reviews leave the commit reported",
+    row: {
+      reviews: [
+        ok("carol", D, 1),
+        rv("bob", "COMMENTED", D, 2, { commit_id: null }),
+      ],
+      expect: { commit: CONFIG, approver: null },
+    },
+  },
+  {
+    id: "C-CFG-13",
+    function: "readReviews",
+    conjunct: "a request for the reviews that fails is an error, not unknown",
+    row: {
+      reviews: { status: 500 },
+      expect: { error: `github: GET ${CONFIG_REVIEWS} answered 500` },
+    },
+  },
+  {
+    id: "C-CFG-14",
+    function: "list",
+    conjunct: "reviews past the page cap are unknown, not an error",
+    row: { reviews: "endless", expect: { approver: null } },
+  },
+  {
+    id: "C-MRG-01",
+    function: "mergedPullOf",
+    conjunct: "a pull request that is not merged does not count",
+    row: {
+      pulls: [mergedPull({ merged_at: null })],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-MRG-02",
+    function: "mergedPullOf",
+    conjunct: "a pull request merged with another merge commit does not count",
+    row: {
+      pulls: [mergedPull({ merge_commit_sha: sha("e") })],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-MRG-03",
+    function: "mergedPullOf",
+    conjunct: "a pull request into another branch does not count",
+    row: {
+      pulls: [
+        mergedPull({
+          base: { ref: "release", sha: BASE, repo: { full_name: REPOSITORY } },
+        }),
+      ],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-MRG-04",
+    function: "mergedPullOf",
+    conjunct: "a pull request into another repository does not count",
+    row: {
+      pulls: [
+        mergedPull({
+          base: { ref: "main", sha: BASE, repo: { full_name: "evil/widgets" } },
+        }),
+      ],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-MRG-05",
+    function: "mergedPullOf",
+    conjunct: "two pull requests that both merged the commit: none is picked",
+    row: {
+      pulls: [mergedPull(), mergedPull({ number: 4 })],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-MRG-06",
+    function: "mergedPullOf",
+    conjunct:
+      "the merging pull request is found when it is the first of several",
+    row: {
+      pulls: [mergedPull(), other(4), open(5)],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-MRG-07",
+    function: "mergedPullOf",
+    conjunct:
+      "the merging pull request is found when it is the last of several",
+    row: {
+      pulls: [other(4), open(5), mergedPull()],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-MRG-08",
+    function: "mergedPullOf",
+    conjunct: "the merging pull request is found between others",
+    row: {
+      pulls: [other(4), mergedPull(), open(5)],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-MRG-09",
+    function: "mergedPullOf",
+    conjunct: "an entry that is no object is an error, not skipped",
+    row: {
+      pulls: [3, mergedPull()],
+      reviews: [ok("carol", D, 1)],
+      expect: {
+        error: `github: GET ${PULLS_OF} answered 200 (a pull request is no object)`,
+      },
+    },
+  },
+  {
+    id: "C-MRG-10",
+    function: "list",
+    conjunct:
+      "pull requests past the page cap are an error: only reviews are reported",
+    row: {
+      pulls: "endless",
+      expect: {
+        error: `github: GET ${PULLS_OF} answered 200 (more pages than the page cap)`,
+      },
+    },
+  },
+  {
+    id: "C-MRG-11",
+    function: "mergedPullOf",
+    conjunct: "a number that is a text is an error",
+    row: {
+      pulls: [mergedPull({ number: "3" })],
+      reviews: [ok("carol", D, 1)],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-12",
+    function: "mergedPullOf",
+    conjunct: "a number that is no integer is an error",
+    row: {
+      pulls: [mergedPull({ number: 3.5 })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-13",
+    function: "mergedPullOf",
+    conjunct: "a number below one is an error",
+    row: {
+      pulls: [mergedPull({ number: 0 })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-14",
+    function: "mergedPullOf",
+    conjunct: "a merge time of another type is an error, not 'not merged'",
+    row: {
+      pulls: [mergedPull({ merged_at: true })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-15",
+    function: "mergedPullOf",
+    conjunct:
+      "a merge commit of another type is an error, not 'another commit'",
+    row: {
+      pulls: [mergedPull({ merge_commit_sha: 1 })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-16",
+    function: "mergedPullOf",
+    conjunct: "a base branch of another type is an error, not 'another branch'",
+    row: {
+      pulls: [
+        mergedPull({ base: { ref: 1, repo: { full_name: REPOSITORY } } }),
+      ],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-17",
+    function: "mergedPullOf",
+    conjunct:
+      "a base without a repository is an error, not 'another repository'",
+    row: {
+      pulls: [mergedPull({ base: { ref: "main", repo: null } })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-18",
+    function: "mergedPullOf",
+    conjunct: "a base repository without a name is an error",
+    row: {
+      pulls: [mergedPull({ base: { ref: "main", repo: {} } })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-19",
+    function: "mergedPullOf",
+    conjunct: "a pull request without a base is an error, not skipped",
+    row: {
+      pulls: [mergedPull({ base: null })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-20",
+    function: "mergedPullOf",
+    conjunct:
+      "an open pull request beside the merging one is skipped, not an error",
+    row: {
+      pulls: [open(5), mergedPull()],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-MRG-21",
+    function: "mergedPullOf",
+    conjunct:
+      "a merged pull request without a merge commit beside the merging one is skipped",
+    row: {
+      pulls: [mergedPull({ number: 5, merge_commit_sha: null }), mergedPull()],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-MRG-22",
+    function: "mergedPullOf",
+    conjunct: "pull requests that only hold the commit name no merging one",
+    row: {
+      pulls: [other(4), open(5)],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-APP-01",
+    function: "latestApprover",
+    conjunct: "an approval after the merge does not count",
+    row: {
+      reviews: [ok("mallory", D, "11:00:01")],
+      expect: { approver: null },
+    },
+  },
+  {
+    id: "C-APP-02",
+    function: "latestApprover",
+    conjunct: "an approval at the very time of the merge counts",
+    row: {
+      reviews: [ok("carol", D, "11:00:00")],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-APP-03",
+    function: "latestApprover",
+    conjunct:
+      "a review of any state after the merge is dropped: a later withdrawal leaves the approver",
+    row: {
+      reviews: [
+        ok("carol", D, 1),
+        rv("carol", "CHANGES_REQUESTED", D, "11:30:00"),
+      ],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-APP-04",
+    function: "latestApprover",
+    conjunct: "a late approval is dropped when the host lists it first",
+    row: {
+      reviews: [ok("mallory", D, "12:00:00"), ok("alice", D, 1)],
+      expect: { approver: "alice" },
+    },
+  },
+  {
+    id: "C-APP-05",
+    function: "latestApprover",
+    conjunct: "a late approval is dropped when the host lists it last",
+    row: {
+      reviews: [ok("alice", D, 1), ok("mallory", D, "12:00:00")],
+      expect: { approver: "alice" },
+    },
+  },
+  {
+    id: "C-APP-06",
+    function: "latestApprover",
+    conjunct:
+      "a late approval is dropped when the host lists it between others",
+    row: {
+      reviews: [
+        ok("alice", D, 1),
+        ok("mallory", D, "12:00:00"),
+        rv("bob", "COMMENTED", D, 2),
+      ],
+      expect: { approver: "alice" },
+    },
+  },
+  {
+    id: "C-APP-07",
+    function: "latestApprover",
+    conjunct: "only an approval that still stood at the merge counts",
+    row: {
+      reviews: [ok("carol", D, 1), rv("carol", "CHANGES_REQUESTED", D, 2)],
+      expect: { approver: null },
+    },
+  },
+  {
+    id: "C-APP-08",
+    function: "latestApprover",
+    conjunct:
+      "an approval of another commit than the merged head does not count",
+    row: { reviews: [ok("carol", E, 1)], expect: { approver: null } },
+  },
+  {
+    id: "C-APP-09",
+    function: "latestApprover",
+    conjunct:
+      "an account off the head that sorts first is skipped: the search goes on",
+    row: {
+      reviews: [ok("aaron", E, 2), ok("bob", D, 1)],
+      expect: { approver: "bob" },
+    },
+  },
+  {
+    id: "C-APP-10",
+    function: "latestApprover",
+    conjunct:
+      "an account off the head between two on it is skipped: the search goes on",
+    row: {
+      reviews: [ok("aaron", D, 1), ok("bob", E, 5), ok("carol", D, 2)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-APP-11",
+    function: "latestApprover",
+    conjunct:
+      "an account off the head that sorts last and approved last does not count",
+    row: {
+      reviews: [ok("bob", D, 1), ok("zed", E, 5)],
+      expect: { approver: "bob" },
+    },
+  },
+  {
+    id: "C-APP-12",
+    function: "latestApprover",
+    conjunct:
+      "the approval that stands is compared: an earlier one of the head by the same account does not count",
+    row: {
+      reviews: [ok("carol", D, 1), ok("carol", E, 2)],
+      expect: { approver: null },
+    },
+  },
+  {
+    id: "C-APP-13",
+    function: "latestApprover",
+    conjunct:
+      "the time of an approval is taken from that account's reviews only",
+    row: {
+      reviews: [ok("zed", D, 5), ok("bob", D, 1)],
+      expect: { approver: "zed" },
+    },
+  },
+  {
+    id: "C-APP-14",
+    function: "latestApprover",
+    conjunct: "the later approval wins when its account sorts first",
+    row: {
+      reviews: [ok("zed", D, 1), ok("bob", D, 5)],
+      expect: { approver: "bob" },
+    },
+  },
+  {
+    id: "C-APP-15",
+    function: "latestApprover",
+    conjunct: "the later approval wins when its account sorts last",
+    row: {
+      reviews: [ok("bob", D, 2), ok("zed", D, 4)],
+      expect: { approver: "zed" },
+    },
+  },
+  {
+    id: "C-APP-16",
+    function: "latestApprover",
+    conjunct:
+      "the later approval wins when its account sorts between two others",
+    row: {
+      reviews: [ok("aaron", D, 1), ok("bob", D, 5), ok("carol", D, 2)],
+      expect: { approver: "bob" },
+    },
+  },
+  {
+    id: "C-APP-17",
+    function: "latestApprover",
+    conjunct: "a later comment does not make an approval the later one",
+    row: {
+      reviews: [
+        ok("carol", D, 1),
+        ok("bob", D, 2),
+        rv("carol", "COMMENTED", D, 3),
+      ],
+      expect: { approver: "bob" },
+    },
+  },
+  {
+    id: "C-APP-18",
+    function: "latestApprover",
+    conjunct: "the latest approval of an account sets its time, not its first",
+    row: {
+      reviews: [ok("carol", D, 1), ok("dave", D, 2), ok("carol", D, 3)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-APP-19",
+    function: "latestApprover",
+    conjunct: "on a tie the account that sorts first is named",
+    row: {
+      reviews: [ok("carol", D, 1), ok("bob", D, 1)],
+      expect: { approver: "bob" },
+    },
+  },
+  {
+    id: "C-APP-20",
+    function: "latestApprover",
+    conjunct:
+      "accounts are visited in their own order, whatever order the host lists the reviews in",
+    row: {
+      reviews: [ok("bob", D, 1), ok("carol", D, 1)],
+      expect: { approver: "bob" },
+    },
+  },
+  {
+    id: "C-APP-21",
+    function: "latestApprover",
+    conjunct: "without an approval nobody is named",
+    row: { reviews: [], expect: { approver: null } },
+  },
+  {
+    id: "C-APP-22",
+    function: "latestApprover",
+    conjunct: "one approval of the head before the merge names its account",
+    row: { reviews: [ok("carol", D, 1)], expect: { approver: "carol" } },
+  },
+  {
+    id: "C-APP-23",
+    function: "latestApprover",
+    conjunct: "the account that sorts last is looked at",
+    row: {
+      reviews: [ok("bob", D, 1), ok("zed", D, 5)],
+      expect: { approver: "zed" },
+    },
+  },
+  {
+    id: "C-APP-24",
+    function: "latestApprover",
+    conjunct: "the account that sorts first is looked at",
+    row: {
+      reviews: [ok("bob", D, 5), ok("zed", E, 1)],
+      expect: { approver: "bob" },
+    },
+  },
+];
+
+describe("CONJUNCTS: the last change under .spec-gate and its approver", () => {
+  it("the table and the list of changes name the same conjuncts, each once", () => {
+    const ids = CONJUNCTS.map((entry) => entry.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(conjunctIds("github-config-commit"));
+  });
+
+  /** A list without end: every page holds `entry` and a link to the next page. */
+  const endless =
+    (path: string, entry: unknown) =>
+    (hit: { url: string }): Reply => {
+      const n = Number(new URL(hit.url, stub.url).searchParams.get("page"));
+      return {
+        json: [entry],
+        headers: {
+          link: `<${stub.url}${path}?per_page=100&page=${n + 1}>; rel="next"`,
+        },
+      };
+    };
+
+  it.each(
+    CONJUNCTS.map((entry) => [entry.id, entry.conjunct, entry.row] as const),
+  )("%s: %s", async (_id, _conjunct, row) => {
+    stub.on(COMMITS_PATH, {
+      json: "commits" in row ? row.commits : [{ sha: CONFIG }],
+    });
+    stub.on(
+      PULLS_OF,
+      row.pulls === "endless"
+        ? endless(PULLS_OF, other(4))
+        : { json: row.pulls ?? [mergedPull()] },
+    );
+    const reviews = row.reviews ?? [];
+    stub.on(
+      CONFIG_REVIEWS,
+      reviews === "endless"
+        ? endless(CONFIG_REVIEWS, ok("carol", D, 1))
+        : Array.isArray(reviews)
+          ? { json: reviews }
+          : reviews,
+    );
+    const call = hostAt(stub).lastConfigCommit();
+    if ("error" in row.expect) {
+      expect((await failing(call)).message).toBe(row.expect.error);
+    } else {
+      expect(await giving(call)).toEqual({
+        commit: "commit" in row.expect ? row.expect.commit : CONFIG,
+        approver: row.expect.approver,
+      });
+    }
+    if (row.reviewsAsked !== undefined) {
+      const asked = stub.hits.filter((hit) =>
+        /\/pulls\/\d+\/reviews$/.test(hit.path),
+      );
+      expect(asked.length > 0).toBe(row.reviewsAsked);
+    }
+  });
 });

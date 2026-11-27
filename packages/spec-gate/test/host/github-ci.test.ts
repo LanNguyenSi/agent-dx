@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createGitHubHost } from "../../src/host/index.js";
+import { conjunctIds } from "./conjunct-mutants.js";
 import {
   failing,
   giving,
@@ -48,11 +49,17 @@ function runJson(over: Record<string, unknown> = {}): Record<string, unknown> {
  * An adapter on `apiUrl` (the API root of github.com when left out) whose
  * requests a fake fetch records and answers with the run.
  */
-function onRoot(apiUrl?: string) {
+function onRoot(
+  apiUrl?: string,
+  reply: { status?: number; json?: unknown } = {},
+) {
   const asked: string[] = [];
   const fetch = (async (input: unknown) => {
     asked.push(String(input));
-    return new Response(JSON.stringify(runJson()), { status: 200 });
+    return new Response(
+      JSON.stringify("json" in reply ? reply.json : runJson()),
+      { status: reply.status ?? 200 },
+    );
   }) as typeof globalThis.fetch;
   const host = createGitHubHost({
     repository: REPOSITORY,
@@ -275,4 +282,399 @@ describe("ciRunStatus: failures", () => {
       );
     },
   );
+});
+
+const ADDRESS = `https://github.com/acme/widgets/actions/runs/${RUN}`;
+const GHE = "https://ghe.example/api/v3";
+const SHAPE = `github: GET ${RUN_PATH} answered 200 (a run has an unexpected shape)`;
+
+interface RunRow {
+  /** The API root; the one of github.com when left out. */
+  root?: string;
+  run: unknown;
+  /** The commit asked for; the head when left out. */
+  commit?: string;
+  /** The status the host answers with; 200 when left out. */
+  status?: number;
+  /** The body the host answers with: the run, changed by `over`, or `json`. */
+  over?: Record<string, unknown>;
+  json?: unknown;
+  expect: "verified" | "unverified" | { error: string };
+  /** How many requests the host gets. */
+  asked: number;
+}
+
+/**
+ * Every conjunct of the run name and of the run check, one row each. The
+ * row of an id fails when the change of that id in `conjunct-mutants.ts` is
+ * made to the source.
+ */
+const CONJUNCTS: {
+  id: string;
+  function: string;
+  conjunct: string;
+  row: RunRow;
+}[] = [
+  {
+    id: "C-RUN-01",
+    function: "runIdOf",
+    conjunct: "a run name that is no text names no run",
+    row: { run: 8123456789, expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-02",
+    function: "runIdOf",
+    conjunct: "a bare id names a run",
+    row: { run: RUN, expect: "verified", asked: 1 },
+  },
+  {
+    id: "C-RUN-03",
+    function: "runIdOf",
+    conjunct: "a bare id names a run on every API root",
+    row: { root: GHE, run: RUN, expect: "verified", asked: 1 },
+  },
+  {
+    id: "C-RUN-04",
+    function: "runIdOf",
+    conjunct: "an id does not start with a zero",
+    row: { run: `0${RUN}`, expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-05",
+    function: "runIdOf",
+    conjunct: "an id holds digits only",
+    row: { run: "8e9", expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-06",
+    function: "runIdOf",
+    conjunct: "an id past the safe range names no run",
+    row: { run: "9007199254740993", expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-07",
+    function: "runIdOf",
+    conjunct: "nothing follows the digits of an id",
+    row: { run: `${RUN} `, expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-08",
+    function: "runIdOf",
+    conjunct: "nothing stands before the digits of an id",
+    row: { run: `+${RUN}`, expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-09",
+    function: "ciRunStatus",
+    conjunct: "an address is read on the API root of github.com",
+    row: { run: ADDRESS, expect: "verified", asked: 1 },
+  },
+  {
+    id: "C-RUN-10",
+    function: "runIdOf",
+    conjunct: "an address is not read when the root is another one",
+    row: { root: GHE, run: ADDRESS, expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-11",
+    function: "ciRunStatus",
+    conjunct: "https alone does not make a root the one of github.com",
+    row: {
+      root: "https://ghe.example",
+      run: ADDRESS,
+      expect: "unverified",
+      asked: 0,
+    },
+  },
+  {
+    id: "C-RUN-12",
+    function: "ciRunStatus",
+    conjunct:
+      "a root that only starts like the API of github.com is another root",
+    row: {
+      root: "https://api.github.com.example",
+      run: ADDRESS,
+      expect: "unverified",
+      asked: 0,
+    },
+  },
+  {
+    id: "C-RUN-13",
+    function: "ciRunStatus",
+    conjunct: "a loopback root is another root",
+    row: {
+      root: "http://127.0.0.1:9",
+      run: ADDRESS,
+      expect: "unverified",
+      asked: 0,
+    },
+  },
+  {
+    id: "C-RUN-14",
+    function: "runIdOf",
+    conjunct: "nothing stands before an address",
+    row: { run: `see ${ADDRESS}`, expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-15",
+    function: "runIdOf",
+    conjunct: "nothing follows the id of an address",
+    row: { run: `${ADDRESS}/attempts/2`, expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-16",
+    function: "runIdOf",
+    conjunct: "an address is https",
+    row: {
+      run: ADDRESS.replace("https:", "http:"),
+      expect: "unverified",
+      asked: 0,
+    },
+  },
+  {
+    id: "C-RUN-17",
+    function: "runIdOf",
+    conjunct: "the host of an address is github.com, dot and all",
+    row: {
+      run: ADDRESS.replace("github.com", "githubxcom"),
+      expect: "unverified",
+      asked: 0,
+    },
+  },
+  {
+    id: "C-RUN-18",
+    function: "runIdOf",
+    conjunct: "a text that is neither an id nor an address names no run",
+    row: { run: "ci", expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-RUN-19",
+    function: "runIdOf",
+    conjunct: "an address of another repository names no run of this one",
+    row: {
+      run: ADDRESS.replace("acme/widgets", "evil/gadgets"),
+      expect: "unverified",
+      asked: 0,
+    },
+  },
+  {
+    id: "C-RUN-20",
+    function: "runIdOf",
+    conjunct: "the owner of an address counts, not only the name",
+    row: {
+      run: ADDRESS.replace("acme/widgets", "evil/widgets"),
+      expect: "unverified",
+      asked: 0,
+    },
+  },
+  {
+    id: "C-RUN-21",
+    function: "runIdOf",
+    conjunct: "the name of an address counts, not only the owner",
+    row: {
+      run: ADDRESS.replace("acme/widgets", "acme/gadgets"),
+      expect: "unverified",
+      asked: 0,
+    },
+  },
+  {
+    id: "C-RUN-22",
+    function: "runIdOf",
+    conjunct:
+      "the repository of an address is compared without the case of ASCII letters",
+    row: {
+      run: ADDRESS.replace("acme/widgets", "Acme/Widgets"),
+      expect: "verified",
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-01",
+    function: "ciRunStatus",
+    conjunct: "a commit that is no full id is unverified without a request",
+    row: { run: RUN, commit: "aaaaaaa", expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-CI-02",
+    function: "ciRunStatus",
+    conjunct: "a run name that names no run is unverified without a request",
+    row: { run: "", expect: "unverified", asked: 0 },
+  },
+  {
+    id: "C-CI-03",
+    function: "ciRunStatus",
+    conjunct: "a run the repository does not have is an answer, not an error",
+    row: { run: RUN, status: 404, expect: "unverified", asked: 1 },
+  },
+  {
+    id: "C-CI-04",
+    function: "ciRunStatus",
+    conjunct: "a run the repository does not have is unverified, not unknown",
+    row: { run: RUN, status: 404, json: {}, expect: "unverified", asked: 1 },
+  },
+  {
+    id: "C-CI-05",
+    function: "ciRunStatus",
+    conjunct: "a run that may not be read is an error, not unverified",
+    row: {
+      run: RUN,
+      status: 403,
+      expect: { error: `github: GET ${RUN_PATH} answered 403` },
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-06",
+    function: "ciRunStatus",
+    conjunct: "a body that is no object is an error",
+    row: {
+      run: RUN,
+      json: [runJson()],
+      expect: {
+        error: `github: GET ${RUN_PATH} answered 200 (not an object)`,
+      },
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-07",
+    function: "ciRunStatus",
+    conjunct: "an id that is no number is an error",
+    row: { run: RUN, over: { id: RUN }, expect: { error: SHAPE }, asked: 1 },
+  },
+  {
+    id: "C-CI-08",
+    function: "ciRunStatus",
+    conjunct: "a run without a commit is an error",
+    row: {
+      run: RUN,
+      over: { head_sha: undefined },
+      expect: { error: SHAPE },
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-09",
+    function: "ciRunStatus",
+    conjunct: "a status of another type is an error",
+    row: { run: RUN, over: { status: 1 }, expect: { error: SHAPE }, asked: 1 },
+  },
+  {
+    id: "C-CI-10",
+    function: "ciRunStatus",
+    conjunct: "a repository without a name is an error",
+    row: {
+      run: RUN,
+      over: { repository: {} },
+      expect: { error: SHAPE },
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-11",
+    function: "ciRunStatus",
+    conjunct: "a repository that is no object has no name",
+    row: {
+      run: RUN,
+      over: { repository: REPOSITORY },
+      expect: { error: SHAPE },
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-12",
+    function: "ciRunStatus",
+    conjunct: "a run without a status is a run, and unverified",
+    row: {
+      run: RUN,
+      over: { status: null, conclusion: null },
+      expect: "unverified",
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-13",
+    function: "ciRunStatus",
+    conjunct: "the run the host answers with must be the run asked for",
+    row: {
+      run: RUN,
+      over: { id: Number(RUN) + 1 },
+      expect: "unverified",
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-14",
+    function: "ciRunStatus",
+    conjunct: "the run must belong to this repository",
+    row: {
+      run: RUN,
+      over: { repository: { full_name: "evil/widgets" } },
+      expect: "unverified",
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-15",
+    function: "ciRunStatus",
+    conjunct: "the run must have run at the commit",
+    row: {
+      run: RUN,
+      over: { head_sha: sha("c") },
+      expect: "unverified",
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-16",
+    function: "ciRunStatus",
+    conjunct: "the run must have completed",
+    row: {
+      run: RUN,
+      over: { status: "in_progress", conclusion: null },
+      expect: "unverified",
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-17",
+    function: "ciRunStatus",
+    conjunct: "a run that meets all four is verified",
+    row: { run: RUN, expect: "verified", asked: 1 },
+  },
+  {
+    id: "C-CI-18",
+    function: "ciRunStatus",
+    conjunct: "a run that misses one is unverified, not unknown",
+    row: {
+      run: RUN,
+      over: { status: "queued", conclusion: null },
+      expect: "unverified",
+      asked: 1,
+    },
+  },
+];
+
+describe("CONJUNCTS: the name of a run and what makes it verified", () => {
+  it("the table and the list of changes name the same conjuncts, each once", () => {
+    const ids = CONJUNCTS.map((entry) => entry.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(conjunctIds("github-ci"));
+  });
+
+  it.each(
+    CONJUNCTS.map((entry) => [entry.id, entry.conjunct, entry.row] as const),
+  )("%s: %s", async (_id, _conjunct, row) => {
+    const root = onRoot(row.root, {
+      status: row.status,
+      json: "json" in row ? row.json : runJson(row.over),
+    });
+    const call = root.host.ciRunStatus(row.commit ?? HEAD, row.run as string);
+    if (typeof row.expect === "string") {
+      expect(await giving(call)).toBe(row.expect);
+    } else {
+      expect((await failing(call)).message).toBe(row.expect.error);
+    }
+    expect(root.asked).toHaveLength(row.asked);
+  });
 });

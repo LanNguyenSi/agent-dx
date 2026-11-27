@@ -19,6 +19,7 @@ import {
   GITHUB_TIMEOUT_MS,
   type GitHubHostOptions,
 } from "../../src/host/index.js";
+import { conjunctIds } from "./conjunct-mutants.js";
 import {
   expectClean,
   giving,
@@ -378,5 +379,216 @@ describe("createGitHubHost: what a request carries", () => {
     expect(GITHUB_MAX_BODY_BYTES).toBe(4 * 1024 * 1024);
     expect(GITHUB_PAGE_SIZE).toBe(100);
     expect(GITHUB_MAX_PAGES).toBe(30);
+  });
+});
+
+/** Marks a row whose options have no `apiUrl` key at all. */
+const ABSENT = Symbol("no apiUrl");
+const NOT_A_URL = "github: apiUrl must be a URL";
+const NOT_HTTPS =
+  "github: apiUrl must be https (http only for a loopback host)";
+const CARRIES_MORE =
+  "github: apiUrl must not carry credentials, a query or a fragment";
+
+interface ApiUrlRow {
+  apiUrl: unknown;
+  /** The address the first request goes to, or the refusal. */
+  expect: { asked: string } | { refused: string };
+}
+
+/**
+ * Every conjunct of the apiUrl check, one row each. The row of an id fails
+ * when the change of that id in `conjunct-mutants.ts` is made to the source.
+ */
+const CONJUNCTS: {
+  id: string;
+  function: string;
+  conjunct: string;
+  row: ApiUrlRow;
+}[] = [
+  {
+    id: "C-API-01",
+    function: "createGitHubHost",
+    conjunct: "without the option the root is the API of github.com",
+    row: {
+      apiUrl: ABSENT,
+      expect: { asked: `https://api.github.com${PULL_PATH}` },
+    },
+  },
+  {
+    id: "C-API-02",
+    function: "createGitHubHost",
+    conjunct: "an option that is undefined is read as left out",
+    row: {
+      apiUrl: undefined,
+      expect: { asked: `https://api.github.com${PULL_PATH}` },
+    },
+  },
+  {
+    id: "C-API-03",
+    function: "createGitHubHost",
+    conjunct: "null is refused, not read as left out",
+    row: { apiUrl: null, expect: { refused: NOT_A_URL } },
+  },
+  {
+    id: "C-API-04",
+    function: "createGitHubHost",
+    conjunct: "a value that is no text is refused even when it would parse",
+    row: {
+      apiUrl: new URL("https://ghe.example/api/v3"),
+      expect: { refused: NOT_A_URL },
+    },
+  },
+  {
+    id: "C-API-05",
+    function: "createGitHubHost",
+    conjunct: "a text wins over the default",
+    row: {
+      apiUrl: "https://ghe.example",
+      expect: { asked: `https://ghe.example${PULL_PATH}` },
+    },
+  },
+  {
+    id: "C-API-06",
+    function: "createGitHubHost",
+    conjunct: "an empty text is refused, not replaced by the default",
+    row: { apiUrl: "", expect: { refused: NOT_A_URL } },
+  },
+  {
+    id: "C-API-07",
+    function: "apiRootOf",
+    conjunct: "a text that does not parse is refused, not replaced",
+    row: { apiUrl: "api.github.com", expect: { refused: NOT_A_URL } },
+  },
+  {
+    id: "C-API-08",
+    function: "apiRootOf",
+    conjunct: "http to a host that is not loopback is refused",
+    row: { apiUrl: "http://ghe.example", expect: { refused: NOT_HTTPS } },
+  },
+  {
+    id: "C-API-09",
+    function: "apiRootOf",
+    conjunct: "another scheme is refused for a loopback host too",
+    row: { apiUrl: "ftp://127.0.0.1/api", expect: { refused: NOT_HTTPS } },
+  },
+  {
+    id: "C-API-10",
+    function: "apiRootOf",
+    conjunct: "https is accepted for a host that is not loopback",
+    row: {
+      apiUrl: "https://ghe.example:8443",
+      expect: { asked: `https://ghe.example:8443${PULL_PATH}` },
+    },
+  },
+  {
+    id: "C-API-11",
+    function: "apiRootOf",
+    conjunct: "http is accepted for 127.0.0.1",
+    row: {
+      apiUrl: "http://127.0.0.1:8080",
+      expect: { asked: `http://127.0.0.1:8080${PULL_PATH}` },
+    },
+  },
+  {
+    id: "C-API-12",
+    function: "apiRootOf",
+    conjunct: "http is accepted for [::1]",
+    row: {
+      apiUrl: "http://[::1]:8080",
+      expect: { asked: `http://[::1]:8080${PULL_PATH}` },
+    },
+  },
+  {
+    id: "C-API-13",
+    function: "apiRootOf",
+    conjunct: "http is accepted for localhost",
+    row: {
+      apiUrl: "http://localhost:8080",
+      expect: { asked: `http://localhost:8080${PULL_PATH}` },
+    },
+  },
+  {
+    id: "C-API-14",
+    function: "apiRootOf",
+    conjunct: "another address of the loopback net is not a loopback host",
+    row: { apiUrl: "http://127.0.0.2:8080", expect: { refused: NOT_HTTPS } },
+  },
+  {
+    id: "C-API-15",
+    function: "apiRootOf",
+    conjunct: "a user name is refused",
+    row: {
+      apiUrl: "https://user@ghe.example",
+      expect: { refused: CARRIES_MORE },
+    },
+  },
+  {
+    id: "C-API-16",
+    function: "apiRootOf",
+    conjunct: "a password without a user name is refused",
+    row: {
+      apiUrl: "https://:secret@ghe.example",
+      expect: { refused: CARRIES_MORE },
+    },
+  },
+  {
+    id: "C-API-17",
+    function: "apiRootOf",
+    conjunct: "a query is refused",
+    row: {
+      apiUrl: "https://ghe.example?x=1",
+      expect: { refused: CARRIES_MORE },
+    },
+  },
+  {
+    id: "C-API-18",
+    function: "apiRootOf",
+    conjunct: "a fragment is refused",
+    row: { apiUrl: "https://ghe.example#x", expect: { refused: CARRIES_MORE } },
+  },
+  {
+    id: "C-API-19",
+    function: "createGitHubHost",
+    conjunct: "a slash at the end of the root is not doubled",
+    row: {
+      apiUrl: "https://ghe.example/",
+      expect: { asked: `https://ghe.example${PULL_PATH}` },
+    },
+  },
+  {
+    id: "C-API-20",
+    function: "createGitHubHost",
+    conjunct: "the path of the root stays in front of every request",
+    row: {
+      apiUrl: "https://ghe.example/api/v3",
+      expect: { asked: `https://ghe.example/api/v3${PULL_PATH}` },
+    },
+  },
+];
+
+describe("CONJUNCTS: the apiUrl option", () => {
+  it("the table and the list of changes name the same conjuncts, each once", () => {
+    const ids = CONJUNCTS.map((entry) => entry.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(conjunctIds("github-options"));
+  });
+
+  it.each(
+    CONJUNCTS.map((entry) => [entry.id, entry.conjunct, entry.row] as const),
+  )("%s: %s", async (_id, _conjunct, row) => {
+    const seam = recorder();
+    const options = {
+      ...OPTIONS,
+      fetch: seam.fetch,
+      ...(row.apiUrl === ABSENT ? {} : { apiUrl: row.apiUrl }),
+    };
+    if ("refused" in row.expect) {
+      expect(refusal(options).message).toBe(row.expect.refused);
+      expect(seam.calls).toEqual([]);
+    } else {
+      await createGitHubHost(options as GitHubHostOptions).pullRequest();
+      expect(seam.calls.map((call) => call.url)).toEqual([row.expect.asked]);
+    }
   });
 });

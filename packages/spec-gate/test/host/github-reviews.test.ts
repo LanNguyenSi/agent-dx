@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { instantOf } from "../../src/approve/facts.js";
 import { GITHUB_MAX_PAGES, GITHUB_PAGE_SIZE } from "../../src/host/index.js";
+import { conjunctIds } from "./conjunct-mutants.js";
 import {
   failing,
   giving,
@@ -501,5 +502,1008 @@ describe("reviews: pages", () => {
     await host.reviews();
     await host.reviews();
     expect(stub.hits).toHaveLength(2);
+  });
+});
+
+/** A review by `login`, approved on the head at minute 1 unless `over` says otherwise. */
+const by = (login: string, over: Record<string, unknown> = {}) =>
+  reviewJson(login, "APPROVED", HEAD, 1, over);
+const NEXT = '<{P:2}>; rel="next"';
+
+interface PageOf {
+  /** The entries of the page; `fill` is that many reviews of made-up accounts. */
+  reviews?: unknown[];
+  fill?: number;
+  /** A body sent as it is, in place of the entries. */
+  body?: string;
+  /**
+   * The `Link` header. `{P:n}` is the address of page n of this list,
+   * `{page:n}` its path and query, `{root}` the root of the stub, `{foreign}`
+   * the root of another origin, `{host}` the host and port of the stub.
+   */
+  link?: string;
+}
+
+interface ReviewsRow {
+  /** The path prefix of the API root. */
+  prefix?: string;
+  pages: PageOf[];
+  /** Answer every page up to this one with one review and a next link. */
+  endless?: number;
+  /** The logins in order, how many reviews, or the reason of the error. */
+  expect: { logins: string[] } | { count: number } | { error: string };
+  /** The pages that are asked for, in order. */
+  asked: number[];
+}
+
+const upTo = (n: number): number[] =>
+  Array.from({ length: n }, (_, i) => i + 1);
+
+/**
+ * Every conjunct of reading a list of reviews: the entries, the pages, the
+ * entries and parameters of a `Link` header, and what a next link must be.
+ * One row each; the row of an id fails when the change of that id in
+ * `conjunct-mutants.ts` is made to the source.
+ */
+const CONJUNCTS: {
+  id: string;
+  function: string;
+  conjunct: string;
+  row: ReviewsRow;
+}[] = [
+  {
+    id: "C-REV-01",
+    function: "readReviews",
+    conjunct:
+      "an entry that is no object, first in the list, makes the list unreadable",
+    row: {
+      pages: [{ reviews: ["text", by("alice")] }],
+      expect: { error: "a review is no object" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-02",
+    function: "readReviews",
+    conjunct:
+      "an entry without a state, in the middle, makes the list unreadable",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice"), by("bob", { state: undefined }), by("carol")],
+        },
+      ],
+      expect: { error: "a review has no state" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-03",
+    function: "readReviews",
+    conjunct: "a pending review, last in the list, is left out",
+    row: {
+      pages: [{ reviews: [by("alice"), by("bob", { state: "PENDING" })] }],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-04",
+    function: "readReviews",
+    conjunct:
+      "a pending review, first in the list, is skipped and does not end the list",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice", { state: "PENDING" }), by("bob"), by("carol")],
+        },
+      ],
+      expect: { logins: ["bob", "carol"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-05",
+    function: "readReviews",
+    conjunct:
+      "a pending review, in the middle, is skipped and does not end the list",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice"), by("bob", { state: "PENDING" }), by("carol")],
+        },
+      ],
+      expect: { logins: ["alice", "carol"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-06",
+    function: "readReviews",
+    conjunct:
+      "a pending review is left out before its user, commit and time are looked at",
+    row: {
+      pages: [
+        {
+          reviews: [
+            { id: 1, state: "PENDING", user: null, commit_id: null },
+            by("alice"),
+          ],
+        },
+      ],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-07",
+    function: "readReviews",
+    conjunct: "an unknown state, last in the list, makes the list unreadable",
+    row: {
+      pages: [{ reviews: [by("alice"), by("bob", { state: "LGTM" })] }],
+      expect: { error: "a review has an unknown state" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-08",
+    function: "readReviews",
+    conjunct: "a user that is no object has no login",
+    row: {
+      pages: [{ reviews: [by("alice", { user: "alice" })] }],
+      expect: { error: "a review has no login" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-09",
+    function: "readReviews",
+    conjunct: "a login must have the form of a login",
+    row: {
+      pages: [{ reviews: [by("alice", { user: { login: "ali ce" } })] }],
+      expect: { error: "a review has no login" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-10",
+    function: "readReviews",
+    conjunct: "a commit must be a full commit id",
+    row: {
+      pages: [{ reviews: [by("alice", { commit_id: "abc1234" })] }],
+      expect: { error: "a review has no commit" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-11",
+    function: "readReviews",
+    conjunct: "a time must be a text",
+    row: {
+      pages: [{ reviews: [by("alice", { submitted_at: 1714557600 })] }],
+      expect: { error: "a review has no submission time" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-12",
+    function: "readReviews",
+    conjunct: "a time must name an instant that exists",
+    row: {
+      pages: [
+        { reviews: [by("alice", { submitted_at: "2024-02-31T10:00:00Z" })] },
+      ],
+      expect: { error: "a review has no submission time" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-13",
+    function: "readReviews",
+    conjunct: "the reviews keep the order of the host",
+    row: {
+      pages: [{ reviews: [by("zed"), by("alice"), by("mike")] }],
+      expect: { logins: ["zed", "alice", "mike"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-14",
+    function: "readReviews",
+    conjunct: "an unreadable entry on a later page is not dropped either",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: NEXT },
+        { reviews: [by("bob", { state: "LGTM" })] },
+      ],
+      expect: { error: "a review has an unknown state" },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-REV-15",
+    function: "reviews",
+    conjunct: "an unreadable list is an error, never a shorter list",
+    row: {
+      pages: [{ reviews: [by("alice"), by("bob", { user: null })] }],
+      expect: { error: "a review has no login" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-16",
+    function: "readReviews",
+    conjunct: "a list past the page cap is unreadable, never an empty list",
+    row: {
+      pages: [],
+      endless: GITHUB_MAX_PAGES + 1,
+      expect: { error: "more pages than the page cap" },
+      asked: upTo(GITHUB_MAX_PAGES),
+    },
+  },
+  {
+    id: "C-REV-17",
+    function: "readReviews",
+    conjunct: "the last entry is read",
+    row: {
+      pages: [{ reviews: [by("alice"), by("bob", { state: "LGTM" })] }],
+      expect: { error: "a review has an unknown state" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-18",
+    function: "readReviews",
+    conjunct: "the first entry is read",
+    row: {
+      pages: [{ reviews: [by("alice", { state: "LGTM" }), by("bob")] }],
+      expect: { error: "a review has an unknown state" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-19",
+    function: "readReviews",
+    conjunct: "an entry between the first and the last is read",
+    row: {
+      pages: [
+        { reviews: [by("alice"), by("bob", { state: "LGTM" }), by("carol")] },
+      ],
+      expect: { error: "a review has an unknown state" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LST-01",
+    function: "list",
+    conjunct: "a body that is no list is an error, not an empty list",
+    row: {
+      pages: [{ body: '{"reviews":[]}' }],
+      expect: { error: "not a list" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LST-02",
+    function: "list",
+    conjunct: "the pages are joined in the order they were asked for",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: NEXT },
+        { reviews: [by("bob")], link: '<{P:3}>; rel="next"' },
+        { reviews: [by("carol")] },
+      ],
+      expect: { logins: ["alice", "bob", "carol"] },
+      asked: [1, 2, 3],
+    },
+  },
+  {
+    id: "C-LST-03",
+    function: "list",
+    conjunct: "a next link on a short page asks for the next page",
+    row: {
+      pages: [{ reviews: [by("alice")], link: NEXT }, { reviews: [by("bob")] }],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LST-04",
+    function: "list",
+    conjunct: "a full page without a link asks for the next page",
+    row: {
+      pages: [{ fill: GITHUB_PAGE_SIZE }, { reviews: [by("bob")] }],
+      expect: { count: GITHUB_PAGE_SIZE + 1 },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LST-05",
+    function: "list",
+    conjunct: "a page one short of full without a link is the last one",
+    row: {
+      pages: [{ fill: GITHUB_PAGE_SIZE - 1 }],
+      expect: { count: GITHUB_PAGE_SIZE - 1 },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LST-06",
+    function: "list",
+    conjunct: "a first page without a link that is not full is the last one",
+    row: {
+      pages: [{ reviews: [by("alice")] }],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LST-07",
+    function: "list",
+    conjunct: "a list of exactly the page cap is read",
+    row: {
+      pages: [],
+      endless: GITHUB_MAX_PAGES,
+      expect: { count: GITHUB_MAX_PAGES },
+      asked: upTo(GITHUB_MAX_PAGES),
+    },
+  },
+  {
+    id: "C-LST-08",
+    function: "list",
+    conjunct: "a list one page past the cap is not cut",
+    row: {
+      pages: [],
+      endless: GITHUB_MAX_PAGES + 1,
+      expect: { error: "more pages than the page cap" },
+      asked: upTo(GITHUB_MAX_PAGES),
+    },
+  },
+  {
+    id: "C-LST-09",
+    function: "list",
+    conjunct: "the page after page n is page n + 1",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: NEXT },
+        { reviews: [by("bob")], link: '<{P:3}>; rel="next"' },
+        { reviews: [by("carol")] },
+      ],
+      expect: { count: 3 },
+      asked: [1, 2, 3],
+    },
+  },
+  {
+    id: "C-LST-10",
+    function: "list",
+    conjunct: "the entries after the first of a page are kept",
+    row: {
+      pages: [{ reviews: [by("alice"), by("bob"), by("carol")] }],
+      expect: { logins: ["alice", "bob", "carol"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LST-11",
+    function: "list",
+    conjunct: "the entries before the last of a page are kept",
+    row: {
+      pages: [{ reviews: [by("dave"), by("erin"), by("frank")] }],
+      expect: { logins: ["dave", "erin", "frank"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-01",
+    function: "nextTarget",
+    conjunct: "no Link header means no next page, not an unreadable header",
+    row: {
+      pages: [{ reviews: [by("alice")] }, { reviews: [by("bob")] }],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-02",
+    function: "nextTarget",
+    conjunct: "a header that is no list of links is unreadable, not empty",
+    row: {
+      pages: [{ reviews: [by("alice")], link: "garbage" }],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-03",
+    function: "nextTarget",
+    conjunct:
+      "an unreadable entry after a next entry still makes the header unreadable",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: `${NEXT}, garbage` },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-04",
+    function: "nextTarget",
+    conjunct: "the last entry of a header is read",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: `<{P:1}>; rel="first", <{P:1}>; rel="prev", ${NEXT}`,
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-05",
+    function: "nextTarget",
+    conjunct: "an entry without next after the next entry does not undo it",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: `${NEXT}, <{P:9}>; rel="last"` },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-06",
+    function: "nextTarget",
+    conjunct:
+      "an entry without next before the next entry is skipped and does not end the search",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: `<{P:1}>; rel="prev", ${NEXT}, <{P:9}>; rel="last"`,
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-07",
+    function: "nextTarget",
+    conjunct:
+      "two next entries side by side make the header unreadable: the first does not win",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: `${NEXT}, ${NEXT}` },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-08",
+    function: "nextTarget",
+    conjunct:
+      "two next entries with another between them make the header unreadable: the last does not win",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: `${NEXT}, <{P:9}>; rel="last", ${NEXT}`,
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-09",
+    function: "nextTarget",
+    conjunct:
+      "of two rel parameters the first decides: next first reads the next page",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; rel="next"; rel="prev"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-10",
+    function: "nextTarget",
+    conjunct:
+      "of two rel parameters the first decides: prev first ends the list",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; rel="prev"; rel="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-11",
+    function: "nextTarget",
+    conjunct: "the name of the rel parameter is read without its case",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; REL="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-12",
+    function: "nextTarget",
+    conjunct:
+      "a parameter with another name is not the relation, however alike",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; rev="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-13",
+    function: "nextTarget",
+    conjunct: "a parameter before rel is not the relation",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; title="next"; rel="prev"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-14",
+    function: "nextTarget",
+    conjunct: "a quoted relation is read",
+    row: {
+      pages: [{ reviews: [by("alice")], link: NEXT }, { reviews: [by("bob")] }],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-15",
+    function: "nextTarget",
+    conjunct: "a relation without quotes is read",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: "<{P:2}>; rel=next" },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-16",
+    function: "nextTarget",
+    conjunct:
+      "text inside the quoted value of another parameter is no parameter",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{P:2}>; title="; rel=prev"; rel="next"',
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-17",
+    function: "nextTarget",
+    conjunct: "the relation is read without its case",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; rel="NEXT"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-18",
+    function: "nextTarget",
+    conjunct: "next as the last of several relations counts",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; rel="prev next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-19",
+    function: "nextTarget",
+    conjunct: "next as the first of several relations counts",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; rel="next last"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-20",
+    function: "nextTarget",
+    conjunct:
+      "next between other relations counts: relations are split at spaces",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; rel="first next last"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-21",
+    function: "nextTarget",
+    conjunct: "a target stands in angle brackets",
+    row: {
+      pages: [{ reviews: [by("alice")], link: '{P:2}; rel="next"' }],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-22",
+    function: "nextTarget",
+    conjunct: "a parameter has a value",
+    row: {
+      pages: [{ reviews: [by("alice")], link: "<{P:2}>; rel" }],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-23",
+    function: "nextTarget",
+    conjunct: "entries are separated by a comma",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: `${NEXT} <{P:9}>; rel="last"` },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-24",
+    function: "nextTarget",
+    conjunct: "an entry without a rel parameter is not a next entry",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; title="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-01",
+    function: "hasNext",
+    conjunct: "without a next entry no further page is asked for",
+    row: {
+      pages: [{ reviews: [by("alice")], link: '<{P:1}>; rel="last"' }],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-02",
+    function: "hasNext",
+    conjunct:
+      "a target that is no full address is an error, not completed from the root",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{page:2}>; rel="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-03",
+    function: "hasNext",
+    conjunct: "an unreadable header is an error, not the end of the list",
+    row: {
+      pages: [{ reviews: [by("alice")], link: "<unclosed; rel=next" }],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-04",
+    function: "hasNext",
+    conjunct: "a next link to another origin is an error",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{foreign}{page:2}>; rel="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link leaves the API origin" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-05",
+    function: "hasNext",
+    conjunct: "a next link with a user name is an error",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<http://user@{host}{page:2}>; rel="next"',
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link leaves the API origin" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-06",
+    function: "hasNext",
+    conjunct: "a next link with a password alone is an error",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<http://:pw@{host}{page:2}>; rel="next"',
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link leaves the API origin" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-07",
+    function: "hasNext",
+    conjunct: "a next link outside the path of the API root is an error",
+    row: {
+      prefix: "/api/v3",
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/api/v4{page:2}>; rel="next"',
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-08",
+    function: "hasNext",
+    conjunct: "a next link to another list of the repository is an error",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/repos/acme/widgets/pulls/8/reviews?per_page=100&page=2>; rel="next"',
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-09",
+    function: "hasNext",
+    conjunct: "a next link to the same list of another repository is an error",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/repos/acme/gadgets/pulls/7/reviews?per_page=100&page=2>; rel="next"',
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-10",
+    function: "hasNext",
+    conjunct: "a next link may spell the repository in another case",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/repos/Acme/WIDGETS/pulls/7/reviews?per_page=100&page=2>; rel="next"',
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-NXT-11",
+    function: "hasNext",
+    conjunct: "a next link may name the repository by its numeric id",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/repositories/1300192/pulls/7/reviews?per_page=100&page=2>; rel="next"',
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-NXT-12",
+    function: "hasNext",
+    conjunct: "the numeric id is one segment of digits",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/repositories/1/2/pulls/7/reviews?per_page=100&page=2>; rel="next"',
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-13",
+    function: "hasNext",
+    conjunct: "a next link names one page, not two",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: `<{root}${REVIEWS_PATH}?page=2&page=3>; rel="next"`,
+        },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link names another page" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-14",
+    function: "hasNext",
+    conjunct: "a next link that skips a page is an error",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:3}>; rel="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link names another page" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-15",
+    function: "hasNext",
+    conjunct: "a next link to the same page is an error",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:1}>; rel="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link names another page" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-16",
+    function: "hasNext",
+    conjunct:
+      "the next link of a later page is checked like the one of the first",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: NEXT },
+        { reviews: [by("bob")], link: '<{foreign}{page:3}>; rel="next"' },
+        { reviews: [by("carol")] },
+      ],
+      expect: { error: "next link leaves the API origin" },
+      asked: [1, 2],
+    },
+  },
+];
+
+describe("CONJUNCTS: reading a list of reviews and its Link headers", () => {
+  it("the table and the list of changes name the same conjuncts, each once", () => {
+    const ids = CONJUNCTS.map((entry) => entry.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(conjunctIds("github-reviews"));
+  });
+
+  it.each(
+    CONJUNCTS.map((entry) => [entry.id, entry.conjunct, entry.row] as const),
+  )("%s: %s", async (_id, _conjunct, row) => {
+    const prefix = row.prefix ?? "";
+    const expand = (text: string): string =>
+      text
+        .replace(
+          /\{P:(\d+)\}/g,
+          (_, n) => `${stub.url}${prefix}${page(Number(n))}`,
+        )
+        .replace(/\{page:(\d+)\}/g, (_, n) => page(Number(n)))
+        .replaceAll("{root}", stub.url)
+        .replaceAll("{foreign}", foreign.url)
+        .replaceAll("{host}", new URL(stub.url).host);
+    if (row.endless !== undefined) {
+      const last = row.endless;
+      stub.on(REVIEWS_PATH, (hit): Reply => {
+        const n = Number(new URL(hit.url, stub.url).searchParams.get("page"));
+        return {
+          json: [by(`user${n}`)],
+          headers:
+            n < last ? { link: expand(`<{P:${n + 1}}>; rel="next"`) } : {},
+        };
+      });
+    }
+    row.pages.forEach((of, i) => {
+      const reviews =
+        of.fill === undefined
+          ? (of.reviews ?? [])
+          : Array.from({ length: of.fill }, (_, k) => by(`user${k}`));
+      stub.on(`${prefix}${page(i + 1)}`, {
+        ...(of.body === undefined ? { json: reviews } : { body: of.body }),
+        headers: of.link === undefined ? {} : { link: expand(of.link) },
+      });
+    });
+    foreign.on(REVIEWS_PATH, { json: [by("mallory")] });
+    const host = hostAt(
+      stub,
+      prefix === "" ? {} : { apiUrl: `${stub.url}${prefix}` },
+    );
+    if ("error" in row.expect) {
+      const error = await failing(host.reviews());
+      expect(error.message).toBe(`${AT} (${row.expect.error})`);
+    } else {
+      const logins = (await giving(host.reviews())).map((r) => r.login);
+      if ("logins" in row.expect) expect(logins).toEqual(row.expect.logins);
+      else expect(logins).toHaveLength(row.expect.count);
+    }
+    expect(stub.hits.map((hit) => hit.url)).toEqual(
+      row.asked.map((n) => `${prefix}${page(n)}`),
+    );
+    expect(foreign.hits).toEqual([]);
   });
 });
