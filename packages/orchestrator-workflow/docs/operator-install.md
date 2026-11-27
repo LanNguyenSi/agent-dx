@@ -118,7 +118,7 @@ path no longer exists (ENOENT) or is no longer a directory counts as
 both are de-registered, including a target on a removable or network mount
 that is not mounted at that moment (the path is gone, or the empty mount point
 has no manifest). Do not schedule `--prune` while targets live on such a
-mount. After a non-empty prune the human output ends with a hint line;
+mount. After a non-empty prune the human output prints a restore hint after the pruned list;
 `orchestrator-workflow adopt <dir>` restores a pruned entry once the target is
 available again. The `--json` output is unchanged.
 For a legacy opencode leaf without a recorded provider-qualified model id,
