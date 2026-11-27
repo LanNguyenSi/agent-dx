@@ -166,6 +166,7 @@ describe('docs/approve.md, "After the merge"', () => {
       "ambiguous-merge-base",
       "config-in-merge",
       "spec-not-in-merge",
+      "review-not-proposed",
       "shallow-repository",
       "digest-mismatch-after-merge",
       "checkout-not-default-tip",
@@ -196,7 +197,12 @@ describe('docs/approve.md, "After the merge"', () => {
       "a squash that follows a commit of the default branch that changed `.spec-gate/` or removed a proposed spec, within N - 1 commits, is not approved",
       "a pull request of more than 50 commits is not measured",
       "No merge is computed to say what the landed tree should be",
-      "The digest of the spec must differ between the start of the measured first-parent steps and the merge commit",
+      "Some measured first-parent step must change the spec and, for `single-commit`, so must the range from the reviewed base to the head commit",
+      "or when the spec is not `proposed` at its start: not there, not parsing, or a draft",
+      "Each step is asked on its own, not the two ends of all steps",
+      "Condition 3 asks that the spec is `proposed` at the commit of every approving review considered (`review-not-proposed`, which names the commit)",
+      "A rebase merge can reach commits of the default branch as well",
+      "N counts every commit of the pull request, its merge commits included",
       "a pull request that did not change this spec does not approve it",
       "This takes the place of `head-in-reference`",
       "the default branch was moved to it by fast-forward, or the branch was pushed there",
@@ -215,6 +221,8 @@ describe('docs/approve.md, "After the merge"', () => {
       "A shallow repository is refused before anything is measured, in both modes: conditions 2, 4, 7 and 8 are `shallow-repository`",
       "`git-failed` when git cannot say whether it is shallow",
       "A shallow repository is refused: conditions 2, 4, 7 and 8 are `shallow-repository` and the exit code is 1",
+      "When `HEAD` and the default ref share no history the checkout can see (a clone of depth 1, for one), the check refuses before that test",
+      "exit 2, no report and no word about a shallow repository",
     ]) {
       expect(flat, phrase).toContain(phrase);
     }
@@ -249,6 +257,7 @@ describe('docs/approve.md, "After the merge"', () => {
       "The merge commit and the head are the host's word",
       "Named later by fewer commits than the pull request has, the steps can leave out the first commits of a rebase merge",
       "A squash merge is measured like a rebase merge",
+      "The same holds for a rebase merge of a pull request that holds merge commits or commits the replay drops",
       "After the merge the bindings are therefore compared neither with their log as it was merged before nor with the bindings of the approved head",
       "neither is a later commit of the default branch that changes `bindings.yaml` without a log entry",
     ]) {

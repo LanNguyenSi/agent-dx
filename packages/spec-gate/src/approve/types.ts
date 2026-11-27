@@ -74,7 +74,7 @@ export type ConditionName = (typeof CONDITIONS)[number]["name"];
 export const MERGED_SUMMARIES: Record<ConditionNumber, string> = {
   1: "The host reports the pull request as merged, and an approving review stands on the head commit the host reports for it.",
   2: "An approver of that head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the tip of the default branch, the pull request targeted the default branch, its merge commit is on the default branch and no range of the merge changes a path under `.spec-gate/`.",
-  3: "The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered, and the merge changed the digest of this spec.",
+  3: "The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is `proposed` at each of those commits, and the merge changed this spec.",
   4: "The spec is `proposed` at the tip of the default branch, the checkout is at that commit, the spec directory of the work tree is the one it holds, and the final lint has no error.",
   5: "`agent_identities` is not empty and shares no account with `approvers`.",
   6: "The host enforces a review for `specs/` and for `.spec-gate/`, and reports the last change under `.spec-gate/`.",
@@ -121,6 +121,7 @@ export const FAILURE_CODES = {
   "review-digest-unavailable": [3],
   "digest-mismatch": [3],
   "digest-mismatch-after-merge": [3],
+  "review-not-proposed": [3],
   "spec-not-in-merge": [3],
   "spec-unreadable": [4],
   "status-not-proposed": [4],

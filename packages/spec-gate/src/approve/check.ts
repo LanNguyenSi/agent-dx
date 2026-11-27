@@ -360,6 +360,19 @@ function digestUnchanged(s: Subject, headDigest: string | null): Outcome {
         `no digest exists for the spec at the commit ${commit} of an approving review`,
       );
     }
+    if (
+      s.mode === "merged" &&
+      specStateAt(s.git.repo, commit, s.specPath)?.status !== "proposed"
+    ) {
+      // The status is no part of the digest. Before the merge condition 4
+      // reads it at the head, which is where a counted approval stands;
+      // after the merge it reads it at the tip, so the reviewed commit is
+      // asked here: an approval of a draft approves no spec.
+      return fails(
+        "review-not-proposed",
+        `the spec is not proposed at the commit ${commit} of an approving review; an approval of a draft does not count, whatever status the default branch gave the spec later`,
+      );
+    }
     if (digest !== headDigest) {
       // After the merge both sides are named: the reader has no checkout of
       // the reviewed commit to compute the second one from.
@@ -377,32 +390,41 @@ function digestUnchanged(s: Subject, headDigest: string | null): Outcome {
   if (s.landing !== null && !broughtBy(s, s.landing)) {
     return fails(
       "spec-not-in-merge",
-      "the merge of the pull request did not change the digest of this spec: its approval is not an approval of this spec, whatever its head holds",
+      "the merge of the pull request did not change this spec: its approval is not an approval of this spec, whatever its head holds",
     );
   }
   return holds(
     s.mode === "merged"
-      ? "the digest at the tip of the default branch equals the digest at the commit of every approving review considered, and the merge changed the digest of this spec"
+      ? "the digest at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is proposed at each of them, and the merge changed this spec"
       : "the digest at the head equals the digest at the commit of every approving review considered",
   );
 }
 
 /**
- * Whether the merged pull request is the one that brought this spec: the
- * digest of the spec differs between the start of the measured first-parent
- * steps and the merge commit and, where the reviewed commits are not in the
- * history of the merge commit, between the reviewed base and the head. No
- * digest at the start (the spec was not there, or did not parse) counts as
- * another digest than one at the end.
+ * Whether the merged pull request is the one that brought this spec: some
+ * measured first-parent step changes the spec and, where the reviewed
+ * commits are not in the history of the merge commit, so does the range
+ * from the reviewed base to the head.
+ *
+ * A range changes the spec when the digest differs between its two ends, or
+ * when the spec is not `proposed` at its start (not there, not parsing, or
+ * a draft): the status is no part of the digest, and a pull request that
+ * only proposes a draft the default branch already held is the one that
+ * brought the spec. Each step is asked on its own, not the two ends of all
+ * steps: a pull request that puts back an earlier text right after another
+ * one changed it leaves both ends equal.
  */
 function broughtBy(s: Subject, landing: Landing): boolean {
-  const digestAt = (commit: string) =>
-    specDigestAt(s.git.repo, commit, s.specPath);
-  if (digestAt(landing.landedFrom) === digestAt(landing.merge)) return false;
+  const repo = s.git.repo;
+  const changes = (from: string, to: string): boolean =>
+    specStateAt(repo, from, s.specPath)?.status !== "proposed" ||
+    specDigestAt(repo, from, s.specPath) !== specDigestAt(repo, to, s.specPath);
+  const steps = landing.ranges.slice(0, landing.commits);
+  if (!steps.some((step) => changes(step.from, step.to))) return false;
   return (
     landing.reviewedBase === null ||
     s.approvedHead === null ||
-    digestAt(landing.reviewedBase) !== digestAt(s.approvedHead)
+    changes(landing.reviewedBase, s.approvedHead)
   );
 }
 
