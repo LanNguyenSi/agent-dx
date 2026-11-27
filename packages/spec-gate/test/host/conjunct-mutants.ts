@@ -634,6 +634,7 @@ const pull: Omit<ConjunctMutant, "table">[] = [
     id: "C-PUL-32",
     match: "if (isMerged) {",
     with: "if (isMerged && false) {",
+    untyped: true,
   },
   {
     id: "C-PUL-33",
@@ -652,6 +653,7 @@ const pull: Omit<ConjunctMutant, "table">[] = [
     id: "C-PUL-36",
     match: "mergeCommit: landed,",
     with: "mergeCommit: headSha,",
+    untyped: true,
   },
   {
     id: "C-PUL-37",

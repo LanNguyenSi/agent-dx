@@ -382,9 +382,10 @@ Conditions 5 and 6 ask what they ask in the open mode.
 ### What is judged, and where
 
 The tip of the default branch is the commit `defaultRef` names when the check
-runs. `spec.md` and `testplan.yaml`, the digest and the commands are read from
-git at that commit, and `spec`, `digest` and `commands` of the report are
-those of that commit. The merge commit may lie below the tip: a commit the
+runs. `spec.md` and `testplan.yaml` are read from git at that commit, and
+`spec`, `digest` and `commands` of the report are those of the spec as that
+commit holds it (the command set still comes from its `commands_ref`, see
+"Commands"). The merge commit may lie below the tip: a commit the
 default branch gained after the merge is part of what is judged. So the answer
 is about the default branch as it is now, and it can change when the branch
 moves on.
