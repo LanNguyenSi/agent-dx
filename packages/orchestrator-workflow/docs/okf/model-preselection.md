@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-11-18T08:13:21Z
+timestamp: 2026-11-27T06:18:28Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -145,12 +145,12 @@ below.
   richer: when the `opencode` harness is selected, `resolveInitInputs`
   (`cli-inputs.ts`) shells out to
   `opencode models`, parses the catalog (`loadOpencodeCatalog`,
-  `src/opencode.ts:270-279#"return [];"`), auto-detects the provider offering Claude
-  models (`detectProvider`, `src/opencode.ts:40-64#"return { provider: undefined, ambiguous: false };"`; exactly one candidate
+  `src/opencode.ts:289-306#"return parseOpencodeCatalog(stdout);"`), auto-detects the provider offering Claude
+  models (`detectProvider`, `src/opencode.ts:42-66#"return { provider: undefined, ambiguous: false };"`; exactly one candidate
   provider resolves automatically, more than one triggers an "ambiguous,
   pass `--opencode-provider`" warning, none triggers a "no provider found"
   warning), and resolves each alias to the highest-versioned canonical match
-  (`resolveAlias`, `src/opencode.ts:116-149#"return best;"`, non-canonical variants like
+  (`resolveAlias`, `src/opencode.ts:118-151#"return best;"`, non-canonical variants like
   `-fast`/`-thinking`/`-mini`/`-latest` deprioritized). `composeOpencodeAgent`
   emits `model:` only when a resolved value exists; otherwise the line is
   omitted entirely so the subagent inherits the session/default model
@@ -160,7 +160,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:368#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:374#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:500-523#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2182-2190#"${role}.md must not contain model:"`,
@@ -331,7 +331,7 @@ line per unresolved class (`small`/`medium`/
 of `init`'s CLI action into `resolveInitInputs` so a later `apply --target`
 command can reuse it; `init` still writes each returned warning to stderr),
 mirroring `resolveOpencodeModels`'s own per-role warning style (a default-tier alias with no model is omitted with a `Warning:` and never replaced; a tier-variant class with no model of its own falls back to the next lower class that resolved, with a `Note:` line naming role, tier and class used, a `Warning:` when it drops more than one class, and no variant for a reviewer or advisor below the `medium` class)
-(`opencode.ts:190-259#"return { resolved, warnings };"`) rather than staying silent. Second, `runInit`'s
+(`opencode.ts:192-261#"return { resolved, warnings };"`) rather than staying silent. Second, `runInit`'s
 opencode tier loop (`init.ts:1243-1271#"effortLine,"`) now checks whether the variant's
 class model resolved at all (`variantModelValue !== undefined`,
 `init.ts:1246-1258#"// rules in opencodeEffortLine above."`) and skips the write, and the manifest ledger entry,
@@ -451,7 +451,7 @@ that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `docs/model-routing-reference.md`'s "Effort tiers" section
 (moved from README.md) gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:394#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:400#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. the skill's
 `references/delegation-and-tiers.md` states it once, in a dedicated bullet

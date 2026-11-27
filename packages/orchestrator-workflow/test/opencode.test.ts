@@ -1,7 +1,10 @@
+import { homedir } from "node:os";
+
 import { describe, expect, it } from "vitest";
 
 import {
   detectProvider,
+  loadOpencodeCatalog,
   parseOpencodeCatalog,
   providerOf,
   resolveAlias,
@@ -450,5 +453,138 @@ describe("fable alias and class fallback", () => {
       resolveOpencodeModels(DEFAULT_MODELS, { catalog, reportRoles: [] })
         .warnings,
     ).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadOpencodeCatalog (spawn injected, no real binary)
+// ---------------------------------------------------------------------------
+
+type SpawnCall = { command: string; args: unknown; options: unknown };
+
+function recordingSpawn(stdout: string | Error): {
+  calls: SpawnCall[];
+  execFile: NonNullable<Parameters<typeof loadOpencodeCatalog>[0]>["execFile"];
+} {
+  const calls: SpawnCall[] = [];
+  const execFile = ((command: string, args: unknown, options: unknown) => {
+    calls.push({ command, args, options });
+    if (stdout instanceof Error) throw stdout;
+    return stdout;
+  }) as unknown as NonNullable<
+    Parameters<typeof loadOpencodeCatalog>[0]
+  >["execFile"];
+  return { calls, execFile };
+}
+
+describe("loadOpencodeCatalog", () => {
+  const NEUTRAL = "/neutral/home";
+  const CATALOG = "github-copilot/claude-sonnet-4.6\n";
+
+  it("spawns the bare name on POSIX, from the neutral directory, with the same timeout and stdio", () => {
+    for (const platform of ["linux", "darwin"]) {
+      const { calls, execFile } = recordingSpawn(CATALOG);
+      const out = loadOpencodeCatalog({
+        platform,
+        pathEnv: ".:/usr/bin",
+        isFile: () => {
+          throw new Error("POSIX must not probe the file system");
+        },
+        cwd: () => NEUTRAL,
+        execFile,
+      });
+      expect(out).toEqual(["github-copilot/claude-sonnet-4.6"]);
+      expect(calls).toEqual([
+        {
+          command: "opencode",
+          args: ["models"],
+          options: {
+            encoding: "utf8",
+            timeout: 10_000,
+            stdio: ["ignore", "pipe", "ignore"],
+            cwd: NEUTRAL,
+          },
+        },
+      ]);
+    }
+  });
+
+  it("spawns the resolved absolute path on win32, from the neutral directory", () => {
+    const hit = "C:\\tools\\opencode.exe";
+    const { calls, execFile } = recordingSpawn(CATALOG);
+    const out = loadOpencodeCatalog({
+      platform: "win32",
+      pathEnv: ".;C:\\tools",
+      isFile: (p) => p === hit || p === "opencode.exe",
+      cwd: () => NEUTRAL,
+      execFile,
+    });
+    expect(out).toEqual(["github-copilot/claude-sonnet-4.6"]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe(hit);
+    expect(calls[0]?.options).toMatchObject({
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "ignore"],
+      cwd: NEUTRAL,
+    });
+  });
+
+  it("returns [] without spawning when the win32 name does not resolve", () => {
+    for (const pathEnv of [".", "", undefined, "C:\\npm"]) {
+      const { calls, execFile } = recordingSpawn(CATALOG);
+      const out = loadOpencodeCatalog({
+        platform: "win32",
+        pathEnv,
+        isFile: (p) => p === "opencode.exe" || p === "C:\\npm\\opencode.cmd",
+        cwd: () => NEUTRAL,
+        execFile,
+      });
+      expect(out).toEqual([]);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it("defaults the working directory to the home directory", () => {
+    for (const platform of ["linux", "darwin"]) {
+      const { calls, execFile } = recordingSpawn(CATALOG);
+      loadOpencodeCatalog({ platform, execFile });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.options).toMatchObject({ cwd: homedir() });
+    }
+  });
+
+  it("checks the real file system by default on win32: a path that is not a file does not spawn", () => {
+    const { calls, execFile } = recordingSpawn(CATALOG);
+    const out = loadOpencodeCatalog({
+      platform: "win32",
+      pathEnv: "C:\\opencode-test-no-such-directory",
+      execFile,
+    });
+    expect(out).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it("returns [] when the spawn fails or the neutral directory cannot be determined", () => {
+    const failing = recordingSpawn(new Error("ENOENT"));
+    expect(
+      loadOpencodeCatalog({
+        platform: "linux",
+        cwd: () => NEUTRAL,
+        execFile: failing.execFile,
+      }),
+    ).toEqual([]);
+    expect(failing.calls).toHaveLength(1);
+
+    const never = recordingSpawn(CATALOG);
+    expect(
+      loadOpencodeCatalog({
+        platform: "linux",
+        cwd: () => {
+          throw new Error("no home");
+        },
+        execFile: never.execFile,
+      }),
+    ).toEqual([]);
+    expect(never.calls).toEqual([]);
   });
 });
