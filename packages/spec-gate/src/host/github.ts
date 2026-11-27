@@ -81,14 +81,21 @@ const LINK_ENTRY_RE =
   /\s*<([^<>]*)>((?:\s*;\s*[A-Za-z*]+\s*=\s*(?:"[^"]*"|[^",;\s]+))*)\s*(?:,|$)/y;
 /** How a `Link` header names a repository by its numeric id. */
 const REPOSITORY_ID_PATH_RE = /^\/repositories\/[1-9][0-9]*$/;
-const LINK_REL_RE = /;\s*rel\s*=\s*(?:"([^"]*)"|([^",;\s]+))/i;
+/** One parameter of a `Link` entry: its name and its value, quoted or bare. */
+const LINK_PARAM_RE = /;\s*([A-Za-z*]+)\s*=\s*(?:"([^"]*)"|([^",;\s]+))/g;
 
 /** What a request gave: a parsed body for 200, else one of the statuses asked for. */
 type Answer =
   | { status: 200; json: unknown; link: string | null }
   | { status: number; json?: undefined; link?: undefined };
 
-type Listing = { ok: true; items: unknown[] } | { ok: false; status: number };
+/** A list, the mapped status that came instead, or `null` for a list past the page cap. */
+type Listing =
+  { ok: true; items: unknown[] } | { ok: false; status: number | null };
+
+/** The reviews of a pull request, or the error that says why its list cannot be read as reviews. */
+type Reviews =
+  { ok: true; reviews: HostReview[] } | { ok: false; error: Error };
 
 /** What one source says about a required review. */
 type Evidence = "requires" | "none" | "unreadable";
@@ -188,8 +195,12 @@ function nextTarget(header: string | null): string | null | undefined {
   while (entry.lastIndex < header.length) {
     const m = entry.exec(header);
     if (m === null) return undefined;
-    const rel = LINK_REL_RE.exec(m[2]!);
-    const names = (rel?.[1] ?? rel?.[2] ?? "").toLowerCase().split(/\s+/);
+    // The relation is the value of the first parameter named `rel`. Text
+    // inside the quoted value of another parameter is not a parameter.
+    const rel = [...m[2]!.matchAll(LINK_PARAM_RE)].find(
+      (param) => param[1]!.toLowerCase() === "rel",
+    );
+    const names = (rel?.[2] ?? rel?.[3] ?? "").toLowerCase().split(/\s+/);
     if (!names.includes("next")) continue;
     if (next !== null) return undefined;
     next = m[1]!;
@@ -197,14 +208,22 @@ function nextTarget(header: string | null): string | null | undefined {
   return next;
 }
 
-/** The run id `run` names for `repository` (lower case), or `null`. */
-function runIdOf(run: unknown, repository: string): string | null {
+/**
+ * The run id `run` names for `repository` (lower case), or `null`. The
+ * address form is read only when `addresses` is true: an address on
+ * github.com names a run of that host, not of another API root.
+ */
+function runIdOf(
+  run: unknown,
+  repository: string,
+  addresses: boolean,
+): string | null {
   if (typeof run !== "string") return null;
   let id: string;
   if (RUN_ID_RE.test(run)) {
     id = run;
   } else {
-    const m = RUN_URL_RE.exec(run);
+    const m = addresses ? RUN_URL_RE.exec(run) : null;
     if (m === null) return null;
     if (asciiLower(`${m[1]}/${m[2]}`) !== repository) return null;
     id = m[3]!;
@@ -275,7 +294,13 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
   if (typeof token !== "string" || !TOKEN_RE.test(token)) {
     throw new Error("github: token must be printable ASCII without a space");
   }
-  const api = apiRootOf(options.apiUrl ?? GITHUB_API_URL);
+  const { apiUrl } = options;
+  // Only a missing option means the default: a value of another type, null
+  // included, is a configuration that went wrong, not a wish for github.com.
+  if (apiUrl !== undefined && typeof apiUrl !== "string") {
+    throw new Error("github: apiUrl must be a URL");
+  }
+  const api = apiRootOf(apiUrl ?? GITHUB_API_URL);
   const send = options.fetch ?? globalThis.fetch;
   if (typeof send !== "function") {
     throw new Error("github: no fetch is available");
@@ -438,6 +463,7 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
   async function list(
     path: string,
     mapped: readonly number[] = [],
+    pastCap: "throw" | "report" = "throw",
   ): Promise<Listing> {
     const items: unknown[] = [];
     for (let page = 1; ; page += 1) {
@@ -456,38 +482,48 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
         answer.json.length >= GITHUB_PAGE_SIZE;
       if (!more) return { ok: true, items };
       if (page >= GITHUB_MAX_PAGES) {
+        if (pastCap === "report") return { ok: false, status: null };
         throw failure(path, 200, "more pages than the page cap");
       }
     }
   }
 
-  /** The submitted reviews of pull request `number`, all pages. */
-  async function reviewsOf(number: number): Promise<HostReview[]> {
+  /**
+   * The submitted reviews of pull request `number`, all pages. A list that
+   * arrives but cannot be read as reviews (an entry of another shape, more
+   * pages than the cap) is reported, not thrown: the caller decides what an
+   * unreadable list means. A request that fails throws.
+   */
+  async function readReviews(number: number): Promise<Reviews> {
     const path = `${repoPath}/pulls/${number}/reviews`;
-    const listing = await list(path);
-    if (!listing.ok) throw failure(path, listing.status);
+    const unreadable = (reason: string): Reviews => ({
+      ok: false,
+      error: failure(path, 200, reason),
+    });
+    const listing = await list(path, [], "report");
+    if (!listing.ok) return unreadable("more pages than the page cap");
     const reviews: HostReview[] = [];
     for (const entry of listing.items) {
-      if (!isRecord(entry)) throw failure(path, 200, "a review is no object");
+      if (!isRecord(entry)) return unreadable("a review is no object");
       const state = entry.state;
       if (typeof state !== "string") {
-        throw failure(path, 200, "a review has no state");
+        return unreadable("a review has no state");
       }
       // A pending review was never submitted: it is not a review.
       if (state === "PENDING") continue;
       if (!(REVIEW_STATES as readonly string[]).includes(state)) {
-        throw failure(path, 200, "a review has an unknown state");
+        return unreadable("a review has an unknown state");
       }
       const user = entry.user;
       const login = isRecord(user) ? user.login : undefined;
       const commit = entry.commit_id;
       const submittedAt = entry.submitted_at;
-      if (!isLogin(login)) throw failure(path, 200, "a review has no login");
+      if (!isLogin(login)) return unreadable("a review has no login");
       if (!isCommitId(commit)) {
-        throw failure(path, 200, "a review has no commit");
+        return unreadable("a review has no commit");
       }
       if (typeof submittedAt !== "string" || instantOf(submittedAt) === null) {
-        throw failure(path, 200, "a review has no submission time");
+        return unreadable("a review has no submission time");
       }
       reviews.push({
         login,
@@ -496,7 +532,7 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
         submittedAt,
       });
     }
-    return reviews;
+    return { ok: true, reviews };
   }
 
   async function readPullRequest(): Promise<{
@@ -600,17 +636,27 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
   let enforcementOnce: Promise<Enforcement> | undefined;
 
   /**
-   * The login of the latest approval that stands among `reviews`, by the
-   * rule of the approval check; `null` without one.
+   * The login of the latest approval of commit `head` that stood when the
+   * pull request was merged at `mergedAt`, by the rule of the approval
+   * check; `null` without one. A review after the merge did not let the
+   * change in, and an approval of another commit is not an approval of what
+   * was merged.
    */
-  function latestApprover(reviews: readonly HostReview[]): string | null {
-    const timed: TimedReview[] = reviews.map((review, index) => ({
-      ...review,
-      at: instantOf(review.submittedAt)!,
-      index,
-    }));
+  function latestApprover(
+    reviews: readonly HostReview[],
+    head: string,
+    mergedAt: number,
+  ): string | null {
+    const timed: TimedReview[] = reviews
+      .map((review, index) => ({
+        ...review,
+        at: instantOf(review.submittedAt)!,
+        index,
+      }))
+      .filter((review) => review.at <= mergedAt);
     let best: { login: string; at: number } | null = null;
     for (const approval of standingApprovals(timed)) {
+      if (approval.commit !== head) continue;
       // The login is the one of the account's latest approval, so the
       // latest approval under that login is the one that stands.
       const at = timed
@@ -622,22 +668,24 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
   }
 
   /**
-   * The number of the merged pull request into `branch` whose merge commit
-   * is `commit`; `null` when there is none or more than one.
+   * The merged pull request into `branch` whose merge commit is `commit`:
+   * its number, its head commit and its merge time as the host gave them;
+   * `null` when there is none or more than one.
    */
   async function mergedPullOf(
     commit: string,
     branch: string,
-  ): Promise<number | null> {
+  ): Promise<{ number: number; head: unknown; mergedAt: string } | null> {
     const path = `${repoPath}/commits/${commit}/pulls`;
     const listing = await list(path);
     if (!listing.ok) throw failure(path, listing.status);
-    const numbers: number[] = [];
+    const merged: { number: number; head: unknown; mergedAt: string }[] = [];
     for (const entry of listing.items) {
       if (!isRecord(entry)) {
         throw failure(path, 200, "a pull request is no object");
       }
       const number = entry.number;
+      const head = entry.head;
       const mergedAt = entry.merged_at;
       const mergeCommit = entry.merge_commit_sha;
       const base = entry.base;
@@ -661,10 +709,14 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
         baseRef === branch &&
         sameRepository(baseRepo.full_name)
       ) {
-        numbers.push(number);
+        merged.push({
+          number,
+          head: isRecord(head) ? head.sha : undefined,
+          mergedAt,
+        });
       }
     }
-    return numbers.length === 1 ? numbers[0]! : null;
+    return merged.length === 1 ? merged[0]! : null;
   }
 
   return {
@@ -673,7 +725,11 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
     },
 
     async reviews(): Promise<HostReview[]> {
-      return reviewsOf(pullNumber);
+      // A review that cannot be read is never dropped: the reviews that
+      // remain would tell another story.
+      const read = await readReviews(pullNumber);
+      if (!read.ok) throw read.error;
+      return read.reviews;
     },
 
     async reviewEnforcement(path: ReviewPath): Promise<Enforcement> {
@@ -697,14 +753,27 @@ export function createGitHubHost(options: GitHubHostOptions): HostAdapter {
       const first: unknown = json[0];
       const commit = isRecord(first) ? first.sha : undefined;
       if (!isCommitId(commit)) throw failure(path, 200, "no commit id");
-      const number = await mergedPullOf(commit, branch);
-      if (number === null) return { commit, approver: null };
-      return { commit, approver: latestApprover(await reviewsOf(number)) };
+      const merged = await mergedPullOf(commit, branch);
+      if (merged === null) return { commit, approver: null };
+      // Without the commit that was merged and the time of the merge no
+      // approval can be tied to the change: the approver is unknown.
+      const mergedAt = instantOf(merged.mergedAt);
+      if (!isCommitId(merged.head) || mergedAt === null) {
+        return { commit, approver: null };
+      }
+      // Unknown is an answer here, so reviews that cannot be read do not
+      // fail the fact for every pull request of the repository.
+      const read = await readReviews(merged.number);
+      if (!read.ok) return { commit, approver: null };
+      return {
+        commit,
+        approver: latestApprover(read.reviews, merged.head, mergedAt),
+      };
     },
 
     async ciRunStatus(commit: string, run: string): Promise<CiRunStatus> {
       if (!isCommitId(commit)) return "unverified";
-      const id = runIdOf(run, repoKey);
+      const id = runIdOf(run, repoKey, api.origin === GITHUB_API_URL);
       if (id === null) return "unverified";
       const path = `${repoPath}/actions/runs/${id}`;
       const answer = await get(path, "", [404]);

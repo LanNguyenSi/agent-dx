@@ -319,7 +319,7 @@ const host = createGitHubHost({
 | `repository` | `<owner>/<name>`, the repository the pull request targets: letters, digits, `-` and `_`, and `.` in the name |
 | `pullRequest` | the number of the pull request, a positive integer |
 | `token` | a token that may read the repository: printable ASCII without a space |
-| `apiUrl` | the API root, `https://api.github.com` when left out. It must be `https:`; `http:` is accepted only for the loopback hosts `127.0.0.1`, `[::1]` and `localhost`. It carries no credentials, query or fragment |
+| `apiUrl` | the API root, `https://api.github.com` when left out. It must be `https:`; `http:` is accepted only for the loopback hosts `127.0.0.1`, `[::1]` and `localhost`. It carries no credentials, query or fragment. A value that is not a text, `null` included, is refused and not read as left out |
 | `fetch` | a replacement for the global `fetch`: a seam for tests |
 
 An option that does not fit is refused when the adapter is made, before
@@ -415,7 +415,9 @@ A required code-owner review (`require_code_owner_review` in a ruleset,
 0 is not evidence: the adapter does not read a code-owners file and cannot
 say which paths it covers. Who may bypass a rule (the bypass list of a
 ruleset, `enforce_admins` and the bypass allowances of a classic protection)
-is not read either; see "Admin bypass" under "Known gaps".
+is not read either; see "Admin bypass" under "Known gaps". Any actor on such
+a list (a role, a team, an app, not only an administrator) can merge without
+the review while the adapter reports `enforced`.
 
 Rulesets and branch protections hold for a branch, not for a path, so the
 answer is the same for `specs/` and `.spec-gate/`.
@@ -430,21 +432,40 @@ condition 7 does see it).
 
 `approver` is looked up through the pull requests the host associates with
 that commit. Exactly one of them must be merged, into the target branch of
-this repository, with that commit as its `merge_commit_sha`; then the
-approver is the account whose approval of that pull request stands and was
-submitted last, by the rule of condition 1 (on a tie, the first account in
-order). In every other case `approver` is `null`. That is the case for a
-change that was pushed without a pull request, and usually for a pull request
-merged with a merge commit, since the commit that changed the files is then a
-commit of the merged branch and not the merge commit. The approval may be of
-an earlier commit of that pull request.
+this repository, with that commit as its `merge_commit_sha`. An approval of
+that pull request counts only when it is tied to what was merged: it was
+submitted on the head commit of the merged pull request (`head.sha`) and not
+after the merge (`merged_at`). The approver is then the account whose
+approval stood at the merge and was submitted last, by the rule of condition
+1 (on a tie, the first account in order). So none of these names an approver:
+
+- (a) an approval of an earlier commit, when more was pushed before the
+  merge;
+- (b) a later approval of an older commit, whoever gave it;
+- (c) an approval submitted after the merge. A review after the merge does
+  not take an earlier approval away either.
+
+In every other case `approver` is `null`: a change that was pushed without a
+pull request; usually a pull request merged with a merge commit, since the
+commit that changed the files is then a commit of the merged branch and not
+the merge commit; a merged pull request whose head commit or merge time the
+host does not give in a readable form; and reviews of that pull request that
+cannot be read as reviews (an entry without a user, without a commit or with
+an unknown state, or more pages than the cap). `null` is "unknown" and does
+not fail condition 6, so one unreadable review on an old pull request does
+not fail the fact for every pull request of the repository. A request that
+fails (a status other than 200, a time limit, a body over the cap or a body
+that is not a JSON list) still throws.
 
 ### CI runs
 
 `run` is a run id (digits) or the address
 `https://github.com/{owner}/{repo}/actions/runs/{id}` of a run of the same
-repository; anything else is `unverified` and nothing is asked. So is a
-`commit` that is not a full commit id. Then `verified` needs all of: the run
+repository; anything else is `unverified` and nothing is asked. The address
+is read only when the API root is `https://api.github.com`: on another root
+the id in it would name another run than the one the address shows, so the
+answer is `unverified` and nothing is asked. So is a `commit` that is not a
+full commit id. Then `verified` needs all of: the run
 exists (404 is `unverified`), its `repository.full_name` is this repository,
 its `head_sha` is `commit` and its `status` is `completed`. The remaining gap:
 any workflow of the repository counts, whatever started it and however it

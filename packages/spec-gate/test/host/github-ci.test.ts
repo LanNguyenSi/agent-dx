@@ -1,13 +1,16 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createGitHubHost } from "../../src/host/index.js";
 import {
   failing,
   giving,
   HEAD,
   hostAt,
   P,
+  PULL,
   REPOSITORY,
   sha,
   Stub,
+  TOKEN,
 } from "./stub.js";
 
 let stub: Stub;
@@ -41,6 +44,26 @@ function runJson(over: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
+/**
+ * An adapter on `apiUrl` (the API root of github.com when left out) whose
+ * requests a fake fetch records and answers with the run.
+ */
+function onRoot(apiUrl?: string) {
+  const asked: string[] = [];
+  const fetch = (async (input: unknown) => {
+    asked.push(String(input));
+    return new Response(JSON.stringify(runJson()), { status: 200 });
+  }) as typeof globalThis.fetch;
+  const host = createGitHubHost({
+    repository: REPOSITORY,
+    pullRequest: PULL,
+    token: TOKEN,
+    apiUrl,
+    fetch,
+  });
+  return { host, asked };
+}
+
 describe("ciRunStatus: verified", () => {
   it("a completed run of this repository at the commit, named by its id", async () => {
     stub.on(RUN_PATH, { json: runJson() });
@@ -51,10 +74,19 @@ describe("ciRunStatus: verified", () => {
   it.each([
     [`https://github.com/acme/widgets/actions/runs/${RUN}`],
     [`https://github.com/Acme/Widgets/actions/runs/${RUN}`],
-  ])("the same run named by its address %s", async (run) => {
-    stub.on(RUN_PATH, { json: runJson() });
-    expect(await giving(hostAt(stub).ciRunStatus(HEAD, run))).toBe("verified");
-    expect(stub.hits.map((hit) => hit.url)).toEqual([RUN_PATH]);
+  ])(
+    "the same run named by its address %s, on the API root of github.com",
+    async (run) => {
+      const github = onRoot();
+      expect(await giving(github.host.ciRunStatus(HEAD, run))).toBe("verified");
+      expect(github.asked).toEqual([`https://api.github.com${RUN_PATH}`]);
+    },
+  );
+
+  it("a run named by its id on another API root", async () => {
+    const other = onRoot("https://ghe.example/api/v3");
+    expect(await giving(other.host.ciRunStatus(HEAD, RUN))).toBe("verified");
+    expect(other.asked).toEqual([`https://ghe.example/api/v3${RUN_PATH}`]);
   });
 
   it("says nothing about how the run ended: a failed run that completed is a run", async () => {
@@ -159,12 +191,38 @@ describe("ciRunStatus: unverified", () => {
     ["a number", 8123456789],
     ["nothing", undefined],
   ])("%s, without asking the host", async (_what, run) => {
+    // An address is read on the API root of github.com only, so every row
+    // is also asked there: it must be refused for its own form.
+    const github = onRoot();
     stub.on(RUN_PATH, { json: runJson() });
-    expect(await giving(hostAt(stub).ciRunStatus(HEAD, run as string))).toBe(
-      "unverified",
-    );
+    for (const host of [hostAt(stub), github.host]) {
+      expect(await giving(host.ciRunStatus(HEAD, run as string))).toBe(
+        "unverified",
+      );
+    }
     expect(stub.hits).toEqual([]);
+    expect(github.asked).toEqual([]);
   });
+
+  it.each([
+    ["a loopback root", undefined],
+    ["an enterprise root", "https://ghe.example/api/v3"],
+    ["a root on another host of github.com", "https://uploads.github.com"],
+    [
+      "a root that only starts like the API of github.com",
+      "https://api.github.com.example",
+    ],
+  ])(
+    "the address of a run on github.com is not read on %s: the run there is another run",
+    async (_what, apiUrl) => {
+      const other = onRoot(apiUrl ?? stub.url);
+      const address = `https://github.com/acme/widgets/actions/runs/${RUN}`;
+      expect(await giving(other.host.ciRunStatus(HEAD, address))).toBe(
+        "unverified",
+      );
+      expect(other.asked).toEqual([]);
+    },
+  );
 
   it.each([
     ["a short commit id", "aaaaaaa"],

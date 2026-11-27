@@ -167,17 +167,27 @@ describe("createGitHubHost: the API root", () => {
     ]);
   });
 
-  it("apiUrl null: read as absent, the default root is used", async () => {
+  it("apiUrl null: refused, not read as absent, and nothing is sent", () => {
     const seam = recorder();
-    await createGitHubHost({
-      ...OPTIONS,
-      apiUrl: null as unknown as undefined,
-      fetch: seam.fetch,
-    }).pullRequest();
-    expect(seam.calls.map((call) => call.url)).toEqual([
-      `https://api.github.com${PULL_PATH}`,
-    ]);
+    const error = refusal({ ...OPTIONS, apiUrl: null, fetch: seam.fetch });
+    expect(error.message).toBe("github: apiUrl must be a URL");
+    expect(seam.calls).toEqual([]);
   });
+
+  it.each([
+    ["a number", 7],
+    ["a truth value", false],
+    ["an object", { href: "https://ghe.example/api/v3" }],
+    ["a parsed address", new URL("https://ghe.example/api/v3")],
+  ])(
+    "apiUrl that is %s: refused, only a text is an address",
+    (_what, apiUrl) => {
+      const seam = recorder();
+      const error = refusal({ ...OPTIONS, apiUrl, fetch: seam.fetch });
+      expect(error.message).toBe("github: apiUrl must be a URL");
+      expect(seam.calls).toEqual([]);
+    },
+  );
 
   it("apiUrl given: it wins over the default, with its path prefix and without a doubled slash", async () => {
     const seam = recorder();
@@ -322,6 +332,7 @@ describe("createGitHubHost: what a request carries", () => {
     expect(hit.headers.authorization).toBe(`Bearer ${TOKEN}`);
     expect(hit.headers.accept).toBe("application/vnd.github+json");
     expect(hit.headers["x-github-api-version"]).toBe("2022-11-28");
+    expect(hit.headers["user-agent"]).toBe("spec-gate");
     expect(GITHUB_API_VERSION).toBe("2022-11-28");
     const elsewhere = Object.entries(hit.headers).filter(
       ([name, value]) =>

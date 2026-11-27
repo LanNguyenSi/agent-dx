@@ -237,6 +237,24 @@ describe("reviewEnforcement: what it asks and keeps", () => {
     );
   });
 
+  it("throws on rules that go on past the page cap, instead of reading them as not readable", async () => {
+    stub.on(RULES_PATH, (hit) => {
+      const n = Number(new URL(hit.url, stub.url).searchParams.get("page"));
+      return {
+        json: [{ type: "deletion" }],
+        headers: {
+          link: `<${stub.url}${RULES_PATH}?per_page=100&page=${n + 1}>; rel="next"`,
+        },
+      };
+    });
+    stub.on(PROTECTION_PATH, PROTECTION["no review settings"]!);
+    const error = await failing(hostAt(stub).reviewEnforcement("specs/"));
+    expect(error.message).toBe(
+      `github: GET ${RULES_PATH} answered 200 (more pages than the page cap)`,
+    );
+    expect(stub.hitsOf(PROTECTION_PATH)).toEqual([]);
+  });
+
   it("throws for a path the check does not ask for, and asks the host nothing", async () => {
     const host = hostAt(stub);
     await expect(host.reviewEnforcement("src/" as ReviewPath)).rejects.toThrow(

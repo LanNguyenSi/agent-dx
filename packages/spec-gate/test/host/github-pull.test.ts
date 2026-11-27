@@ -142,6 +142,46 @@ describe("pullRequest", () => {
       "no base commit",
     ],
     [
+      "a short base id",
+      {
+        base: {
+          ref: "main",
+          sha: "bbbbbbb",
+          repo: { full_name: "acme/widgets" },
+        },
+      },
+      "no base commit",
+    ],
+    [
+      "a base id in upper case",
+      {
+        base: {
+          ref: "main",
+          sha: "B".repeat(40),
+          repo: { full_name: "acme/widgets" },
+        },
+      },
+      "no base commit",
+    ],
+    ...[
+      ["an encoded slash", "a%2fb"],
+      ["a number sign", "main#x"],
+      ["a space", "a b"],
+      ["a backslash", "a\\b"],
+      ["a reflog selector", "a@{b"],
+      ["an at sign", "a@b"],
+      ["a colon", "a:b"],
+      ["a tilde", "main~1"],
+      ["a caret", "main^"],
+    ].map(
+      ([what, ref]) =>
+        [
+          `a base branch with ${what}`,
+          { base: { ref, sha: BASE, repo: { full_name: "acme/widgets" } } },
+          "no base branch",
+        ] as [string, Record<string, unknown>, string],
+    ),
+    [
       "a base branch with a parent segment",
       {
         base: {

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { GITHUB_MAX_PAGES } from "../../src/host/index.js";
 import {
   BASE,
   failing,
@@ -42,7 +43,8 @@ function mergedPull(
     state: "closed",
     title: "settings, approved by carol",
     user: { login: "dev" },
-    merged_at: "2024-04-01T09:00:00Z",
+    // After the hour the reviews of the fixtures are submitted in.
+    merged_at: "2024-05-01T11:00:00Z",
     merge_commit_sha: CONFIG,
     head: { ref: "settings", sha: sha("d"), repo: { full_name: REPOSITORY } },
     base: { ref: "main", sha: BASE, repo: { full_name: REPOSITORY } },
@@ -311,6 +313,15 @@ describe("lastConfigCommit: the approver, by the rule of the approval check", ()
       "carol",
     ],
     [
+      "an account that approved twice with another approver between: its later approval decides",
+      [
+        reviewJson("carol", "APPROVED", D, 1),
+        reviewJson("dave", "APPROVED", D, 2),
+        reviewJson("carol", "APPROVED", D, 3),
+      ],
+      "carol",
+    ],
+    [
       "a later approver whose approval no longer stands",
       [
         reviewJson("carol", "APPROVED", D, 1),
@@ -359,19 +370,155 @@ describe("lastConfigCommit: the approver, by the rule of the approval check", ()
       approver,
     });
   });
+});
 
-  it("throws on a review of that pull request with an unknown state", async () => {
-    merged([reviewJson("carol", "LGTM", sha("d"), 1)]);
-    const error = await failing(hostAt(stub).lastConfigCommit());
-    expect(error.message).toBe(
-      `github: GET ${CONFIG_REVIEWS} answered 200 (a review has an unknown state)`,
-    );
+describe("lastConfigCommit: the approval is of the merged commit and not after the merge", () => {
+  /** The head of pull request 3, and a commit it held before. */
+  const D = sha("d");
+  const E = sha("e");
+  const at = (time: string) => ({ submitted_at: `2024-05-01T${time}Z` });
+
+  it.each([
+    [
+      "the only approval is of another commit than the merged head",
+      [reviewJson("carol", "APPROVED", E, 1)],
+      null,
+    ],
+    [
+      "an approval of the head, and a later approval of an older commit by another account",
+      [
+        reviewJson("alice", "APPROVED", D, 1),
+        reviewJson("mallory", "APPROVED", E, 2),
+      ],
+      "alice",
+    ],
+    [
+      "an account whose latest approval is of an older commit",
+      [
+        reviewJson("carol", "APPROVED", D, 1),
+        reviewJson("carol", "APPROVED", E, 2),
+      ],
+      null,
+    ],
+    [
+      "an approval submitted after the merge",
+      [reviewJson("mallory", "APPROVED", D, 0, at("11:00:01"))],
+      null,
+    ],
+    [
+      "an approval before the merge and one by another account after it",
+      [
+        reviewJson("alice", "APPROVED", D, 1),
+        reviewJson("mallory", "APPROVED", D, 0, at("12:00:00")),
+      ],
+      "alice",
+    ],
+    [
+      "an approval at the very time of the merge",
+      [reviewJson("carol", "APPROVED", D, 0, at("11:00:00"))],
+      "carol",
+    ],
+    [
+      "an approval before the merge that the account took back after it",
+      [
+        reviewJson("carol", "APPROVED", D, 1),
+        reviewJson("carol", "CHANGES_REQUESTED", D, 0, at("11:30:00")),
+      ],
+      "carol",
+    ],
+  ])("%s", async (_what, reviews, approver) => {
+    merged(reviews);
+    expect(await giving(hostAt(stub).lastConfigCommit())).toEqual({
+      commit: CONFIG,
+      approver,
+    });
   });
 
-  it("throws when the reviews of that pull request cannot be read", async () => {
+  it.each([
+    ["no head", { head: undefined }],
+    ["a head that is null", { head: null }],
+    ["a head without a commit", { head: { ref: "settings" } }],
+    ["a short head commit", { head: { sha: "ddddddd" } }],
+    ["a head commit in upper case", { head: { sha: "D".repeat(40) } }],
+    ["a merge time that is no time", { merged_at: "yesterday" }],
+    ["a merge time without a zone", { merged_at: "2024-05-01T11:00:00" }],
+  ])(
+    "a merged pull request with %s: the approver is unknown, and no reviews are read",
+    async (_what, over) => {
+      merged([reviewJson("carol", "APPROVED", D, 1)], [mergedPull(over)]);
+      expect(await giving(hostAt(stub).lastConfigCommit())).toEqual({
+        commit: CONFIG,
+        approver: null,
+      });
+      expect(stub.hitsOf(CONFIG_REVIEWS)).toEqual([]);
+    },
+  );
+});
+
+describe("lastConfigCommit: reviews of that pull request that cannot be read", () => {
+  const D = sha("d");
+
+  it.each([
+    ["a review without a user", { user: null }],
+    ["a review whose commit the host no longer has", { commit_id: null }],
+    ["a review with an unknown state", { state: "LGTM" }],
+    ["a review without a time", { submitted_at: undefined }],
+  ])(
+    "%s: the approver is unknown, and the fact does not fail",
+    async (_what, over) => {
+      merged([
+        reviewJson("carol", "APPROVED", D, 1),
+        reviewJson("bob", "COMMENTED", D, 2, over),
+      ]);
+      expect(await giving(hostAt(stub).lastConfigCommit())).toEqual({
+        commit: CONFIG,
+        approver: null,
+      });
+    },
+  );
+
+  it("more reviews than the page cap: the approver is unknown, and the fact does not fail", async () => {
     merged([]);
-    stub.on(CONFIG_REVIEWS, { status: 403 });
-    const error = await failing(hostAt(stub).lastConfigCommit());
-    expect(error.message).toBe(`github: GET ${CONFIG_REVIEWS} answered 403`);
+    stub.on(CONFIG_REVIEWS, (hit) => {
+      const n = Number(new URL(hit.url, stub.url).searchParams.get("page"));
+      return {
+        json: [reviewJson("carol", "APPROVED", D, 1)],
+        headers: {
+          link: `<${stub.url}${CONFIG_REVIEWS}?per_page=100&page=${n + 1}>; rel="next"`,
+        },
+      };
+    });
+    expect(await giving(hostAt(stub).lastConfigCommit())).toEqual({
+      commit: CONFIG,
+      approver: null,
+    });
+    expect(stub.hitsOf(CONFIG_REVIEWS)).toHaveLength(GITHUB_MAX_PAGES);
   });
+
+  it.each([[401], [403], [404], [500]])(
+    "throws when the reviews of that pull request answer %d",
+    async (status) => {
+      merged([]);
+      stub.on(CONFIG_REVIEWS, { status });
+      const error = await failing(hostAt(stub).lastConfigCommit());
+      expect(error.message).toBe(
+        `github: GET ${CONFIG_REVIEWS} answered ${status}`,
+      );
+    },
+  );
+
+  it.each([
+    ["no JSON", "<html>Bad gateway</html>", "invalid JSON"],
+    ["no list", "{}", "not a list"],
+  ])(
+    "throws when the reviews of that pull request are %s",
+    async (_what, body, reason) => {
+      merged([]);
+      stub.on(CONFIG_REVIEWS, { body });
+      const error = await failing(hostAt(stub).lastConfigCommit());
+      expect(error.message).toBe(
+        `github: GET ${CONFIG_REVIEWS} answered 200 (${reason})`,
+      );
+    },
+  );
 });

@@ -273,6 +273,10 @@ describe("reviews: pages", () => {
     ["among other relations", 'rel="prev next"'],
     ["in upper case", 'REL="NEXT"'],
     ["after another parameter", 'title="x"; rel="next"'],
+    [
+      "after a quoted value that reads like a relation",
+      'title="; rel=prev"; rel="next"',
+    ],
   ])("reads a next relation written %s", async (_what, rel) => {
     stub.on(page(1), {
       json: [reviewJson("alice", "APPROVED", HEAD, 1)],

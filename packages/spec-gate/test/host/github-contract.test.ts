@@ -62,8 +62,9 @@ beforeEach(() => {
     json: [
       {
         number: 3,
-        merged_at: "2024-04-01T09:00:00Z",
+        merged_at: "2024-05-01T11:00:00Z",
         merge_commit_sha: S.c1,
+        head: { ref: "settings", sha: sha("d") },
         base: { ref: "main", repo: { full_name: REPOSITORY } },
       },
     ],
