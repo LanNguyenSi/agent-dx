@@ -2025,6 +2025,28 @@ describe(
       expect(codes(report)).toEqual(ALL_OK);
     });
 
+    it("the state is judged against the digest at the tip, not at the merge commit: a second pull request squashed right after the first with another text, the approved text pushed back later, is approved inside the same boundary", async () => {
+      const s = await build();
+      await s.repo.checkout("pr2", s.head);
+      const head2 = await s.repo.commit({ "README.md": "two\n" }, "typo");
+      const first = await land(s, "squash");
+      const specFile = path.join(first.dir, SPEC_REL, "spec.md");
+      const approvedText = fs.readFileSync(specFile, "utf8");
+      await first.repo.checkout("main");
+      await first.repo.sh("merge", "-q", "--squash", "pr2");
+      editSpec(first.dir);
+      const merge = await first.repo.commit({}, "squash pr2 with another text");
+      fs.writeFileSync(specFile, approvedText);
+      const tip = await first.repo.commit({}, "the approved text again");
+      await first.repo.setRef(REMOTE_MAIN, tip);
+      const report = await checkLanded(
+        { ...first, head: head2, merge, landed: tip },
+        { reviews: [review("alice", "APPROVED", head2)] },
+      );
+      expect(codes(report)).toEqual(ALL_OK);
+      expect(report.approved).toBe(true);
+    });
+
     it.each([
       ["merge-commit", "merge-commit"],
       ["merge-commit", "fast-forward"],

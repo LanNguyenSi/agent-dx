@@ -1137,9 +1137,14 @@ Named here instead of closed:
   adapter does not supply. A decided boundary; whether a host dismisses a
   review when the base of a pull request changes is a setting of the host.
 - A second pull request with the same commits: when a pull request whose
-  commits hold a spec is squashed within N - 1 commits after the commit that
-  brought that spec, the measured steps hold that landing and the reviewed
-  commits hold the spec, so it is taken for the one that brought it.
+  commits hold a spec that already landed (the same commits, or a cherry-pick
+  of them) is squashed within N - 1 commits after the commit that brought that
+  spec, or rebase merged within as many commits as it has merge commits and
+  commits the replay drops, the measured steps hold that landing and the
+  reviewed commits hold the spec, so it is taken for the one that brought it.
+  The state is judged against the digest at the tip, so this holds even when
+  that pull request was squashed with another text and the approved text was
+  put back on the tip later.
 - The merge commit and the head are the host's word: the check verifies that
   the merge commit is on the default branch and reads its history from git,
   and cannot verify that it is the commit that merged this pull request. A
