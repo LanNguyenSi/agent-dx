@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { scratch, validFiles } from "./lint/helpers.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -107,6 +108,155 @@ describe("spec-gate CLI", () => {
       const run = await runCli(["--version"], cli);
       expect(run.code).not.toBe(0);
       expect(run.stderr).toContain("no version");
+    });
+  });
+});
+
+describe("spec-gate questions, answer and status", () => {
+  const qfile = (questions: unknown[], answers: unknown[]): string =>
+    JSON.stringify({ questions, answers });
+  const qn = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    target: "AC-1",
+    class: "blind-spot",
+    blocking: false,
+    question: `Open point ${id}?`,
+    options: [],
+    ...over,
+  });
+
+  function specHome(questions: unknown[], answers: unknown[]): string {
+    const dir = path.join(scratch(), "specs", "s1");
+    for (const [rel, text] of Object.entries(
+      Object.assign(validFiles(), {
+        "questions.json": qfile(questions, answers),
+      }),
+    )) {
+      const file = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+    }
+    return dir;
+  }
+
+  describe("questions", () => {
+    it("exits 1 and prints spec-gate-questions/1 with an unanswered question", async () => {
+      const dir = specHome([qn("QN-1", { blocking: true })], []);
+      const run = await runCli(["questions", dir]);
+      expect(run.code).toBe(1);
+      const report = JSON.parse(run.stdout) as {
+        format: string;
+        counts: { unanswered: number };
+      };
+      expect(report.format).toBe("spec-gate-questions/1");
+      expect(report.counts.unanswered).toBe(1);
+    });
+
+    it("exits 0 when nothing is unanswered", async () => {
+      const run = await runCli(["questions", specHome([], [])]);
+      expect(run.code).toBe(0);
+    });
+
+    it("exits 2 on a directory that is not one", async () => {
+      const run = await runCli(["questions", path.join(scratch(), "nope")]);
+      expect(run.code).toBe(2);
+    });
+  });
+
+  describe("answer", () => {
+    it("exits 0 and writes the answer, then exits 2 on a second answer", async () => {
+      const dir = specHome([qn("QN-1")], []);
+      const run = await runCli([
+        "answer",
+        dir,
+        "QN-1",
+        "--answer",
+        "yes",
+        "--channel",
+        "chat",
+        "--author",
+        "alice",
+      ]);
+      expect(run.code).toBe(0);
+      const written = JSON.parse(
+        fs.readFileSync(path.join(dir, "questions.json"), "utf8"),
+      ) as { answers: { question: string; time: string }[] };
+      expect(written.answers.map((a) => a.question)).toEqual(["QN-1"]);
+      expect(written.answers[0]!.time).toMatch(
+        /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/,
+      );
+      const again = await runCli([
+        "answer",
+        dir,
+        "QN-1",
+        "--answer",
+        "no",
+        "--channel",
+        "chat",
+        "--author",
+        "alice",
+      ]);
+      expect(again.code).toBe(2);
+    });
+
+    it("exits 2 when --channel is missing", async () => {
+      const dir = specHome([qn("QN-1")], []);
+      const run = await runCli([
+        "answer",
+        dir,
+        "QN-1",
+        "--answer",
+        "yes",
+        "--author",
+        "alice",
+      ]);
+      expect(run.code).toBe(2);
+      expect(run.stderr).toContain("--channel");
+    });
+
+    it("exits 2 when --accept-recommended is given with --option", async () => {
+      const dir = specHome(
+        [
+          qn("QN-1", {
+            class: "divergence",
+            options: [{ label: "keep", consequence: "sessions stay" }],
+            recommended: "keep",
+          }),
+        ],
+        [],
+      );
+      const run = await runCli([
+        "answer",
+        dir,
+        "QN-1",
+        "--accept-recommended",
+        "--option",
+        "keep",
+        "--channel",
+        "chat",
+        "--author",
+        "alice",
+      ]);
+      expect(run.code).toBe(2);
+      expect(run.stderr).toContain("--option");
+    });
+  });
+
+  describe("status", () => {
+    it("exits 0 and prints spec-gate-status/1", async () => {
+      const run = await runCli(["status", specHome([], [])]);
+      expect(run.code).toBe(0);
+      const report = JSON.parse(run.stdout) as {
+        format: string;
+        status: string;
+      };
+      expect(report.format).toBe("spec-gate-status/1");
+      expect(report.status).toBe("draft");
+    });
+
+    it("exits 2 on a directory that is not one", async () => {
+      const run = await runCli(["status", path.join(scratch(), "nope")]);
+      expect(run.code).toBe(2);
     });
   });
 });

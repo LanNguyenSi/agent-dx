@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { GitRequest, LintReport } from "../../src/lint/index.js";
 import { lintSpecDir } from "../../src/lint/index.js";
+import type { Clock } from "../../src/state/index.js";
 import {
   bindSpecDir,
   proposeSpecDir,
@@ -20,7 +21,7 @@ import {
   plainHistory,
   specFiles,
 } from "../lint/git-helpers.js";
-import { validFiles } from "../lint/helpers.js";
+import { scratch, validFiles } from "../lint/helpers.js";
 
 /**
  * The valid test plan (TP-1, red-first) plus a stays-green row (TP-2) and a
@@ -110,3 +111,57 @@ export const ofLogRule = (report: LintReport) =>
 
 export const codesOf = (report: LintReport) =>
   ofLogRule(report).map((f) => f.code);
+
+/** A spec directory at `specs/s1` under a scratch root, the valid fixture with `overrides`. */
+export function draftSpecDir(
+  overrides: Record<string, string | null> = {},
+): string {
+  const dir = path.join(scratch(), "specs", "s1");
+  const files = { ...validFiles(), ...overrides };
+  for (const [rel, text] of Object.entries(files)) {
+    if (text === null) continue;
+    const file = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+  }
+  return dir;
+}
+
+/** A clock that always returns the instant `iso` names. */
+export const clockAt =
+  (iso: string): Clock =>
+  () =>
+    new Date(iso);
+
+/** A `questions.json` text from question and answer objects. */
+export const questionsFile = (
+  questions: unknown[],
+  answers: unknown[],
+): string => JSON.stringify({ questions, answers });
+
+/** A question object with the usual fields, `over` applied. */
+export const question = (
+  id: string,
+  over: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  id,
+  target: "AC-1",
+  class: "blind-spot",
+  blocking: false,
+  question: `Open point ${id} about the token store?`,
+  options: [],
+  ...over,
+});
+
+/** An answer object with the usual fields, `over` applied. */
+export const answerObj = (
+  q: string,
+  over: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  question: q,
+  answer: "revoke",
+  channel: "comment",
+  author: "alice",
+  time: "2000-01-31T12:00:00Z",
+  ...over,
+});
