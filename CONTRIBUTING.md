@@ -73,10 +73,12 @@ through a pull request: the default-branch ruleset requires a pull
 request, blocks force pushes and branch deletion, and can be bypassed
 by repository admins. No status check is required, so a red CI run
 does not block a merge. There is no tag ruleset and the publish job of
-`publish-npm.yml` has no protected environment, so anyone who can push
-a tag matching a published package's tag pattern can start a publish
-run; the "Verify tagged commit is on master" step in that workflow
-stops only an accidental side-branch tag.
+`publish-npm.yml` has no protected environment, so anyone with write
+access can start a publish run, by pushing a tag that matches a published
+package's tag pattern or by dispatching the workflow for an existing tag;
+the "Verify tagged commit is on master" step in that workflow stops a
+side-branch tag only while the workflow on that tag is unmodified, so
+someone with write access who edits it there is not stopped.
 
 The diagram below shows the tag-driven publish path next to the operator
 workflows that write to the registry with the repository token, where each
