@@ -14,6 +14,7 @@ import path from "node:path";
 import {
   DigestError,
   assertCommit as assertCommandsRef,
+  compareText,
   computeDigest,
   readCommandSet,
   referencedCommandNames,
@@ -108,6 +109,72 @@ export function specDigestAt(
   } catch (err) {
     if (!isReadError(err)) throw err;
     return null;
+  }
+}
+
+/** The commands of a spec, or the reason they cannot be listed. */
+export type SpecCommands =
+  | { ok: true; commands: { name: string; argv: string[] }[] }
+  /** `problem` is a fixed code: one of this module's own or a code of the digest's readers. */
+  | { ok: false; problem: string };
+
+/**
+ * The commands a runner may start for the spec at `specPath` as `commit`
+ * holds it, sorted by name: every command a test-plan row names
+ * (`check_command_ref`), and the command of the set that carries
+ * `{selector}` when the set has one. That one is listed whatever the
+ * bindings say: it is what a runner starts for every row bound to a
+ * selector, and a binding can gain a selector after the approval.
+ *
+ * `spec.md` and `testplan.yaml` are read from the tree of `commit`, the
+ * command set from git at the `commands_ref` of that spec, through the
+ * readers of the digest: never at the tip of the default branch, never at
+ * `commit` itself and never from the work tree. A set that cannot be read
+ * there (no such commit, no regular file, a file that does not parse) and a
+ * row that names a command the set lacks are a problem, not an empty list.
+ */
+export function specCommandsAt(
+  repo: string,
+  commit: string,
+  specPath: string,
+): SpecCommands {
+  try {
+    const spec = specAt(repo, commit, specPath);
+    if (spec === null) return { ok: false, problem: "spec-unreadable" };
+    const planBytes = readBlobBytes(
+      repo,
+      commit,
+      repoPathOf(specPath, TESTPLAN_FILE),
+    );
+    const planText = planBytes === null ? null : decodeUtf8(planBytes);
+    const plan = planText === null ? null : parseTestPlan(planText);
+    if (plan === null || !plan.ok) {
+      return { ok: false, problem: "testplan-unreadable" };
+    }
+    const ref = spec.frontmatter.commands_ref;
+    const set = readCommandSet(repo, ref);
+    const argvOf = new Map<string, string[]>();
+    for (const name of referencedCommandNames(plan.value)) {
+      const entry = set.commands.find((c) => c.name === name);
+      if (entry === undefined) {
+        return { ok: false, problem: "command-ref-unknown" };
+      }
+      argvOf.set(name, entry.argv);
+    }
+    for (const entry of set.commands) {
+      if (entry.usesSelector) argvOf.set(entry.name, entry.argv);
+    }
+    return {
+      ok: true,
+      commands: [...argvOf.keys()]
+        .sort(compareText)
+        .map((name) => ({ name, argv: [...argvOf.get(name)!] })),
+    };
+  } catch (err) {
+    if (err instanceof DigestError) return { ok: false, problem: err.code };
+    if (err instanceof LintGitError)
+      return { ok: false, problem: "git-failed" };
+    throw err;
   }
 }
 

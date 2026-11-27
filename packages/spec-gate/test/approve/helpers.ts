@@ -27,6 +27,7 @@ import {
   SPEC_REL,
   specFiles,
 } from "../lint/git-helpers.js";
+import { validFiles } from "../lint/helpers.js";
 import { BIND_BINDINGS, BIND_PLAN, commitSpec } from "../state/helpers.js";
 
 /** Approvers and one agent identity, spelled in another case than the logins the tests use. */
@@ -39,8 +40,10 @@ export interface Scenario {
   dir: string;
   /** The spec directory. */
   spec: string;
-  /** The tip of the default branch, where the settings are. */
+  /** The commit of the default branch that holds the settings; its tip unless `tip` is set. */
   c1: string;
+  /** The tip of the default branch, when it moved on after `c1`. */
+  tip?: string;
   /** The commit that holds the draft spec. */
   draft: string;
   /** `HEAD`. */
@@ -51,32 +54,74 @@ export interface Built extends Scenario {
   repo: Repo;
 }
 
+export interface BuildOptions {
+  /** The text of `.spec-gate/config.yaml`; `null` for none. Default `CONFIG`. */
+  config?: string | null;
+  /** The text of `.spec-gate/commands.yaml`; `null` for none. Default `COMMANDS_OK`. */
+  commands?: string | null;
+  /** The test plan of the spec. Default `BIND_PLAN`. */
+  plan?: string;
+  /** Further files of the settings commit `c1`, such as another spec that is merged already. */
+  merged?: Record<string, string>;
+  /**
+   * A commit on the default branch after `c1`. The default ref is set there
+   * and the branch `pr` starts there; the spec still names `c1` as its
+   * `base_commit` and `commands_ref`.
+   */
+  later?: Record<string, string>;
+  /** False leaves the spec a draft. */
+  propose?: boolean;
+}
+
 /**
  * A default branch with the command set and (unless `config` is `null`)
  * `.spec-gate/config.yaml`, `refs/remotes/origin/main` at its tip, and a
  * branch `pr` with a draft spec that is proposed and committed unless
  * `propose` is false.
  */
-export async function build(
-  options: { config?: string | null; propose?: boolean } = {},
-): Promise<Built> {
+export async function build(options: BuildOptions = {}): Promise<Built> {
   const repo = await Repo.create();
   await repo.commit({ "README.md": "one\n" }, "init");
-  const settings: Record<string, string> = {
-    ".spec-gate/commands.yaml": COMMANDS_OK,
-  };
+  const settings: Record<string, string> = { ...options.merged };
+  if (options.commands !== null) {
+    settings[".spec-gate/commands.yaml"] = options.commands ?? COMMANDS_OK;
+  }
   if (options.config !== null) {
     settings[".spec-gate/config.yaml"] = options.config ?? CONFIG;
   }
   const c1 = await repo.commit(settings, "settings");
-  await repo.setRef(REMOTE_MAIN, c1);
-  await repo.checkout("pr", c1);
-  const spec = specFiles({ base: c1, ref: c1, plan: BIND_PLAN });
+  const tip =
+    options.later === undefined
+      ? c1
+      : await repo.commit(options.later, "the default branch moves on");
+  await repo.setRef(REMOTE_MAIN, tip);
+  await repo.checkout("pr", tip);
+  const spec = specFiles({
+    base: c1,
+    ref: c1,
+    plan: options.plan ?? BIND_PLAN,
+  });
   spec[`${SPEC_REL}/bindings.yaml`] = BIND_BINDINGS;
   const draft = await repo.commit(spec, "spec");
   let head = draft;
   if (options.propose !== false) head = await propose(repo);
-  return { repo, dir: repo.dir, spec: repo.spec, c1, draft, head };
+  return {
+    repo,
+    dir: repo.dir,
+    spec: repo.spec,
+    c1,
+    ...(tip === c1 ? {} : { tip }),
+    draft,
+    head,
+  };
+}
+
+/** A `spec.md` that parses, with the given id and status. */
+export function otherSpec(id: string, status = "proposed"): string {
+  const text = validFiles()["spec.md"]!;
+  return text
+    .replace(/^id: .*$/m, `id: ${id}`)
+    .replace(/^status: .*$/m, `status: ${status}`);
 }
 
 /** Proposes the draft at `HEAD` and commits the result. */
@@ -113,6 +158,7 @@ export function keep(built: Scenario): Scenario {
     dir,
     spec: path.join(dir, SPEC_REL),
     c1: built.c1,
+    ...(built.tip === undefined ? {} : { tip: built.tip }),
     draft: built.draft,
     head: built.head,
   };
@@ -207,7 +253,7 @@ export function pullRequestOf(
     number: 7,
     author: "dev",
     head: s.head,
-    base: s.c1,
+    base: s.tip ?? s.c1,
     targetRef: "refs/heads/main",
     ...over,
   };

@@ -21,7 +21,7 @@ import {
   type Scenario,
 } from "./helpers.js";
 
-const ALL_OK = ["ok", "ok", "ok", "ok", "ok", "ok", "ok"];
+const ALL_OK = ["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"];
 
 /** The standard repository: proposed spec at the head, `CONFIG` on the default branch. */
 let S: Scenario;
@@ -64,6 +64,7 @@ describe("checkApproval: approved", { timeout: 60_000 }, () => {
           { login: "alice", commit: S.head, at_head: true, problem: null },
         ],
         last_config_commit: { commit: S.c1, approver: "bob" },
+        commands: [],
         gaps: [{ code: "coldread-not-checked", message: expect.any(String) }],
       },
     });
@@ -78,10 +79,10 @@ describe("checkApproval: approved", { timeout: 60_000 }, () => {
     expect(one).not.toContain(fs.realpathSync(S.dir));
   });
 
-  it("has seven conditions, numbered in order, each with a code the table knows", async () => {
+  it("has eight conditions, numbered in order, each with a code the table knows", async () => {
     const report = await check(S, { reviews: [], enforcement: "unknown" });
     expect(report.conditions.map((c) => c.condition)).toEqual([
-      1, 2, 3, 4, 5, 6, 7,
+      1, 2, 3, 4, 5, 6, 7, 8,
     ]);
     for (const c of report.conditions) {
       expect(c.ok).toBe(c.code === "ok");

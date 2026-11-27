@@ -3,7 +3,8 @@
 A spec in the tree is `draft` or `proposed`. There is no `approved` status to
 write: "approved" is derived, each time it is asked for, from facts about the
 pull request that carries the spec. `checkApproval` in `src/approve/` is that
-derivation. It is a library function; no CLI verb calls it yet.
+derivation. It is a library function; the CLI verb `spec-gate approve-check`
+calls it for a pull request on GitHub (see "CLI").
 
 ```ts
 import { checkApproval } from "./src/approve/index.js";
@@ -35,7 +36,8 @@ tree.
 | `host` | the host adapter |
 
 `repo`, `defaultRef` and `base` are resolved exactly as the lint resolves its
-git inputs, and are handed to the final lint unchanged. The reference commit
+git inputs, and are handed to the final lint unchanged; the repository check
+of condition 8 runs over the commits they resolve to. The reference commit
 is `base` when given, else the commit `defaultRef` names; it is the reference
 of the lint and the start of the diff base, and nothing else. The settings
 (`approvers`, `agent_identities`) are always read at the commit `defaultRef`
@@ -58,9 +60,13 @@ a link, a git input does not resolve (the lint's own messages), `defaultRef`
 is missing, or the spec directory is not `specs/<name>`. The host is not asked
 anything then. A refusal is never an approval.
 
+A report is not an approval either: it says `approved: true` or
+`approved: false`. The CLI verb keeps the three apart by its exit code (see
+"CLI").
+
 ## Conditions
 
-`approved` is true only when all seven conditions hold. The report has one
+`approved` is true only when all eight conditions hold. The report has one
 entry per condition, in this order, each with `ok`, a `code` (`ok` when it
 holds) and a `message`.
 
@@ -73,6 +79,7 @@ holds) and a `message`.
 | 5 | `agent-identities-separate` | `agent_identities` is not empty and shares no account with `approvers` |
 | 6 | `review-enforced` | the host enforces a review for `specs/` and for `.spec-gate/`, and reports the last change under `.spec-gate/` |
 | 7 | `config-untouched` | no file under `.spec-gate/` differs between the diff base and the head |
+| 8 | `repo-check-clean` | the repository check has no finding between the diff base and the head: no protected spec disappears, changes its id, goes back to `draft` or loses its log |
 
 A condition that could not be evaluated does not hold. A host method that
 throws, rejects or returns a value outside its type gives `host-failed` for
@@ -237,6 +244,36 @@ the fork does not count.
 
 Codes: `spec-changes-config`, `git-failed`.
 
+### 8. The repository check is clean
+
+The repository check (see "Repository check" in [lint.md](lint.md)) has no
+finding. It is `checkRepository`, the function behind `spec-gate repo-check`,
+called as it is over the git inputs of this check: the tree of the diff base
+(`merge-base(HEAD, reference commit)`) and the tree of the head, both read
+from git. So a pull request that carries an approved spec and, beside it,
+deletes another proposed spec, changes its id, puts it back to `draft` or
+removes its `bindings.log` is not approved.
+
+- The work tree is not asked. A spec the head deletes stays deleted when the
+  file is restored in the work tree without a commit, and a spec the head
+  holds is not missed because the work tree lacks it.
+- The whole tree is walked, not only `specs/`: a protected `spec.md` anywhere
+  counts, as for `repo-check`.
+- The diff base is the merge base, not the tip of the default branch: a spec
+  merged there after the pull request forked is not counted as removed.
+
+A finding is `repo-check-findings`. The message gives the number of findings
+and, for the first 20 in the order of the repository check (by path, then
+code), the code and the path, the path quoted as a JSON text; the rest is
+counted (`(and 3 more)`). A tree over a cap of the repository check is
+`tree-too-large`: a tree that was not read in full is never passed.
+
+This condition covers the pull requests `approve-check` runs on. A pull
+request without a spec to approve deletes a spec just as well, so
+`repo-check` still runs on every pull request.
+
+Codes: `repo-check-findings`, `tree-too-large`, `git-failed`.
+
 ## Report
 
 Format `spec-gate-approve/1`. The report is deterministic: the same
@@ -255,10 +292,120 @@ time, no absolute path, and nothing a host adapter threw.
 | `default_commit` | the commit `defaultRef` names; the settings were read there |
 | `digest` | the digest of the spec at the head, or `null` |
 | `pull_request` | `number`, `author`, `head`, `base`, `target_ref` as the host reports them, or `null` when the host failed |
-| `conditions` | seven entries: `condition`, `name`, `ok`, `code`, `message` |
+| `conditions` | eight entries: `condition`, `name`, `ok`, `code`, `message` |
 | `approvals` | every approval that stands, on the head or not: `login`, `commit`, `at_head`, `problem` (`null` for an approver that counts) |
 | `last_config_commit` | `commit` and `approver` of the last change under `.spec-gate/`; `null` is unknown |
+| `commands` | the commands the spec at the head refers to, each with `name` and `argv`, sorted by name; `null` when they cannot be read (see "Commands") |
 | `gaps` | the checks the approval does not make, each with a `code` and a `message`; a gap never changes `approved` |
+
+### Commands
+
+`commands` shows the reader what a runner may start for the spec:
+
+- every command a test-plan row names with `check_command_ref`;
+- the command of the set that carries `{selector}`, when the set has one. It
+  is what a runner starts for every row whose binding has a selector, and it
+  is listed whatever the bindings say: a binding can gain a selector after the
+  approval.
+
+`spec.md` and `testplan.yaml` are read from git at the head, the set from
+`.spec-gate/commands.yaml` at the `commands_ref` of that spec, through the
+readers of the digest (see [digest.md](digest.md)). The set is never read at
+the tip of the default branch, at the head or from the work tree: a set that
+changed since `commands_ref` is not what the spec binds. Each entry has the
+`name` and the `argv` list, element for element, `{selector}` left as it is
+written. The entries are sorted by name, by code units. No other command of
+the set is listed.
+
+When the commands cannot be read, `commands` is `null` and `gaps` holds
+`commands-not-resolved` with the reason in its message: `spec-unreadable`,
+`testplan-unreadable`, `commands-ref-unresolvable`, `commands-file-missing`,
+`commands-file-invalid`, `command-ref-unknown` (a row names a command the set
+lacks) or `git-failed`. A set that cannot be read is never shown as an empty
+list. An empty list means a set was read, no row names a command and no
+command carries `{selector}`.
+
+The field is not a condition and changes none: the list of conditions is the
+same with and without it. What it shows is bound elsewhere. `commands_ref` and
+the argv list of every command a row names are part of the digest (condition
+3), and the final lint (condition 4) refuses a `static` row that names a
+command the set lacks. A spec without such a row, in a repository without a
+command set, can therefore be approved with `commands: null`.
+
+## CLI
+
+```
+spec-gate approve-check <spec-dir> --repo <dir> --default-ref <ref> [--base <commit>]
+    --github-repo <owner/name> --pr <number> [--api-url <url>]
+```
+
+runs the check for one open pull request on GitHub and prints the report as
+one JSON line on stdout. It makes one GitHub adapter (see "GitHub adapter")
+and calls `checkApproval` once. The code is `runApproveCheck` in
+`src/approve/verb.ts`.
+
+| Argument | Meaning |
+|---|---|
+| `<spec-dir>` | `specDir` |
+| `--repo`, `--default-ref`, `--base` | the inputs of the same name; `--repo` and `--default-ref` are required |
+| `--github-repo` | `repository` of the adapter: `<owner>/<name>` of the repository the pull request targets; required |
+| `--pr` | the number of the pull request: digits only, 1 or more; required |
+| `--api-url` | `apiUrl` of the adapter; `https://api.github.com` when left out |
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | a report whose `approved` is `true` |
+| 1 | a report whose `approved` is not `true`; the conditions in the JSON line say why |
+| 2 | no report: a usage error, a refusal of the check, an option the adapter refuses, a missing token or an exception. stderr says which, stdout is empty |
+
+Only exit 0 means approved. A job that reads "the command ran" as a pass is
+wrong for 1 and for 2 alike.
+
+`--help` prints the usage and exits 0, as for every verb, and checks nothing.
+A job that takes the spec directory from the pull request (a changed path)
+passes it after `--`, so that a value which starts with `-` is read as the
+directory and refused, not as an option.
+
+A host that answers with an error or cannot be reached is not a refusal: the
+conditions that needed its facts are `host-failed`, the report is printed and
+the exit code is 1.
+
+### Token
+
+The token is read from the environment variable `GITHUB_TOKEN` and from
+nowhere else. There is no option for it. Without the variable, or with an
+empty one, the verb exits 2 and names the variable.
+
+The token is not printed:
+
+- the report holds no field for it, and the adapter does not use an answer of
+  the host that repeats it (see "Errors and limits");
+- a refusal names the input that is wrong and never its value;
+- an argument or option the verb does not know is refused without being
+  repeated on stderr, so a token passed as `--token=...` by mistake is not
+  printed either;
+- before anything is written, both outputs are searched for the token, as it
+  is and as a JSON text holds it. An output that holds it is withheld as a
+  whole and the verb exits 2.
+
+The permissions the token needs are listed under "Token and permissions".
+
+### In a pull request job
+
+- Check out the head commit of the pull request, not a merge of it. A pull
+  request job of GitHub Actions checks out a merge of the head with the
+  target branch unless it is told the head commit; at such a merge condition 1
+  is `head-mismatch` and the exit code is 1.
+- Fetch the default branch with its history before the check. The check
+  never fetches: it needs the commit `--default-ref` names (for example
+  `refs/remotes/origin/main`) and the merge base of that commit and the head.
+- `--base` is optional. When given, it must be the base commit the host
+  reports for the pull request (`base-mismatch` otherwise).
+- For a host other than github.com, give its API root as `--api-url`.
+- Whether the pull request can change the job that runs the check is a
+  property of the host setup, outside this command.
 
 ## What the check can and cannot say
 
@@ -302,7 +449,8 @@ that a given evidence file came out of it.
 ## GitHub adapter
 
 `createGitHubHost` in `src/host/github.ts` is a `HostAdapter` for one pull
-request of one repository, over the GitHub REST API. No CLI verb uses it yet.
+request of one repository, over the GitHub REST API. `spec-gate approve-check`
+makes one per run (see "CLI").
 
 ```ts
 import { createGitHubHost } from "./src/host/index.js";
@@ -530,8 +678,14 @@ Named here instead of closed:
 
 - `coldread-not-checked` (in `gaps` of every report): the cold-read digest is
   not compared, because no cold-read format exists yet.
-- Admin bypass: an administrator who may bypass a ruleset can merge without
-  the review the adapter reports as enforced.
+- Admin bypass and every other bypass actor: who may bypass a ruleset or a
+  branch protection is not read. That is the bypass list of a ruleset, and
+  `enforce_admins` and the bypass allowances of a classic protection. Any
+  actor on such a list (an administrator, a role, a team, an app) can merge
+  without the review the adapter reports as enforced.
+- `commands-not-resolved` (in `gaps` when `commands` is `null`): the commands
+  of the spec could not be read at its `commands_ref`, so the report shows
+  none. No condition depends on it.
 - Squash merges: what lands on the default branch can differ from the head
   that was approved. This check judges the head of the pull request; comparing
   the digest on the default branch with the digest at the commit of the

@@ -3,7 +3,7 @@
  *
  * The tree knows `draft` and `proposed` only; "approved" is derived here,
  * from facts a host adapter supplies and from git reads at fixed commits.
- * It holds only when all seven conditions hold (see `CONDITIONS` and
+ * It holds only when all eight conditions hold (see `CONDITIONS` and
  * `docs/approve.md`). The check never fetches, never writes and never reads
  * text a pull request author controls: the settings come from git at the
  * commit the default ref names (the tip of the default branch, with or
@@ -31,6 +31,7 @@ import { resolveGitInputs, type GitRequest } from "../lint/git/resolve.js";
 import { checkSpecChangesConfig } from "../lint/rules/refs.js";
 import { lintSpecDir } from "../lint/run.js";
 import type { GitInputs, Loaded, RuleContext } from "../lint/types.js";
+import { checkRepository } from "../repo/index.js";
 import {
   SPECS_DIR,
   isRepoPath,
@@ -39,11 +40,17 @@ import {
   specPathIn,
 } from "../state/git.js";
 import { readHostFacts, type Fact, type HostFacts } from "./facts.js";
-import { specDigestAt, specDirMatchesCommit, specStateAt } from "./git.js";
+import {
+  specCommandsAt,
+  specDigestAt,
+  specDirMatchesCommit,
+  specStateAt,
+} from "./git.js";
 import { allowlisted, sameAccount } from "./logins.js";
 import { standingApprovals, type StandingApproval } from "./reviews.js";
 import {
   APPROVE_FORMAT,
+  COMMANDS_GAP,
   CONDITIONS,
   GAPS,
   OK_CODE,
@@ -54,6 +61,7 @@ import {
   type ConditionNumber,
   type ConditionResult,
   type FailureCode,
+  type Gap,
   type ReportedApproval,
 } from "./types.js";
 
@@ -415,6 +423,42 @@ function configUntouched(s: Subject): Outcome {
   );
 }
 
+/** The most findings of the repository check a message of condition 8 lists. */
+export const MAX_LISTED_FINDINGS = 20;
+
+/**
+ * 8: the repository check has no finding, judged as `repo-check` judges it.
+ *
+ * It runs over the git inputs the lint got: the trees of the diff base and
+ * of the head, both read from git. The work tree is not asked, so a spec
+ * the head deletes stays deleted whatever the checkout holds, and the walk
+ * covers the whole tree, not only `specs/`.
+ */
+function repoCheckClean(s: Subject): Outcome {
+  const { findings } = checkRepository(s.git);
+  if (findings.some((finding) => finding.code === "tree-too-large")) {
+    return fails(
+      "tree-too-large",
+      "the tree of the diff base or of the head is over a cap of the repository check; a tree that was not read in full is never passed",
+    );
+  }
+  if (findings.length > 0) {
+    // The findings arrive sorted by path, then code. A path is text of the
+    // tree, so it is quoted: where one ends is never a guess.
+    const listed = findings
+      .slice(0, MAX_LISTED_FINDINGS)
+      .map((finding) => `${finding.code} ${JSON.stringify(finding.path)}`);
+    const more = findings.length - listed.length;
+    return fails(
+      "repo-check-findings",
+      `the repository check reports ${count(findings.length, "finding", "findings")}: ${listed.join(", ")}${more > 0 ? ` (and ${more} more)` : ""}`,
+    );
+  }
+  return holds(
+    "no protected spec of the diff base disappears, changes its id, goes back to draft or loses its log at the head",
+  );
+}
+
 /** A git read that fails inside a condition fails that condition. */
 function evaluate(check: () => Outcome): Outcome {
   try {
@@ -559,7 +603,25 @@ export async function checkApproval(
       7,
       evaluate(() => configUntouched(subject)),
     ),
+    result(
+      8,
+      evaluate(() => repoCheckClean(subject)),
+    ),
   ];
+  // What a runner may start for this spec. It is shown to the reader and is
+  // no condition: the digest of condition 3 already binds the same argv
+  // lists for every command a row names.
+  const commands = specCommandsAt(git.repo, git.head, specPath);
+  const gaps: Gap[] = GAPS.map((gap) => ({
+    code: gap.code,
+    message: gap.message,
+  }));
+  if (!commands.ok) {
+    gaps.push({
+      code: COMMANDS_GAP,
+      message: `the commands of the spec could not be read from git at its commands_ref (${commands.problem}); the report lists none`,
+    });
+  }
 
   const code = (n: ConditionNumber) => conditions[n - 1]!.code;
   const pullRequest = facts.pullRequest.ok ? facts.pullRequest.value : null;
@@ -595,7 +657,8 @@ export async function checkApproval(
       commit: configCommit.commit,
       approver: configCommit.approver,
     },
-    gaps: GAPS.map((gap) => ({ code: gap.code, message: gap.message })),
+    commands: commands.ok ? commands.commands : null,
+    gaps,
   };
   return { kind: "report", report };
 }
