@@ -142,3 +142,33 @@ describe("renderSummary", () => {
     );
   });
 });
+
+describe("renderSummary terminal escapes", () => {
+  it("escapes control characters in warnings, path, rule id and message", () => {
+    const summary = runSlopCheck({
+      text: 'x <invoke name="a\x1b]52;c;aGk=\x07"> y\n',
+      filename: "msg.md",
+    });
+    summary.warnings = ["w\x1b[31m"];
+    summary.violations[0]!.path = "ev\x1b[2Jil\r.md";
+    summary.violations[0]!.ruleId = "r\x9b";
+    const rendered = renderSummary(summary);
+    expect(rendered).toContain("warning: w\\x1b[31m");
+    expect(rendered).toContain("ev\\x1b[2Jil\\x0d.md");
+    expect(rendered).toContain("r\\u009b");
+    expect(rendered).toContain("\\x1b]52;c;aGk=\\x07");
+    expect(rendered).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
+  });
+
+  it("renders a clean multi-line summary byte for byte", () => {
+    const summary = runSlopCheck({
+      text: "done\n</result>\n",
+      filename: "msg.md",
+    });
+    const v = summary.violations[0]!;
+    expect(renderSummary(summary)).toBe(
+      `msg.md\n  BLOCK ${v.line}:${v.column}  ${v.ruleId}  ${v.message}\n` +
+        `1 file(s) scanned, 1 violation(s) (block 1, warn 0, info 0)`,
+    );
+  });
+});

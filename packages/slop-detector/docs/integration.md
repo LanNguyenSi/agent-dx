@@ -184,6 +184,8 @@ Input rules:
 - Stdin with nothing to read exits `2`: a TTY, `< /dev/null`, an empty pipe, or a pipe that carries only whitespace.
 - A stdin that never writes a byte and never closes fails with the same error after a 10-second first-byte timeout. Set `SLOP_DETECTOR_STDIN_TIMEOUT_MS` to a positive number of milliseconds to change it. The timeout is cleared on the first chunk of data, so a producer that writes something and then stalls is not bounded.
 
+Text output (and the `slop_check` MCP tool result) escapes control characters in file paths, messages and warnings as visible `\xNN` or `\uNNNN` sequences, so scanned content cannot drive the terminal; `--format json` carries the raw text.
+
 `slop-detector list-rules [-f text|json]` prints every rule. The text format is one tab-separated line per rule (id, default severity, `on`/`off` by default, rationale); the JSON format is an array of objects with `rule`, `pack`, `defaultSeverity`, `enabledByDefault` and `rationale`.
 
 `check --format json` prints one `CheckSummary` object, which the composite action parses:

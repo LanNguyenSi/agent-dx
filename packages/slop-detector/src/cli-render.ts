@@ -6,6 +6,7 @@
 // transport wiring.
 
 import type { CheckSummary, Severity } from "./types.js";
+import { sanitizeForTerminal as san } from "./util/terminal.js";
 
 /**
  * Render a CheckSummary as the CLI's plain-text output: any engine-level
@@ -17,7 +18,7 @@ import type { CheckSummary, Severity } from "./types.js";
 export function renderText(summary: CheckSummary, explain: boolean): string {
   let text = "";
   for (const warning of summary.warnings ?? []) {
-    text += `slop-detector: warning: ${warning}\n`;
+    text += `slop-detector: warning: ${san(warning)}\n`;
   }
   if (summary.violations.length === 0) {
     text += `slop-detector: clean (${summary.filesScanned} files scanned)\n`;
@@ -25,12 +26,12 @@ export function renderText(summary: CheckSummary, explain: boolean): string {
   }
   const byFile = groupBy(summary.violations, (v) => v.path);
   for (const [filePath, vs] of byFile) {
-    text += `\n${filePath}\n`;
+    text += `\n${san(filePath)}\n`;
     for (const v of vs) {
       const sev = severityLabel(v.severity);
-      text += `  ${sev} ${v.line}:${v.column}  ${v.ruleId}  ${v.message}\n`;
+      text += `  ${sev} ${v.line}:${v.column}  ${san(v.ruleId)}  ${san(v.message)}\n`;
       if (explain) {
-        text += `    ↪ ${v.rationale}\n`;
+        text += `    ↪ ${san(v.rationale)}\n`;
       }
     }
   }
