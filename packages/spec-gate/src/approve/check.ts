@@ -288,7 +288,7 @@ function approverAllowed(s: Subject): Outcome {
     if (changed.length > 0) {
       return fails(
         "config-in-merge",
-        `${count(changed.length, "path", "paths")} under .spec-gate/ ${changed.length === 1 ? "differs" : "differ"} over a range of the merge: the settings at the tip of the default branch may be the pull request's own, and who may approve is not taken from them`,
+        `${count(changed.length, "path", "paths")} under .spec-gate/ changed over a range of the merge: the settings at the tip of the default branch may be the pull request's own, and who may approve is not taken from them`,
       );
     }
   } else if (isAncestor(s.git.repo, s.git.head, s.defaultCommit)) {
@@ -730,7 +730,7 @@ function configUntouched(s: Subject): Outcome {
     return fails(
       "spec-changes-config",
       s.mode === "merged"
-        ? `${count(changed.length, "path", "paths")} under .spec-gate/ ${changed.length === 1 ? "differs" : "differ"} over a range of the merge; a change there is a pull request of its own`
+        ? `${count(changed.length, "path", "paths")} under .spec-gate/ changed over a range of the merge; a change there is a pull request of its own`
         : `the pull request changes ${count(changed.length, "path", "paths")} under .spec-gate/; a change there is a pull request of its own`,
     );
   }

@@ -675,7 +675,7 @@ describe(
           ok: false,
           code: "config-in-merge",
           message:
-            "1 path under .spec-gate/ differs over a range of the merge: the settings at the tip of the default branch may be the pull request's own, and who may approve is not taken from them",
+            "1 path under .spec-gate/ changed over a range of the merge: the settings at the tip of the default branch may be the pull request's own, and who may approve is not taken from them",
         });
         expect(cond(report, 7)).toEqual({
           condition: 7,
@@ -683,25 +683,28 @@ describe(
           ok: false,
           code: "spec-changes-config",
           message:
-            "1 path under .spec-gate/ differs over a range of the merge; a change there is a pull request of its own",
+            "1 path under .spec-gate/ changed over a range of the merge; a change there is a pull request of its own",
         });
         expect(failing(report)).toEqual([2, 7]);
         expect(report.approved).toBe(false);
         // Nothing differs between the base the host reports and the merge
-        // commit, between the reviewed base and the head, or between the
-        // start of the measured steps and the merge commit: only the steps,
-        // one by one, show the change.
+        // commit, and nothing between the reviewed base and the head: of
+        // the measured ranges only the step of the squashed commit shows
+        // the change.
         expect(report.merge!.commits).toBe(2);
-        expect(
-          await git(m.dir, [
+        const changedOver = (range: { from: string; to: string }) =>
+          git(m.dir, [
             "diff",
             "--name-only",
-            report.merge!.ranges[1]!.from,
-            m.merge,
+            range.from,
+            range.to,
             "--",
             ".spec-gate",
-          ]),
-        ).toBe("");
+          ]);
+        expect(await changedOver({ from: m.c1, to: m.merge })).toBe("");
+        expect(
+          await Promise.all(report.merge!.ranges.map(changedOver)),
+        ).toEqual([".spec-gate/config.yaml", "", ""]);
         expect(report.pull_request!.base).toBe(m.c1);
         expect(report.merge!.reviewed_base).toBe(m.c1);
         expect(report.reference).toBe(withBase ? m.c1 : m.landed);
@@ -722,7 +725,7 @@ describe(
       expect(cond(report, 2).code).toBe("config-in-merge");
       // One path, although two ranges show it.
       expect(cond(report, 7).message).toBe(
-        "1 path under .spec-gate/ differs over a range of the merge; a change there is a pull request of its own",
+        "1 path under .spec-gate/ changed over a range of the merge; a change there is a pull request of its own",
       );
       expect(failing(report)).toEqual([2, 7]);
     });
@@ -753,6 +756,42 @@ describe(
       expect(cond(report, 7).code).toBe("spec-changes-config");
       expect(failing(report)).toEqual([2, 7]);
       expect(report.approved).toBe(false);
+    });
+
+    it("a head that changes the settings, squashed into a commit that does not carry the change: the reviewed commits changed them, not approved", async () => {
+      const s = await build();
+      await s.repo.commit(
+        { ".spec-gate/config.yaml": WITH_MALLORY },
+        "let me in",
+      );
+      const head = await s.repo.head();
+      await s.repo.checkout("main");
+      for (const n of [1, 2, 3]) {
+        await s.repo.commit({ [`elsewhere-${n}.txt`]: "x\n" }, "elsewhere");
+      }
+      await s.repo.sh("merge", "-q", "--squash", "pr");
+      const merge = await s.repo.commit(
+        { ".spec-gate/config.yaml": CONFIG },
+        "squash pr",
+      );
+      await s.repo.setRef(REMOTE_MAIN, merge);
+      const report = await checkLanded({ ...s, head, merge, landed: merge });
+      const changed = await Promise.all(
+        report.merge!.ranges.map((range) =>
+          git(s.dir, [
+            "diff",
+            "--name-only",
+            range.from,
+            range.to,
+            "--",
+            ".spec-gate",
+          ]),
+        ),
+      );
+      // No first-parent step changes the settings; the reviewed range does.
+      expect(changed).toEqual(["", "", "", ".spec-gate/config.yaml"]);
+      expect(failing(report)).toEqual([2, 7]);
+      expect(cond(report, 7).code).toBe("spec-changes-config");
     });
 
     it("a merge commit that changes the settings in the merge itself: not approved", async () => {
@@ -1223,6 +1262,8 @@ describe("a shape git cannot tell", { timeout: 60_000 }, () => {
       expect(cond(report, condition).code).toBe("shallow-repository");
     }
     expect(failing(report)).toEqual([2, 4, 7, 8]);
+    // Nothing is derived in a shallow history, although it could be here.
+    expect(report.merge).toBeNull();
     expect(report.approved).toBe(false);
   });
 
@@ -1409,7 +1450,7 @@ describe(
         ok: false,
         code: "spec-changes-config",
         message:
-          "1 path under .spec-gate/ differs over a range of the merge; a change there is a pull request of its own",
+          "1 path under .spec-gate/ changed over a range of the merge; a change there is a pull request of its own",
       });
       expect(failing(report)).toEqual([2, 7]);
       expect(report.approved).toBe(false);

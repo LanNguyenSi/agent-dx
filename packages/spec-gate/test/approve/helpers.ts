@@ -373,7 +373,7 @@ export const CONFIG_ONLY_BOB =
  * commit puts `.spec-gate/config.yaml` back to its text at `c1`. Nothing
  * under `.spec-gate/` differs between `c1` and the squashed commit, or
  * between `c1` and the head; only the first parent of the squashed commit
- * shows the change.
+ * shows the change, and no other commit of the measured steps does.
  */
 export async function squashWithOwnSettings(): Promise<Built & Landed> {
   const s = await build();
@@ -382,6 +382,10 @@ export async function squashWithOwnSettings(): Promise<Built & Landed> {
     { ".spec-gate/config.yaml": CONFIG_ONLY_BOB },
     "alice is no approver any more",
   );
+  // An unrelated commit in between: of the first-parent steps the check
+  // measures for this pull request of two commits, only the squashed commit
+  // itself changes the settings.
+  await s.repo.commit({ "elsewhere.txt": "main moved on\n" }, "elsewhere");
   await s.repo.sh("merge", "-q", "--squash", "pr");
   const merge = await s.repo.commit(
     { ".spec-gate/config.yaml": CONFIG },
