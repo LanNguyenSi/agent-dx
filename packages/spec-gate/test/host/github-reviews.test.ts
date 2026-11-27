@@ -7,6 +7,9 @@ import {
   giving,
   HEAD,
   hostAt,
+  FORBIDDEN_CHARACTERS,
+  PULL,
+  REPOSITORY,
   type Reply,
   reviewJson,
   REVIEWS_PATH,
@@ -534,6 +537,10 @@ interface ReviewsRow {
   expect: { logins: string[] } | { count: number } | { error: string };
   /** The pages that are asked for, in order. */
   asked: number[];
+  /** The pull request the adapter is made for; 7 when left out. */
+  number?: number;
+  /** The repository the adapter is made for; acme/widgets when left out. */
+  repository?: string;
 }
 
 const upTo = (n: number): number[] =>
@@ -1444,6 +1451,446 @@ const CONJUNCTS: {
       asked: [1, 2],
     },
   },
+  {
+    id: "C-LST-12",
+    function: "list",
+    conjunct:
+      "the next link of a full page is checked too, not only that of a short page",
+    row: {
+      pages: [
+        { fill: GITHUB_PAGE_SIZE, link: '<{foreign}{page:2}>; rel="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { error: "next link leaves the API origin" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-20",
+    function: "readReviews",
+    conjunct: "pending in another case is not pending: the list is unreadable",
+    row: {
+      pages: [{ reviews: [by("alice"), by("bob", { state: "pending" })] }],
+      expect: { error: "a review has an unknown state" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-21",
+    function: "readReviews",
+    conjunct: "a known state in another case is an unknown state",
+    row: {
+      pages: [{ reviews: [by("alice", { state: "approved" })] }],
+      expect: { error: "a review has an unknown state" },
+      asked: [1],
+    },
+  },
+  ...(
+    [
+      [
+        "C-TIM-01",
+        "a time in another notation is no time, even when a date parser reads it",
+        "May 1, 2024 10:00:00 GMT",
+        false,
+      ],
+      [
+        "C-TIM-02",
+        "a day that does not exist is not rolled over",
+        "2024-02-31T10:00:00Z",
+        false,
+      ],
+      [
+        "C-TIM-03",
+        "a zone that does not exist is no time",
+        "2024-05-01T10:00:00+99:99",
+        false,
+      ],
+      ["C-TIM-04", "a time needs a zone", "2024-05-01T10:00:00", false],
+      [
+        "C-TIM-05",
+        "a fraction of a second is allowed",
+        "2024-05-01T10:00:00.123Z",
+        true,
+      ],
+      [
+        "C-TIM-06",
+        "date and time are joined by a T",
+        "2024-05-01 10:00:00Z",
+        false,
+      ],
+      [
+        "C-TIM-07",
+        "the letters of a time are upper case",
+        "2024-05-01t10:00:00z",
+        false,
+      ],
+      [
+        "C-TIM-08",
+        "the day, month and year must come back as written",
+        "2024-02-30T10:00:00Z",
+        false,
+      ],
+      [
+        "C-TIM-09",
+        "a fraction has at most nine digits",
+        "2024-05-01T10:00:00.1234567890Z",
+        false,
+      ],
+      [
+        "C-TIM-10",
+        "an hour that does not exist is not rolled over",
+        "2024-05-01T24:00:00Z",
+        false,
+      ],
+    ] as const
+  ).map(([id, conjunct, time, read]) => ({
+    id,
+    function: "instantOf",
+    conjunct,
+    row: {
+      pages: [{ reviews: [by("alice", { submitted_at: time })] }],
+      expect: read
+        ? { logins: ["alice"] }
+        : { error: "a review has no submission time" },
+      asked: [1],
+    } as ReviewsRow,
+  })),
+  {
+    id: "C-NXT-17",
+    function: "hasNext",
+    conjunct:
+      "a next link below another path is named as that, and that is no crash",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/repos/acme/widgets/pulls/7/comments?per_page=100&page=2>; rel="next"',
+        },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-18",
+    function: "hasNext",
+    conjunct: "the Link header that is read is the one of the answer",
+    row: {
+      pages: [{ reviews: [by("alice")], link: NEXT }, { reviews: [by("bob")] }],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LST-13",
+    function: "list",
+    conjunct: "a next link is compared with the list that was asked for",
+    row: {
+      pages: [{ reviews: [by("alice")], link: NEXT }, { reviews: [by("bob")] }],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LST-14",
+    function: "list",
+    conjunct: "a next link is compared with the page that was asked for",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: NEXT },
+        { reviews: [by("bob")], link: '<{P:3}>; rel="next"' },
+        { reviews: [by("carol")] },
+      ],
+      expect: { logins: ["alice", "bob", "carol"] },
+      asked: [1, 2, 3],
+    },
+  },
+  {
+    id: "C-REV-22",
+    function: "readReviews",
+    conjunct:
+      "a submission time that is no text is no time, even when it prints like one",
+    row: {
+      pages: [
+        { reviews: [by("alice", { submitted_at: ["2024-05-01T10:00:00Z"] })] },
+      ],
+      expect: { error: "a review has no submission time" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-23",
+    function: "readReviews",
+    conjunct: "a reviewer that is null has no login, and that is no crash",
+    row: {
+      pages: [{ reviews: [by("alice", { user: null })] }],
+      expect: { error: "a review has no login" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-REV-24",
+    function: "reviews",
+    conjunct:
+      "the reviews read are those of the pull request the adapter was made for",
+    row: {
+      number: 12,
+      pages: [{ reviews: [by("alice")] }],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-25",
+    function: "nextTarget",
+    conjunct: "a target holds no opening angle bracket",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<<https://other.example/list>; rel="prev"',
+        },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-26",
+    function: "nextTarget",
+    conjunct: "a target holds no closing angle bracket",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<https://other.example/list>x>; rel="prev"',
+        },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-27",
+    function: "nextTarget",
+    conjunct: "a parameter has a name",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<https://other.example/list>; ="prev"',
+        },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-28",
+    function: "nextTarget",
+    conjunct: "a value without quotes is not empty",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: "<https://other.example/list>; rel=" },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-29",
+    function: "nextTarget",
+    conjunct: "a value without quotes holds no quote",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<https://other.example/list>; rel=pre"v',
+        },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-30",
+    function: "nextTarget",
+    conjunct:
+      "a value without quotes ends at a comma, and what follows must be an entry",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: "<https://other.example/list>; rel=prev,x",
+        },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-31",
+    function: "nextTarget",
+    conjunct:
+      "a value without quotes ends at a semicolon, and what follows must be a parameter",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: "<https://other.example/list>; rel=prev;x",
+        },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-32",
+    function: "nextTarget",
+    conjunct:
+      "a value without quotes ends at a space, and nothing but a separator follows",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: "<https://other.example/list>; rel=prev x",
+        },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LNK-33",
+    function: "nextTarget",
+    conjunct:
+      "a value without quotes before the relation ends at its semicolon",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; type=list; rel="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-34",
+    function: "nextTarget",
+    conjunct:
+      "a space before the equals sign is not part of the name of a parameter",
+    row: {
+      pages: [
+        { reviews: [by("alice")], link: '<{P:2}>; rel ="next"' },
+        { reviews: [by("bob")] },
+      ],
+      expect: { logins: ["alice", "bob"] },
+      asked: [1, 2],
+    },
+  },
+  {
+    id: "C-LNK-35",
+    function: "nextTarget",
+    conjunct: "the name of a parameter is letters and the asterisk",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<https://other.example/list>; re%l="prev"',
+        },
+      ],
+      expect: { error: "next link not readable" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-19",
+    function: "hasNext",
+    conjunct: "the path of a repository by its id is compared with its case",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/REPOSITORIES/1300192/pulls/7/reviews?per_page=100&page=2>; rel="next"',
+        },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-20",
+    function: "hasNext",
+    conjunct: "nothing stands before the path of a repository by its id",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/x/repositories/1300192/pulls/7/reviews?per_page=100&page=2>; rel="next"',
+        },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-21",
+    function: "hasNext",
+    conjunct:
+      "the prefix of the API root stands at the start of the path, not somewhere in it",
+    row: {
+      prefix: "/repos",
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/abcde/repos/acme/widgets/pulls/7/reviews?per_page=100&page=2>; rel="next"',
+        },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-22",
+    function: "hasNext",
+    conjunct: "the list stands at the end of the path, not somewhere in it",
+    row: {
+      repository: "pulls/7",
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/repos/pulls/7/reviewsAAAAAAAA?per_page=100&page=2>; rel="next"',
+        },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-NXT-23",
+    function: "hasNext",
+    conjunct: "the id of a repository is digits",
+    row: {
+      pages: [
+        {
+          reviews: [by("alice")],
+          link: '<{root}/repositories/13%/pulls/7/reviews?per_page=100&page=2>; rel="next"',
+        },
+      ],
+      expect: { error: "next link names another path" },
+      asked: [1],
+    },
+  },
+  {
+    id: "C-LST-15",
+    function: "list",
+    conjunct: "a page is asked for at the path of the list",
+    row: {
+      pages: [{ reviews: [by("alice")] }],
+      expect: { logins: ["alice"] },
+      asked: [1],
+    },
+  },
 ];
 
 describe("CONJUNCTS: reading a list of reviews and its Link headers", () => {
@@ -1457,13 +1904,15 @@ describe("CONJUNCTS: reading a list of reviews and its Link headers", () => {
     CONJUNCTS.map((entry) => [entry.id, entry.conjunct, entry.row] as const),
   )("%s: %s", async (_id, _conjunct, row) => {
     const prefix = row.prefix ?? "";
+    const list = `/repos/${row.repository ?? REPOSITORY}/pulls/${row.number ?? PULL}/reviews`;
+    const pageOf = (n: number): string => `${list}?per_page=100&page=${n}`;
     const expand = (text: string): string =>
       text
         .replace(
           /\{P:(\d+)\}/g,
-          (_, n) => `${stub.url}${prefix}${page(Number(n))}`,
+          (_, n) => `${stub.url}${prefix}${pageOf(Number(n))}`,
         )
-        .replace(/\{page:(\d+)\}/g, (_, n) => page(Number(n)))
+        .replace(/\{page:(\d+)\}/g, (_, n) => pageOf(Number(n)))
         .replaceAll("{root}", stub.url)
         .replaceAll("{foreign}", foreign.url)
         .replaceAll("{host}", new URL(stub.url).host);
@@ -1483,27 +1932,65 @@ describe("CONJUNCTS: reading a list of reviews and its Link headers", () => {
         of.fill === undefined
           ? (of.reviews ?? [])
           : Array.from({ length: of.fill }, (_, k) => by(`user${k}`));
-      stub.on(`${prefix}${page(i + 1)}`, {
+      stub.on(`${prefix}${pageOf(i + 1)}`, {
         ...(of.body === undefined ? { json: reviews } : { body: of.body }),
         headers: of.link === undefined ? {} : { link: expand(of.link) },
       });
     });
     foreign.on(REVIEWS_PATH, { json: [by("mallory")] });
-    const host = hostAt(
-      stub,
-      prefix === "" ? {} : { apiUrl: `${stub.url}${prefix}` },
-    );
+    const host = hostAt(stub, {
+      ...(prefix === "" ? {} : { apiUrl: `${stub.url}${prefix}` }),
+      ...(row.number === undefined ? {} : { pullRequest: row.number }),
+      ...(row.repository === undefined ? {} : { repository: row.repository }),
+    });
     if ("error" in row.expect) {
       const error = await failing(host.reviews());
-      expect(error.message).toBe(`${AT} (${row.expect.error})`);
+      expect(error.message).toBe(
+        `github: GET ${list} answered 200 (${row.expect.error})`,
+      );
     } else {
       const logins = (await giving(host.reviews())).map((r) => r.login);
       if ("logins" in row.expect) expect(logins).toEqual(row.expect.logins);
       else expect(logins).toHaveLength(row.expect.count);
     }
     expect(stub.hits.map((hit) => hit.url)).toEqual(
-      row.asked.map((n) => `${prefix}${page(n)}`),
+      row.asked.map((n) => `${prefix}${pageOf(n)}`),
     );
     expect(foreign.hits).toEqual([]);
   });
+
+  // What the name of a parameter and the id of a repository may not hold,
+  // one test each. The asterisk is a character of a name.
+  it.each(FORBIDDEN_CHARACTERS.filter((char) => char !== "*"))(
+    "a parameter name with %j in it makes the header unreadable",
+    async (char) => {
+      stub.on(page(1), {
+        json: [by("alice")],
+        headers: {
+          link: `<https://other.example/list>; a${char}b="x", <${stub.url}${page(2)}>; rel="next"`,
+        },
+      });
+      const error = await failing(hostAt(stub).reviews());
+      expect(error.message).toBe(`${AT} (next link not readable)`);
+      expect(stub.hits.map((hit) => hit.url)).toEqual([page(1)]);
+    },
+  );
+
+  it.each(FORBIDDEN_CHARACTERS.filter((char) => !"<>".includes(char)))(
+    "a repository id with %j in it is another path",
+    async (char) => {
+      for (const id of [`13${char}`, `1${char}3`]) {
+        stub.reset();
+        stub.on(page(1), {
+          json: [by("alice")],
+          headers: {
+            link: `<${stub.url}/repositories/${id}/pulls/7/reviews?per_page=100&page=2>; rel="next"`,
+          },
+        });
+        const error = await failing(hostAt(stub).reviews());
+        expect(error.message).toBe(`${AT} (next link names another path)`);
+        expect(stub.hits.map((hit) => hit.url)).toEqual([page(1)]);
+      }
+    },
+  );
 });

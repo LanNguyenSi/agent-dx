@@ -566,7 +566,19 @@ interface ConfigRow {
     { commit?: string | null; approver: string | null } | { error: string };
   /** Whether the reviews of pull request 3 are asked for at all. */
   reviewsAsked?: boolean;
+  /** The branch the pull request under check targets; main when left out. */
+  target?: string;
+  /** The commit the host lists and whose pull requests are routed; the config commit when left out. */
+  commit?: string;
+  /** The number of the pull request whose reviews are routed; 3 when left out. */
+  reviewsOf?: number;
+  /** The request for the commits, as it must be sent. */
+  askedCommits?: string;
 }
+
+const into = (ref: string) => ({
+  base: { ref, sha: BASE, repo: { full_name: REPOSITORY } },
+});
 
 /**
  * Every conjunct of the last change under `.spec-gate/`: the commit, the
@@ -1190,6 +1202,264 @@ const CONJUNCTS: {
       expect: { approver: "bob" },
     },
   },
+  {
+    id: "C-CFG-15",
+    function: "lastConfigCommit",
+    conjunct:
+      "a pull request merged into the target branch counts when the target is not main",
+    row: {
+      target: "release",
+      pulls: [mergedPull(into("release"))],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-CFG-16",
+    function: "lastConfigCommit",
+    conjunct:
+      "a pull request merged into main does not count when the target is another branch",
+    row: {
+      target: "release",
+      pulls: [mergedPull()],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+      reviewsAsked: false,
+    },
+  },
+  {
+    id: "C-CFG-17",
+    function: "lastConfigCommit",
+    conjunct:
+      "the pull requests asked for are those of the commit the host listed",
+    row: {
+      commit: sha("9"),
+      pulls: [mergedPull({ merge_commit_sha: sha("9") })],
+      reviews: [ok("carol", D, 1)],
+      expect: { commit: sha("9"), approver: "carol" },
+    },
+  },
+  {
+    id: "C-CFG-18",
+    function: "lastConfigCommit",
+    conjunct: "the reviews read are those of the merging pull request",
+    row: {
+      pulls: [mergedPull({ number: 12 })],
+      reviewsOf: 12,
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-CFG-19",
+    function: "lastConfigCommit",
+    conjunct:
+      "approvals are compared with the head of the merging pull request",
+    row: {
+      pulls: [mergedPull({ head: { sha: sha("8") } })],
+      reviews: [ok("carol", sha("8"), 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-CFG-20",
+    function: "lastConfigCommit",
+    conjunct:
+      "approvals are compared with the merge time of the merging pull request",
+    row: {
+      reviews: [ok("mallory", D, "11:00:01")],
+      expect: { approver: null },
+    },
+  },
+  {
+    id: "C-CFG-21",
+    function: "lastConfigCommit",
+    conjunct: "the target branch is one value of the query, encoded",
+    row: {
+      target: "release/1.x+y",
+      commits: [],
+      expect: { commit: null, approver: null },
+      askedCommits: `${COMMITS_PATH}?sha=release%2F1.x%2By&path=.spec-gate&per_page=1`,
+    },
+  },
+  {
+    id: "C-CFG-22",
+    function: "lastConfigCommit",
+    conjunct: "the commits asked for are those of the target branch",
+    row: {
+      target: "release",
+      commits: [],
+      expect: { commit: null, approver: null },
+      askedCommits: `${COMMITS_PATH}?sha=release&path=.spec-gate&per_page=1`,
+    },
+  },
+  {
+    id: "C-CFG-23",
+    function: "lastConfigCommit",
+    conjunct: "the commits asked for are those under .spec-gate",
+    row: {
+      commits: [],
+      expect: { commit: null, approver: null },
+      askedCommits: COMMITS_URL,
+    },
+  },
+  {
+    id: "C-CFG-24",
+    function: "mergedPullOf",
+    conjunct: "the path of the pull requests names the commit",
+    row: {
+      commit: sha("7"),
+      pulls: [mergedPull({ merge_commit_sha: sha("7") })],
+      reviews: [ok("carol", D, 1)],
+      expect: { commit: sha("7"), approver: "carol" },
+    },
+  },
+  {
+    id: "C-CFG-25",
+    function: "readReviews",
+    conjunct: "the path of the reviews names the pull request",
+    row: {
+      pulls: [mergedPull({ number: 15 })],
+      reviewsOf: 15,
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-APP-25",
+    function: "latestApprover",
+    conjunct: "an approval within the second after the merge does not count",
+    row: {
+      reviews: [ok("mallory", D, "11:00:00.500")],
+      expect: { approver: null },
+    },
+  },
+  {
+    id: "C-MRG-23",
+    function: "mergedPullOf",
+    conjunct:
+      "a base repository that is null is an unexpected shape, and no crash",
+    row: {
+      pulls: [mergedPull({ base: { ref: "main", sha: BASE, repo: null } })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-24",
+    function: "mergedPullOf",
+    conjunct:
+      "a merge time that is neither null nor a text is an unexpected shape",
+    row: {
+      pulls: [mergedPull({ merged_at: 5 })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-25",
+    function: "mergedPullOf",
+    conjunct:
+      "a base that is null has no branch: an unexpected shape, and no crash",
+    row: {
+      pulls: [mergedPull({ base: null })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-MRG-26",
+    function: "mergedPullOf",
+    conjunct:
+      "a base that is null has no repository: an unexpected shape, and no crash",
+    row: {
+      pulls: [mergedPull({ base: null })],
+      expect: { error: SHAPE_OF_PULL },
+    },
+  },
+  {
+    id: "C-CFG-26",
+    function: "lastConfigCommit",
+    conjunct: "the approver is looked for in the reviews that were read",
+    row: { reviews: [ok("carol", D, 1)], expect: { approver: "carol" } },
+  },
+  {
+    id: "C-CFG-27",
+    function: "lastConfigCommit",
+    conjunct: "the commits are asked for at the path of the commits",
+    row: {
+      commits: [],
+      expect: { commit: null, approver: null },
+      askedCommits: COMMITS_URL,
+    },
+  },
+  {
+    id: "C-CFG-28",
+    function: "lastConfigCommit",
+    conjunct:
+      "without a readable merge time no review counts, however early it was",
+    row: {
+      pulls: [mergedPull({ merged_at: "soon" })],
+      reviews: [
+        rv("carol", "APPROVED", D, 0, { submitted_at: "1969-12-31T23:59:59Z" }),
+      ],
+      expect: { approver: null },
+    },
+  },
+  {
+    id: "C-CFG-29",
+    function: "mergedPullOf",
+    conjunct:
+      "a head that is null is no commit: the approver is unknown, and that is no crash",
+    row: {
+      pulls: [mergedPull({ head: null })],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: null },
+    },
+  },
+  {
+    id: "C-CFG-30",
+    function: "lastConfigCommit",
+    conjunct: "a listed commit that is null has no id, and that is no crash",
+    row: {
+      commits: [null],
+      expect: {
+        error: `github: GET ${COMMITS_PATH} answered 200 (no commit id)`,
+      },
+    },
+  },
+  {
+    id: "C-APP-26",
+    function: "latestApprover",
+    conjunct: "the first standing approval is taken without a comparison",
+    row: { reviews: [ok("carol", D, 1)], expect: { approver: "carol" } },
+  },
+  {
+    id: "C-MRG-27",
+    function: "mergedPullOf",
+    conjunct: "pull request 1 is a pull request",
+    row: {
+      pulls: [mergedPull({ number: 1 })],
+      reviewsOf: 1,
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-MRG-28",
+    function: "mergedPullOf",
+    conjunct:
+      "an open pull request with the same commit does not stand beside the merged one",
+    row: {
+      pulls: [mergedPull({ number: 4, merged_at: null }), mergedPull()],
+      reviews: [ok("carol", D, 1)],
+      expect: { approver: "carol" },
+    },
+  },
+  {
+    id: "C-APP-27",
+    function: "latestApprover",
+    conjunct:
+      "the standing approvals are those of the reviews before the merge",
+    row: { reviews: [ok("carol", D, 1)], expect: { approver: "carol" } },
+  },
 ];
 
 describe("CONJUNCTS: the last change under .spec-gate and its approver", () => {
@@ -1215,18 +1485,24 @@ describe("CONJUNCTS: the last change under .spec-gate and its approver", () => {
   it.each(
     CONJUNCTS.map((entry) => [entry.id, entry.conjunct, entry.row] as const),
   )("%s: %s", async (_id, _conjunct, row) => {
+    const commit = row.commit ?? CONFIG;
+    const pullsPath = `${P}/commits/${commit}/pulls`;
+    const reviewsPath = `${P}/pulls/${row.reviewsOf ?? 3}/reviews`;
+    if (row.target !== undefined) {
+      stub.on(PULL_PATH, { json: pullJson(into(row.target)) });
+    }
     stub.on(COMMITS_PATH, {
-      json: "commits" in row ? row.commits : [{ sha: CONFIG }],
+      json: "commits" in row ? row.commits : [{ sha: commit }],
     });
     stub.on(
-      PULLS_OF,
+      pullsPath,
       row.pulls === "endless"
         ? endless(PULLS_OF, other(4))
         : { json: row.pulls ?? [mergedPull()] },
     );
     const reviews = row.reviews ?? [];
     stub.on(
-      CONFIG_REVIEWS,
+      reviewsPath,
       reviews === "endless"
         ? endless(CONFIG_REVIEWS, ok("carol", D, 1))
         : Array.isArray(reviews)
@@ -1241,6 +1517,11 @@ describe("CONJUNCTS: the last change under .spec-gate and its approver", () => {
         commit: "commit" in row.expect ? row.expect.commit : CONFIG,
         approver: row.expect.approver,
       });
+    }
+    if (row.askedCommits !== undefined) {
+      expect(stub.hitsOf(COMMITS_PATH).map((hit) => hit.url)).toEqual([
+        row.askedCommits,
+      ]);
     }
     if (row.reviewsAsked !== undefined) {
       const asked = stub.hits.filter((hit) =>

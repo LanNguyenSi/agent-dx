@@ -22,6 +22,7 @@ import {
 import { conjunctIds } from "./conjunct-mutants.js";
 import {
   expectClean,
+  FORBIDDEN_CHARACTERS,
   giving,
   hostAt,
   PULL,
@@ -391,10 +392,30 @@ const CARRIES_MORE =
   "github: apiUrl must not carry credentials, a query or a fragment";
 
 interface ApiUrlRow {
-  apiUrl: unknown;
+  /** The apiUrl option; left out of the options when the row has none. */
+  apiUrl?: unknown;
+  /** Other options that differ from the usual ones. */
+  over?: Record<string, unknown>;
+  /** A value in place of the whole options object. */
+  options?: unknown;
+  /** No fetch is given: the request goes through the global one to the stub. */
+  global?: true;
   /** The address the first request goes to, or the refusal. */
   expect: { asked: string } | { refused: string };
 }
+
+const REPOSITORY_FORM = "github: repository must be <owner>/<name>";
+const NUMBER_FORM = "github: pullRequest must be a positive integer";
+const TOKEN_FORM = "github: token must be printable ASCII without a space";
+const USUAL = { asked: `https://api.github.com${PULL_PATH}` };
+const repository = (value: unknown): ApiUrlRow => ({
+  over: { repository: value },
+  expect: { refused: REPOSITORY_FORM },
+});
+const token = (value: unknown): ApiUrlRow => ({
+  over: { token: value },
+  expect: { refused: TOKEN_FORM },
+});
 
 /**
  * Every conjunct of the apiUrl check, one row each. The row of an id fails
@@ -565,9 +586,232 @@ const CONJUNCTS: {
       expect: { asked: `https://ghe.example/api/v3${PULL_PATH}` },
     },
   },
+  {
+    id: "C-OPT-01",
+    function: "createGitHubHost",
+    conjunct: "options that are null are refused by name, not with a crash",
+    row: {
+      options: null,
+      expect: { refused: "github: options must be an object" },
+    },
+  },
+  {
+    id: "C-OPT-02",
+    function: "createGitHubHost",
+    conjunct:
+      "a repository that is no text is refused, even when it prints like one",
+    row: repository(["acme/widgets"]),
+  },
+  {
+    id: "C-OPT-03",
+    function: "createGitHubHost",
+    conjunct: "a repository without a name is refused",
+    row: repository("acme"),
+  },
+  {
+    id: "C-OPT-04",
+    function: "createGitHubHost",
+    conjunct: "a repository with a third segment is refused",
+    row: repository("acme/widgets/extra"),
+  },
+  {
+    id: "C-OPT-05",
+    function: "createGitHubHost",
+    conjunct: "the owner must match its pattern",
+    row: repository("ac me/widgets"),
+  },
+  {
+    id: "C-OPT-06",
+    function: "createGitHubHost",
+    conjunct: "an owner does not start with a hyphen",
+    row: repository("-acme/widgets"),
+  },
+  {
+    id: "C-OPT-07",
+    function: "createGitHubHost",
+    conjunct: "an owner has at most 39 characters",
+    row: repository(`${"a".repeat(40)}/widgets`),
+  },
+  {
+    id: "C-OPT-08",
+    function: "createGitHubHost",
+    conjunct: "a dot is no character of an owner",
+    row: repository("ac.me/widgets"),
+  },
+  {
+    id: "C-OPT-09",
+    function: "createGitHubHost",
+    conjunct: "nothing follows the owner",
+    row: repository("acme!/widgets"),
+  },
+  {
+    id: "C-OPT-10",
+    function: "createGitHubHost",
+    conjunct: "nothing stands before the owner",
+    row: repository("!acme/widgets"),
+  },
+  {
+    id: "C-OPT-11",
+    function: "createGitHubHost",
+    conjunct: "the name must match its pattern",
+    row: repository("acme/wid gets"),
+  },
+  {
+    id: "C-OPT-12",
+    function: "createGitHubHost",
+    conjunct: "a name has at most 100 characters",
+    row: repository(`acme/${"w".repeat(101)}`),
+  },
+  {
+    id: "C-OPT-13",
+    function: "createGitHubHost",
+    conjunct: "a name is not empty",
+    row: repository("acme/"),
+  },
+  {
+    id: "C-OPT-14",
+    function: "createGitHubHost",
+    conjunct: "a percent sign is no character of a name",
+    row: repository("acme/wid%2fgets"),
+  },
+  {
+    id: "C-OPT-15",
+    function: "createGitHubHost",
+    conjunct: "nothing stands before the name",
+    row: repository("acme/!widgets"),
+  },
+  {
+    id: "C-OPT-16",
+    function: "createGitHubHost",
+    conjunct: "nothing follows the name",
+    row: repository("acme/widgets!"),
+  },
+  {
+    id: "C-OPT-17",
+    function: "createGitHubHost",
+    conjunct: "a name that is one dot is refused",
+    row: repository("acme/."),
+  },
+  {
+    id: "C-OPT-18",
+    function: "createGitHubHost",
+    conjunct: "a name that is two dots is refused",
+    row: repository("acme/.."),
+  },
+  {
+    id: "C-OPT-19",
+    function: "createGitHubHost",
+    conjunct: "a pull request number is an integer",
+    row: { over: { pullRequest: 1.5 }, expect: { refused: NUMBER_FORM } },
+  },
+  {
+    id: "C-OPT-20",
+    function: "createGitHubHost",
+    conjunct: "a pull request number lies in the safe range",
+    row: { over: { pullRequest: 2 ** 53 }, expect: { refused: NUMBER_FORM } },
+  },
+  {
+    id: "C-OPT-21",
+    function: "createGitHubHost",
+    conjunct: "a pull request number is at least 1",
+    row: { over: { pullRequest: 0 }, expect: { refused: NUMBER_FORM } },
+  },
+  {
+    id: "C-OPT-22",
+    function: "createGitHubHost",
+    conjunct:
+      "a token that is no text is refused, even when it prints like one",
+    row: token(7),
+  },
+  {
+    id: "C-OPT-23",
+    function: "createGitHubHost",
+    conjunct: "the token must match its pattern",
+    row: token("line\nbreak"),
+  },
+  {
+    id: "C-OPT-24",
+    function: "createGitHubHost",
+    conjunct: "a space is no character of a token",
+    row: token("with space"),
+  },
+  {
+    id: "C-OPT-25",
+    function: "createGitHubHost",
+    conjunct: "a character past ASCII is no character of a token",
+    row: token("t\u00f6ken"),
+  },
+  {
+    id: "C-OPT-26",
+    function: "createGitHubHost",
+    conjunct: "a token has at most 4096 characters",
+    row: token("x".repeat(4097)),
+  },
+  {
+    id: "C-OPT-27",
+    function: "createGitHubHost",
+    conjunct: "a token is not empty",
+    row: token(""),
+  },
+  {
+    id: "C-OPT-28",
+    function: "createGitHubHost",
+    conjunct: "nothing follows the token",
+    row: token("abc\n"),
+  },
+  {
+    id: "C-OPT-29",
+    function: "createGitHubHost",
+    conjunct: "nothing stands before the token",
+    row: token("\nabc"),
+  },
+  {
+    id: "C-OPT-30",
+    function: "createGitHubHost",
+    conjunct: "a fetch that is no function is refused",
+    row: {
+      over: { fetch: "fetch" },
+      expect: { refused: "github: no fetch is available" },
+    },
+  },
+  {
+    id: "C-OPT-31",
+    function: "createGitHubHost",
+    conjunct: "a given fetch wins over the global one",
+    row: {
+      apiUrl: "http://127.0.0.1:9",
+      expect: { asked: `http://127.0.0.1:9${PULL_PATH}` },
+    },
+  },
+  {
+    id: "C-OPT-32",
+    function: "createGitHubHost",
+    conjunct: "without a given fetch the global one is used",
+    row: { global: true, expect: USUAL },
+  },
+  {
+    id: "C-OPT-33",
+    function: "createGitHubHost",
+    conjunct:
+      "the character after the last printable one is no character of a token",
+    row: token("ab\x7f"),
+  },
+  {
+    id: "C-OPT-34",
+    function: "createGitHubHost",
+    conjunct:
+      "the first printable character after the space is a character of a token",
+    row: { over: { token: "a!b" }, expect: USUAL },
+  },
+  {
+    id: "C-OPT-35",
+    function: "createGitHubHost",
+    conjunct: "the last printable character is a character of a token",
+    row: { over: { token: "a~b" }, expect: USUAL },
+  },
 ];
 
-describe("CONJUNCTS: the apiUrl option", () => {
+describe("CONJUNCTS: the options of the adapter", () => {
   it("the table and the list of changes name the same conjuncts, each once", () => {
     const ids = CONJUNCTS.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -578,11 +822,23 @@ describe("CONJUNCTS: the apiUrl option", () => {
     CONJUNCTS.map((entry) => [entry.id, entry.conjunct, entry.row] as const),
   )("%s: %s", async (_id, _conjunct, row) => {
     const seam = recorder();
-    const options = {
-      ...OPTIONS,
-      fetch: seam.fetch,
-      ...(row.apiUrl === ABSENT ? {} : { apiUrl: row.apiUrl }),
-    };
+    if (row.global === true) {
+      stub.on(PULL_PATH, { json: pullJson() });
+      await giving(hostAt(stub).pullRequest());
+      expect(stub.hits.map((hit) => hit.url)).toEqual([PULL_PATH]);
+      return;
+    }
+    const options =
+      "options" in row
+        ? row.options
+        : {
+            ...OPTIONS,
+            fetch: seam.fetch,
+            ...(!("apiUrl" in row) || row.apiUrl === ABSENT
+              ? {}
+              : { apiUrl: row.apiUrl }),
+            ...row.over,
+          };
     if ("refused" in row.expect) {
       expect(refusal(options).message).toBe(row.expect.refused);
       expect(seam.calls).toEqual([]);
@@ -591,4 +847,28 @@ describe("CONJUNCTS: the apiUrl option", () => {
       expect(seam.calls.map((call) => call.url)).toEqual([row.expect.asked]);
     }
   });
+
+  it.each([...FORBIDDEN_CHARACTERS, ".", "+"])(
+    "an owner with %j in it is refused",
+    (char) => {
+      for (const owner of [`${char}acme`, `ac${char}me`, `acme${char}`]) {
+        const options = { ...OPTIONS, repository: `${owner}/widgets` };
+        expect(refusal(options).message).toBe(REPOSITORY_FORM);
+      }
+    },
+  );
+
+  it.each([...FORBIDDEN_CHARACTERS, "+"])(
+    "a name with %j in it is refused",
+    (char) => {
+      for (const name of [
+        `${char}widgets`,
+        `wid${char}gets`,
+        `widgets${char}`,
+      ]) {
+        const options = { ...OPTIONS, repository: `acme/${name}` };
+        expect(refusal(options).message).toBe(REPOSITORY_FORM);
+      }
+    },
+  );
 });

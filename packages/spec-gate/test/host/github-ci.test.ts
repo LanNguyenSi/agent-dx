@@ -3,6 +3,7 @@ import { createGitHubHost } from "../../src/host/index.js";
 import { conjunctIds } from "./conjunct-mutants.js";
 import {
   failing,
+  FORBIDDEN_CHARACTERS,
   giving,
   HEAD,
   hostAt,
@@ -52,6 +53,7 @@ function runJson(over: Record<string, unknown> = {}): Record<string, unknown> {
 function onRoot(
   apiUrl?: string,
   reply: { status?: number; json?: unknown } = {},
+  repository: string = REPOSITORY,
 ) {
   const asked: string[] = [];
   const fetch = (async (input: unknown) => {
@@ -62,7 +64,7 @@ function onRoot(
     );
   }) as typeof globalThis.fetch;
   const host = createGitHubHost({
-    repository: REPOSITORY,
+    repository,
     pullRequest: PULL,
     token: TOKEN,
     apiUrl,
@@ -302,6 +304,10 @@ interface RunRow {
   expect: "verified" | "unverified" | { error: string };
   /** How many requests the host gets. */
   asked: number;
+  /** The repository the adapter is made for; acme/widgets when left out. */
+  repository?: string;
+  /** The one request the host gets. */
+  askedFor?: string;
 }
 
 /**
@@ -653,6 +659,81 @@ const CONJUNCTS: {
       asked: 1,
     },
   },
+  {
+    id: "C-RUN-23",
+    function: "ciRunStatus",
+    conjunct:
+      "an address is compared with the repository the adapter was made for",
+    row: {
+      repository: "octo/cat",
+      run: `https://github.com/octo/cat/actions/runs/${RUN}`,
+      over: { repository: { full_name: "octo/cat" } },
+      expect: "verified",
+      asked: 1,
+    },
+  },
+  {
+    id: "C-RUN-24",
+    function: "ciRunStatus",
+    conjunct: "the run asked for is the run that was named",
+    row: {
+      run: "555",
+      over: { id: 555 },
+      expect: "verified",
+      asked: 1,
+      askedFor: `https://api.github.com${P}/actions/runs/555`,
+    },
+  },
+  {
+    id: "C-CI-19",
+    function: "ciRunStatus",
+    conjunct: "the status of a run is compared with its case",
+    row: {
+      run: RUN,
+      over: { status: "Completed" },
+      expect: "unverified",
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-20",
+    function: "sameRepository",
+    conjunct:
+      "a repository whose name only starts like this one is another repository",
+    row: {
+      run: RUN,
+      over: { repository: { full_name: "acme/widgets-fork" } },
+      expect: "unverified",
+      asked: 1,
+    },
+  },
+  {
+    id: "C-CI-21",
+    function: "ciRunStatus",
+    conjunct: "a repository that is null is an unexpected shape, and no crash",
+    row: {
+      run: RUN,
+      over: { repository: null },
+      expect: { error: SHAPE },
+      asked: 1,
+    },
+  },
+  {
+    id: "C-RUN-25",
+    function: "ciRunStatus",
+    conjunct: "the id is read from the name that was given",
+    row: { run: "555", over: { id: 555 }, expect: "verified", asked: 1 },
+  },
+  {
+    id: "C-RUN-26",
+    function: "runIdOf",
+    conjunct: "an address is compared with its case",
+    row: {
+      run: ADDRESS.replace("github.com", "GitHub.com"),
+      expect: "unverified",
+      asked: 0,
+    },
+  },
 ];
 
 describe("CONJUNCTS: the name of a run and what makes it verified", () => {
@@ -665,10 +746,14 @@ describe("CONJUNCTS: the name of a run and what makes it verified", () => {
   it.each(
     CONJUNCTS.map((entry) => [entry.id, entry.conjunct, entry.row] as const),
   )("%s: %s", async (_id, _conjunct, row) => {
-    const root = onRoot(row.root, {
-      status: row.status,
-      json: "json" in row ? row.json : runJson(row.over),
-    });
+    const root = onRoot(
+      row.root,
+      {
+        status: row.status,
+        json: "json" in row ? row.json : runJson(row.over),
+      },
+      row.repository,
+    );
     const call = root.host.ciRunStatus(row.commit ?? HEAD, row.run as string);
     if (typeof row.expect === "string") {
       expect(await giving(call)).toBe(row.expect);
@@ -676,5 +761,29 @@ describe("CONJUNCTS: the name of a run and what makes it verified", () => {
       expect((await failing(call)).message).toBe(row.expect.error);
     }
     expect(root.asked).toHaveLength(row.asked);
+    if (row.askedFor !== undefined) {
+      expect(root.asked).toEqual([row.askedFor]);
+    }
   });
+
+  // What the id of a run may not hold, one test each: no request is made
+  // for a name that only a lenient reader of numbers would take as an id.
+  it.each([...FORBIDDEN_CHARACTERS, ".", "e", "+", "-", "_", "x"])(
+    "a run id with %j in it names no run",
+    async (char) => {
+      for (const run of [
+        `8${char}1`,
+        `81${char}`,
+        `${char}81`,
+        `${ADDRESS}${char}`,
+        ADDRESS.replace(RUN, `8${char}1`),
+      ]) {
+        const root = onRoot();
+        expect(await giving(root.host.ciRunStatus(HEAD, run))).toBe(
+          "unverified",
+        );
+        expect(root.asked).toEqual([]);
+      }
+    },
+  );
 });

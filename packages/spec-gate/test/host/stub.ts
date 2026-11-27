@@ -158,6 +158,38 @@ export function hostAt(
   });
 }
 
+/**
+ * Characters that no name the adapter reads may hold, one test each where
+ * a pattern is checked: a pattern that lets one of them in fails its test.
+ */
+export const FORBIDDEN_CHARACTERS = [
+  "%",
+  "#",
+  " ",
+  "\\",
+  "@",
+  ":",
+  "~",
+  "^",
+  "?",
+  "*",
+  "[",
+  '"',
+  "'",
+  "<",
+  ">",
+  "|",
+  ",",
+  ";",
+  "=",
+  "&",
+  "!",
+  "$",
+  "(",
+  "{",
+  "é",
+] as const;
+
 /** Everything an error or a value could show to a reader, as one text. */
 function shown(value: unknown): string {
   const parts = [
