@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `node_modules/.bin` that `npm exec` adds) stay trusted, and on other
   platforms the lookup of the bare name is unchanged. Providers defined only
   in the repository's `opencode.json` no longer appear in the catalog; pass
-  `--models` or `--opencode-provider` for them.
+  fully qualified `--models` entries (`provider/model-id`) for them.
 
 ## [0.53.0] - 2026-11-18
 
