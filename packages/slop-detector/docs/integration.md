@@ -150,6 +150,10 @@ It exposes one tool, `slop_check`:
 
 It returns each violation as `SEVERITY line:col rule message`, grouped by file, plus a one-line tally.
 
+`path` and `configPath` are confined to the server's working directory: a value is read only when it exists and its real path (every symbolic link followed) lies inside that directory. A relative value resolves against it, and anything else, such as an absolute path elsewhere, a `..` escape, or an in-tree symlink that points out, is refused with `slop_check: <path|configPath> is outside the server's working directory: <value>` and nothing is opened or loaded. The directory the server was launched from decides the boundary, so launch it from the repository it should scan. `text` input and `filename` are not affected: `filename` only steers prose-vs-code detection and is never opened.
+
+Residual: a config inside the working directory can still enable `placement.markers`, whose matches echo the matched text of in-root files in the result. Only scan trees whose configs you trust.
+
 Register it with your runtime by pointing at the built entry point:
 
 ```json

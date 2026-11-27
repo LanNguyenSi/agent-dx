@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -63,7 +63,7 @@ describe("runSlopCheck — path input", () => {
     try {
       const file = path.join(dir, "note.md");
       fs.writeFileSync(file, "We shipped it — and it worked.\n");
-      const summary = runSlopCheck({ path: file });
+      const summary = runSlopCheck({ path: file }, { root: dir });
       expect(
         summary.violations.find((v) => v.ruleId === "prose-slop/em-dash"),
       ).toBeDefined();
@@ -73,9 +73,208 @@ describe("runSlopCheck — path input", () => {
   });
 
   it("throws when the path does not exist", () => {
-    expect(() => runSlopCheck({ path: "/nonexistent/slop-mcp/xyz" })).toThrow(
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "slop-mcp-"));
+    try {
+      expect(() => runSlopCheck({ path: "missing.md" }, { root: dir })).toThrow(
+        /does not exist/,
+      );
+      expect(() =>
+        runSlopCheck({ path: "/nonexistent/slop-mcp/xyz" }, { root: dir }),
+      ).toThrow(/does not exist/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("runSlopCheck: confinement to the root", () => {
+  const SLOPPY = "We shipped it \u2014 and it worked.\n";
+  const hasEmDash = (s: ReturnType<typeof runSlopCheck>) =>
+    s.violations.some((v) => v.ruleId === "prose-slop/em-dash");
+  let base: string;
+  let root: string;
+  let outside: string;
+
+  beforeEach(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), "slop-mcp-root-"));
+    root = path.join(base, "root");
+    outside = path.join(base, "outside");
+    fs.mkdirSync(root);
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(root, "in.md"), SLOPPY);
+    fs.writeFileSync(path.join(outside, "out.md"), SLOPPY);
+    fs.writeFileSync(path.join(outside, "slop.config.yml"), "rules: {}\n");
+    fs.writeFileSync(path.join(root, "slop.config.yml"), "rules: {}\n");
+  });
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  const OUT = /is outside the server's working directory/;
+
+  it("scans an absolute path inside the root", () => {
+    expect(
+      hasEmDash(runSlopCheck({ path: path.join(root, "in.md") }, { root })),
+    ).toBe(true);
+  });
+
+  it("scans a relative path resolved against the root", () => {
+    expect(hasEmDash(runSlopCheck({ path: "in.md" }, { root }))).toBe(true);
+  });
+
+  it("refuses an absolute path outside the root", () => {
+    expect(() =>
+      runSlopCheck({ path: path.join(outside, "out.md") }, { root }),
+    ).toThrow(OUT);
+  });
+
+  it("refuses a relative .. escape", () => {
+    expect(() => runSlopCheck({ path: "../outside/out.md" }, { root })).toThrow(
+      /path is outside/,
+    );
+  });
+
+  it("refuses a sibling directory sharing the root's name prefix", () => {
+    const sibling = path.join(base, "root2");
+    fs.mkdirSync(sibling);
+    fs.writeFileSync(path.join(sibling, "x.md"), SLOPPY);
+    expect(() =>
+      runSlopCheck({ path: path.join(sibling, "x.md") }, { root }),
+    ).toThrow(OUT);
+  });
+
+  it("refuses an in-tree symlink to an outside file", () => {
+    fs.symlinkSync(path.join(outside, "out.md"), path.join(root, "link.md"));
+    expect(() => runSlopCheck({ path: "link.md" }, { root })).toThrow(OUT);
+  });
+
+  it("refuses an in-tree symlink to an outside directory", () => {
+    fs.symlinkSync(outside, path.join(root, "linkdir"), "dir");
+    expect(() => runSlopCheck({ path: "linkdir" }, { root })).toThrow(OUT);
+    expect(() => runSlopCheck({ path: "linkdir/out.md" }, { root })).toThrow(
+      OUT,
+    );
+  });
+
+  it("scans an in-tree symlink to an in-tree file", () => {
+    fs.symlinkSync(path.join(root, "in.md"), path.join(root, "alias.md"));
+    expect(hasEmDash(runSlopCheck({ path: "alias.md" }, { root }))).toBe(true);
+  });
+
+  it("keeps the does-not-exist error for a dangling in-tree symlink", () => {
+    fs.symlinkSync(path.join(root, "gone.md"), path.join(root, "dangling.md"));
+    expect(() => runSlopCheck({ path: "dangling.md" }, { root })).toThrow(
       /does not exist/,
     );
+  });
+
+  it("loads a configPath inside the root", () => {
+    fs.writeFileSync(
+      path.join(root, "off.yml"),
+      "rules:\n  prose-slop/em-dash:\n    enabled: false\n",
+    );
+    expect(hasEmDash(runSlopCheck({ path: "in.md" }, { root }))).toBe(true);
+    expect(
+      hasEmDash(
+        runSlopCheck({ path: "in.md", configPath: "off.yml" }, { root }),
+      ),
+    ).toBe(false);
+  });
+
+  it("reports a missing configPath inside the root as missing, one outside as outside", () => {
+    expect(() =>
+      runSlopCheck({ path: "in.md", configPath: "nope.yml" }, { root }),
+    ).toThrow(/configPath does not exist: nope\.yml/);
+    expect(() =>
+      runSlopCheck(
+        { path: "in.md", configPath: path.join(outside, "nope.yml") },
+        { root },
+      ),
+    ).toThrow(/configPath is outside/);
+  });
+
+  it("keeps the does-not-exist error for an empty path", () => {
+    expect(() => runSlopCheck({ path: "" }, { root })).toThrow(
+      /path does not exist/,
+    );
+  });
+
+  it("scans a relative path by its spelling when the root sits under a build directory", () => {
+    // Real path: the process cwd is always reported without symlinks.
+    const buildRoot = path.join(fs.realpathSync(base), "build", "repo");
+    fs.mkdirSync(path.join(buildRoot, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(buildRoot, "docs", "n.md"), SLOPPY);
+    const cwd = process.cwd();
+    try {
+      process.chdir(buildRoot);
+      const summary = runSlopCheck({ path: "docs" }, { root: buildRoot });
+      expect(summary.filesScanned).toBe(1);
+      expect(hasEmDash(summary)).toBe(true);
+      expect(summary.violations[0]?.path).toBe(path.join("docs", "n.md"));
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it("scans by absolute path when a relative value does not resolve from the working directory", () => {
+    // root differs from the process cwd: the relative spelling would point
+    // somewhere else, so the resolved path is used.
+    expect(hasEmDash(runSlopCheck({ path: "in.md" }, { root }))).toBe(true);
+  });
+
+  it("refuses a configPath outside the root without loading it", () => {
+    const outsideConfig = path.join(outside, "slop.config.yml");
+    expect(() =>
+      runSlopCheck({ path: "in.md", configPath: outsideConfig }, { root }),
+    ).toThrow(/configPath is outside/);
+    expect(() =>
+      runSlopCheck(
+        { text: "hi", filename: "msg.md", configPath: outsideConfig },
+        { root },
+      ),
+    ).toThrow(/configPath is outside/);
+  });
+
+  it("refuses an invalid outside config with the containment error, not a parse error", () => {
+    const bad = path.join(outside, "bad.yml");
+    fs.writeFileSync(bad, "rules: [unterminated\n");
+    expect(() =>
+      runSlopCheck({ path: "in.md", configPath: bad }, { root }),
+    ).toThrow(/configPath is outside/);
+  });
+
+  it("refuses a configPath reached through a symlink out of the root", () => {
+    fs.symlinkSync(
+      path.join(outside, "slop.config.yml"),
+      path.join(root, "linked.yml"),
+    );
+    expect(() =>
+      runSlopCheck({ path: "in.md", configPath: "linked.yml" }, { root }),
+    ).toThrow(/configPath is outside/);
+  });
+
+  it("defaults the root to the process working directory", () => {
+    const cwd = process.cwd();
+    try {
+      process.chdir(root);
+      expect(hasEmDash(runSlopCheck({ path: "in.md" }))).toBe(true);
+      expect(() =>
+        runSlopCheck({ path: path.join(outside, "out.md") }),
+      ).toThrow(OUT);
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it("leaves text input and filename unconfined", () => {
+    expect(
+      hasEmDash(
+        runSlopCheck(
+          { text: SLOPPY, filename: "/elsewhere/never-opened.md" },
+          { root },
+        ),
+      ),
+    ).toBe(true);
   });
 });
 

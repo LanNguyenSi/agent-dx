@@ -393,11 +393,14 @@ describe("the anchor only applies when the target lies inside the --config file'
       "--config",
       configPath,
     ]);
-    const viaMcp = runSlopCheck({
-      path: target,
-      packs: ["review-slop"],
-      configPath,
-    });
+    const viaMcp = runSlopCheck(
+      {
+        path: target,
+        packs: ["review-slop"],
+        configPath,
+      },
+      { root: tmp },
+    );
 
     expect(viaCli.blockCount).toBe(0);
     expect(viaMcp.blockCount).toBe(0);
@@ -610,17 +613,23 @@ describe("each entry point's scanRoot and configAnchor option is load-bearing", 
     const filename = path.join(tmp, "packages", "sub", "README.md");
     fs.writeFileSync(filename, reviewText);
 
-    const viaText = runSlopCheck({
-      text: reviewText,
-      filename,
-      packs: ["review-slop"],
-      configPath,
-    });
-    const viaPath = runSlopCheck({
-      path: filename,
-      packs: ["review-slop"],
-      configPath,
-    });
+    const viaText = runSlopCheck(
+      {
+        text: reviewText,
+        filename,
+        packs: ["review-slop"],
+        configPath,
+      },
+      { root: tmp },
+    );
+    const viaPath = runSlopCheck(
+      {
+        path: filename,
+        packs: ["review-slop"],
+        configPath,
+      },
+      { root: tmp },
+    );
 
     // Without the anchor on `scanRoot`, `checkText` falls back to the
     // nearest package.json above `filename` -- the NESTED
@@ -641,17 +650,23 @@ describe("each entry point's scanRoot and configAnchor option is load-bearing", 
     const filename = path.join(tmp, "packages", "sub", "notes.ts");
     fs.writeFileSync(filename, emDashText);
 
-    const viaText = runSlopCheck({
-      text: emDashText,
-      filename,
-      packs: ["prose-slop"],
-      configPath,
-    });
-    const viaPath = runSlopCheck({
-      path: filename,
-      packs: ["prose-slop"],
-      configPath,
-    });
+    const viaText = runSlopCheck(
+      {
+        text: emDashText,
+        filename,
+        packs: ["prose-slop"],
+        configPath,
+      },
+      { root: tmp },
+    );
+    const viaPath = runSlopCheck(
+      {
+        path: filename,
+        packs: ["prose-slop"],
+        configPath,
+      },
+      { root: tmp },
+    );
 
     // `.ts` is "code" by default, and `prose-slop` never applies to code:
     // the em-dash violation exists only because `treatAsProse` matched,
@@ -692,12 +707,15 @@ describe("each entry point's scanRoot and configAnchor option is load-bearing", 
         [null as unknown as string, "input.md"],
       ];
       for (const [filename, reportedPath] of unnamed) {
-        const viaText = runSlopCheck({
-          text: emDashText,
-          filename,
-          packs: ["prose-slop"],
-          configPath,
-        });
+        const viaText = runSlopCheck(
+          {
+            text: emDashText,
+            filename,
+            packs: ["prose-slop"],
+            configPath,
+          },
+          { root: tmp },
+        );
         // The reported path keeps its pre-anchor derivation: the gate
         // decides the anchor, it does not rename the input.
         expect(viaText.violations[0]?.path).toBe(reportedPath);
@@ -724,16 +742,22 @@ describe("each entry point's scanRoot and configAnchor option is load-bearing", 
     const target = path.join(tmp, "packages", "sub", "ignored", "bad.md");
     fs.writeFileSync(target, reviewText);
 
-    const viaPath = runSlopCheck({
-      path: target,
-      packs: ["review-slop"],
-      configPath,
-    });
-    const viaDir = runSlopCheck({
-      path: tmp,
-      packs: ["review-slop"],
-      configPath,
-    });
+    const viaPath = runSlopCheck(
+      {
+        path: target,
+        packs: ["review-slop"],
+        configPath,
+      },
+      { root: tmp },
+    );
+    const viaDir = runSlopCheck(
+      {
+        path: tmp,
+        packs: ["review-slop"],
+        configPath,
+      },
+      { root: tmp },
+    );
 
     // Pruned before it is read, so the file is never counted and its two
     // findings never appear -- the same outcome walking the whole fixture

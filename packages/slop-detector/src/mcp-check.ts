@@ -4,23 +4,31 @@
 // stdio transport).
 
 import fs from "node:fs";
+import path from "node:path";
 import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { packsByFilter } from "./packs/registry.js";
 import { sanitizeForTerminal } from "./util/terminal.js";
 import { resolvePatternAnchor } from "./util/pattern-anchor.js";
+import { isInside, realPath, resolvesInside } from "./util/path-containment.js";
 import type { CheckSummary, Severity, Violation } from "./types.js";
 
 export interface SlopCheckInput {
   /** In-memory string to scan. Mutually exclusive with `path`. */
   text?: string;
-  /** File or directory path to scan. Mutually exclusive with `text`. */
+  /**
+   * File or directory path to scan. Mutually exclusive with `text`. Must
+   * resolve (symbolic links followed) inside the server's working directory.
+   */
   path?: string;
   /** Filename to assume for `text` input (drives prose-vs-code detection). */
   filename?: string;
   /** Restrict to these rule packs; off-by-default packs only run when named. */
   packs?: string[];
-  /** Path to a slop.config.yml / .json; defaults to the built-in config. */
+  /**
+   * Path to a slop.config.yml / .json; defaults to the built-in config. Must
+   * resolve inside the server's working directory.
+   */
   configPath?: string;
 }
 
@@ -28,14 +36,39 @@ export interface SlopCheckInput {
  * Run a slop scan over an in-memory string (`text`) or a file/directory
  * (`path`). Exactly one of `text` / `path` must be provided. Mirrors the
  * config + pack resolution of the `slop-detector check` CLI.
+ *
+ * `path` and `configPath` are read only when they exist and their real path
+ * lies inside `root` (default: the server's working directory); relative
+ * values resolve against `root`.
  */
-export function runSlopCheck(input: SlopCheckInput): CheckSummary {
+export function runSlopCheck(
+  input: SlopCheckInput,
+  { root = process.cwd() }: { root?: string } = {},
+): CheckSummary {
   if (input.text !== undefined && input.path !== undefined) {
     throw new Error("slop_check: pass either `text` or `path`, not both");
   }
-  const config = input.configPath
-    ? loadConfig(input.configPath)
-    : defaultConfig();
+  let configPath: string | undefined;
+  if (input.configPath) {
+    configPath = path.resolve(root, input.configPath);
+    if (!resolvesInside(root, configPath)) {
+      // A config that cannot be resolved and is spelled inside the root is
+      // missing, not outside: only a resolvable or lexically outside value
+      // is reported as outside.
+      if (
+        realPath(configPath) === undefined &&
+        isInside(path.resolve(root), configPath)
+      ) {
+        throw new Error(
+          `slop_check: configPath does not exist: ${input.configPath}`,
+        );
+      }
+      throw new Error(
+        `slop_check: configPath is outside the server's working directory: ${input.configPath}`,
+      );
+    }
+  }
+  const config = configPath ? loadConfig(configPath) : defaultConfig();
   const packFilter =
     input.packs && input.packs.length > 0 ? input.packs : undefined;
   const packs = packsByFilter(packFilter);
@@ -59,9 +92,7 @@ export function runSlopCheck(input: SlopCheckInput): CheckSummary {
         : undefined;
     const filename = input.filename ?? "input.md";
     const textAnchor =
-      named !== undefined
-        ? resolvePatternAnchor(input.configPath, named)
-        : undefined;
+      named !== undefined ? resolvePatternAnchor(configPath, named) : undefined;
     const violations = checkText(input.text, filename, {
       packs,
       config,
@@ -72,11 +103,26 @@ export function runSlopCheck(input: SlopCheckInput): CheckSummary {
     return summarize(violations, 1);
   }
   if (input.path !== undefined) {
-    if (!fs.existsSync(input.path)) {
+    const target = path.resolve(root, input.path);
+    if (input.path === "" || !fs.existsSync(target)) {
       throw new Error(`slop_check: path does not exist: ${input.path}`);
     }
-    const pathAnchor = resolvePatternAnchor(input.configPath, input.path);
-    return checkPath(input.path, {
+    if (!resolvesInside(root, target)) {
+      throw new Error(
+        `slop_check: path is outside the server's working directory: ${input.path}`,
+      );
+    }
+    const pathAnchor = resolvePatternAnchor(configPath, target);
+    // The scan runs from the process working directory. A relative value
+    // that names the same place from there keeps its spelling, so default
+    // ignores such as `**/build/**` match against the path as written and
+    // not against the absolute path above the launch directory, and reported
+    // paths stay relative. Anything else is scanned by its absolute path.
+    const scanTarget =
+      !path.isAbsolute(input.path) && path.resolve(input.path) === target
+        ? input.path
+        : target;
+    return checkPath(scanTarget, {
       packs,
       config,
       packFilter,

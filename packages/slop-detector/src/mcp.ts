@@ -51,7 +51,7 @@ server.registerTool(
         .string()
         .optional()
         .describe(
-          "File or directory path to scan. Mutually exclusive with `text`.",
+          "File or directory path to scan, inside the server's working directory. Mutually exclusive with `text`.",
         ),
       filename: z
         .string()
@@ -69,7 +69,7 @@ server.registerTool(
         .string()
         .optional()
         .describe(
-          "Path to a slop.config.yml / .json. Default: the built-in config.",
+          "Path to a slop.config.yml / .json inside the server's working directory. Default: the built-in config.",
         ),
     },
     annotations: { readOnlyHint: true },
