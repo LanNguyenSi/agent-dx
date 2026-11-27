@@ -3,10 +3,11 @@
 ## Development Setup
 
 ```bash
+npm ci
 npm test
 ```
 
-The project currently has no runtime dependencies, so cloning the repository and running the test suite is enough for local development.
+The project currently has no runtime dependencies, but the test suite runs on the devDependency `vitest`, so install the dependencies with `npm ci` before running `npm test`.
 
 ## Pull Request Guidelines
 

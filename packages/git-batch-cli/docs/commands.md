@@ -41,7 +41,7 @@ flowchart TD
   P -.->|"git fails"| E
 ```
 
-With `--dry-run`, fetch, checkout and merge are recorded in `actions` but not run, so detection uses the refs from the last real fetch.
+With `--dry-run`, fetch, checkout and merge are recorded in `actions` but not run, so detection uses the refs from the last real fetch. The reported current branch (text `current=`, JSON `currentBranch`) is the branch the repository is actually on before the planned actions, not the target branch the planned checkout would switch to.
 
 ## `status`
 
@@ -95,7 +95,7 @@ The plain-text `status` row keeps the existing columns in place and appends the 
 
 ## `dirty`
 
-Shows only repositories that currently have local changes.
+Shows only repositories that currently have local changes. A repository whose status cannot be read is listed as well, with `outcome=error` and the git message in `error`; any `error` outcome exits 1, with or without `--strict`.
 
 ```bash
 git-batch dirty ~/git
@@ -127,6 +127,8 @@ git-batch list ~/git
 
 ## Options
 
+The value options `--root`, `--protected`, `--only`, `--exclude` and `--concurrency` also accept the `--option=<value>` form; boolean flags do not.
+
 - `--root <path>`: explicitly set the root folder to scan (defaults to cwd)
 - `--protected <a,b,c>`: try only these branches, in order, as the target branch (replaces `origin/HEAD` and the default list, see [Branch detection](#branch-detection))
 - `--only <a,b,c>`: include only matching repository names
@@ -139,6 +141,7 @@ git-batch list ~/git
 - `--json`: emit JSON instead of plain text
 - `--fetch`: for `status`, run `git fetch --quiet` per repo before computing ahead/behind
 - `--concurrency <n>` (also `--concurrency=<n>`): number of repositories processed in parallel by `sync`, `fetch` and `status --fetch`; a positive integer, default 8. A bare `--concurrency` without a value fails with `Missing value for --concurrency`; any other non-positive-integer value fails with `Invalid value for --concurrency`. Very large values are not capped and can hit the open-file limit (each in-flight fetch holds several descriptors), so keep it modest.
+- `--help` (also `-h`): show the help text and exit 0; no repository is scanned or changed
 
 ## Repository filters
 
