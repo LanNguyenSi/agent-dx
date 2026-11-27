@@ -21,12 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The opencode catalog lookup at install time (`opencode models`) now runs from
   the home directory instead of the target repository, and on Windows finds
   `opencode` only through fully qualified `PATH` entries (`.exe` and `.com`
-  files), never the current directory or a relative entry, so a repository can
-  no longer plant an executable the lookup would start. On other platforms the
-  lookup of the bare name is unchanged. Whether the home directory as working
-  directory changes which repository-local opencode configuration the command
-  reads has not been verified against opencode's source; a missing catalog
-  still falls back to the existing "no catalog" warnings.
+  files). That closes the current directory, relative `PATH` entries and
+  running inside the repository as ways to start a planted executable or to
+  load the repository's opencode configuration and plugins during the lookup.
+  Absolute `PATH` entries that point into the repository (for example the
+  `node_modules/.bin` that `npm exec` adds) stay trusted, and on other
+  platforms the lookup of the bare name is unchanged. Providers defined only
+  in the repository's `opencode.json` no longer appear in the catalog; pass
+  `--models` or `--opencode-provider` for them.
 
 ## [0.53.0] - 2026-11-18
 

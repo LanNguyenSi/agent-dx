@@ -341,7 +341,10 @@ runs `opencode models` to fetch the live catalog and auto-detects which
 provider to use (the one that offers Claude models). The lookup runs the
 `opencode` found on `PATH` from the home directory, never from the target
 repository; on Windows it never uses the current directory or a relative
-`PATH` entry and starts only `.exe` or `.com` files. When exactly one such
+`PATH` entry and starts only `.exe` or `.com` files. Because the repository's
+opencode configuration is not loaded for the lookup, providers defined only in
+the repository's `opencode.json` are missing from the catalog; pass `--models`
+or `--opencode-provider` for them. When exactly one such
 provider exists the aliases are resolved to the highest-version matching id in
 the catalog. When multiple providers offer Claude models the CLI warns and asks
 you to pass `--opencode-provider <id>` to disambiguate, or to supply

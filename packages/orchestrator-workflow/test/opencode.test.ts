@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -540,6 +542,26 @@ describe("loadOpencodeCatalog", () => {
       expect(out).toEqual([]);
       expect(calls).toEqual([]);
     }
+  });
+
+  it("defaults the working directory to the home directory", () => {
+    for (const platform of ["linux", "darwin"]) {
+      const { calls, execFile } = recordingSpawn(CATALOG);
+      loadOpencodeCatalog({ platform, execFile });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.options).toMatchObject({ cwd: homedir() });
+    }
+  });
+
+  it("checks the real file system by default on win32: a path that is not a file does not spawn", () => {
+    const { calls, execFile } = recordingSpawn(CATALOG);
+    const out = loadOpencodeCatalog({
+      platform: "win32",
+      pathEnv: "C:\\opencode-test-no-such-directory",
+      execFile,
+    });
+    expect(out).toEqual([]);
+    expect(calls).toEqual([]);
   });
 
   it("returns [] when the spawn fails or the neutral directory cannot be determined", () => {

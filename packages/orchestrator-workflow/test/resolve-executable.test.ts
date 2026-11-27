@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   isFullyQualifiedWin32,
+  isRegularFile,
   resolveExecutable,
 } from "../src/resolve-executable.js";
 
@@ -203,6 +208,23 @@ describe("resolveExecutable on win32", () => {
     ).toBe("C:\\second\\opencode.exe");
   });
 
+  it("trims whitespace around PATH entries", () => {
+    expect(
+      resolveExecutable("opencode", {
+        ...base,
+        pathEnv: " C:\\a ; C:\\b ",
+        isFile: filesOf("C:\\a\\opencode.exe"),
+      }),
+    ).toBe("C:\\a\\opencode.exe");
+    expect(
+      resolveExecutable("opencode", {
+        ...base,
+        pathEnv: " C:\\a ; C:\\b ",
+        isFile: filesOf("C:\\b\\opencode.exe"),
+      }),
+    ).toBe("C:\\b\\opencode.exe");
+  });
+
   it("returns undefined for an unset or empty PATH", () => {
     const isFile = filesOf(CWD_PLANT);
     expect(
@@ -228,4 +250,66 @@ describe("resolveExecutable off win32", () => {
       ).toBe("opencode");
     }
   });
+});
+
+describe("isRegularFile and the real file system", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "resolve-executable-"));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("is true for a regular file, false for a directory and for a missing path", () => {
+    const file = join(root, "opencode.exe");
+    const dir = join(root, "a-directory");
+    writeFileSync(file, "");
+    mkdirSync(dir);
+    expect(isRegularFile(file)).toBe(true);
+    expect(isRegularFile(dir)).toBe(false);
+    expect(isRegularFile(join(root, "missing.exe"))).toBe(false);
+  });
+
+  it("skips a directory named like the executable and returns the later real file", () => {
+    // The resolver builds win32 paths, so a POSIX host maps the two fake
+    // drive entries onto real directories; the file-system check is real.
+    const dirEntry = join(root, "first");
+    const fileEntry = join(root, "second");
+    mkdirSync(join(dirEntry, "opencode.exe"), { recursive: true });
+    mkdirSync(fileEntry);
+    writeFileSync(join(fileEntry, "opencode.exe"), "");
+    const toReal = (p: string): string =>
+      p
+        .replace("C:\\first", dirEntry)
+        .replace("C:\\second", fileEntry)
+        .replace(/\\/g, "/");
+    expect(
+      resolveExecutable("opencode", {
+        platform: "win32",
+        pathEnv: "C:\\first;C:\\second",
+        isFile: (p) => isRegularFile(toReal(p)),
+      }),
+    ).toBe("C:\\second\\opencode.exe");
+  });
+
+  it.runIf(process.platform === "win32")(
+    "resolves through real fully qualified entries on a Windows host",
+    () => {
+      const dirEntry = join(root, "first");
+      const fileEntry = join(root, "second");
+      mkdirSync(join(dirEntry, "opencode.exe"), { recursive: true });
+      mkdirSync(fileEntry);
+      writeFileSync(join(fileEntry, "opencode.exe"), "");
+      expect(
+        resolveExecutable("opencode", {
+          platform: "win32",
+          pathEnv: `${dirEntry};${fileEntry}`,
+          isFile: isRegularFile,
+        }),
+      ).toBe(`${fileEntry}\\opencode.exe`);
+    },
+  );
 });
