@@ -38,8 +38,9 @@ import {
   resolveRef,
 } from "../lint/git/index.js";
 import { resolveGitInputs, type GitRequest } from "../lint/git/resolve.js";
+import { kinAtDiffBase } from "../lint/rules/bindings-log.js";
 import { checkSpecChangesConfig } from "../lint/rules/refs.js";
-import { lintSpecDir } from "../lint/run.js";
+import { checkBindingsLogAt, lintSpecDir } from "../lint/run.js";
 import type { GitInputs, Loaded, RuleContext } from "../lint/types.js";
 import { checkRepository, type RepoCheckFinding } from "../repo/index.js";
 import {
@@ -468,14 +469,101 @@ function bindingProblem(
 }
 
 /**
+ * Why the bindings at the tip of the default branch are not the ones the
+ * merged pull request was approved with, or `null` when they are.
+ *
+ * The final lint at the tip compares the tip with itself, so its
+ * `bindings-log` rule sees no log that was merged before. The rule is run
+ * once more, alone, from each of two diff bases, with the tip as `HEAD`:
+ *
+ * - the head commit the host reports, where the approving reviews stand:
+ *   its log must be extended by the log at the tip, and the bindings at the
+ *   tip must be the replay of the entries after it (a squash that carried
+ *   other bindings, an entry dropped or rewritten after the review, a later
+ *   commit that changed `bindings.yaml` without an entry);
+ * - the start of every measured first-parent step of the default branch,
+ *   the first parent of the merge commit first: every log such a commit
+ *   holds for this spec must be extended as well (a pull request that put
+ *   a merged spec back to draft and proposed it again). After a rebase
+ *   merge the first parent is a replayed commit, and what the default
+ *   branch held before is the start of the last step; after a merge commit
+ *   there is one step, from the first parent. A commit that holds no
+ *   `bindings.log` for a spec of this id has no log to extend and is not
+ *   asked: run from there, the rule would look for the propose commit in
+ *   the history of the tip, where a squash or rebase merge does not put
+ *   it. A spec it holds as proposed without a log that the merge removed or
+ *   moved is condition 8's finding.
+ *
+ * All of these commits are in the repository: the landing was derived from
+ * them.
+ * The spec directory of the work tree is the one the tip holds (checked
+ * before this runs), so the rule reads the tip's files. A git read that
+ * fails throws, and the condition is `git-failed`.
+ */
+function bindingsProblem(
+  s: Subject,
+  landing: Landing,
+  id: string,
+): Failure | null {
+  const repo = s.git.repo;
+  const bases = [
+    {
+      name: "the head commit of the pull request",
+      commit: landing.head,
+      always: true,
+    },
+    ...landing.ranges.slice(0, landing.commits).map((step, i) => ({
+      name:
+        i === 0
+          ? "the first parent of the merge commit"
+          : `the commit ${i + 1} first-parent steps below the merge commit`,
+      commit: step.from,
+      always: false,
+    })),
+  ];
+  const problems: string[] = [];
+  for (const base of bases) {
+    if (
+      !base.always &&
+      !kinAtDiffBase(repo, base.commit, id).some((kin) => kin.log !== null)
+    ) {
+      continue;
+    }
+    const run = checkBindingsLogAt(s.dir, {
+      repo,
+      reference: s.defaultCommit,
+      diffBase: base.commit,
+      head: s.at,
+    });
+    if (!run.ran) {
+      return fails(
+        "bindings-after-merge",
+        `the bindings log at ${whereOf(s)} is not checked from ${base.name}: the input ${run.input} of the spec directory did not load`,
+      );
+    }
+    if (run.findings.length > 0) {
+      const found = [...new Set(run.findings.map((f) => f.code))].sort();
+      problems.push(`from ${base.name}: ${found.join(", ")}`);
+    }
+  }
+  if (problems.length === 0) return null;
+  return fails(
+    "bindings-after-merge",
+    `the bindings log at ${whereOf(s)} does not hold measured ${problems.join("; ")}. The log at the tip must extend every log these commits hold for this spec, and the bindings at the tip must be the replay of the entries after it: the bindings on the default branch are not the ones that were approved`,
+  );
+}
+
+/**
  * 4: `proposed` at the commit that is judged, and the final lint there is
  * clean. In the open mode the lint measures from the measuring base, never
  * from a base commit given. In the merged mode the checkout must be at the
- * tip of the default branch, and the lint compares that tip with itself.
+ * tip of the default branch, the lint compares that tip with itself, and
+ * the `bindings-log` rule is run once more from the approved head and from
+ * the first parent of the merge commit (`bindingsProblem`).
  */
 function proposedAndClean(
   s: Subject,
-  state: { status: string } | null,
+  state: { id: string; status: string } | null,
 ): Outcome {
   if (state === null) {
     return fails(
@@ -504,9 +592,20 @@ function proposedAndClean(
     );
   }
   if (s.history !== null) return s.history;
-  // After the merge the lint measures nothing from the pull request, so no
-  // range is needed for it.
-  if (s.mode === "open" && !s.spans.ok) return s.spans.outcome;
+  // In the open mode the lint measures from the measuring base. After the
+  // merge the lint measures nothing from the pull request, but the bindings
+  // are measured from two commits of the landing, so it must be known.
+  if (!s.spans.ok) return s.spans.outcome;
+  if (s.mode === "merged") {
+    if (s.landing === null) {
+      return fails(
+        "git-failed",
+        "where the pull request landed is not known; the bindings after the merge are not verified",
+      );
+    }
+    const unbound = bindingsProblem(s, s.landing, state.id);
+    if (unbound !== null) return unbound;
+  }
   // The lint is given the default ref and never the base commit. It then
   // resolves its reference to the default commit and its diff base to the
   // merge base of the head with it, which is the measuring base: there is

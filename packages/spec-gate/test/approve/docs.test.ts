@@ -171,6 +171,7 @@ describe('docs/approve.md, "After the merge"', () => {
       "shallow-repository",
       "digest-mismatch-after-merge",
       "checkout-not-default-tip",
+      "bindings-after-merge",
       "review-commit-unavailable",
       "worktree-not-head",
       ...MERGE_SHAPES,
@@ -188,6 +189,9 @@ describe('docs/approve.md, "After the merge"', () => {
       "The approval must stand on the head commit the host reports for the pull request",
       "the message names both digests and both commits",
       "`HEAD` must be the commit `defaultRef` names",
+      "each of these commits as the diff base: the head commit the host reports, where the approving reviews stand, and the start of every measured first-parent step",
+      "A commit of the steps that holds no log for the spec is not asked: it has no log to extend",
+      "the message names the commit it was measured from (the head commit, the first parent, or a step below it) and the codes of the rule, never the content of a file",
       "an approver taken off the list on the default branch after the merge does not count",
       "The first range runs from the first parent of the merge commit to the merge commit",
       "each of the last N first-parent steps below the merge commit, N being the number of commits between the reviewed base and the head commit",
@@ -272,7 +276,7 @@ describe('docs/approve.md, "After the merge"', () => {
     for (const phrase of [
       "the check after the merge compares the digest at the tip of the default branch with the digest at the commit of the approving review",
       "reports `merge-shape-unknown` and never approves",
-      "Bindings after the merge: `bindings.yaml` and `bindings.log` are not part of the digest",
+      "Bindings after the merge: condition 4 measures the log at the tip from the approved head and from the start of every measured first-parent step, not from a commit of the default branch after the merge commit",
       "Which pull request, in the open mode: an approval of a commit counts for every spec in the tree of that commit",
       "The check after the merge asks that the pull request brought the spec to the state judged at the tip (`spec-not-in-merge`); the open mode does not",
       "An approval given before the default branch moved, after the merge",
@@ -282,8 +286,6 @@ describe('docs/approve.md, "After the merge"', () => {
       "Named later by fewer commits than the pull request has, the steps can leave out the first commits of a rebase merge",
       "A squash merge is measured like a rebase merge",
       "The same holds for a rebase merge of a pull request that holds merge commits or commits the replay drops",
-      "After the merge the bindings are therefore compared neither with their log as it was merged before nor with the bindings of the approved head",
-      "neither is a later commit of the default branch that changes `bindings.yaml` without a log entry",
     ]) {
       expect(gaps, phrase).toContain(phrase);
     }

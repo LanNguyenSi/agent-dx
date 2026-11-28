@@ -385,8 +385,8 @@ describe("the pull request must be merged", { timeout: 60_000 }, () => {
     const report = await checkLanded(SQUASH, {
       pullRequest: landedPull(SQUASH, { merged: false }),
     });
-    expect(failing(report)).toEqual([1, 2, 7, 8]);
-    for (const condition of [1, 2, 7, 8] as const) {
+    expect(failing(report)).toEqual([1, 2, 4, 7, 8]);
+    for (const condition of [1, 2, 4, 7, 8] as const) {
       expect(cond(report, condition).code).toBe("not-merged");
     }
     expect(report.approved).toBe(false);
@@ -398,8 +398,8 @@ describe("the pull request must be merged", { timeout: 60_000 }, () => {
         throw new Error("token=SECRET");
       },
     });
-    expect(failing(report)).toEqual([1, 2, 7, 8]);
-    for (const condition of [1, 2, 7, 8] as const) {
+    expect(failing(report)).toEqual([1, 2, 4, 7, 8]);
+    for (const condition of [1, 2, 4, 7, 8] as const) {
       expect(cond(report, condition).code).toBe("host-failed");
     }
     expect(report.merge).toBeNull();
@@ -419,7 +419,7 @@ describe("the pull request must be merged", { timeout: 60_000 }, () => {
       const report = await checkLanded(SQUASH, {
         pullRequest: landedPull(SQUASH, over),
       });
-      expect(failing(report)).toEqual([1, 2, 7, 8]);
+      expect(failing(report)).toEqual([1, 2, 4, 7, 8]);
       expect(cond(report, 2).code).toBe("host-failed");
       expect(report.pull_request).toBeNull();
     },
@@ -453,7 +453,7 @@ describe(
       const report = await checkLanded(SQUASH, {
         pullRequest: landedPull(SQUASH, { mergeCommit: SQUASH.head }),
       });
-      expect(failing(report)).toEqual([2, 7, 8]);
+      expect(failing(report)).toEqual([2, 4, 7, 8]);
       expect(cond(report, 7).code).toBe("merge-not-on-default");
       expect(report.approved).toBe(false);
     });
@@ -462,7 +462,7 @@ describe(
       const report = await checkLanded(SQUASH, {
         pullRequest: landedPull(SQUASH, { mergeCommit: "0".repeat(40) }),
       });
-      expect(failing(report)).toEqual([2, 7, 8]);
+      expect(failing(report)).toEqual([2, 4, 7, 8]);
       expect(cond(report, 2).code).toBe("merge-not-on-default");
     });
 
@@ -470,7 +470,7 @@ describe(
       const report = await checkLanded(SQUASH, {
         pullRequest: landedPull(SQUASH, { mergeCommit: null }),
       });
-      expect(failing(report)).toEqual([2, 7, 8]);
+      expect(failing(report)).toEqual([2, 4, 7, 8]);
       expect(cond(report, 8)).toMatchObject({
         code: "merge-not-on-default",
         message:
@@ -941,7 +941,7 @@ describe(
         ok: false,
         code: "review-commit-unavailable",
       });
-      for (const condition of [2, 7, 8] as const) {
+      for (const condition of [2, 4, 7, 8] as const) {
         expect(cond(report, condition)).toMatchObject({
           ok: false,
           code: "head-unavailable",
@@ -949,7 +949,7 @@ describe(
             "the head commit of the pull request is not in the repository; the check never fetches, so the job has to bring that commit in before it runs",
         });
       }
-      expect(failing(report)).toEqual([2, 3, 7, 8]);
+      expect(failing(report)).toEqual([2, 3, 4, 7, 8]);
     });
 
     it("an approval of an older commit with another digest: the mismatch names that commit", async () => {
@@ -1173,7 +1173,7 @@ describe("a shape git cannot tell", { timeout: 60_000 }, () => {
     });
     // The first parent of the head would show a clean range.
     expect(report.approvals[0]!.problem).toBeNull();
-    for (const condition of [2, 7, 8] as const) {
+    for (const condition of [2, 4, 7, 8] as const) {
       expect(cond(report, condition)).toMatchObject({
         ok: false,
         code: "merge-shape-unknown",
@@ -1181,7 +1181,7 @@ describe("a shape git cannot tell", { timeout: 60_000 }, () => {
           "the head commit of the pull request is on the default branch without a merge commit of its own (a fast-forward, or a push of the branch); where the pull request begins on the default branch cannot be told from git, so nothing is measured",
       });
     }
-    expect(failing(report)).toEqual([2, 7, 8]);
+    expect(failing(report)).toEqual([2, 4, 7, 8]);
     expect(report.merge).toBeNull();
     expect(report.approved).toBe(false);
   });
@@ -1396,7 +1396,7 @@ describe("a shape git cannot tell", { timeout: 60_000 }, () => {
       throw new LintGitError("git-failed", "git could not be run");
     };
     const report = await checkLanded(SQUASH);
-    for (const condition of [2, 7, 8] as const) {
+    for (const condition of [2, 4, 7, 8] as const) {
       expect(cond(report, condition)).toMatchObject({
         ok: false,
         code: "git-failed",
@@ -1404,7 +1404,7 @@ describe("a shape git cannot tell", { timeout: 60_000 }, () => {
           "the repository could not be read (git-failed); where the pull request landed is not known and nothing is measured from a guess",
       });
     }
-    expect(failing(report)).toEqual([2, 7, 8]);
+    expect(failing(report)).toEqual([2, 4, 7, 8]);
     expect(report.merge).toBeNull();
   });
 

@@ -16,11 +16,15 @@ import { loadAcks, loadConfig, loadInputs, type FindingSink } from "./load.js";
 import { resolveProfile } from "./profile.js";
 import { RULES, findRule, planRules } from "./registry.js";
 import { buildReport } from "./report.js";
+import { checkLog as checkBindingsLogOnly } from "./rules/bindings-log.js";
 import type {
   Finding,
+  GitInputs,
+  InputName,
   LintReport,
   Mode,
   Profile,
+  RuleContext,
   RuleDef,
   RuleFinding,
 } from "./types.js";
@@ -199,4 +203,48 @@ export function lintSpecDir(
     skipped: plan.skipped,
   });
   return { ok: true, report };
+}
+
+/** The result of `checkBindingsLogAt`. */
+export type BindingsLogRun =
+  | { ran: true; findings: RuleFinding[] }
+  | {
+      ran: false;
+      /** The input the rule needs or uses that did not load. */
+      input: InputName;
+    };
+
+/**
+ * Runs the `bindings-log` rule alone on the spec directory `specDir`, with
+ * git inputs the caller resolved: `git` is taken as it is, nothing is
+ * resolved again, and no other rule, acknowledgement or report step runs.
+ * The files come from the spec directory, as for the lint; the rule reads
+ * the repository only through `git`.
+ *
+ * The rule does not run when one of its inputs did not load as the lint
+ * would skip it: `spec.md` absent or failed, `bindings.yaml` or
+ * `testplan.yaml` failed. A git read that fails throws its `LintGitError`;
+ * it is not a finding here.
+ */
+export function checkBindingsLogAt(
+  specDir: string,
+  git: GitInputs,
+): BindingsLogRun {
+  const inputs = loadInputs(specDir, { add: () => {} });
+  if (inputs.spec.state !== "ok") return { ran: false, input: "spec" };
+  if (inputs.bindings.state === "failed") {
+    return { ran: false, input: "bindings" };
+  }
+  if (inputs.testplan.state === "failed") {
+    return { ran: false, input: "testplan" };
+  }
+  const ctx: RuleContext = {
+    inputs,
+    status: inputs.spec.value.frontmatter.status,
+    profile: resolveProfile(inputs.triage, undefined).profile,
+    mode: "final",
+    specDir,
+    git,
+  };
+  return { ran: true, findings: checkBindingsLogOnly(ctx) };
 }
