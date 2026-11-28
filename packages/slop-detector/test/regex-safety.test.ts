@@ -51,6 +51,13 @@ describe("findRegexSafetyProblem", () => {
       ["a bounded variable range on a dot under a plus", "(.{1,16})+x"],
       ["a two-way range under a plus", "(a{1,2})+x"],
       ["a variable range under a star", "(a{0,3})*x"],
+      ["two optional atoms under a plus", "(a?a?)+x"],
+      ["a literal then an optional atom under a plus", "(aa?)+x"],
+      ["two optional dots under a plus", "(.?.?)+x"],
+      ["an optional atom with a delimiter under a plus", "(a?b)+"],
+      ["a lazy optional atom under a plus", "(a??b)+"],
+      ["a lookahead holding an optional atom", "(?=a?)+"],
+      ["the literal outer bound plus one", "(a+){3}x"],
       [
         "an open repeat under a count above the outer bound",
         `(a+){${MAX_OUTER_REPEAT + 1}}x`,
@@ -70,6 +77,25 @@ describe("findRegexSafetyProblem", () => {
     });
   });
 
+  describe("a group opener does not hide a later nested quantifier", () => {
+    // The opener `?...` is skipped; a wrong skip would jump to the `:` (or,
+    // for a lookbehind, the `>`) at the end and miss the refused group before
+    // it.
+    const openers: Array<[string, string]> = [
+      ["a lookahead", "(?=a)(b+)+:"],
+      ["a negative lookahead", "(?!a)(b+)+:"],
+      ["a lookbehind", "(?<=a)(b+)+>"],
+      ["a negative lookbehind", "(?<!a)(b+)+>"],
+      ["a named group", "(?<n>a)(b+)+:"],
+      ["a plain group", "(a)(b+)+:"],
+    ];
+    it.each(openers)("%s: %s", (_label, pattern) => {
+      expect(findRegexSafetyProblem(pattern)).toEqual({
+        kind: "nested-quantifier",
+      });
+    });
+  });
+
   it("refuses a numbered backreference", () => {
     expect(findRegexSafetyProblem("(a)\\1")).toEqual({ kind: "backreference" });
   });
@@ -83,6 +109,13 @@ describe("findRegexSafetyProblem", () => {
   it("refuses a named backreference", () => {
     expect(findRegexSafetyProblem("(?<n>a)\\k<n>")).toEqual({
       kind: "backreference",
+    });
+  });
+
+  it("pins the documented lengths: 512 characters pass, 513 do not", () => {
+    expect(findRegexSafetyProblem("a".repeat(512))).toBeNull();
+    expect(findRegexSafetyProblem("a".repeat(513))).toEqual({
+      kind: "too-long",
     });
   });
 
@@ -116,9 +149,13 @@ describe("findRegexSafetyProblem", () => {
         `(a+){${MAX_OUTER_REPEAT}}`,
       ],
       ["a fixed count under a plus", "(?:a{2})+"],
+      ["a lazy fixed count under a plus", "(?:a{2}?)+"],
+      ["a named group opener under a plus", "(?<name>ab)+"],
+      ["a lookahead opener under a star", "(?=ab)*c"],
+      ["a negative lookbehind opener without a repeat", "(?<!a)b+"],
+      ["a literal count at the outer bound", "(a+){2}x"],
       ["a fixed count under a fixed count", "(a{2}){3}"],
       ["a fixed-width dotted-quad shape", "(\\d{3}\\.){3}"],
-      ["an optional atom under a plus", "(a?b)+"],
       ["an escaped plus then a plus", "\\++"],
       ["a literal brace that is not a quantifier", "(a+){x}"],
       ["a repeat after the group closed", "(a+)b+"],
@@ -206,6 +243,17 @@ describe("globs", () => {
     expect(globToRegex("a/**/b/**/c").test("a/x/b/y/z/c")).toBe(true);
   });
 
+  it("pins the documented cap: 8 wildcards load, 9 do not", () => {
+    const eight = "a*b*c*d*e*f*g*h*i";
+    const nine = "a*b*c*d*e*f*g*h*i*j";
+    expect(countWildcards(eight)).toBe(8);
+    expect(countWildcards(nine)).toBe(9);
+    expect(load(`treatAsProse:\n  - "${eight}"\n`)).not.toThrow();
+    expect(load(`treatAsProse:\n  - "${nine}"\n`)).toThrow(
+      /more than 8 wildcards/,
+    );
+  });
+
   it("counts wildcards the way globToRegex reads them", () => {
     expect(countWildcards("src/foo.ts")).toBe(0);
     expect(countWildcards("src/*.ts")).toBe(1);
@@ -282,6 +330,8 @@ describe("regex patterns at config load", () => {
     "(.{1,16})+x",
     "(a{1,2})+x",
     "(a+){16}x",
+    "(a?a?)+x",
+    "(aa?)+x",
   ];
   const fields: Array<[string, (p: string) => string]> = [
     [

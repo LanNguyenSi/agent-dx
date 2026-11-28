@@ -9,23 +9,27 @@
 //
 //   - a group repeated more than `MAX_OUTER_REPEAT` times whose body holds a
 //     repeat with a variable count (`(a+)+`, `(.*)*`, `(\w+\s?)+`,
-//     `((ab)+)+`, `(a{1,16})+`, `(a+){3}`). A repeat counts as variable when
-//     its upper count exceeds its lower count and is at least 2; a fixed
-//     count (`{n}`) and `?` do not,
+//     `((ab)+)+`, `(a{1,16})+`, `(a+){3}`, `(a?a?)+`). A repeat counts as
+//     variable when its upper count exceeds its lower count, `?` included; a
+//     fixed count (`{n}`) does not. The `?` that opens a group (`(?:`,
+//     `(?=`, `(?<name>`) is not a repeat,
 //   - backreferences (`\1`, `\k<name>`),
 //   - patterns longer than `MAX_REGEX_LENGTH` characters.
 //
-// It is a structural check, not a proof, and a pattern it accepts can still
-// stall a scan on a long line: overlapping alternation under one repeat
-// (`(a|a)*`, `(a|ab)*`) and adjacent overlapping repeats (`a*a*a*b`, `a+a+x`)
-// are not detected. See `docs/configuration.md`.
+// It is a best-effort structural check, not a guarantee, and a pattern it
+// accepts can still stall a scan on a long line: overlapping alternation under
+// one repeat (`(a|a)*`, `(a|ab)*`), adjacent overlapping repeats (`a*a*a*b`,
+// `a+a+x`) and nested fixed counts (`((a+){2}){2}`) are not detected. See
+// `docs/configuration.md`.
 
 /** Longest accepted regex source, in characters. */
 export const MAX_REGEX_LENGTH = 512;
 
 /**
  * A group repeated at most this many times may hold a variable repeat
- * (`(a+){2}` is quadratic at worst); above it, or unbounded, it may not.
+ * (a single `(a+){2}` is quadratic at worst; nested fixed counts such as
+ * `((a+){2}){2}` multiply and are not detected); above it, or unbounded, it
+ * may not.
  */
 export const MAX_OUTER_REPEAT = 2;
 
@@ -67,8 +71,6 @@ function readQuantifier(src: string, i: number): Quantifier | null {
   const c = src[i];
   if (c === "*") return { min: 0, max: Infinity, next: i + 1 };
   if (c === "+") return { min: 1, max: Infinity, next: i + 1 };
-  // A lazy `?` after a quantifier is read on the next step as a repeat of at
-  // most one, which is never variable.
   if (c === "?") return { min: 0, max: 1, next: i + 1 };
   if (c !== "{") return null;
   BRACE_QUANTIFIER.lastIndex = i;
@@ -80,6 +82,24 @@ function readQuantifier(src: string, i: number): Quantifier | null {
   else if (m[3] === "") max = Infinity;
   else max = Number(m[3]);
   return { min, max, next: i + m[0].length };
+}
+
+/**
+ * Index just past the group opener that starts at `src[i]` (a `(`). The `?`
+ * of `(?:`, `(?=`, `(?!`, `(?<=`, `(?<!`, `(?<name>` and a modifier group
+ * such as `(?i:` belongs to the opener, not to a repeat.
+ */
+function skipGroupOpener(src: string, i: number): number {
+  if (src[i + 1] !== "?") return i + 1;
+  const c = src[i + 2];
+  if (c === ":" || c === "=" || c === "!") return i + 3;
+  if (c === "<") {
+    if (src[i + 3] === "=" || src[i + 3] === "!") return i + 4;
+    const close = src.indexOf(">", i + 3);
+    return close === -1 ? i + 3 : close + 1;
+  }
+  const colon = src.indexOf(":", i + 2);
+  return colon === -1 ? i + 2 : colon + 1;
 }
 
 /**
@@ -115,11 +135,8 @@ export function findRegexSafetyProblem(
       i++;
       last = { isGroup: false, hasVariable: false };
     } else if (c === "(") {
-      // The opener's own characters (`?:`, `?=`, `?!`, `?<=`, `?<name>`,
-      // a modifier list) carry no variable repeat, so they are read like
-      // ordinary atoms after the `(`.
       stack.push({ hasVariable: false });
-      i++;
+      i = skipGroupOpener(pattern, i);
       last = null;
     } else if (c === ")") {
       const frame = stack.length > 1 ? stack.pop()! : { hasVariable: false };
@@ -136,11 +153,13 @@ export function findRegexSafetyProblem(
         if (last?.isGroup && last.hasVariable && q.max > MAX_OUTER_REPEAT) {
           nested = true;
         }
-        if (q.max > q.min && q.max >= 2) {
+        if (q.max > q.min) {
           stack[stack.length - 1].hasVariable = true;
         }
         last = null;
         i = q.next;
+        // A lazy `?` after a quantifier is part of it, not a second repeat.
+        if (pattern[i] === "?") i++;
       } else {
         last = { isGroup: false, hasVariable: false };
         i++;
