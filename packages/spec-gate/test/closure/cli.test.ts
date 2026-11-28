@@ -28,10 +28,15 @@ interface CliRun {
   stderr: string;
 }
 
-async function cli(args: string[], env?: NodeJS.ProcessEnv): Promise<CliRun> {
+async function cli(
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+  options: { cwd?: string } = {},
+): Promise<CliRun> {
   const run = await runBounded(process.execPath, [cliPath, ...args], {
     timeoutMs: 30_000,
     ...(env !== undefined ? { env } : {}),
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
   });
   if (run.timedOut) throw new Error("the CLI did not finish in time");
   return { code: run.code, stdout: run.stdout, stderr: run.stderr };
@@ -511,3 +516,93 @@ describe("spec-gate closure: the host flags", { timeout: 60_000 }, () => {
     expect(run.stdout).not.toContain("ci_status");
   });
 });
+
+const LEAK = "closure-leak-7b41d2";
+
+describe(
+  "spec-gate closure: a <spec-dir> that starts with a dash is an unknown argument",
+  { timeout: 60_000 },
+  () => {
+    /** The verb's options with the <spec-dir> slot filled by `token`. */
+    function withToken(s: Scenario, token: string, first: boolean): string[] {
+      const tail = [
+        "--repo",
+        s.repo.dir,
+        "--default-ref",
+        REMOTE_MAIN,
+        "--start",
+        s.spec,
+      ];
+      return first
+        ? ["closure", token, ...tail]
+        : ["closure", ...tail, "--", token];
+    }
+
+    /** A token put where the <spec-dir> belongs is refused, never echoed. */
+    async function refusedUnechoed(args: string[]): Promise<void> {
+      const run = await cli(args);
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toMatch(
+        /^spec-gate: closure: unknown-argument: [^\n]+\n$/,
+      );
+      expect(run.stderr).not.toContain(LEAK);
+      expect(run.stdout).not.toContain(LEAK);
+    }
+
+    it("refuses --token=<v> given in the <spec-dir> slot", async () => {
+      const s = await scenario();
+      await refusedUnechoed(withToken(s, `--token=${LEAK}`, true));
+    });
+
+    it("refuses -t<v> given in the <spec-dir> slot", async () => {
+      const s = await scenario();
+      await refusedUnechoed(withToken(s, `-t${LEAK}`, true));
+    });
+
+    it("refuses -- --token=<v> given in the <spec-dir> slot", async () => {
+      const s = await scenario();
+      await refusedUnechoed(withToken(s, `--token=${LEAK}`, false));
+    });
+
+    it("takes a real directory named ./-x as the <spec-dir>, not as an unknown argument", async () => {
+      const s = await scenario();
+      fs.mkdirSync(path.join(s.repo.dir, "-x"));
+      // The same real directory: the dash-prefixed token is the unknown
+      // argument, the `./`-prefixed one is the directory.
+      const asDash = await cli(
+        [
+          "closure",
+          "-x",
+          "--repo",
+          s.repo.dir,
+          "--default-ref",
+          REMOTE_MAIN,
+          "--start",
+          s.spec,
+        ],
+        undefined,
+        { cwd: s.repo.dir },
+      );
+      expect(asDash.code).toBe(2);
+      expect(asDash.stderr).toContain("closure: unknown-argument");
+      const asDir = await cli(
+        [
+          "closure",
+          "./-x",
+          "--repo",
+          s.repo.dir,
+          "--default-ref",
+          REMOTE_MAIN,
+          "--start",
+          s.spec,
+        ],
+        undefined,
+        { cwd: s.repo.dir },
+      );
+      expect(asDir.code).toBe(2);
+      expect(asDir.stderr).toContain("closure: spec-dir-invalid");
+      expect(asDir.stderr).not.toContain("unknown-argument");
+    });
+  },
+);

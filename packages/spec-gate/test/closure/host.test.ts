@@ -305,6 +305,113 @@ describe(
 );
 
 describe(
+  "closure with --github-repo: the dedup is over the whole (commit, ci_run) pair",
+  { timeout: 60_000 },
+  () => {
+    it("asks once per pair for one run id at two commits, and does not share the answer", async () => {
+      const s = await scenario();
+      writeEvidence(s.repo, "TP-1", [
+        ci(s.a, "7", { result: "fail" }),
+        ci(s.b, "7"),
+      ]);
+      const made = fakeHost((commit) =>
+        commit === s.a ? "verified" : "unverified",
+      );
+      const row = rowOf(await reportWithHost(s, made.host), "TP-1");
+      expect(made.calls).toEqual([
+        [s.a, "7"],
+        [s.b, "7"],
+      ]);
+      expect(row.ci_unverified).toBe(true);
+    });
+
+    it("asks once per pair for two run ids at one commit, and keeps the answers apart", async () => {
+      const s = await scenario();
+      writeEvidence(s.repo, "TP-2", [ci(s.spec, "1"), ci(s.spec, "2")]);
+      const made = fakeHost((_commit, run) =>
+        run === "1" ? "verified" : "unverified",
+      );
+      const row = rowOf(await reportWithHost(s, made.host), "TP-2");
+      expect(made.calls).toEqual([
+        [s.spec, "1"],
+        [s.spec, "2"],
+      ]);
+      expect(row.ci_status).toBe("unverified");
+      expect(row.ci_unverified).toBe(true);
+    });
+
+    it("does not ask an ignored ci envelope, and it cannot mark the row", async () => {
+      const s = await scenario();
+      writeEvidence(s.repo, "TP-2", [
+        ci(s.spec, "1", { dirty: true }),
+        ci(s.spec, "2"),
+        { commit: s.spec, producer: "local" },
+      ]);
+      const made = fakeHost((_commit, run) =>
+        run === "2" ? "verified" : "unverified",
+      );
+      const row = rowOf(await reportWithHost(s, made.host), "TP-2");
+      expect(made.calls.map(([, run]) => run)).toEqual(["2"]);
+      expect(row.ci_status).toBe("verified");
+      expect(row.ci_unverified).toBe(false);
+      expect(row.self_reported).toBe(true);
+    });
+  },
+);
+
+describe(
+  "closure with --github-repo: an output that holds the token is withheld whole",
+  { timeout: 60_000 },
+  () => {
+    it("withholds a report that holds the token (the host repo is the token)", async () => {
+      const s = await scenario();
+      writeEvidence(s.repo, "TP-2", [ci(s.spec)]);
+      const result = await runClosure(
+        s.repo.spec,
+        {
+          repo: s.repo.dir,
+          defaultRef: REMOTE_MAIN,
+          start: s.spec,
+          githubRepo: TOKEN,
+        },
+        { GITHUB_TOKEN: TOKEN },
+        { createHost: () => fakeHost().host },
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("token-in-output");
+      expect(JSON.stringify(result)).not.toContain(TOKEN);
+    });
+
+    it("withholds an unexpected host-construction error whose text holds the token", async () => {
+      const s = await scenario();
+      writeEvidence(s.repo, "TP-2", [ci(s.spec)]);
+      const seams = {
+        // eslint-disable-next-line no-unused-vars
+        get createHost(): (options: GitHubHostOptions) => HostAdapter {
+          throw new Error(`host construction broke on ${TOKEN}`);
+        },
+      };
+      const result = await runClosure(
+        s.repo.spec,
+        {
+          repo: s.repo.dir,
+          defaultRef: REMOTE_MAIN,
+          start: s.spec,
+          githubRepo: REPOSITORY,
+        },
+        { GITHUB_TOKEN: TOKEN },
+        seams,
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("token-in-output");
+      expect(JSON.stringify(result)).not.toContain(TOKEN);
+    });
+  },
+);
+
+describe(
   "closure without --github-repo: nothing is asked",
   { timeout: 60_000 },
   () => {
@@ -528,9 +635,50 @@ describe(
       );
       expect(row.ci_status).toBe("host-failed");
       expect(row.ci_unverified).toBe(true);
-      // The T2a state of a pass at `a` with no pass at the start commit,
-      // unchanged by the host failing.
+      // The state without --github-repo of a pass at `a` with no pass at
+      // the start commit, unchanged by the host failing.
       expect(row.state).toBe("unproven");
+    });
+  },
+);
+
+describe(
+  "closure with --github-repo: the host is asked a bounded number of pairs at a time",
+  { timeout: 60_000 },
+  () => {
+    /** A host that records the highest number of calls in flight at once. */
+    function concurrencyHost(answer = "verified"): {
+      host: HostAdapter;
+      inFlightMax: () => number;
+      calls: () => number;
+    } {
+      let inFlight = 0;
+      let peak = 0;
+      let started = 0;
+      const host = {
+        ciRunStatus: async () => {
+          started += 1;
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          await new Promise((res) => setTimeout(res, 5));
+          inFlight -= 1;
+          return answer as never;
+        },
+      } as unknown as HostAdapter;
+      return { host, inFlightMax: () => peak, calls: () => started };
+    }
+
+    it("never has more than four distinct pairs in flight", async () => {
+      const s = await scenario();
+      writeEvidence(
+        s.repo,
+        "TP-2",
+        Array.from({ length: 10 }, (_, i) => ci(s.spec, String(1000 + i))),
+      );
+      const made = concurrencyHost();
+      await reportWithHost(s, made.host);
+      expect(made.calls()).toBe(10);
+      expect(made.inFlightMax()).toBeLessThanOrEqual(4);
     });
   },
 );

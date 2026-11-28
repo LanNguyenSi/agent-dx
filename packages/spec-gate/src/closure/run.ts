@@ -489,22 +489,40 @@ async function askRun(
  * row's counted ci envelopes was not `verified`, and `ci_status` set to the
  * worst of them in the order of `CI_STATUSES`. Nothing here touches a row's
  * `state` or the report's `ok`: the host's answer marks, it does not gate.
+ * At most `CI_FAN_OUT` distinct pairs are asked at a time.
  */
+const CI_FAN_OUT = 4;
+
 async function verifyCi(judged: Judged, host: HostAdapter): Promise<void> {
-  const asked = new Map<string, Promise<CiStatus>>();
+  // One distinct pair, asked at most once.
+  const pairs: { key: string; commit: string; run: string }[] = [];
+  const seen = new Set<string>();
   for (const target of judged.ci) {
     const key = JSON.stringify([target.commit, target.run]);
-    if (!asked.has(key)) {
-      asked.set(key, askRun(host, target.commit, target.run));
-    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push({ key, commit: target.commit, run: target.run });
   }
+  // At most CI_FAN_OUT pairs are asked at a time, so a large evidence set
+  // never opens a host call per pair at once.
+  const marked = new Map<string, CiStatus>();
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < pairs.length) {
+      const pair = pairs[next]!;
+      next += 1;
+      marked.set(pair.key, await askRun(host, pair.commit, pair.run));
+    }
+  };
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(CI_FAN_OUT, pairs.length); i += 1) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
   const byRow = new Map<number, CiStatus[]>();
   for (const target of judged.ci) {
-    const status = await asked.get(
-      JSON.stringify([target.commit, target.run]),
-    )!;
     const list = byRow.get(target.row) ?? [];
-    list.push(status);
+    list.push(marked.get(JSON.stringify([target.commit, target.run]))!);
     byRow.set(target.row, list);
   }
   for (const [rowIndex, statuses] of byRow) {
@@ -560,9 +578,11 @@ export async function runClosure(
   const token = request.githubRepo === undefined ? "" : readToken(env);
   let result: ClosureResult;
   try {
-    if ((request.unknownArguments ?? 0) > 0) {
+    if ((request.unknownArguments ?? 0) > 0 || specDir.startsWith("-")) {
       // What was not understood is not repeated: an argument given by
-      // mistake may be a secret.
+      // mistake may be a secret. A <spec-dir> that starts with `-` is such
+      // an argument (an option given in its place), never a directory: a
+      // directory so named is given as `./-x`.
       refuse(
         "unknown-argument",
         "takes one <spec-dir> and the options --repo, --default-ref, --start, --head, --github-repo and --api-url; an argument or option it does not know was given (it is not repeated here). The token is read from " +

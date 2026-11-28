@@ -2,7 +2,7 @@
 
 `spec-gate closure` answers, for every row of a proposed spec's test plan,
 whether the evidence files in the spec directory prove the row at or after the
-start commit of the work, and why. It is read-only and offline: it reads
+start commit of the work, and why. It is read-only: it reads
 `spec.md` and `testplan.yaml` as the merged spec commit holds them, the history
 and the command set from git, all through the same hardened calls as `lint`
 (see "Git inputs" in [lint.md](lint.md)), and only `bindings.yaml` and
@@ -38,7 +38,9 @@ same shared construction as `approve-check`. Like `approve-check`, the verb
 has no help option of its own and does not stop at an option it does not
 know: an unknown argument or option is refused by the verb itself and never
 repeated on stderr, so a token given as `--token=...` by mistake is not
-printed (`spec-gate help closure` prints the help).
+printed (`spec-gate help closure` prints the help). A `<spec-dir>` that
+starts with `-` is taken for such an unknown argument (an option given in
+its place), never as a directory: a directory so named is given as `./-x`.
 
 The rows, their kinds and `check_command_ref`, the spec id and `commands_ref`
 all come from the copies at the merged spec commit: a change of `spec.md` or
@@ -55,7 +57,7 @@ Each of these is a refusal: one line on stderr, `spec-gate: closure: <code>:
 
 | Code | When |
 |---|---|
-| `unknown-argument` | the command line held an argument or option the verb does not know (it is named in the refusal only as such: the value is not repeated) |
+| `unknown-argument` | the command line held an argument or option the verb does not know, including a `<spec-dir>` that starts with `-` (a value so given is named in the refusal only as such: it is not repeated) |
 | `token-missing` | `--github-repo` was given and `GITHUB_TOKEN` is absent or empty |
 | `host-input-invalid` | `--github-repo` or `--api-url` is not accepted by the host adapter (a name that is not `<owner>/<name>`, an API root that is not `https:` or a loopback `http:`); `--api-url` without `--github-repo` |
 | `start-invalid`, `head-invalid` | `--start` or `--head` is not a full commit id (40 or 64 lower-case hex digits) |
@@ -166,9 +168,10 @@ With `--github-repo` the host is asked, once per distinct
 report, whether a run named `ci_run` ran at `commit` in that repository
 (`ciRunStatus`, see "CI runs" in [approve.md](approve.md): `verified` only
 for a completed run of the repository at that commit, about which nothing
-is said as to how it ended). The answer marks the row; it decides nothing:
-no answer, and no host failure, changes a row's `state` or the report's
-`ok` or the exit code.
+is said as to how it ended). The pairs are asked at most four at a time, so
+a large evidence set never opens one host call per pair at once. The answer
+marks the row; it decides nothing: no answer, and no host failure, changes a
+row's `state` or the report's `ok` or the exit code.
 
 | The host's answer for a pair | The pair is marked | The row with such an envelope |
 |---|---|---|

@@ -465,6 +465,11 @@ describe("the approval sources", () => {
     expect([...shared.matchAll(/\benv\[[^\]]*\]/g)].map((m) => m[0])).toEqual([
       "env[TOKEN_VARIABLE]",
     ]);
+    // The shared construction opens no connection and touches no environment
+    // of its own: the caller hands the environment in and the adapter is the
+    // only place a connection is opened.
+    expect(shared).not.toMatch(/\bfetch\b|globalThis|node:/);
+    expect(shared).not.toMatch(/\bprocess\b/);
     expect(TOKEN_VARIABLE).toBe("GITHUB_TOKEN");
     // The token goes to the adapter and to the search of the outputs, and
     // into no text.
