@@ -290,7 +290,11 @@ Codes: `config-invalid`, `approval-not-verifiable`.
 
 The adapter reports, for `specs/` and for `.spec-gate/`, one of `enforced`,
 `not-enforced` and `unknown`. Both must be `enforced`; `unknown` counts as
-not enforced: `approval-not-enforced`.
+not enforced: `approval-not-enforced`. The detail of the failure names, for
+each path that is not `enforced`, why: for `unknown` that the host could not
+read whether a review is enforced, with a pointer to "Token and permissions"
+below; for `not-enforced` that the host reports no required review. The
+check fails closed in both cases.
 
 The adapter also reports the last change under `.spec-gate/` on the default
 branch and who approved it, and the report always lists it
@@ -1075,7 +1079,11 @@ fine-grained personal access tokens"; in a workflow the keys of
 The token of a workflow run cannot be given the administration permission.
 With such a token the classic protection is not readable, and a repository
 that enforces the review through a classic protection alone gets `unknown`.
+A branch without any classic protection gets `unknown` the same way,
+because the host answers both cases alike.
 A ruleset is readable with every token that can read the repository.
+With a workflow token, enforce the review through a ruleset: classic
+protection alone reads as `unknown` and the check fails closed.
 
 ## Known gaps
 

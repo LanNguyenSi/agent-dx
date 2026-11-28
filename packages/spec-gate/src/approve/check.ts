@@ -580,7 +580,14 @@ function reviewEnforced(s: Subject): Outcome {
   if (states.some((entry) => entry.state !== "enforced")) {
     return fails(
       "approval-not-enforced",
-      `a review is not enforced for every path (${states.map((entry) => `${entry.path}: ${entry.state}`).join(", ")}); unknown counts as not enforced`,
+      `a review is not enforced for every path (${states.map((entry) => `${entry.path}: ${entry.state}`).join(", ")}); ${states
+        .filter((entry) => entry.state !== "enforced")
+        .map((entry) =>
+          entry.state === "unknown"
+            ? `${entry.path} the host could not read whether a review is enforced (a workflow token cannot read classic branch protection, and a branch without classic protection answers the same way; a ruleset that requires a review is readable with a token that can read the repository; see "Token and permissions" in docs/approve.md)`
+            : `${entry.path} the host reports no required review`,
+        )
+        .join("; ")}; unknown counts as not enforced`,
     );
   }
   return holds(`the host enforces a review for ${REVIEW_PATHS.join(" and ")}`);

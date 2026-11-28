@@ -59,6 +59,59 @@ describe(
       },
     );
 
+    const COULD_NOT_READ =
+      "the host could not read whether a review is enforced";
+    const POINTER = 'see "Token and permissions" in docs/approve.md';
+    const NO_REVIEW = "the host reports no required review";
+
+    it("both paths unknown: the detail says the enforcement could not be read, per path, and points to the permissions", async () => {
+      const report = await check(S, { enforcement: "unknown" });
+      const message = cond(report, 6).message;
+      expect(cond(report, 6).code).toBe("approval-not-enforced");
+      expect(message).toContain(`specs/ ${COULD_NOT_READ}`);
+      expect(message).toContain(`.spec-gate/ ${COULD_NOT_READ}`);
+      expect(message).toContain(POINTER);
+      expect(message).not.toContain(NO_REVIEW);
+    });
+
+    it("both paths not enforced: the detail says the host reports no required review and nothing about reading", async () => {
+      const report = await check(S, { enforcement: "not-enforced" });
+      const message = cond(report, 6).message;
+      expect(cond(report, 6).code).toBe("approval-not-enforced");
+      expect(message).toContain(`specs/ ${NO_REVIEW}`);
+      expect(message).toContain(`.spec-gate/ ${NO_REVIEW}`);
+      expect(message).not.toContain(COULD_NOT_READ);
+      expect(message).not.toContain(POINTER);
+    });
+
+    it("one unknown and one not enforced: each phrase is bound to its own path", async () => {
+      const report = await check(S, {
+        enforcement: { "specs/": "unknown", ".spec-gate/": "not-enforced" },
+      });
+      const message = cond(report, 6).message;
+      expect(message).toContain(`specs/ ${COULD_NOT_READ}`);
+      expect(message).toContain(`.spec-gate/ ${NO_REVIEW}`);
+      expect(message).not.toContain(`specs/ ${NO_REVIEW}`);
+      expect(message).not.toContain(`.spec-gate/ ${COULD_NOT_READ}`);
+      const swapped = await check(S, {
+        enforcement: { "specs/": "not-enforced", ".spec-gate/": "unknown" },
+      });
+      expect(cond(swapped, 6).message).toContain(`specs/ ${NO_REVIEW}`);
+      expect(cond(swapped, 6).message).toContain(
+        `.spec-gate/ ${COULD_NOT_READ}`,
+      );
+    });
+
+    it("one enforced and one unknown: only the unknown path is explained", async () => {
+      const report = await check(S, {
+        enforcement: { "specs/": "enforced", ".spec-gate/": "unknown" },
+      });
+      const message = cond(report, 6).message;
+      expect(message).toContain(`.spec-gate/ ${COULD_NOT_READ}`);
+      expect(message).not.toContain(`specs/ ${COULD_NOT_READ}`);
+      expect(message).not.toContain(NO_REVIEW);
+    });
+
     it("an approve is not reported when no approval stands on the head", async () => {
       const report = await check(S, {
         enforcement: "not-enforced",
