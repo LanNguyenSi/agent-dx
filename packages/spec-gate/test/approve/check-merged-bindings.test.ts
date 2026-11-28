@@ -147,6 +147,28 @@ async function landEdited(
 }
 
 /**
+ * Proposes the spec at `HEAD` of `s` measured from `c1`, where no log of the
+ * spec exists, as master's `relogged` fixture does: the default ref is set
+ * to `c1` for the propose and put back to `tip` afterwards. Measured from
+ * the default branch the propose would see the log merged there.
+ */
+async function proposeFromC1(
+  s: Built,
+  tip: string,
+): Promise<ReturnType<typeof proposeSpecDir>> {
+  await s.repo.setRef(REMOTE_MAIN, s.c1);
+  try {
+    return proposeSpecDir(s.spec, {
+      repo: s.dir,
+      defaultRef: REMOTE_MAIN,
+      base: s.c1,
+    });
+  } finally {
+    await s.repo.setRef(REMOTE_MAIN, tip);
+  }
+}
+
+/**
  * A spec that is merged with its log, and then a second pull request that
  * puts it back to draft without the log, edits its normative layer, and
  * proposes it again from the base `c1`, where no log exists to compare
@@ -166,10 +188,7 @@ async function reproposed(how: MergeHow): Promise<Built & Landed> {
   );
   editSpec(first.dir);
   await first.repo.commit({ [LOG]: null }, "back to draft, without the log");
-  const result = proposeSpecDir(first.spec, {
-    repo: first.dir,
-    base: first.c1,
-  });
+  const result = await proposeFromC1(first, merged);
   if (result.kind !== "written") {
     throw new Error(
       `the second propose did not write: ${JSON.stringify(result)}`,
@@ -491,7 +510,7 @@ async function proposedByHand(
   const draft = await s.repo.head();
   await s.repo.setRef(REMOTE_MAIN, draft);
   await s.repo.checkout("side", draft);
-  const result = proposeSpecDir(s.spec, { repo: s.dir, base: s.c1 });
+  const result = await proposeFromC1(s, draft);
   if (result.kind !== "written") {
     throw new Error(`the propose did not write: ${JSON.stringify(result)}`);
   }
