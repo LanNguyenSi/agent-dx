@@ -117,6 +117,9 @@ export function globToRegex(glob: string): RegExp {
           // must start a fresh path segment.
           re += "(?:.*/)?";
           i++;
+          // A run of `**/` means the same as one: stacking the optional
+          // group only multiplies the ways a failed match can backtrack.
+          while (glob.startsWith("**/", i + 1)) i += 3;
         } else {
           re += ".*";
         }

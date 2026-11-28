@@ -2,6 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
+import {
+  MAX_GLOB_DOUBLE_STARS,
+  MAX_REGEX_LENGTH,
+  countDoubleStars,
+  findRegexSafetyProblem,
+} from "./util/regex-safety.js";
 import type {
   PackId,
   ResolvedConfig,
@@ -31,10 +37,13 @@ const RuleOverrideSchema = z.object({
 // can never match that relative path, so it's always a misconfiguration
 // (someone assuming absolute-path matching) rather than a valid pattern.
 // Reject it at parse time instead of letting it silently match nothing.
-const EntrypointGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
-  message:
-    'entrypointGlobs patterns are matched relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor"), not as absolute paths: remove the leading "/"',
-});
+const EntrypointGlobSchema = z
+  .string()
+  .refine((g) => !g.startsWith("/"), {
+    message:
+      'entrypointGlobs patterns are matched relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor"), not as absolute paths: remove the leading "/"',
+  })
+  .superRefine(globSegmentCap("entrypointGlobs"));
 
 // `placement.markers` and `placement.allow` are regex pattern strings the
 // placement-slop pack compiles at check time (`new RegExp(pattern, ...)`).
@@ -48,45 +57,91 @@ const EntrypointGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
 // span only excuses the match it covers, and a zero-width span can never
 // cover (start < end of) anything, so it could never suppress a real
 // finding.
-const RegexPatternSchema = z
-  .string()
-  .superRefine((pattern, ctx) => {
-    try {
-      new RegExp(pattern);
-    } catch {
-      ctx.addIssue({
-        code: "custom",
-        message: `Invalid regular expression in placement config: "${pattern}"`,
-      });
-    }
-  })
-  .superRefine((pattern, ctx) => {
-    try {
-      if (new RegExp(pattern).test("")) {
+//
+// The same compile step also refuses patterns that can backtrack without
+// bound (see `util/regex-safety.ts`): the engine is synchronous, so one such
+// pattern stalls the whole scan. One message per bad pattern, and none when
+// the pattern did not compile (that error already names it).
+function regexPatternSchema(field: string) {
+  return z
+    .string()
+    .superRefine((pattern, ctx) => {
+      try {
+        new RegExp(pattern);
+      } catch {
         ctx.addIssue({
           code: "custom",
-          message: `Regular expression in placement config matches the empty string, which would match every position in every scanned line: "${pattern}"`,
+          message: `Invalid regular expression in placement config: "${pattern}"`,
+        });
+        return;
+      }
+      const problem = findRegexSafetyProblem(pattern);
+      if (problem?.kind === "too-long") {
+        ctx.addIssue({
+          code: "custom",
+          message: `Regular expression in ${field} is longer than ${MAX_REGEX_LENGTH} characters (${pattern.length}), starting "${pattern.slice(0, 60)}"`,
+        });
+      } else if (problem?.kind === "backreference") {
+        ctx.addIssue({
+          code: "custom",
+          message: `Regular expression in ${field} uses a backreference, which can backtrack without bound: "${pattern}"`,
+        });
+      } else if (problem?.kind === "nested-quantifier") {
+        ctx.addIssue({
+          code: "custom",
+          message: `Regular expression in ${field} can backtrack without bound (nested quantifier): "${pattern}"`,
         });
       }
-    } catch {
-      // Already reported by the first `.superRefine` above; don't double-report.
+    })
+    .superRefine((pattern, ctx) => {
+      try {
+        if (new RegExp(pattern).test("")) {
+          ctx.addIssue({
+            code: "custom",
+            message: `Regular expression in placement config matches the empty string, which would match every position in every scanned line: "${pattern}"`,
+          });
+        }
+      } catch {
+        // Already reported by the first `.superRefine` above; don't double-report.
+      }
+    });
+}
+
+// Every config glob compiles through `globToRegex`, which turns each `**`
+// into `.*` or `(?:.*/)?`. Runs of `**/` collapse there, but separated `**`
+// segments still multiply the ways a failed match can backtrack, so a glob
+// carries at most `MAX_GLOB_DOUBLE_STARS` of them.
+function globSegmentCap(field: string) {
+  return (glob: string, ctx: z.RefinementCtx) => {
+    if (countDoubleStars(glob) > MAX_GLOB_DOUBLE_STARS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `${field} pattern has more than ${MAX_GLOB_DOUBLE_STARS} "**" segments: "${glob}"`,
+      });
     }
-  });
+  };
+}
+
+const PlainGlobSchema = (field: string) =>
+  z.string().superRefine(globSegmentCap(field));
 
 // `placement.instructionGlobs` is matched against a path already made
 // relative to the scan root (see `isInstructionFile` in
 // packs/placement-slop.ts and `_resolveEntrypointGlobs` in engine.ts for
 // the sibling mechanism) — same reasoning as `EntrypointGlobSchema` above:
 // a leading "/" can never match that relative path.
-const InstructionGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
-  message:
-    'placement.instructionGlobs patterns are matched relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor"), not as absolute paths: remove the leading "/"',
-});
+const InstructionGlobSchema = z
+  .string()
+  .refine((g) => !g.startsWith("/"), {
+    message:
+      'placement.instructionGlobs patterns are matched relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor"), not as absolute paths: remove the leading "/"',
+  })
+  .superRefine(globSegmentCap("placement.instructionGlobs"));
 
 const PlacementConfigSchema = z.object({
-  markers: z.array(RegexPatternSchema).optional(),
+  markers: z.array(regexPatternSchema("placement.markers")).optional(),
   instructionGlobs: z.array(InstructionGlobSchema).optional(),
-  allow: z.array(RegexPatternSchema).optional(),
+  allow: z.array(regexPatternSchema("placement.allow")).optional(),
 });
 
 // `workflow.allowExpressions` entries are the bare expression body only
@@ -192,13 +247,16 @@ const WorkflowConfigSchema = z.object({
 // `review.allowPaths` is matched against a path already made relative to
 // the scan root (mirrors `InstructionGlobSchema`/`EntrypointGlobSchema`
 // above) -- a leading "/" can never match that relative path.
-const ReviewAllowPathSchema = z.string().refine((g) => !g.startsWith("/"), {
-  message:
-    'review.allowPaths patterns are matched relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor"), not as absolute paths: remove the leading "/"',
-});
+const ReviewAllowPathSchema = z
+  .string()
+  .refine((g) => !g.startsWith("/"), {
+    message:
+      'review.allowPaths patterns are matched relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor"), not as absolute paths: remove the leading "/"',
+  })
+  .superRefine(globSegmentCap("review.allowPaths"));
 
 const ReviewConfigSchema = z.object({
-  allow: z.array(RegexPatternSchema).optional(),
+  allow: z.array(regexPatternSchema("review.allow")).optional(),
   allowPaths: z.array(ReviewAllowPathSchema).optional(),
 });
 
@@ -219,9 +277,9 @@ const ConfigFileSchema = z.object({
   // unknown pack ids rejected.
   packs: z.partialRecord(PackIdSchema, z.boolean()).optional(),
   rules: z.record(z.string(), RuleOverrideSchema).optional(),
-  ignorePaths: z.array(z.string()).optional(),
-  treatAsProse: z.array(z.string()).optional(),
-  treatAsCode: z.array(z.string()).optional(),
+  ignorePaths: z.array(PlainGlobSchema("ignorePaths")).optional(),
+  treatAsProse: z.array(PlainGlobSchema("treatAsProse")).optional(),
+  treatAsCode: z.array(PlainGlobSchema("treatAsCode")).optional(),
   corpus: z.boolean().optional(),
   entrypointGlobs: z.array(EntrypointGlobSchema).optional(),
   placement: PlacementConfigSchema.optional(),
