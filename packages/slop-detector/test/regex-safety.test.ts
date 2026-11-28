@@ -437,6 +437,36 @@ describe("regex patterns at config load", () => {
   it("reports a nested-quantifier pattern that also matches the empty string once", () => {
     const msg = messageOf(load(make1("(a*)*")));
     expect(msg.match(/can backtrack without bound/g)).toHaveLength(1);
+    expect(msg).not.toContain("matches the empty string");
+    expect(msg.match(/Regular expression in/g)).toHaveLength(1);
+  });
+
+  it("reports a backreference pattern that also matches the empty string once", () => {
+    const msg = messageOf(load(make1("(a*)\\1")));
+    expect(msg).toContain("uses a backreference");
+    expect(msg).not.toContain("matches the empty string");
+    expect(msg.match(/Regular expression in/g)).toHaveLength(1);
+  });
+
+  it("reports an over-long pattern that also matches the empty string once", () => {
+    const long = "a?".repeat(MAX_REGEX_LENGTH);
+    const msg = messageOf(load(make1(long)));
+    expect(msg).toContain("is longer than");
+    expect(msg).not.toContain("matches the empty string");
+    expect(msg.match(/Regular expression in/g)).toHaveLength(1);
+  });
+
+  it("reports a nested-quantifier empty-matching pattern once in placement.allow", () => {
+    const msg = messageOf(
+      load(`placement:\n  allow:\n    - ${JSON.stringify("(a*)*")}\n`),
+    );
+    expect(msg).toContain("(nested quantifier)");
+    expect(msg).not.toContain("matches the empty string");
+    expect(msg.match(/Regular expression in/g)).toHaveLength(1);
+  });
+
+  it("accepts a safe non-empty pattern", () => {
+    expect(load(make1("a+b"))).not.toThrow();
   });
 
   it("still reports the empty-match refusal for a safe pattern that matches nothing", () => {

@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   example a commit message through `--stdin-path`).
 - The README's GitHub Action example now pins commit SHAs (`actions/checkout` and a `<commit-sha>` placeholder for the action) and explains why a tag is not enough; it also says that `v1` does not contain the fixes listed under `[Unreleased]`. `docs/integration.md` no longer recommends pinning the action at `@v1`.
 - An unknown pack id under `packs:` in `slop.config.yml` is still refused (exit 2), and the error now names the unknown id(s) and lists every valid pack id again, as the `--pack` filter does; the list is derived from the pack id schema.
+- A `placement.markers`, `placement.allow` or `review.allow` regex that is refused as unsafe (nested quantifier, backreference, over the length cap) and also matches the empty string, such as `(a*)*`, now gets only the safety message. It used to get a second, misleading empty-match message as well.
 
 ### Security
 
