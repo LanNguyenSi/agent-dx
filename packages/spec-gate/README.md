@@ -94,7 +94,10 @@ prints one JSON report line (`spec-gate-approve/1`) with the eight conditions,
 the repository check among them, and the commands the spec refers to. It
 exits 0 when approved, 1 when not and 2 on a usage error or refusal; only 0
 means approved. The token is read from the environment variable
-`GITHUB_TOKEN` only, never from an option, and is never printed. The checkout
+`GITHUB_TOKEN` only: no command line option takes it, and spec-gate never
+prints the value of an option in its error output (the option's name stays).
+A bare argument before the verb name is printed as an unknown command, so the
+token belongs in the environment only. The checkout
 must be at the head commit of the pull request, not at a merge of it. It is
 described in [docs/approve.md](docs/approve.md) ("CLI"); the code lives in
 `src/approve/` and `src/host/`.
