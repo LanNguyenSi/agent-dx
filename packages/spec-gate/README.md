@@ -102,6 +102,26 @@ must be at the head commit of the pull request, not at a merge of it. It is
 described in [docs/approve.md](docs/approve.md) ("CLI"); the code lives in
 `src/approve/` and `src/host/`.
 
+`spec-gate closure <spec-dir> --repo <dir> --default-ref <ref> --start
+<commit> [--head <commit>]` prints one JSON report line
+(`spec-gate-closure/1`) that says for every row of the test plan, as the
+merged spec commit holds it, whether the evidence files in the spec directory
+prove it at or after the start commit: `proven`, `failed`, `unproven`,
+`not-decidable` (measurement, manual and runtime rows, which are for review)
+or `pending-post-deploy`, with the reason and every envelope that does not
+count. `spec.md` and `testplan.yaml` are read at the merged spec commit, never
+from the work tree; `bindings.yaml` and `evidence/` are read from the spec
+directory. An envelope counts only when its phase is `closure`, its commit
+lies on `start..head`, its work tree was clean and its digest and selector
+match the row's command and binding. It exits 0 when no row is `failed` or
+`unproven`, 1 when one is, and 2 on a usage error or a refusal (a start commit
+that is not after the merged spec commit or not on the default branch, a head
+that is not after the start, a merged spec that is not proposed, a command set
+that cannot be read, an evidence or bindings file that does not load). It is
+read-only and offline; CI runs are not verified with the host yet and the
+squash rule is not applied. It is described in
+[docs/closure.md](docs/closure.md); the code lives in `src/closure/`.
+
 ## Formats
 
 The files `spec-gate` reads and writes, their grammars, the field-to-layer

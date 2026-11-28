@@ -5,6 +5,7 @@ import { Command, CommanderError, Option } from "commander";
 import { intakeFile } from "./adapters/file.js";
 import { runApproveCheck } from "./approve/index.js";
 import { maskOptionValues } from "./cli-output.js";
+import { runClosure } from "./closure/index.js";
 import {
   DigestError,
   computeSpecDigest,
@@ -644,6 +645,67 @@ program
     process.exitCode = 0;
   });
 
+// `closure` exits 0 for a report with no row failed or unproven, 1 for a
+// report with one, and 2 for a usage error, a refusal (a precondition that
+// does not hold; no report is printed then) or an unexpected exception.
+program
+  .command("closure")
+  .description(
+    "print one JSON report line (spec-gate-closure/1) that says for every test-plan row of the merged spec whether " +
+      "the evidence files in the spec directory prove it at or after the start commit, read-only and offline; exits 0 when no row is failed or " +
+      "unproven, 1 when one is, 2 on a usage error or refusal",
+  )
+  .argument(
+    "<spec-dir>",
+    "the spec directory inside --repo; bindings.yaml and evidence/ are read from it, spec.md and testplan.yaml at the merged spec commit",
+  )
+  .requiredOption(
+    "--repo <dir>",
+    "the trusted checkout root, as for lint; never discovered",
+  )
+  .requiredOption(
+    "--default-ref <ref>",
+    "full ref name of the fetched default branch, as for lint; the merged spec commit is looked up on it",
+  )
+  .requiredOption(
+    "--start <commit>",
+    "full commit id of the start commit from the host: the merged spec commit or a descendant of it, on --default-ref",
+  )
+  .option(
+    "--head <commit>",
+    "full commit id the work is evaluated at, the start commit or a descendant of it (default: HEAD of the checkout)",
+  )
+  .exitOverride((err: CommanderError) => {
+    throw err;
+  })
+  .action(
+    (
+      specDir: string,
+      options: {
+        repo: string;
+        defaultRef: string;
+        start: string;
+        head?: string;
+      },
+    ) => {
+      const result = runClosure(specDir, {
+        repo: options.repo,
+        defaultRef: options.defaultRef,
+        start: options.start,
+        ...(options.head !== undefined ? { head: options.head } : {}),
+      });
+      if (!result.ok) {
+        process.stderr.write(
+          `spec-gate: closure: ${result.code}: ${result.message}\n`,
+        );
+        process.exitCode = 2;
+        return;
+      }
+      process.stdout.write(`${JSON.stringify(result.report)}\n`);
+      process.exitCode = result.report.ok ? 0 : 1;
+    },
+  );
+
 // `approve-check` exits 0 only for a report that says approved, 1 for a
 // report that does not, and 2 for a usage error, a refusal or an exception.
 // The token is read from the environment and has no option. An option the
@@ -734,8 +796,8 @@ try {
   await program.parseAsync();
 } catch (err) {
   // Only `intake file`, `lint`, `lint-ack`, `propose`, `bind`, `repo-check`,
-  // `export`, `questions`, `answer`, `status` and `approve-check` have
-  // exitOverride, so every CommanderError comes from one of them: help and
+  // `export`, `questions`, `answer`, `status`, `approve-check` and `closure`
+  // have exitOverride, so every CommanderError comes from one of them: help and
   // version keep their exit code 0, a usage error exits 2; anything else is
   // an unexpected exception and also exits 2.
   if (err instanceof CommanderError) {

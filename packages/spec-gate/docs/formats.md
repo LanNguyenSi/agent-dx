@@ -57,7 +57,7 @@ at its base), never at the head of a spec pull request.
 | `commands_ref` | the head of the fetched remote default branch at intake, the same commit as `base_commit` | `intake`; `propose` only verifies and sets nothing | intake | `source/meta.json` and the `spec.md` frontmatter | must be an ancestor of the default branch, checked as for `base_commit`; the approval check resolves the argv lists at this commit itself and prints them |
 | binding reference | `bindings.yaml` at the commit `propose` ran at; once the log is on the default branch and the propose commit is no ancestor of the head (a squash or rebase merge), `bindings.yaml` at the diff base, read from git | `propose`, as the hash of `bindings.yaml` in the first `bindings.log` entry | propose | `specs/<id>/bindings.log` (outside the digest) | the propose commit must be an ancestor of the head; after a squash or rebase merge it may not be, and then the diff base must hold the log of the spec at the same path with the same propose entry, the log at the head must extend it, and only the bind entries after it are checked and replayed; otherwise a lint error |
 | start commit | the commit the implementation work started from; closing evidence is compared there | the host, passed as `closure --start <commit>` | closure | not stored; an argument of the closing check | must be a descendant of the merged spec commit; otherwise the closing check stops |
-| evidence envelopes | the commit each envelope names in its `commit` field, which the runner reads from its own checkout | the host runner; never a model role | evidence (phase `baseline`) and closure (phase `closure`) | `specs/<id>/evidence/TP-<n>.jsonl`, one file per test-plan row, JSON Lines, both phases in one file | `baseline`: the commit must equal `base_commit`, the work tree clean, the `commands_digest` the digest of the row's one command at `commands_ref` and the selector the binding's, else `stale-evidence`; `closure` (which includes per-slice evidence): the commit must be the start commit or a descendant of it; after a squash merge an envelope stays valid if its commit is reachable from the default branch, otherwise only if it was on the PR branch before the squash and the PR's CI run references it |
+| evidence envelopes | the commit each envelope names in its `commit` field, which the runner reads from its own checkout | the host runner; never a model role | evidence (phase `baseline`) and closure (phase `closure`) | `specs/<id>/evidence/TP-<n>.jsonl`, one file per test-plan row, JSON Lines, both phases in one file | `baseline`: the commit must equal `base_commit`, the work tree clean, the `commands_digest` the digest of the row's one command at `commands_ref` and the selector the binding's, else `stale-evidence`; `closure` (which includes per-slice evidence): the closing check counts an envelope only when its commit is on `start..head`, the start commit or a descendant of it and an ancestor of (or equal to) the head it evaluates; the squash rule (after a squash merge an envelope stays valid if its commit is reachable from the default branch, otherwise only if it was on the PR branch before the squash and the PR's CI run references it) is not applied yet, so an envelope at a commit the head does not hold never counts |
 <!-- END generated: reference-states -->
 
 The table is exported as `REFERENCE_STATES`; a test fails when this page and
@@ -640,9 +640,11 @@ on its phase. An envelope whose commit is reachable from the default branch
 after the merge stays valid. Any other envelope stays valid only if its commit
 was on the pull request branch before the squash and the pull request's CI run
 references that commit; otherwise it does not count. Without a squash merge
-the rule does not apply. The three facts are git and host questions: the
-closing check answers them and passes them to `evidenceSurvivesSquash`;
-nothing in the format layer runs git.
+the rule does not apply. The three facts are git and host questions, and
+nothing in the format layer runs git. The closing check does not apply this
+rule yet: an envelope at a commit the head does not hold never counts there
+(see [closure.md](closure.md)); `evidenceSurvivesSquash` is the format-layer
+predicate for when the host facts are available.
 
 **Layout.** Envelopes are stored under `specs/<id>/evidence/`, one file per
 test-plan row, named `TP-<n>.jsonl` after that row's id: the file name is the

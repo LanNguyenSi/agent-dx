@@ -31,18 +31,17 @@ import {
   EVIDENCE_DIR,
   EVIDENCE_FILE_SUFFIX,
   expectedCommandsDigest,
-  parseCommandSet,
   staleEvidenceApplies,
-  type Binding,
   type EvidenceEnvelope,
   type TestPlanRow,
 } from "../../formats/index.js";
 import {
-  LintGitError,
-  isAncestor,
-  isCommit,
-  readBlobAtCommit,
-} from "../git/index.js";
+  COMMANDS_PATH,
+  rowTemplate,
+  templatesAtCommandsRef,
+  type Templates,
+} from "../commands-at-ref.js";
+import { LintGitError } from "../git/index.js";
 import { valueOf } from "../inputs.js";
 import type {
   GitInputs,
@@ -53,7 +52,6 @@ import type {
 } from "../types.js";
 
 const TESTPLAN = "testplan.yaml";
-const COMMANDS_PATH = ".spec-gate/commands.yaml";
 const FULL: RuleDef["profiles"] = ["full"];
 
 /** The value of an input a rule declared in `uses`, or undefined when absent. */
@@ -74,84 +72,6 @@ function evidenceFile(tpId: string): string {
 }
 
 // ------------------------------------------------------------- stale-evidence
-
-/**
- * The expected digest of what one row's check runs, or `undefined` when
- * the row has no determinable command: the rule then reports
- * `command-unknown`, except for a `static` row, whose unknown
- * `check_command_ref` is the `static-command-unknown` error.
- */
-function rowTemplate(
-  row: TestPlanRow,
-  binding: Binding | undefined,
-  selectorArgv: readonly string[] | undefined,
-  byName: ReadonlyMap<string, readonly string[]>,
-): readonly string[] | undefined {
-  if (row.kind === "static") {
-    return byName.get(row.check_command_ref ?? "") ?? undefined;
-  }
-  if (binding?.selector !== undefined) return selectorArgv;
-  return undefined;
-}
-
-type Templates =
-  | { ok: true; selectorArgv?: string[]; byName: Map<string, string[]> }
-  | { ok: false; code: string; message: string };
-
-/**
- * The command set at `commands_ref`, read like `static-command-unknown`
- * reads it: only at that commit, never at a `commands_ref` that failed its
- * ancestry check. A git read that could not run is thrown to the guard.
- */
-function templatesAtCommandsRef(ctx: RuleContext, git: GitInputs): Templates {
-  const ref = valueOf(ctx.inputs.spec).frontmatter.commands_ref;
-  if (!isCommit(git.repo, ref) || !isAncestor(git.repo, ref, git.reference)) {
-    return {
-      ok: false,
-      code: "commands-ref-untrusted",
-      message: `the expected digest needs ${COMMANDS_PATH} at commands_ref, which is not read because commands_ref is not a trusted reference (see commands-ref-not-ancestor)`,
-    };
-  }
-  let text: string;
-  try {
-    text = readBlobAtCommit(git.repo, ref, COMMANDS_PATH);
-  } catch (err) {
-    if (
-      !(err instanceof LintGitError) ||
-      err.code === "git-failed" ||
-      err.code === "output-too-large" ||
-      err.code === "object-unreadable"
-    ) {
-      throw err;
-    }
-    const missing =
-      err.code === "path-missing" || err.code === "path-not-regular";
-    return {
-      ok: false,
-      code: missing ? "commands-file-missing" : "commands-file-invalid",
-      message: missing
-        ? `the expected digest needs ${COMMANDS_PATH} at commands_ref, which is missing there or is not a regular file`
-        : `the expected digest needs ${COMMANDS_PATH} at commands_ref, which is not valid UTF-8 there`,
-    };
-  }
-  const parsed = parseCommandSet(text);
-  if (!parsed.ok) {
-    return {
-      ok: false,
-      code: "commands-file-invalid",
-      message: `the expected digest needs ${COMMANDS_PATH} at commands_ref, which does not parse there`,
-    };
-  }
-  const byName = new Map<string, string[]>();
-  let selectorArgv: string[] | undefined;
-  for (const command of parsed.value.commands) {
-    byName.set(command.name, command.argv);
-    if (command.usesSelector) selectorArgv = command.argv;
-  }
-  return selectorArgv
-    ? { ok: true, selectorArgv, byName }
-    : { ok: true, byName };
-}
 
 function staleEvidenceCheck(ctx: RuleContext): RuleFinding[] {
   const spec = valueOf(ctx.inputs.spec);
@@ -184,7 +104,12 @@ function staleEvidenceCheck(ctx: RuleContext): RuleFinding[] {
   const findings: RuleFinding[] = [];
   let templates: Templates | undefined;
   if (needsTemplates) {
-    templates = templatesAtCommandsRef(ctx, gitOf(ctx));
+    const git = gitOf(ctx);
+    templates = templatesAtCommandsRef(
+      git.repo,
+      spec.frontmatter.commands_ref,
+      git.reference,
+    );
     if (!templates.ok) {
       findings.push({
         file: `repo:${COMMANDS_PATH}`,
