@@ -26,7 +26,9 @@ const EXAMPLE_ALLOWLIST: Record<string, string[]> = {
   // Moved from README.md's "Verification sets" section to
   // docs/verification-sets.md: the JSON worked example lives there now,
   // not in README.md.
-  "docs/verification-sets.md": ['"npx", "okf-kit", "check", "docs/okf"'],
+  "docs/verification-sets.md": [
+    '"npx", "-y", "okf-kit@<pinned-version>", "check", "docs/okf"',
+  ],
 };
 
 /** README.md, INSTALL-AGENT.md, every Markdown file directly under docs/

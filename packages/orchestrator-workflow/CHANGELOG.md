@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolves inside the package files. `docs/operator-install.md` now says that a
   relative `ORCHESTRATOR_WORKFLOW_HOME` resolves against each command's working
   directory.
+- The verification-set worked example in `docs/verification-sets.md` now pins
+  its bundle check (`npx -y okf-kit@<pinned-version>`, the placeholder form of
+  the `OKF_KIT_VERSION: <pinned-version>` pattern in
+  `assets/skill/references/bundle-gate-in-ci.md`) instead of letting it float
+  to the newest okf-kit, and a new test rejects any unpinned `npx` okf-kit
+  invocation (shell form or JSON argv form) in the package's docs and assets.
 
 ### Security
 
