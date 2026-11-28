@@ -41,6 +41,7 @@ import {
   IntakeError,
   parseRecordedMeta,
   remoteBaseCommit,
+  resolveGitTimeoutMs,
   serializeMeta,
   sha256Hex,
   writeSource,
@@ -138,8 +139,11 @@ function collectAttachments(paths: readonly string[]): SourceAttachment[] {
   });
 }
 
-async function resolveRepoDir(repo: string | undefined): Promise<string> {
-  if (repo === undefined) return gitToplevel(process.cwd());
+async function resolveRepoDir(
+  repo: string | undefined,
+  timeoutMs: number,
+): Promise<string> {
+  if (repo === undefined) return gitToplevel(process.cwd(), timeoutMs);
   try {
     if (!fs.statSync(repo).isDirectory()) {
       throw new IntakeError("bad-repo", "not a directory");
@@ -178,6 +182,10 @@ export interface FileIntakeOptions {
   attach: readonly string[];
   raw: boolean;
   check: boolean;
+  /** The raw `--git-timeout` value, in seconds; undefined when not given. */
+  gitTimeout?: string | undefined;
+  /** Where `SPEC_GATE_GIT_TIMEOUT` is read from; defaults to the process environment. */
+  env?: NodeJS.ProcessEnv | undefined;
 }
 
 export interface IntakeRun {
@@ -189,13 +197,17 @@ export interface IntakeRun {
 export async function intakeFile(
   options: FileIntakeOptions,
 ): Promise<IntakeRun> {
+  const timeoutMs = resolveGitTimeoutMs(
+    options.gitTimeout,
+    options.env ?? process.env,
+  );
   if (!isSpecId(options.id)) {
     throw new IntakeError(
       "invalid-spec-id",
       `${JSON.stringify(options.id)} is not a spec ID: expected lower-case letters and digits in hyphen-separated groups, at most ${MAX_SPEC_ID_LENGTH} characters`,
     );
   }
-  const repoDir = await resolveRepoDir(options.repo);
+  const repoDir = await resolveRepoDir(options.repo, timeoutMs);
   const bytes = readSourceFile(options.sourcePath);
   assertScannableText(bytes, options.sourcePath);
   const text = bytes.toString("utf8");
@@ -237,7 +249,7 @@ export async function intakeFile(
     );
   }
   const attachments = collectAttachments(options.attach);
-  const commit = await remoteBaseCommit(repoDir, options.remote);
+  const commit = await remoteBaseCommit(repoDir, options.remote, timeoutMs);
 
   const sha256 = sha256Hex(bytes);
   const meta: SourceMeta = {

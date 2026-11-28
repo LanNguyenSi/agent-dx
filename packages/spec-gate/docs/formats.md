@@ -180,7 +180,13 @@ name is never picked; it writes no local ref, fetches no tag, prunes nothing,
 reads the commit id from the one line `FETCH_HEAD` holds and peels it to a
 commit. Every git call runs without a shell, without any `GIT_*` variable of
 the caller, without a terminal prompt and with a timeout that kills the whole
-process group; an error message never carries a command line, a URL or git's
+process group. The timeout is 15 seconds per git call by default; `--git-timeout
+<seconds>` or the environment variable `SPEC_GATE_GIT_TIMEOUT` sets it for
+every git call of the run, to a whole number of seconds from 1 to 3600 in plain
+decimal digits (no sign, fraction, exponent, space or leading zero). The flag
+wins over the variable, the variable over the default, and the variable is not
+read when the flag is given; a value that is set but empty or out of range is
+refused with `bad-git-timeout` before any git call, also with `--check`. An error message never carries a command line, a URL or git's
 own output. The fetch passes `--write-fetch-head` explicitly, so a repo-local
 `fetch.writeFetchHEAD=false` cannot leave a stale FETCH_HEAD standing in for
 the fetch.
@@ -216,7 +222,7 @@ that was killed.
 Exit codes of `intake file`: 0 on success, 2 on an error (a named code on
 stderr, nothing on stdout, nothing written). A usage error of this command (a
 missing `--id` or `<path>`, an unknown option) and an unexpected exception
-also exit 2. `--help` and `--version` exit 0. With `--check`: 0 when the file
+also exit 2, as does a refused git timeout (`bad-git-timeout`). `--help` and `--version` exit 0. With `--check`: 0 when the file
 is unchanged, 1 on drift, 2 on an error (no recorded `meta.json`, a
 `meta.json` that is not strict JSON, not an object, or without a `sha256`
 string and a `lines` array of `{ id, kind }`). `intake file --check` reads the

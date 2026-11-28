@@ -13,7 +13,9 @@ they are built.
 `spec-gate intake file <path> --id <spec-id>` creates `specs/<id>/source/`
 in the target repository from a local file, with `base_commit` and
 `commands_ref` set to the head of the remote default branch. The file
-format is described in [docs/formats.md](docs/formats.md).
+format is described in [docs/formats.md](docs/formats.md). Each git call
+times out after 15 seconds; `--git-timeout <seconds>` or
+`SPEC_GATE_GIT_TIMEOUT` changes that.
 
 `spec-gate triage <spec-dir>` derives the triage class from
 `<spec-dir>/triage.json`, writes `class` and `rule_version` back through a
