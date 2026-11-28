@@ -2,8 +2,8 @@
  * The reference-state rules: the revisions a spec names must be the ones the
  * steps may trust. `base_commit` and `commands_ref` are set by the intake
  * step, never by a model role, so a lint that sees one that is not an
- * ancestor of the reference commit (the pull request base, or the fetched
- * default branch) stops the run: a commit that exists only on the head of
+ * ancestor of the reference commit (the commit of the fetched default
+ * branch) stops the run: a commit that exists only on the head of
  * the pull request, or on a fork, is the spec author's own input.
  *
  * `meta-frontmatter-mismatch` needs no repository. The other four read git
@@ -252,7 +252,7 @@ export const REF_RULES: readonly RuleDef[] = [
     ackable: false,
     needsGit: true,
     summary:
-      "The frontmatter base_commit is the full id of a commit in the repository and an ancestor of the reference commit (the --base commit, else the --default-ref commit); a commit that exists only on the pull request head or a fork is an error.",
+      "The frontmatter base_commit is the full id of a commit in the repository and an ancestor of the reference commit (the --default-ref commit; --base never moves it); a commit that exists only on the pull request head or a fork is an error.",
     needs: ["spec"],
     check: ancestryCheck("base_commit"),
   },
@@ -276,7 +276,7 @@ export const REF_RULES: readonly RuleDef[] = [
     ackable: false,
     needsGit: true,
     summary:
-      "No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count.",
+      "No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between the measuring base (the one merge base of HEAD and the --default-ref commit) and HEAD, renames not detected; changes made only on the default branch do not count.",
     needs: [],
     check: checkSpecChangesConfig,
   },

@@ -18,6 +18,7 @@ import {
   plainHistory,
   skipReasonOf,
   specFiles,
+  usageError,
 } from "./git-helpers.js";
 import {
   BIND_BINDINGS,
@@ -277,7 +278,7 @@ describe("base-commit-not-ancestor and commands-ref-not-ancestor", () => {
     );
   });
 
-  describe("the reference commit: --base wins over --default-ref", () => {
+  describe("the reference commit: the --default-ref commit, --base moves nothing", () => {
     async function moved() {
       const { repo, c1 } = await plainHistory();
       // The default branch moved on after the PR base `c1`.
@@ -299,17 +300,19 @@ describe("base-commit-not-ancestor and commands-ref-not-ancestor", () => {
       );
     });
 
-    it("--base alone: the PR base is the reference, a later default commit is not an ancestor of it", async () => {
+    it("--base alone: refused, a base names no default branch to measure from", async () => {
       const { repo, c1 } = await moved();
-      const report = lintIn(repo, { base: c1 });
-      expect(ofRule(report, "base-commit-not-ancestor")).toHaveLength(1);
-      expect(ofRule(report, "commands-ref-not-ancestor")).toEqual([]);
+      expect(usageError(repo, { base: c1 })).toContain(
+        "--base needs --default-ref <ref>",
+      );
     });
 
-    it("both set: --base wins", async () => {
+    it("both set: the --default-ref commit is the reference, an older base moves no ancestry check", async () => {
       const { repo, c1 } = await moved();
       const report = lintIn(repo, { ...DEFAULT, base: c1 });
-      expect(ofRule(report, "base-commit-not-ancestor")).toHaveLength(1);
+      expect(ofRule(report, "base-commit-not-ancestor")).toEqual([]);
+      expect(ofRule(report, "commands-ref-not-ancestor")).toEqual([]);
+      expect(report).toEqual(lintIn(repo, DEFAULT));
     });
   });
 });
@@ -517,7 +520,7 @@ describe("spec-changes-config", () => {
         );
         await repo.checkout("merge", c1);
         await repo.sh("merge", "--no-ff", "-q", "-m", "merge ref", "pr");
-        return lintIn(repo, { base: c1 });
+        return lintIn(repo, { ...DEFAULT, base: c1 });
       },
     );
   });
@@ -717,7 +720,7 @@ describe("a valid spec on a plain history passes every rule", () => {
       specFiles({ base: c0, ref: c1, plan: STATIC_PLAN }),
       "spec",
     );
-    for (const request of [DEFAULT, { base: c1 }, { ...DEFAULT, base: c1 }]) {
+    for (const request of [DEFAULT, { ...DEFAULT, base: c1 }]) {
       const report = lintIn(repo, request);
       expect(report.errors).toEqual([]);
       expect(report.warnings).toEqual([]);

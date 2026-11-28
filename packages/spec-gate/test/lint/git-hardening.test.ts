@@ -96,8 +96,12 @@ async function embeddedLayout(graft: boolean, worktree = ".", twin?: string) {
 describe("a git directory committed into the work tree", () => {
   for (const graft of [false, true]) {
     const name = graft ? "with info/grafts" : "with its own default branch";
+    // The graft variant also names the base, which is validated against
+    // the real repository's default branch.
     const flags = (c1: string) =>
-      graft ? { base: c1 } : { defaultRef: REMOTE_MAIN };
+      graft
+        ? { defaultRef: REMOTE_MAIN, base: c1 }
+        : { defaultRef: REMOTE_MAIN };
 
     it(`is never found from the spec directory: a git input without --repo is a usage error (${name})`, async () => {
       const { repo, c1 } = await embeddedLayout(graft);
@@ -503,7 +507,6 @@ describe("the repository's own configuration", () => {
     await control(repo, markers);
     for (const request of [
       { defaultRef: REMOTE_MAIN },
-      { base: c1 },
       { defaultRef: REMOTE_MAIN, base: c1 },
     ]) {
       const report = lintIn(repo, request, { final: true });
@@ -543,7 +546,10 @@ describe("a graft file", () => {
       },
     );
     expect(plain.code).toBe(0);
-    for (const request of [{ defaultRef: REMOTE_MAIN }, { base: c1 }]) {
+    for (const request of [
+      { defaultRef: REMOTE_MAIN },
+      { defaultRef: REMOTE_MAIN, base: c1 },
+    ]) {
       const report = lintIn(repo, request);
       expect(
         ofRule(report, "base-commit-not-ancestor"),
@@ -567,7 +573,8 @@ describe("--base and --default-ref together", () => {
     expect(usageError(repo, { defaultRef: REMOTE_MAIN, base: side })).toBe(
       message,
     );
-    // equal and older are fine; --base is the reference commit
+    // equal and older are fine; the --default-ref commit stays the
+    // reference commit, so an older base moves no ancestry check
     expect(lintIn(repo, { defaultRef: REMOTE_MAIN, base: c1 }).errors).toEqual(
       [],
     );
@@ -576,9 +583,11 @@ describe("--base and --default-ref together", () => {
         lintIn(repo, { defaultRef: REMOTE_MAIN, base: c0 }),
         "base-commit-not-ancestor",
       ),
-    ).toHaveLength(1);
-    // each flag alone is not subject to the check
-    expect(lintIn(repo, { base: side }).ok).toBe(true);
+    ).toHaveLength(0);
+    // --base alone is refused before it could be checked against anything
+    expect(usageError(repo, { base: side })).toContain(
+      "--base needs --default-ref",
+    );
     // a --default-ref that is itself bad is still reported first
     expect(
       usageError(repo, { defaultRef: "refs/heads/nope", base: side }),

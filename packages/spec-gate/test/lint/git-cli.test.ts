@@ -66,13 +66,49 @@ describe("resolving the git inputs", () => {
     ]);
   });
 
-  it("--base is the reference when given, and the diff base is its merge base with HEAD", async () => {
+  it("--base is validated and moves nothing: the reference is the --default-ref commit, the diff base the one merge base with HEAD", async () => {
     const { repo, c0, c1 } = await committed();
-    const report = lintIn(repo, { base: c0 });
-    // c0 is an ancestor of c1 but c1 is not an ancestor of the reference c0
-    expect(ofRule(report, "base-commit-not-ancestor")).toHaveLength(1);
-    expect(ofRule(report, "commands-ref-not-ancestor")).toHaveLength(1);
+    // c0 lies on the default branch, so it is a valid base; measured from
+    // it, c1 would not be an ancestor of the reference
+    const report = lintIn(repo, { ...DEFAULT, base: c0 });
+    expect(ofRule(report, "base-commit-not-ancestor")).toHaveLength(0);
+    expect(ofRule(report, "commands-ref-not-ancestor")).toHaveLength(0);
+    expect(report).toEqual(lintIn(repo, DEFAULT));
     expect(c1).not.toBe(c0);
+  });
+
+  it("the resolved inputs with an older --base are the ones without it", async () => {
+    const { repo, c0, c1 } = await committed();
+    const seen: unknown[] = [];
+    const probe = {
+      id: "probe-git",
+      level: "error" as const,
+      profiles: ["light", "full"] as const,
+      gated: false,
+      ackable: false,
+      needsGit: true,
+      summary: "probe",
+      needs: [],
+      check: (ctx: { git?: unknown }) => {
+        seen.push(ctx.git);
+        return [];
+      },
+    };
+    for (const base of [c0, c1]) {
+      const result = lintSpecDir(
+        repo.spec,
+        { git: { repo: repo.dir, defaultRef: REMOTE_MAIN, base } },
+        [...RULES, probe],
+      );
+      expect(result.ok).toBe(true);
+    }
+    const expected = {
+      repo: fs.realpathSync(repo.dir),
+      reference: c1,
+      diffBase: c1,
+      head: await repo.head(),
+    };
+    expect(seen).toEqual([expected, expected]);
   });
 
   it("each combination of the two reference flags", async () => {
@@ -85,11 +121,15 @@ describe("resolving the git inputs", () => {
     expect(base(lintIn(repo, { defaultRef: "refs/remotes/origin/old" }))).toBe(
       1,
     );
-    // base alone
-    expect(base(lintIn(repo, { base: c1 }))).toBe(0);
-    expect(base(lintIn(repo, { base: c0 }))).toBe(1);
-    // both: --base wins as the reference; it must lie on the default branch
-    expect(base(lintIn(repo, { ...DEFAULT, base: c0 }))).toBe(1);
+    // base alone: refused, a base names no default branch to measure from
+    for (const alone of [c1, c0]) {
+      expect(usageError(repo, { base: alone })).toBe(
+        "--base needs --default-ref <ref>: the change is measured from the merge base of HEAD and the --default-ref commit, never from --base",
+      );
+    }
+    // both: --base is validated and must lie on the default branch; the
+    // --default-ref commit stays the reference
+    expect(base(lintIn(repo, { ...DEFAULT, base: c0 }))).toBe(0);
     expect(base(lintIn(repo, { ...DEFAULT, base: c1 }))).toBe(0);
     expect(
       base(lintIn(repo, { defaultRef: "refs/remotes/origin/old", base: c0 })),
@@ -302,7 +342,7 @@ describe("usage errors", () => {
     const { repo, c1 } = await committed();
     await repo.sh("checkout", "-q", "--orphan", "island");
     await repo.commit({ "i.txt": "i\n" }, "unrelated");
-    expect(usageError(repo, { base: c1 })).toBe(
+    expect(usageError(repo, { ...DEFAULT, base: c1 })).toBe(
       "HEAD and the reference commit share no history",
     );
   });
@@ -310,7 +350,9 @@ describe("usage errors", () => {
   it("an unborn HEAD", async () => {
     const { repo, c1 } = await committed();
     await repo.sh("checkout", "-q", "--orphan", "fresh");
-    expect(usageError(repo, { base: c1 })).toBe("HEAD does not name a commit");
+    expect(usageError(repo, { ...DEFAULT, base: c1 })).toBe(
+      "HEAD does not name a commit",
+    );
   });
 
   it("--config together with a git input, either one", async () => {
@@ -357,7 +399,6 @@ describe("the built CLI", () => {
     const { repo, c1 } = await committed();
     for (const args of [
       ["--default-ref", REMOTE_MAIN],
-      ["--base", c1],
       ["--default-ref", REMOTE_MAIN, "--base", c1],
     ]) {
       const run = await runCli([
@@ -429,6 +470,7 @@ describe("the built CLI", () => {
       ["--base", c1.slice(0, 12)],
       ["--base", "refs/heads/main"],
       ["--repo", scratch(), "--base", c1],
+      ["--base", c1],
       ["--base", c1, "--config", config],
       ["--default-ref", REMOTE_MAIN, "--config", config],
     ]) {
@@ -512,7 +554,7 @@ describe("the config at the reference commit", () => {
     const { repo, ref } = await repoWithConfig("questions:\n  warn_above: 2\n");
     await repo.commit(withQuestions(ref, ref), "spec");
     expect(budget(lintIn(repo, DEFAULT))).toBe(1);
-    expect(budget(lintIn(repo, { base: ref }))).toBe(1);
+    expect(budget(lintIn(repo, { ...DEFAULT, base: ref }))).toBe(1);
   });
 
   it("a config changed on the head of the pull request changes nothing", async () => {
@@ -539,7 +581,7 @@ describe("the config at the reference commit", () => {
     expect(budget(lintIn(repo, DEFAULT))).toBe(1);
   });
 
-  it("--base reads the config at the PR base, not at a later default tip", async () => {
+  it("--base does not move the config: it is read at the --default-ref commit, not at an older PR base", async () => {
     const { repo, ref } = await repoWithConfig("questions:\n  warn_above: 2\n");
     await repo.commit(withQuestions(ref, ref), "spec");
     await repo.checkout("moved", ref);
@@ -549,10 +591,9 @@ describe("the config at the reference commit", () => {
     );
     await repo.setRef(REMOTE_MAIN, later);
     await repo.checkout("work");
-    // the default tip says 100, the PR base says 2: --base wins
+    // the default tip says 100, the PR base says 2: the default tip decides
     expect(budget(lintIn(repo, DEFAULT))).toBe(0);
-    expect(budget(lintIn(repo, { base: ref }))).toBe(1);
-    expect(budget(lintIn(repo, { ...DEFAULT, base: ref }))).toBe(1);
+    expect(budget(lintIn(repo, { ...DEFAULT, base: ref }))).toBe(0);
   });
 
   it("without git inputs there is no config: the defaults, whatever the work tree holds", async () => {
@@ -640,7 +681,9 @@ describe("rule-skipped under --final", () => {
       path: "$",
     });
     // with git inputs the final run is clean
-    expect(lintIn(repo, { base: c1 }, { final: true }).ok).toBe(true);
+    expect(lintIn(repo, { ...DEFAULT, base: c1 }, { final: true }).ok).toBe(
+      true,
+    );
   });
 
   it("a missing optional input of an error rule is input-absent, with git inputs too", async () => {
