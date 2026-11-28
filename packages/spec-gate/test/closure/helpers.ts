@@ -61,8 +61,9 @@ export function closureSpecFiles(options: {
   status?: string;
   plan?: string;
   bindings?: string;
+  spec?: string;
 }): Record<string, string> {
-  let spec = validFiles()["spec.md"]!;
+  let spec = options.spec ?? validFiles()["spec.md"]!;
   spec = spec.replace(/^base_commit: .*$/m, `base_commit: ${options.ref}`);
   spec = spec.replace(/^commands_ref: .*$/m, `commands_ref: ${options.ref}`);
   spec = spec.replace(
@@ -95,7 +96,23 @@ export interface Scenario {
  * `work` with commits `a` and `b` on top of it; `HEAD` is `b`.
  */
 export async function scenario(
-  options: { status?: string; plan?: string; bindings?: string } = {},
+  options: {
+    status?: string;
+    plan?: string;
+    bindings?: string;
+    spec?: string;
+    /**
+     * Picks the spec's `commands_ref` after `c0` and `c1` exist (default
+     * `c1`); it may commit more, and `main` is checked out afterwards.
+     */
+    // The base no-unused-vars rule reads the names in a signature as variables.
+    // eslint-disable-next-line no-unused-vars
+    commandsRef?: (at: {
+      repo: Repo;
+      c0: string;
+      c1: string;
+    }) => Promise<string>;
+  } = {},
 ): Promise<Scenario> {
   const repo = await Repo.create();
   const c0 = await repo.commit({ "README.md": "one\n" }, "init");
@@ -103,8 +120,19 @@ export async function scenario(
     { ".spec-gate/commands.yaml": COMMANDS },
     "commands",
   );
+  const ref =
+    options.commandsRef === undefined
+      ? c1
+      : await options.commandsRef({ repo, c0, c1 });
+  await repo.checkout("main");
   const spec = await repo.commit(
-    closureSpecFiles({ ref: c1, ...options }),
+    closureSpecFiles({
+      ref,
+      ...(options.status !== undefined ? { status: options.status } : {}),
+      ...(options.plan !== undefined ? { plan: options.plan } : {}),
+      ...(options.bindings !== undefined ? { bindings: options.bindings } : {}),
+      ...(options.spec !== undefined ? { spec: options.spec } : {}),
+    }),
     "spec",
   );
   await repo.setRef(REMOTE_MAIN, spec);

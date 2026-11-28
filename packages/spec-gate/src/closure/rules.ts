@@ -5,9 +5,10 @@
  *
  * - `stays-green`: proven when a counted `pass` is at the start commit
  *   itself and the latest counted envelope is a `pass`.
- * - `red-first`: proven when a counted `fail` (never `error` or `skip`) is
- *   followed by a counted `pass` and the latest counted envelope is a
- *   `pass`.
+ * - `red-first`: proven when the last counted `fail` (never `error` or
+ *   `skip`) is followed by a counted `pass` at a strict descendant of its
+ *   commit and the latest counted envelope is a `pass`; a `fail` and a
+ *   `pass` at one commit prove nothing.
  * - `static`: proven when the latest counted envelope is a `pass` with
  *   `exit: 0`.
  * - `measurement`, `manual`, `runtime`: not decidable from envelopes.
@@ -57,7 +58,17 @@ function redFirst(counted: readonly CountedEnvelope[]): Verdict {
     if (env.result === "fail") lastFail = index;
   });
   if (lastFail < 0) return { state: "unproven", reason: "no-red" };
-  if (!counted.slice(lastFail + 1).some((env) => env.result === "pass")) {
+  const red = counted[lastFail]!.commit;
+  // The counted envelopes are in ancestry order, so a later one at another
+  // commit lies at a strict descendant of the red's commit.
+  if (
+    !counted
+      .slice(lastFail + 1)
+      .some((env) => env.result === "pass" && env.commit !== red)
+  ) {
+    if (counted.some((env) => env.result === "pass" && env.commit === red)) {
+      return { state: "unproven", reason: "red-and-green-at-one-commit" };
+    }
     return { state: "failed", reason: "no-green-after-red" };
   }
   const latest = counted[counted.length - 1]!;

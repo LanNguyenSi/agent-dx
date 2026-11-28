@@ -1,7 +1,7 @@
 /**
  * The report of `spec-gate closure` (`spec-gate-closure/1`): for every
- * test-plan row, whether the committed evidence proves it at or after the
- * start commit, and why. The field order of every object below is the
+ * test-plan row of the merged spec, whether the evidence files in the spec
+ * directory prove it at or after the start commit, and why. The field order of every object below is the
  * order of the JSON line.
  */
 import type { TestPlanKind } from "../formats/index.js";

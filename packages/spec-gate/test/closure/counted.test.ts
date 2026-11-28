@@ -7,6 +7,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { REMOTE_MAIN } from "../lint/git-helpers.js";
 import {
+  PLAN,
   reportIn,
   rowOf,
   scenario,
@@ -74,6 +75,17 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
     });
   }
 
+  it("ignores an envelope at a commit forked before the start that the head does not hold (not-on-head)", async () => {
+    const s = await scenario();
+    await s.repo.checkout("old", s.c1);
+    const forked = await s.repo.commit({ "old.txt": "x\n" }, "forked early");
+    await s.repo.checkout("work");
+    writeEvidence(s.repo, "TP-2", [{ commit: s.spec }, { commit: forked }]);
+    expect(rowOf(reportIn(s), "TP-2").ignored).toEqual([
+      { line: 2, reason: "not-on-head" },
+    ]);
+  });
+
   it("ignores an envelope that names a commit the repository does not hold (not-on-head)", async () => {
     const s = await scenario();
     writeEvidence(s.repo, "TP-2", [
@@ -108,11 +120,12 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
   });
 
   it("ignores a static row's envelope whose command is not in the set (command-unknown)", async () => {
-    const s = await scenario();
-    const plan = fs
-      .readFileSync(path.join(s.repo.spec, "testplan.yaml"), "utf8")
-      .replace("check_command_ref: typecheck", "check_command_ref: build");
-    fs.writeFileSync(path.join(s.repo.spec, "testplan.yaml"), plan);
+    const s = await scenario({
+      plan: PLAN.replace(
+        "check_command_ref: typecheck",
+        "check_command_ref: build",
+      ),
+    });
     writeEvidence(s.repo, "TP-3", [{ commit: s.a }]);
     expect(rowOf(reportIn(s), "TP-3").ignored).toEqual([
       { line: 1, reason: "command-unknown" },

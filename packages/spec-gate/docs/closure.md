@@ -1,11 +1,13 @@
 # Closing check
 
 `spec-gate closure` answers, for every row of a proposed spec's test plan,
-whether the committed evidence proves the row at or after the start commit of
-the work, and why. It is read-only and offline: it reads the spec directory
-from disk the way `lint` does, and the history and the command set from git
-through the same hardened calls (see "Git inputs" in [lint.md](lint.md)). It
-never writes, never fetches and makes no network request.
+whether the evidence files in the spec directory prove the row at or after the
+start commit of the work, and why. It is read-only and offline: it reads
+`spec.md` and `testplan.yaml` as the merged spec commit holds them, the history
+and the command set from git, all through the same hardened calls as `lint`
+(see "Git inputs" in [lint.md](lint.md)), and only `bindings.yaml` and
+`evidence/` from the spec directory on disk. It never writes, never fetches and
+makes no network request.
 
 It counts only evidence it can attribute to the work. An envelope that it
 cannot tie to a commit on `start..head`, to the row's one command and to the
@@ -19,15 +21,19 @@ spec-gate closure <spec-dir> --repo <dir> --default-ref <ref> --start <commit> [
 
 | Flag | Meaning |
 |---|---|
-| `<spec-dir>` | the spec directory inside `--repo`; `spec.md`, `testplan.yaml`, `bindings.yaml` and `evidence/` are read from it on disk |
+| `<spec-dir>` | the spec directory inside `--repo`; `bindings.yaml` (optional) and `evidence/` are read from it on disk, `spec.md` and `testplan.yaml` at the merged spec commit |
 | `--repo <dir>` | the trusted checkout root, as for `lint`; never discovered from the spec directory |
 | `--default-ref <ref>` | the full ref name of the fetched default branch (for example `refs/remotes/origin/main`), resolved offline |
 | `--start <commit>` | the full id of the start commit, given by the host: the commit the implementation work started from |
 | `--head <commit>` | the full id of the commit the work is evaluated at; default: `HEAD` of the checkout |
 
-`.spec-gate/commands.yaml` is read at the spec's `commands_ref`, never at the
+The rows, their kinds and `check_command_ref`, the spec id and `commands_ref`
+all come from the copies at the merged spec commit: a change of `spec.md` or
+`testplan.yaml` in the work tree or on the work branch changes nothing in the
+report. `.spec-gate/commands.yaml` is read at that `commands_ref`, never at the
 head or the tip of the default branch, as the `stale-evidence` lint rule reads
-it.
+it. A missing `bindings.yaml` binds nothing: a row that needs a selector then
+has no command, and its envelopes are `command-unknown`.
 
 ## Preconditions
 
@@ -38,12 +44,13 @@ Each of these is a refusal: one line on stderr, `spec-gate: closure: <code>:
 |---|---|
 | `start-invalid`, `head-invalid` | `--start` or `--head` is not a full commit id (40 or 64 lower-case hex digits) |
 | `spec-dir-invalid` | the spec directory is a symbolic link, not a directory, or a path that cannot be read from a commit |
-| `input-missing` and the loader's codes | `spec.md`, `testplan.yaml` or `bindings.yaml` is missing or does not load |
-| the loader's codes | a file under `evidence/` does not load (no row is judged from half-read evidence; `lint` names the findings) |
+| the loader's codes | `bindings.yaml` exists and does not load, or a file under `evidence/` does not load (no row is judged from half-read evidence; `lint` names the findings) |
 | `git-input-invalid` | `--repo` or `--default-ref` does not resolve, as for `lint` |
 | `start-not-a-commit`, `head-not-a-commit` | the id is no commit of the repository |
 | `spec-not-merged` | no commit on `--default-ref` changed `<spec-dir>/spec.md` or `<spec-dir>/testplan.yaml` |
-| `spec-not-proposed` | `spec.md` at the merged spec commit is missing or its status is not `proposed` |
+| `spec-invalid` | `spec.md` at the merged spec commit is missing, not a regular UTF-8 file or not a valid spec |
+| `spec-not-proposed` | `spec.md` at the merged spec commit does not have status `proposed` |
+| `testplan-invalid` | `testplan.yaml` at the merged spec commit is missing, not a regular UTF-8 file or not a valid test plan |
 | `start-before-spec` | `--start` is not the merged spec commit or a descendant of it |
 | `start-not-on-default` | `--start` is not an ancestor of (or equal to) the `--default-ref` commit |
 | `head-before-start` | `--head` is not `--start` or a descendant of it |
@@ -82,15 +89,18 @@ the CI run it names is not checked with the host yet.
 Order: the counted envelopes of a row are ordered by commit ancestry (an
 envelope at an ancestor commit is earlier), at one commit by `time`, then by
 line. When two counted envelopes lie at commits neither of which is an
-ancestor of the other (two branches merged into the head), the row is
-`not-decidable` with reason `unordered-evidence`.
+ancestor of the other (two branches merged into the head), or an envelope that
+shares its commit with another has a `time` that does not parse, a
+`stays-green`, `red-first` or `static` row is `unproven` with reason
+`unordered-evidence`: an order the check cannot tell decides nothing in the
+row's favour.
 
 ## Per-kind rules
 
 | Kind | `proven` | `failed` | `unproven` | otherwise |
 |---|---|---|---|---|
 | `stays-green` | a counted `pass` at the start commit itself, and the latest counted envelope is a `pass` | the latest counted envelope is a `fail` or an `error` | no counted envelope, the latest is a `skip`, or no `pass` at the start commit | |
-| `red-first` | a counted `fail` followed by a counted `pass`, and the latest counted envelope is a `pass` | no `pass` follows the last `fail`, or an `error` is latest after the green | no counted `fail` (green without red; an `error` or a `skip` is not red), nothing counted, or a `skip` latest after the green | |
+| `red-first` | the last counted `fail` is followed by a counted `pass` at a strict descendant of its commit, and the latest counted envelope is a `pass` | no `pass` follows the last `fail`, or an `error` is latest after the green | no counted `fail` (green without red; an `error` or a `skip` is not red), nothing counted, a `skip` latest after the green, or the only `pass` beside the last `fail` is at the same commit (`red-and-green-at-one-commit`, in either order: a rerun is no red-then-green) | |
 | `static` | the latest counted envelope is a `pass` with `exit: 0` | the latest is a `fail` or an `error` | nothing counted, the latest is a `skip`, or a `pass` with another exit | |
 | `measurement`, `manual`, `runtime` | | | | `not-decidable`, reason `kind-needs-review` |
 | `post-deploy` | | | | `pending-post-deploy` |
@@ -100,7 +110,8 @@ A row of the first three kinds without an evidence file is `unproven`
 `post-deploy` row are listed as counted or ignored but decide nothing. The
 `reason` codes are `pass-at-start-and-latest-pass`, `red-then-green`,
 `latest-pass-exit-zero`, `latest-fail`, `latest-error`, `latest-skip`,
-`no-pass-at-start`, `no-red`, `no-green-after-red`, `pass-exit-not-zero`,
+`no-pass-at-start`, `no-red`, `no-green-after-red`,
+`red-and-green-at-one-commit`, `pass-exit-not-zero`,
 `no-counted-evidence`, `no-evidence-file`, `unordered-evidence`,
 `kind-needs-review` and `post-deploy`.
 
@@ -146,5 +157,8 @@ a `stays-green` row adds `probe: "not-checked"`, a `red-first` row
 - The CI run of a `producer: ci` envelope: the row is marked `ci_unverified`
   and the envelope counts.
 - Measured values, manual and runtime evidence: those rows are for review.
-- Whether `testplan.yaml` and `bindings.yaml` on disk equal the merged copies:
-  they are read from the spec directory as `lint` reads them.
+- `bindings.yaml`: it is read from the spec directory, as `lint` reads it;
+  that a selector was changed only through `bind` is the `bindings-log` lint
+  rule's question.
+- Whether the evidence files are the ones `--head` holds: they are read from
+  the spec directory on disk.

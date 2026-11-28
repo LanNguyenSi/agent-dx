@@ -11,7 +11,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { runBounded } from "../canonical/helpers.js";
 import { REMOTE_MAIN, SPEC_REL } from "../lint/git-helpers.js";
-import { COMMANDS, scenario, writeEvidence, type Scenario } from "./helpers.js";
+import {
+  COMMANDS,
+  scenario,
+  writeEvidence,
+  type EnvelopeFields,
+  type Scenario,
+} from "./helpers.js";
 
 const cliPath = fileURLToPath(new URL("../../dist/cli.js", import.meta.url));
 
@@ -61,29 +67,33 @@ function specFile(s: Scenario, name: string): string {
 }
 
 describe("spec-gate closure: refusals", { timeout: 60_000 }, () => {
-  it("refuses a spec.md that does not load", async () => {
-    const s = await scenario();
-    fs.writeFileSync(specFile(s, "spec.md"), "no frontmatter\n");
-    await refused(argsOf(s), "[a-z-]+");
+  it("refuses a spec.md at the merged spec commit that is not a valid spec", async () => {
+    const s = await scenario({ spec: "no frontmatter\n" });
+    await refused(argsOf(s), "spec-invalid");
   });
 
-  it("refuses a testplan.yaml that does not load", async () => {
-    const s = await scenario();
-    fs.writeFileSync(specFile(s, "testplan.yaml"), "- id: TP-1\n");
-    await refused(argsOf(s), "[a-z-]+");
+  it("refuses a testplan.yaml at the merged spec commit that does not parse", async () => {
+    const s = await scenario({ plan: "- id: TP-1\n" });
+    await refused(argsOf(s), "testplan-invalid");
   });
 
-  it("refuses a missing bindings.yaml", async () => {
+  it("refuses a bindings.yaml that does not parse", async () => {
     const s = await scenario();
-    fs.rmSync(specFile(s, "bindings.yaml"));
-    await refused(argsOf(s), "input-missing");
+    fs.writeFileSync(specFile(s, "bindings.yaml"), "TP-1: [\n");
+    await refused(argsOf(s), "invalid-yaml");
+  });
+
+  it("refuses a bindings.yaml that is not valid", async () => {
+    const s = await scenario();
+    fs.writeFileSync(specFile(s, "bindings.yaml"), "TP-1:\n  status: bogus\n");
+    await refused(argsOf(s), "invalid-value");
   });
 
   it("refuses an evidence file that does not parse", async () => {
     const s = await scenario();
     fs.mkdirSync(specFile(s, "evidence"));
     fs.writeFileSync(specFile(s, "evidence/TP-2.jsonl"), "{not json\n");
-    await refused(argsOf(s), "[a-z-]+");
+    await refused(argsOf(s), "invalid-json");
   });
 
   it("refuses a --start that is not a full commit id", async () => {
@@ -133,40 +143,35 @@ describe("spec-gate closure: refusals", { timeout: 60_000 }, () => {
   });
 
   it("refuses a commands_ref that is not on --default-ref", async () => {
-    const s = await scenario();
-    const text = fs
-      .readFileSync(specFile(s, "spec.md"), "utf8")
-      .replace(/^commands_ref: .*$/m, `commands_ref: ${s.a}`);
-    fs.writeFileSync(specFile(s, "spec.md"), text);
+    const s = await scenario({
+      commandsRef: async ({ repo, c1 }) => {
+        await repo.checkout("side", c1);
+        return repo.commit({ "side.txt": "x\n" }, "side");
+      },
+    });
     await refused(argsOf(s), "commands-ref-untrusted");
   });
 
   it("refuses a command set missing at commands_ref", async () => {
-    const s = await scenario();
-    const text = fs
-      .readFileSync(specFile(s, "spec.md"), "utf8")
-      .replace(/^commands_ref: .*$/m, `commands_ref: ${s.c0}`);
-    fs.writeFileSync(specFile(s, "spec.md"), text);
+    const s = await scenario({ commandsRef: async ({ c0 }) => c0 });
     await refused(argsOf(s), "commands-file-missing");
   });
 
   it("refuses a command set that does not parse at commands_ref", async () => {
-    const s = await scenario();
-    await s.repo.checkout("main");
-    const bad = await s.repo.commit(
-      { ".spec-gate/commands.yaml": "commands: [\n" },
-      "broken commands",
-    );
-    const fixed = await s.repo.commit(
-      { ".spec-gate/commands.yaml": COMMANDS },
-      "fixed commands",
-    );
-    await s.repo.setRef(REMOTE_MAIN, fixed);
-    const text = fs
-      .readFileSync(specFile(s, "spec.md"), "utf8")
-      .replace(/^commands_ref: .*$/m, `commands_ref: ${bad}`);
-    fs.writeFileSync(specFile(s, "spec.md"), text);
-    await refused(argsOf(s, { head: fixed }), "commands-file-invalid");
+    const s = await scenario({
+      commandsRef: async ({ repo }) => {
+        const bad = await repo.commit(
+          { ".spec-gate/commands.yaml": "commands: [\n" },
+          "broken commands",
+        );
+        await repo.commit(
+          { ".spec-gate/commands.yaml": COMMANDS },
+          "fixed commands",
+        );
+        return bad;
+      },
+    });
+    await refused(argsOf(s), "commands-file-invalid");
   });
 
   it("exits 2 without --start (a usage error)", async () => {
@@ -255,6 +260,52 @@ describe("spec-gate closure: report and exit", { timeout: 60_000 }, () => {
     expect(JSON.parse(run.stdout).counts.failed).toBe(1);
   });
 
+  const STAYS_GREEN_ONLY =
+    "- id: TP-2\n  covers: [AC-1]\n  kind: stays-green\n" +
+    '  claim: "login keeps working"\n  probe_hint: "break the login handler"\n';
+
+  /** Merges a side branch cut from the start into the head; its commit. */
+  async function mergedSide(s: Scenario): Promise<string> {
+    await s.repo.checkout("side", s.spec);
+    const side = await s.repo.commit({ "side.txt": "x\n" }, "side");
+    await s.repo.checkout("work");
+    await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge side", "side");
+    return side;
+  }
+
+  const lastOf: [string, EnvelopeFields][] = [
+    ["a failed row", { commit: "", result: "fail" }],
+    ["an unproven row", { commit: "", result: "skip", command: [] }],
+  ];
+  for (const [title, last] of lastOf) {
+    it(`keeps exit 1 for ${title} when an envelope on a merged side branch is added`, async () => {
+      const s = await scenario({ plan: STAYS_GREEN_ONLY });
+      const side = await mergedSide(s);
+      const own: EnvelopeFields[] = [
+        { commit: s.spec },
+        { ...last, commit: s.b },
+      ];
+      writeEvidence(s.repo, "TP-2", own);
+      const control = await cli(argsOf(s));
+      expect(control.code).toBe(1);
+      writeEvidence(s.repo, "TP-2", [
+        ...own,
+        { commit: side, result: "skip", command: [], producer: "local" },
+      ]);
+      const attack = await cli(argsOf(s));
+      expect(attack.code).toBe(1);
+      const report = JSON.parse(attack.stdout) as {
+        ok: boolean;
+        rows: { state: string; reason: string }[];
+      };
+      expect(report.ok).toBe(false);
+      expect(report.rows[0]).toMatchObject({
+        state: "unproven",
+        reason: "unordered-evidence",
+      });
+    });
+  }
+
   it("exits 0 for a plan of review-decided and post-deploy rows only", async () => {
     const plan =
       "- id: TP-5\n  covers: [AC-1]\n  kind: manual\n" +
@@ -262,6 +313,7 @@ describe("spec-gate closure: report and exit", { timeout: 60_000 }, () => {
       "- id: TP-7\n  covers: [AC-1]\n  kind: post-deploy\n" +
       '  claim: "no 5xx after deploy"\n  check: "error rate for 30 minutes"\n  environment: "production"\n';
     const s = await scenario({ plan, bindings: "{}\n" });
+    fs.rmSync(specFile(s, "bindings.yaml"));
     const run = await cli(argsOf(s));
     expect(run.stderr).toBe("");
     expect(run.code).toBe(0);

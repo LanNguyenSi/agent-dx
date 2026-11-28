@@ -5,8 +5,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { REMOTE_MAIN } from "../lint/git-helpers.js";
+import { runClosure } from "../../src/closure/index.js";
+import { REMOTE_MAIN, Repo } from "../lint/git-helpers.js";
 import {
+  COMMANDS,
+  PLAN,
+  closureIn,
   closureSpecFiles,
   reportIn,
   rowOf,
@@ -97,7 +101,7 @@ describe("closure: stays-green", { timeout: 60_000 }, () => {
     expect(rowOf(reportIn(s), "TP-2").probe).toBe("not-checked");
   });
 
-  it("is not decidable when counted envelopes lie on two unrelated branches merged into the head", async () => {
+  it("is unproven when counted envelopes lie on two unrelated branches merged into the head", async () => {
     const s = await scenario();
     await s.repo.checkout("p1", s.spec);
     const p = await s.repo.commit({ "p1.txt": "1\n" }, "p1");
@@ -112,9 +116,42 @@ describe("closure: stays-green", { timeout: 60_000 }, () => {
     const row = rowOf(reportIn(s), "TP-2");
     expect(row.counted).toBe(3);
     expect({ state: row.state, reason: row.reason }).toEqual({
-      state: "not-decidable",
+      state: "unproven",
       reason: "unordered-evidence",
     });
+  });
+
+  it("orders by line at one commit and one time", async () => {
+    expect(
+      await verdict("TP-2", (s) => [
+        { commit: s.spec, result: "fail", time: "2026-01-01T00:00:00Z" },
+        { commit: s.spec, time: "2026-01-01T00:00:00Z" },
+      ]),
+    ).toEqual({ state: "proven", reason: "pass-at-start-and-latest-pass" });
+    expect(
+      await verdict("TP-2", (s) => [
+        { commit: s.spec, time: "2026-01-01T00:00:00Z" },
+        { commit: s.spec, result: "fail", time: "2026-01-01T00:00:00Z" },
+      ]),
+    ).toEqual({ state: "failed", reason: "latest-fail" });
+  });
+
+  it("is unproven when an envelope with a time that does not parse shares its commit with another", async () => {
+    expect(
+      await verdict("TP-2", (s) => [
+        { commit: s.spec, result: "fail" },
+        { commit: s.spec, time: "2026-99-99T99:99:99Z" },
+      ]),
+    ).toEqual({ state: "unproven", reason: "unordered-evidence" });
+  });
+
+  it("orders an envelope with a time that does not parse by its commit alone", async () => {
+    expect(
+      await verdict("TP-2", (s) => [
+        { commit: s.spec },
+        { commit: s.b, time: "2026-99-99T99:99:99Z" },
+      ]),
+    ).toEqual({ state: "proven", reason: "pass-at-start-and-latest-pass" });
   });
 });
 
@@ -163,6 +200,34 @@ describe("closure: red-first", { timeout: 60_000 }, () => {
     ).toEqual({ state: "failed", reason: "latest-error" });
   });
 
+  it("is unproven for a fail and a later pass at one commit", async () => {
+    expect(
+      await verdict("TP-1", (s) => [
+        { commit: s.b, result: "fail", time: "2026-01-01T00:00:01Z" },
+        { commit: s.b, time: "2026-01-01T00:00:02Z" },
+      ]),
+    ).toEqual({ state: "unproven", reason: "red-and-green-at-one-commit" });
+  });
+
+  it("is unproven for a pass and a later fail at one commit", async () => {
+    expect(
+      await verdict("TP-1", (s) => [
+        { commit: s.b, time: "2026-01-01T00:00:01Z" },
+        { commit: s.b, result: "fail", time: "2026-01-01T00:00:02Z" },
+      ]),
+    ).toEqual({ state: "unproven", reason: "red-and-green-at-one-commit" });
+  });
+
+  it("is proven when the green at a later commit follows a red with a rerun at one commit", async () => {
+    expect(
+      await verdict("TP-1", (s) => [
+        { commit: s.a, result: "fail", time: "2026-01-01T00:00:01Z" },
+        { commit: s.a, time: "2026-01-01T00:00:02Z" },
+        { commit: s.b, time: "2026-01-01T00:00:03Z" },
+      ]),
+    ).toEqual({ state: "proven", reason: "red-then-green" });
+  });
+
   it("is unproven with nothing counted", async () => {
     expect(
       await verdict("TP-1", (s) => [{ commit: s.a, dirty: true }]),
@@ -190,6 +255,18 @@ describe("closure: static", { timeout: 60_000 }, () => {
         { commit: s.b, result: "fail" },
       ]),
     ).toEqual({ state: "failed", reason: "latest-fail" });
+  });
+
+  it("counts a null-selector envelope although the row's binding carries a selector", async () => {
+    const s = await scenario({
+      bindings:
+        "TP-1:\n  status: new\n  selector: token rejected\n" +
+        "TP-2:\n  status: existing\n  selector: login works\n" +
+        "TP-3:\n  status: existing\n  selector: something\n",
+    });
+    writeEvidence(s.repo, "TP-3", [{ commit: s.b, selector: null }]);
+    const row = rowOf(reportIn(s), "TP-3");
+    expect([row.state, row.counted, row.ignored]).toEqual(["proven", 1, []]);
   });
 
   it("is not proven by a pass with a non-zero exit", async () => {
@@ -289,11 +366,11 @@ describe("closure: producer marks", { timeout: 60_000 }, () => {
 });
 
 describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
-  it("is looked up on --default-ref: a later spec change on the work branch does not move it", async () => {
+  it("judges the test plan at the merged spec commit: a kind changed on the work branch changes nothing", async () => {
     const s = await scenario();
     const plan = fs
       .readFileSync(path.join(s.repo.spec, "testplan.yaml"), "utf8")
-      .replace("login keeps working", "login still works");
+      .replace("kind: red-first", "kind: post-deploy");
     const changed = await s.repo.commit(
       { "specs/s1/testplan.yaml": plan },
       "edit the plan on the work branch",
@@ -301,6 +378,46 @@ describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
     const report = reportIn(s);
     expect(report.spec_commit).toBe(s.spec);
     expect(report.head).toBe(changed);
+    expect(rowOf(report, "TP-1").kind).toBe("red-first");
+    expect(rowOf(report, "TP-1").state).toBe("unproven");
+    expect(report.ok).toBe(false);
+  });
+
+  it("reports every row of the merged plan when rows are removed on disk", async () => {
+    const s = await scenario();
+    fs.writeFileSync(path.join(s.repo.spec, "testplan.yaml"), "[]\n");
+    const report = reportIn(s);
+    expect(report.rows.map((r) => r.id)).toEqual([
+      "TP-1",
+      "TP-2",
+      "TP-3",
+      "TP-4",
+      "TP-5",
+      "TP-6",
+      "TP-7",
+    ]);
+    expect(report.ok).toBe(false);
+  });
+
+  it("reads commands_ref, the id and the status at the merged spec commit, not on disk", async () => {
+    const s = await scenario();
+    const spec = fs
+      .readFileSync(path.join(s.repo.spec, "spec.md"), "utf8")
+      .replace(/^commands_ref: .*$/m, `commands_ref: ${s.c0}`)
+      .replace(/^status: .*$/m, "status: draft")
+      .replace(/^id: .*$/m, "id: other-spec");
+    fs.writeFileSync(path.join(s.repo.spec, "spec.md"), spec);
+    writeEvidence(s.repo, "TP-2", [{ commit: s.spec }]);
+    const report = reportIn(s);
+    expect(report.spec).toBe("tiny-valid");
+    expect(rowOf(report, "TP-2").state).toBe("proven");
+  });
+
+  it("ignores a broken spec.md and testplan.yaml on disk", async () => {
+    const s = await scenario();
+    fs.writeFileSync(path.join(s.repo.spec, "spec.md"), "no frontmatter\n");
+    fs.writeFileSync(path.join(s.repo.spec, "testplan.yaml"), "- id: TP-1\n");
+    expect(reportIn(s).rows).toHaveLength(7);
   });
 
   it("is the latest change on the default branch, also when the start commit is later", async () => {
@@ -320,7 +437,88 @@ describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
     const report = reportIn(s, { start: later, head: tip });
     expect(report.spec_commit).toBe(s.spec);
   });
+
+  it("is the merge commit when the spec came in through a merge, and a start at the branch commit is refused", async () => {
+    const repo = await Repo.create();
+    await repo.commit({ "README.md": "one\n" }, "init");
+    const c1 = await repo.commit(
+      { ".spec-gate/commands.yaml": COMMANDS },
+      "commands",
+    );
+    await repo.checkout("specpr", c1);
+    const branchCommit = await repo.commit(
+      closureSpecFiles({ ref: c1 }),
+      "spec",
+    );
+    await repo.checkout("main");
+    await repo.commit({ "other.txt": "x\n" }, "main moves on");
+    await repo.sh("merge", "-q", "--no-ff", "-m", "merge spec", "specpr");
+    const merge = await repo.head();
+    await repo.setRef(REMOTE_MAIN, merge);
+    const run = (start: string) =>
+      runClosure(repo.spec, { repo: repo.dir, defaultRef: REMOTE_MAIN, start });
+    const ok = run(merge);
+    expect(ok.ok && ok.report.spec_commit).toBe(merge);
+    const refused = run(branchCommit);
+    expect(refused.ok ? "" : refused.code).toBe("start-before-spec");
+  });
+
+  it("moves with a test-plan-only change on the default branch after the start", async () => {
+    const s = await scenario();
+    await s.repo.checkout("main");
+    const plan = `${PLAN}- id: TP-8\n  covers: [AC-1]\n  kind: static\n  claim: "lint passes"\n  check_command_ref: typecheck\n`;
+    const tip = await s.repo.commit(
+      { "specs/s1/testplan.yaml": plan },
+      "plan only",
+    );
+    await s.repo.setRef(REMOTE_MAIN, tip);
+    const result = closureIn(s, { start: s.spec, head: tip });
+    expect(result.ok ? "" : result.code).toBe("start-before-spec");
+  });
 });
+
+describe(
+  "closure: bindings and the spec directory",
+  { timeout: 60_000 },
+  () => {
+    it("treats a missing bindings.yaml as empty: selector rows count nothing", async () => {
+      const s = await scenario();
+      fs.rmSync(path.join(s.repo.spec, "bindings.yaml"));
+      writeEvidence(s.repo, "TP-2", [{ commit: s.spec }]);
+      writeEvidence(s.repo, "TP-3", [{ commit: s.b }]);
+      const report = reportIn(s);
+      expect(rowOf(report, "TP-2").ignored).toEqual([
+        { line: 1, reason: "command-unknown" },
+      ]);
+      expect(rowOf(report, "TP-2").state).toBe("unproven");
+      expect(rowOf(report, "TP-3").state).toBe("proven");
+    });
+
+    it("refuses a spec directory that is not a directory", async () => {
+      const s = await scenario();
+      const file = path.join(s.repo.dir, "specs", "file");
+      fs.writeFileSync(file, "x\n");
+      const result = runClosure(file, {
+        repo: s.repo.dir,
+        defaultRef: REMOTE_MAIN,
+        start: s.spec,
+      });
+      expect(result.ok ? "" : result.code).toBe("spec-dir-invalid");
+    });
+
+    it("refuses a spec directory that is a symbolic link", async () => {
+      const s = await scenario();
+      const link = path.join(s.repo.dir, "specs", "link");
+      fs.symlinkSync("s1", link);
+      const result = runClosure(link, {
+        repo: s.repo.dir,
+        defaultRef: REMOTE_MAIN,
+        start: s.spec,
+      });
+      expect(result.ok ? "" : result.code).toBe("spec-dir-invalid");
+    });
+  },
+);
 
 describe("closure: unknown rows", { timeout: 60_000 }, () => {
   it("lists an evidence file of no test-plan row and does not refuse", async () => {

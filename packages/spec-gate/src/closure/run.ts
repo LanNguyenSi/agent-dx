@@ -1,8 +1,10 @@
 /**
  * `spec-gate closure`: the per-row closing report. Read-only and offline:
- * the spec directory is read from disk the way lint reads it, the history
- * and `.spec-gate/commands.yaml` at `commands_ref` from git through the
- * hardened runner; nothing is written and nothing is fetched.
+ * `spec.md` and `testplan.yaml` are read at the merged spec commit, the
+ * history and `.spec-gate/commands.yaml` at `commands_ref` from git, all
+ * through the hardened runner; only `bindings.yaml` and `evidence/` are
+ * read from the spec directory on disk. Nothing is written and nothing is
+ * fetched.
  *
  * An envelope counts only when it can be attributed to the work: phase
  * `closure`, a commit on `start..head` (the start commit or a descendant
@@ -16,6 +18,7 @@ import path from "node:path";
 import {
   expectedCommandsDigest,
   parseSpec,
+  parseTestPlan,
   type Bindings,
   type EvidenceEnvelope,
   type TestPlanRow,
@@ -134,7 +137,9 @@ function ignoreReason(
 /**
  * The counted envelopes in order, earliest first: by commit ancestry, and
  * at one commit by `time` (then by line). `null` when two of them lie at
- * commits neither of which is an ancestor of the other.
+ * commits neither of which is an ancestor of the other, or when an
+ * envelope that shares its commit with another has a `time` that does not
+ * parse.
  */
 function ordered(
   counted: readonly { env: EvidenceEnvelope; line: number }[],
@@ -147,6 +152,21 @@ function ordered(
       const b = commits[j]!;
       if (!ancestry.is(a, b) && !ancestry.is(b, a)) return null;
     }
+  }
+  // At one commit only `time` orders; a time that does not parse orders
+  // nothing there.
+  const perCommit = new Map<string, number>();
+  for (const { env } of counted) {
+    perCommit.set(env.commit, (perCommit.get(env.commit) ?? 0) + 1);
+  }
+  if (
+    counted.some(
+      ({ env }) =>
+        (perCommit.get(env.commit) ?? 0) > 1 &&
+        Number.isNaN(Date.parse(env.time)),
+    )
+  ) {
+    return null;
   }
   return [...counted].sort((x, y) => {
     if (x.env.commit !== y.env.commit) {
@@ -191,16 +211,13 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
       findings.push(finding);
     },
   };
+  // Only bindings.yaml and evidence/ are read from disk; spec.md and
+  // testplan.yaml are read at the merged spec commit below.
   const inputs = loadInputs(specDir, sink);
-  for (const [file, input] of [
-    [SPEC_FILE, inputs.spec],
-    [TESTPLAN_FILE, inputs.testplan],
-    [BINDINGS_FILE, inputs.bindings],
-  ] as const) {
-    if (input.state === "ok") continue;
+  if (inputs.bindings.state === "failed") {
     refuse(
-      input.state === "absent" ? "input-missing" : loadFailure(findings, file),
-      `${file} does not load`,
+      loadFailure(findings, BINDINGS_FILE),
+      `${BINDINGS_FILE} does not load`,
     );
   }
   if (inputs.evidence?.state === "failed") {
@@ -209,8 +226,8 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
       "evidence/ does not load: no row could be judged from half-read evidence (run lint for the findings)",
     );
   }
-  const spec = inputs.spec.state === "ok" ? inputs.spec.value : undefined;
-  const plan = inputs.testplan.state === "ok" ? inputs.testplan.value : [];
+  // A missing bindings.yaml binds nothing: a row that needs a selector then
+  // has no command and counts no envelope.
   const bindings: Bindings =
     inputs.bindings.state === "ok" ? inputs.bindings.value : {};
   const loadedEvidence = inputs.evidence;
@@ -255,28 +272,48 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
       `no commit on --default-ref changed ${specRel}/${SPEC_FILE} or ${specRel}/${TESTPLAN_FILE}`,
     );
   }
-  // What spec.md holds at the merged spec commit: a status, or why not.
-  let merged: string;
-  try {
-    const parsed = parseSpec(
-      readBlobAtCommit(repo, specCommit, `${specRel}/${SPEC_FILE}`),
-    );
-    merged = parsed.ok
-      ? `status ${parsed.value.frontmatter.status}`
-      : "not a valid spec";
-  } catch (err) {
-    if (!(err instanceof LintGitError)) throw err;
-    if (err.code === "git-failed" || err.code === "output-too-large") {
-      throw err;
+  // spec.md and testplan.yaml as the merged spec commit holds them: the
+  // copies that are judged, whatever the work tree holds.
+  const atSpecCommit = (file: string): string | undefined => {
+    try {
+      return readBlobAtCommit(repo, specCommit, `${specRel}/${file}`);
+    } catch (err) {
+      if (!(err instanceof LintGitError)) throw err;
+      if (
+        err.code === "git-failed" ||
+        err.code === "output-too-large" ||
+        err.code === "object-unreadable"
+      ) {
+        throw err;
+      }
+      return undefined;
     }
-    merged = "missing or not a regular UTF-8 file";
+  };
+  const specText = atSpecCommit(SPEC_FILE);
+  const parsedSpec = specText === undefined ? undefined : parseSpec(specText);
+  if (parsedSpec === undefined || !parsedSpec.ok) {
+    refuse(
+      "spec-invalid",
+      `${specRel}/${SPEC_FILE} at the merged spec commit ${specCommit} is missing, not a regular UTF-8 file or not a valid spec`,
+    );
   }
-  if (merged !== "status proposed") {
+  const spec = parsedSpec.value;
+  if (spec.frontmatter.status !== "proposed") {
     refuse(
       "spec-not-proposed",
-      `${specRel}/${SPEC_FILE} at the merged spec commit ${specCommit} is ${merged}; closure needs status proposed`,
+      `${specRel}/${SPEC_FILE} at the merged spec commit ${specCommit} has status ${spec.frontmatter.status}; closure needs status proposed`,
     );
   }
+  const planText = atSpecCommit(TESTPLAN_FILE);
+  const parsedPlan =
+    planText === undefined ? undefined : parseTestPlan(planText);
+  if (parsedPlan === undefined || !parsedPlan.ok) {
+    refuse(
+      "testplan-invalid",
+      `${specRel}/${TESTPLAN_FILE} at the merged spec commit ${specCommit} is missing, not a regular UTF-8 file or not a valid test plan`,
+    );
+  }
+  const plan = parsedPlan.value;
 
   // The start and head commits.
   const ancestry = new History(repo);
@@ -296,7 +333,7 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
   // The command set at commands_ref, trusted only on the default branch.
   const templates = templatesAtCommandsRef(
     repo,
-    spec!.frontmatter.commands_ref,
+    spec.frontmatter.commands_ref,
     defaultCommit,
   );
   if (!templates.ok) refuse(templates.code, templates.message);
@@ -324,7 +361,7 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
       ? ordered(counted, ancestry)
       : counted;
     if (order === null) {
-      verdict = { state: "not-decidable", reason: "unordered-evidence" };
+      verdict = { state: "unproven", reason: "unordered-evidence" };
     } else {
       const list: CountedEnvelope[] = order.map(({ env }) => ({
         commit: env.commit,
@@ -366,7 +403,7 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
     .sort((a, b) => tpNumber(a) - tpNumber(b));
   return {
     format: CLOSURE_FORMAT,
-    spec: spec!.frontmatter.id,
+    spec: spec.frontmatter.id,
     start,
     head,
     spec_commit: specCommit,

@@ -651,13 +651,13 @@ program
 program
   .command("closure")
   .description(
-    "print one JSON report line (spec-gate-closure/1) that says for every test-plan row whether the committed " +
-      "evidence proves it at or after the start commit, read-only and offline; exits 0 when no row is failed or " +
+    "print one JSON report line (spec-gate-closure/1) that says for every test-plan row of the merged spec whether " +
+      "the evidence files in the spec directory prove it at or after the start commit, read-only and offline; exits 0 when no row is failed or " +
       "unproven, 1 when one is, 2 on a usage error or refusal",
   )
   .argument(
     "<spec-dir>",
-    "directory with spec.md, testplan.yaml, bindings.yaml and evidence/",
+    "the spec directory inside --repo; bindings.yaml and evidence/ are read from it, spec.md and testplan.yaml at the merged spec commit",
   )
   .requiredOption(
     "--repo <dir>",
