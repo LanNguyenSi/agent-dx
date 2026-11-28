@@ -1060,14 +1060,24 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-/** A remote whose upload-pack never answers; its child pid is written to a file. */
-async function makeHangingRemote(): Promise<{ fx: Fixture; pidFile: string }> {
+/**
+ * A remote whose upload-pack answers its first `answered` calls through the
+ * real git and then never answers; the pid of the sleeping child is written
+ * to a file. `answered: 0` hangs `ls-remote`, `answered: 1` lets `ls-remote`
+ * through and hangs the fetch.
+ */
+async function makeHangingRemote(
+  answered = 0,
+): Promise<{ fx: Fixture; pidFile: string }> {
   const fx = await makeFixture();
   const pidFile = path.join(fx.root, "hang.pid");
+  const counter = path.join(fx.root, "calls.count");
   const script = path.join(fx.root, "hang.sh");
   fs.writeFileSync(
     script,
-    `#!/bin/sh\nsleep 20 &\necho $! > "${pidFile}"\nwait\n`,
+    `#!/bin/sh\nn=$(cat "${counter}" 2>/dev/null || echo 0)\nn=$((n + 1))\necho $n > "${counter}"\n` +
+      `if [ $n -le ${answered} ]; then exec git upload-pack "$@"; fi\n` +
+      `sleep 20 &\necho $! > "${pidFile}"\nwait\n`,
     { mode: 0o755 },
   );
   await git(fx.repo, "config", "remote.origin.uploadpack", script);
@@ -1078,12 +1088,13 @@ async function expectHangTimedOut(
   run: CliRun,
   pidFile: string,
   started: number,
+  code: "no-remote" | "fetch-failed" = "no-remote",
 ): Promise<void> {
   expect(run.code).toBe(2);
   expect(run.stdout).toBe("");
-  expect(run.stderr).toMatch(/no-remote|fetch-failed/);
+  expect(run.stderr).toContain(`spec-gate: ${code}:`);
   expect(run.stderr).toContain("within 1 seconds");
-  expect(Date.now() - started).toBeLessThan(HELPER_TIMEOUT_MS);
+  expect(Date.now() - started).toBeLessThan(10_000);
   const hung = Number(fs.readFileSync(pidFile, "utf8"));
   for (let i = 0; i < 50 && pidAlive(hung); i++) {
     await new Promise((r) => setTimeout(r, 100));
@@ -1112,6 +1123,31 @@ it("--git-timeout 1 stops a hanging remote after one second and kills its proces
     fx.repo,
   );
   await expectHangTimedOut(run, pidFile, started);
+  expect(fs.existsSync(path.join(fx.repo, "specs"))).toBe(false);
+}, 60_000);
+
+it("--git-timeout 1 stops a fetch that hangs after ls-remote answered", async () => {
+  const { fx, pidFile } = await makeHangingRemote(1);
+  const ticket = writeTicket(fx.repo);
+  const started = Date.now();
+  const run = await runCli(
+    [
+      "intake",
+      "file",
+      ticket,
+      "--id",
+      "sg-hang-fetch",
+      "--repo",
+      fx.repo,
+      "--git-timeout",
+      "1",
+    ],
+    fx.repo,
+  );
+  await expectHangTimedOut(run, pidFile, started, "fetch-failed");
+  expect(
+    fs.readFileSync(path.join(fx.root, "calls.count"), "utf8").trim(),
+  ).toBe("2");
   expect(fs.existsSync(path.join(fx.repo, "specs"))).toBe(false);
 }, 60_000);
 

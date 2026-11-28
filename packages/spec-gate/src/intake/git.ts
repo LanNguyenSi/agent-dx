@@ -13,12 +13,13 @@ import {
   gitConfigOverrides,
 } from "../canonical/git-hardening.js";
 import { IntakeError } from "./errors.js";
+import { DEFAULT_GIT_TIMEOUT_SECONDS } from "./timeout.js";
 
 /**
  * The default timeout of a `git` call, in milliseconds; a run can set another
  * one with `--git-timeout` or `SPEC_GATE_GIT_TIMEOUT` (see `timeout.ts`).
  */
-export const GIT_TIMEOUT_MS = 15_000;
+export const GIT_TIMEOUT_MS = DEFAULT_GIT_TIMEOUT_SECONDS * 1000;
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 /**
@@ -161,20 +162,31 @@ export function runProcess(
 }
 
 /**
- * One git call in `repoDir`; a failure to run is a `ProcessFailure`. The
- * calls carry the overrides every git call of the package carries, except
- * `protocol.allow=never`: intake fetches from the remote on purpose.
+ * One git call in `repoDir` with a required timeout; every intake helper goes
+ * through this, so a call site that drops the timeout does not compile. A
+ * failure to run is a `ProcessFailure`. The calls carry the overrides every
+ * git call of the package carries, except `protocol.allow=never`: intake
+ * fetches from the remote on purpose.
  */
-export function runGit(
+function runGitWithin(
   repoDir: string,
   args: readonly string[],
-  timeoutMs: number = GIT_TIMEOUT_MS,
+  timeoutMs: number,
 ): Promise<ProcessRun> {
   const overrides = gitConfigOverrides({ fetching: true });
   return runProcess("git", ["-C", repoDir, ...overrides, ...args], {
     env: gitEnv(),
     timeoutMs,
   });
+}
+
+/** `runGitWithin` with the default timeout, for callers outside intake. */
+export function runGit(
+  repoDir: string,
+  args: readonly string[],
+  timeoutMs: number = GIT_TIMEOUT_MS,
+): Promise<ProcessRun> {
+  return runGitWithin(repoDir, args, timeoutMs);
 }
 
 /** Runs git and returns stdout, or null on a non-zero status or any failure. */
@@ -184,7 +196,7 @@ async function gitOrNull(
   timeoutMs: number,
 ): Promise<string | null> {
   try {
-    const run = await runGit(repoDir, args, timeoutMs);
+    const run = await runGitWithin(repoDir, args, timeoutMs);
     return run.status === 0 ? run.stdout : null;
   } catch {
     return null;
@@ -199,7 +211,7 @@ function failureReason(err: unknown): string {
 /** The git toplevel of `cwd`, or a `no-git-toplevel` error. */
 export async function gitToplevel(
   cwd: string,
-  timeoutMs: number = GIT_TIMEOUT_MS,
+  timeoutMs: number,
 ): Promise<string> {
   const out = await gitOrNull(cwd, ["rev-parse", "--show-toplevel"], timeoutMs);
   const toplevel = out?.trim() ?? "";
@@ -222,7 +234,7 @@ const REMOTE_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
 export async function requireConfiguredRemote(
   repoDir: string,
   remote: string,
-  timeoutMs: number = GIT_TIMEOUT_MS,
+  timeoutMs: number,
 ): Promise<void> {
   if (!REMOTE_NAME_RE.test(remote)) {
     throw new IntakeError(
@@ -254,11 +266,11 @@ const HEADS = "refs/heads/";
 export async function remoteDefaultBranch(
   repoDir: string,
   remote: string,
-  timeoutMs: number = GIT_TIMEOUT_MS,
+  timeoutMs: number,
 ): Promise<string> {
   let out: string;
   try {
-    const run = await runGit(
+    const run = await runGitWithin(
       repoDir,
       ["ls-remote", "--symref", "--end-of-options", remote, "HEAD"],
       timeoutMs,
@@ -338,7 +350,7 @@ export async function remoteHeadCommit(
   repoDir: string,
   remote: string,
   branch: string,
-  timeoutMs: number = GIT_TIMEOUT_MS,
+  timeoutMs: number,
 ): Promise<string> {
   const failed = (why: string): IntakeError =>
     new IntakeError(
@@ -347,7 +359,7 @@ export async function remoteHeadCommit(
     );
   let fetchHead: string;
   try {
-    const fetched = await runGit(
+    const fetched = await runGitWithin(
       repoDir,
       [
         "-c",
@@ -369,7 +381,7 @@ export async function remoteHeadCommit(
     if (fetched.status !== 0) {
       throw failed(`git fetch exited with status ${fetched.status}`);
     }
-    const where = await runGit(
+    const where = await runGitWithin(
       repoDir,
       ["rev-parse", "--git-path", "FETCH_HEAD"],
       timeoutMs,
@@ -402,7 +414,7 @@ export async function remoteHeadCommit(
 export async function remoteBaseCommit(
   repoDir: string,
   remote: string,
-  timeoutMs: number = GIT_TIMEOUT_MS,
+  timeoutMs: number,
 ): Promise<string> {
   await requireConfiguredRemote(repoDir, remote, timeoutMs);
   const branch = await remoteDefaultBranch(repoDir, remote, timeoutMs);
