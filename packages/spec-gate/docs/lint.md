@@ -406,9 +406,11 @@ that is `fetch-depth: 0`, and its default of one commit is a shallow
 repository, which lint, propose and repo-check refuse with exit 2. `--base` is
 optional; given, it is checked to lie on the default branch and changes
 nothing else, and a job that passes `--base` without `--default-ref` exits 2.
-A pull request whose history crossed the default branch's (several merge
-bases) also exits 2 until the default branch is merged into it or it is
-rebased onto it.
+When the job checks out the head commit of the pull request, a pull request
+whose history crossed the default branch's (several merge bases) also exits 2
+until the default branch is merged into it or it is rebased onto it. With the
+merge commit checked out, made against the default commit the job names,
+that commit is an ancestor of `HEAD` and the one merge base.
 
 The config. With git inputs `.spec-gate/config.yaml` is read at the reference
 commit, never from the working tree and never from the head of the spec pull

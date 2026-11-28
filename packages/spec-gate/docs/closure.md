@@ -45,7 +45,7 @@ Each of these is a refusal: one line on stderr, `spec-gate: closure: <code>:
 | `start-invalid`, `head-invalid` | `--start` or `--head` is not a full commit id (40 or 64 lower-case hex digits) |
 | `spec-dir-invalid` | the spec directory is a symbolic link, not a directory, or a path that cannot be read from a commit |
 | the loader's codes | `bindings.yaml` exists and does not load, or a file under `evidence/` does not load (no row is judged from half-read evidence; `lint` names the findings) |
-| `git-input-invalid` | `--repo` or `--default-ref` does not resolve, as for `lint` |
+| `git-input-invalid` | `--repo` or `--default-ref` does not resolve, validated as for `lint`; unlike `lint`, a shallow repository and several merge bases are not refused, since the check measures no range |
 | `start-not-a-commit`, `head-not-a-commit` | the id is no commit of the repository |
 | `spec-not-merged` | no commit on `--default-ref` changed `<spec-dir>/spec.md` or `<spec-dir>/testplan.yaml` |
 | `spec-invalid` | `spec.md` at the merged spec commit is missing, not a regular UTF-8 file or not a valid spec |

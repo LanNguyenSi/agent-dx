@@ -22,7 +22,8 @@ import {
   SPEC_REL,
   specFiles,
 } from "./git-helpers.js";
-import { runCli } from "./helpers.js";
+import { git } from "../canonical/helpers.js";
+import { runCli, scratch } from "./helpers.js";
 import {
   BASE_ALONE,
   BASE_OFF,
@@ -96,6 +97,26 @@ describe("the measuring base of the lint", { timeout: 60_000 }, () => {
     expect(refused(await lint(s.dir, []))).toBe(SHALLOW);
     // the full repository it was cloned from measures
     expect((await lint(s.repo.dir, [])).code).toBe(0);
+  });
+
+  it("a shallow repository is refused before the flags: a --base behind the boundary gets the shallow message", async () => {
+    const s = await oneBase(SPEC);
+    // One commit deep on both branches: the branch tip and c1, the tip of
+    // the default branch; c0 is behind the boundary and not in the clone.
+    const dir = path.join(scratch(), "shallow-one");
+    await git(scratch(), [
+      "clone",
+      "-q",
+      "--depth",
+      "1",
+      "--no-single-branch",
+      `file://${s.repo.dir}`,
+      dir,
+    ]);
+    await expect(git(dir, ["cat-file", "-e", s.c0])).rejects.toThrow();
+    expect(refused(await lint(dir, ["--base", s.c0]))).toBe(SHALLOW);
+    // in the full repository the same base is a valid one
+    expect((await lint(s.repo.dir, ["--base", s.c0])).code).toBe(0);
   });
 
   it("--base older than a default commit the head merged: a setting put back to its text at the base is a change", async () => {

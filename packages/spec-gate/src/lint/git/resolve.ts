@@ -8,8 +8,9 @@
  * is validated (a commit on `--default-ref`) and moves neither. Several merge
  * bases, none, and a shallow repository are refused: from one of several, or
  * from an older commit a shallow boundary leaves, a change can fail to show.
- * A caller that measures the change itself (the approval check, the closing
- * check) asks for the earlier resolution instead, see `ResolveOptions`.
+ * The approval check, which derives its own measuring base and history
+ * check, and the closing check, which measures no range, ask for the
+ * earlier resolution instead, see `ResolveOptions`.
  *
  * Offline and read-only: a ref the caller names is looked up, never
  * fetched. Without `--default-ref` and `--base` there are no git inputs and
@@ -49,13 +50,14 @@ export interface GitRequest {
 }
 
 /**
- * How the inputs are resolved. `callerMeasures` is for a caller that derives
- * its own measuring base and history check and reads only the repository,
- * the commits and the head from here (the approval check, the closing
- * check): the reference is then `--base` when given, else the `--default-ref`
- * commit, the diff base the merge base git names first, and neither several
- * merge bases nor a shallow repository is refused. Lint, propose and
- * repo-check never set it.
+ * How the inputs are resolved. `callerMeasures` is for a caller that does not
+ * measure from the diff base resolved here: the approval check, which derives
+ * its own measuring base and history check, and the closing check, which
+ * reads only the repository, the default commit and the head, measures no
+ * range and does not refuse a shallow repository. The reference is then
+ * `--base` when given, else the `--default-ref` commit, the diff base the
+ * merge base git names first, and neither several merge bases nor a shallow
+ * repository is refused. Lint, propose and repo-check never set it.
  */
 export interface ResolveOptions {
   callerMeasures?: boolean;
@@ -129,6 +131,15 @@ export function resolveGitInputs(
       return fail("the spec directory is not inside the repository");
     }
 
+    // Checked before the flags and the merge bases: behind a shallow
+    // boundary a --base can be missing and git can name an older commit as
+    // the one merge base, so the history is the first thing refused.
+    if (measured && isShallow(toplevel)) {
+      return fail(
+        "the repository is shallow: a merge base can be older than the true one, from which a change can fail to show; nothing is measured, check out the full history",
+      );
+    }
+
     // Both are validated, so a bad value never goes unseen.
     const defaultCommit =
       request.defaultRef !== undefined
@@ -165,13 +176,6 @@ export function resolveGitInputs(
       return { ok: true, git: { repo: toplevel, reference, diffBase, head } };
     }
 
-    // Checked before the merge bases: behind a shallow boundary git can
-    // name an older commit as the one merge base.
-    if (isShallow(toplevel)) {
-      return fail(
-        "the repository is shallow: a merge base can be older than the true one, from which a change can fail to show; nothing is measured, check out the full history",
-      );
-    }
     const reference = defaultCommit!;
     const bases = mergeBases(toplevel, head, reference);
     if (bases.length === 0) {

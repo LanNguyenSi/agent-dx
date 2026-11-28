@@ -129,15 +129,17 @@ export interface GitInputs {
   repo: string;
   /**
    * The commit the ancestry checks compare against: the commit
-   * `--default-ref` names. Only a caller that measures the change itself
-   * (`callerMeasures`: the approval check, the closing check) gets `--base`
-   * here when one is given.
+   * `--default-ref` names. Only a caller that sets `callerMeasures` gets
+   * `--base` here when one is given: the approval check, which derives its
+   * own measuring base and history check, and the closing check, which
+   * measures no range.
    */
   reference: string;
   /**
    * The commit a diff of the spec change starts at: the one merge base of
-   * `head` and the `--default-ref` commit. For a caller that measures the
-   * change itself, the merge base of `head` and `reference` git names first.
+   * `head` and the `--default-ref` commit. For a caller that sets
+   * `callerMeasures`, the merge base of `head` and `reference` git names
+   * first.
    */
   diffBase: string;
   /** `HEAD` of the repository. */
