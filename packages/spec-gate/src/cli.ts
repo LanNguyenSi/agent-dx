@@ -664,7 +664,7 @@ program
   .command("closure")
   .description(
     "print one JSON report line (spec-gate-closure/1) that says for every test-plan row of the merged spec whether " +
-      "the evidence files in the spec directory prove it at or after the start commit, read-only and offline; with --github-repo " +
+      "the evidence files in the spec directory prove it at or after the start commit, read-only, and offline unless --github-repo is given: with it " +
       "the run of every counted producer: ci envelope is additionally checked against that GitHub repository, the token read from " +
       "GITHUB_TOKEN only, and the row is marked verified only when the host vouches for the run; exits 0 when no row is failed or " +
       "unproven, 1 when one is, 2 on a usage error or refusal",

@@ -678,7 +678,41 @@ describe(
       const made = concurrencyHost();
       await reportWithHost(s, made.host);
       expect(made.calls()).toBe(10);
-      expect(made.inFlightMax()).toBeLessThanOrEqual(4);
+      expect(made.inFlightMax()).toBe(4);
+    });
+
+    it("asks every pair once when some host calls throw or reject, and keeps four in flight", async () => {
+      const s = await scenario();
+      writeEvidence(
+        s.repo,
+        "TP-2",
+        Array.from({ length: 12 }, (_, i) => ci(s.spec, String(2000 + i))),
+      );
+      const asked: string[] = [];
+      let inFlight = 0;
+      let peak = 0;
+      const host = {
+        ciRunStatus: (_commit: string, run: string) => {
+          asked.push(run);
+          const k = Number(run) % 4;
+          if (k === 1) throw new Error("sync throw");
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              inFlight -= 1;
+              if (k === 2) reject(new Error("rejected"));
+              else resolve("verified" as never);
+            }, 5);
+          });
+        },
+      } as unknown as HostAdapter;
+      const report = await reportWithHost(s, host);
+      expect([...asked].sort()).toEqual(
+        Array.from({ length: 12 }, (_, i) => String(2000 + i)),
+      );
+      expect(peak).toBe(4);
+      expect(JSON.stringify(report)).toContain('"ci_status":"host-failed"');
     });
   },
 );
