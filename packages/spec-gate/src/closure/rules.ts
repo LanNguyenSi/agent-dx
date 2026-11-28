@@ -5,10 +5,11 @@
  *
  * - `stays-green`: proven when a counted `pass` is at the start commit
  *   itself and the latest counted envelope is a `pass`.
- * - `red-first`: proven when the last counted `fail` (never `error` or
- *   `skip`) is followed by a counted `pass` at a strict descendant of its
- *   commit and the latest counted envelope is a `pass`; a `fail` and a
- *   `pass` at one commit prove nothing.
+ * - `red-first`: failed when the latest counted envelope is a `fail` or an
+ *   `error` after a `pass`; proven when the last counted `fail` (never
+ *   `error` or `skip`) is followed by a counted `pass` at a strict
+ *   descendant of its commit and the latest counted envelope is a `pass`;
+ *   a `fail` and a `pass` at one commit prove nothing.
  * - `static`: proven when the latest counted envelope is a `pass` with
  *   `exit: 0`.
  * - `measurement`, `manual`, `runtime`: not decidable from envelopes.
@@ -53,6 +54,14 @@ function staysGreen(
 }
 
 function redFirst(counted: readonly CountedEnvelope[]): Verdict {
+  const latest = counted[counted.length - 1]!;
+  // A fail or an error after a green is a failure, whatever came before.
+  if (
+    (latest.result === "fail" || latest.result === "error") &&
+    counted.some((env) => env.result === "pass")
+  ) {
+    return latestNotPass(latest);
+  }
   let lastFail = -1;
   counted.forEach((env, index) => {
     if (env.result === "fail") lastFail = index;
@@ -67,11 +76,12 @@ function redFirst(counted: readonly CountedEnvelope[]): Verdict {
       .some((env) => env.result === "pass" && env.commit !== red)
   ) {
     if (counted.some((env) => env.result === "pass" && env.commit === red)) {
-      return { state: "unproven", reason: "red-and-green-at-one-commit" };
+      return latest.result === "pass"
+        ? { state: "unproven", reason: "red-and-green-at-one-commit" }
+        : latestNotPass(latest);
     }
     return { state: "failed", reason: "no-green-after-red" };
   }
-  const latest = counted[counted.length - 1]!;
   if (latest.result !== "pass") return latestNotPass(latest);
   return { state: "proven", reason: "red-then-green" };
 }

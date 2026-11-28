@@ -93,14 +93,18 @@ ancestor of the other (two branches merged into the head), or an envelope that
 shares its commit with another has a `time` that does not parse, a
 `stays-green`, `red-first` or `static` row is `unproven` with reason
 `unordered-evidence`: an order the check cannot tell decides nothing in the
-row's favour.
+row's favour. A later envelope does not resolve such a row, even at a commit
+that descends from both branches; to decide it, remove the envelope lines
+that cannot be ordered, or re-run the check so that the counted envelopes sit
+on one line of history (for example only on the first-parent chain from the
+start commit to the head).
 
 ## Per-kind rules
 
 | Kind | `proven` | `failed` | `unproven` | otherwise |
 |---|---|---|---|---|
 | `stays-green` | a counted `pass` at the start commit itself, and the latest counted envelope is a `pass` | the latest counted envelope is a `fail` or an `error` | no counted envelope, the latest is a `skip`, or no `pass` at the start commit | |
-| `red-first` | the last counted `fail` is followed by a counted `pass` at a strict descendant of its commit, and the latest counted envelope is a `pass` | no `pass` follows the last `fail`, or an `error` is latest after the green | no counted `fail` (green without red; an `error` or a `skip` is not red), nothing counted, a `skip` latest after the green, or the only `pass` beside the last `fail` is at the same commit (`red-and-green-at-one-commit`, in either order: a rerun is no red-then-green) | |
+| `red-first` | the last counted `fail` is followed by a counted `pass` at a strict descendant of its commit, and the latest counted envelope is a `pass` | the latest counted envelope is a `fail` or an `error` and a `pass` came before it (`latest-fail`, `latest-error`), or no `pass` follows the last `fail` (`no-green-after-red`) | no counted `fail` (green without red; an `error` or a `skip` is not red), nothing counted, a `skip` latest after the green, or the latest is a `pass` and the only `pass` beside the last `fail` is at the same commit (`red-and-green-at-one-commit`: a rerun is no red-then-green) | |
 | `static` | the latest counted envelope is a `pass` with `exit: 0` | the latest is a `fail` or an `error` | nothing counted, the latest is a `skip`, or a `pass` with another exit | |
 | `measurement`, `manual`, `runtime` | | | | `not-decidable`, reason `kind-needs-review` |
 | `post-deploy` | | | | `pending-post-deploy` |

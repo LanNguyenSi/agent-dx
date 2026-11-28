@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { runClosure } from "../../src/closure/index.js";
 import { REMOTE_MAIN, Repo } from "../lint/git-helpers.js";
 import {
+  BINDINGS,
   COMMANDS,
   PLAN,
   closureIn,
@@ -180,12 +181,21 @@ describe("closure: red-first", { timeout: 60_000 }, () => {
     ).toEqual({ state: "unproven", reason: "no-red" });
   });
 
-  it("fails when no pass follows the last fail", async () => {
+  it("fails when a fail follows the green", async () => {
     expect(
       await verdict("TP-1", (s) => [
         { commit: s.spec, result: "fail" },
         { commit: s.a },
         { commit: s.b, result: "fail" },
+      ]),
+    ).toEqual({ state: "failed", reason: "latest-fail" });
+  });
+
+  it("fails when no pass follows the last fail", async () => {
+    expect(
+      await verdict("TP-1", (s) => [
+        { commit: s.a, result: "fail" },
+        { commit: s.b, result: "skip", command: [] },
       ]),
     ).toEqual({ state: "failed", reason: "no-green-after-red" });
   });
@@ -200,6 +210,16 @@ describe("closure: red-first", { timeout: 60_000 }, () => {
     ).toEqual({ state: "failed", reason: "latest-error" });
   });
 
+  it("is unproven when a skip is latest after the green", async () => {
+    expect(
+      await verdict("TP-1", (s) => [
+        { commit: s.spec, result: "fail" },
+        { commit: s.a },
+        { commit: s.b, result: "skip", command: [] },
+      ]),
+    ).toEqual({ state: "unproven", reason: "latest-skip" });
+  });
+
   it("is unproven for a fail and a later pass at one commit", async () => {
     expect(
       await verdict("TP-1", (s) => [
@@ -209,13 +229,42 @@ describe("closure: red-first", { timeout: 60_000 }, () => {
     ).toEqual({ state: "unproven", reason: "red-and-green-at-one-commit" });
   });
 
-  it("is unproven for a pass and a later fail at one commit", async () => {
+  it("fails for a pass and a later fail at one commit", async () => {
     expect(
       await verdict("TP-1", (s) => [
         { commit: s.b, time: "2026-01-01T00:00:01Z" },
         { commit: s.b, result: "fail", time: "2026-01-01T00:00:02Z" },
       ]),
-    ).toEqual({ state: "unproven", reason: "red-and-green-at-one-commit" });
+    ).toEqual({ state: "failed", reason: "latest-fail" });
+  });
+
+  it("fails when a fail at the green commit is latest", async () => {
+    expect(
+      await verdict("TP-1", (s) => [
+        { commit: s.a, result: "fail" },
+        { commit: s.b, time: "2026-01-01T00:00:01Z" },
+        { commit: s.b, result: "fail", time: "2026-01-01T00:00:02Z" },
+      ]),
+    ).toEqual({ state: "failed", reason: "latest-fail" });
+  });
+
+  it("fails for greens at two commits followed by a fail", async () => {
+    expect(
+      await verdict("TP-1", (s) => [
+        { commit: s.a },
+        { commit: s.b, time: "2026-01-01T00:00:01Z" },
+        { commit: s.b, result: "fail", time: "2026-01-01T00:00:02Z" },
+      ]),
+    ).toEqual({ state: "failed", reason: "latest-fail" });
+  });
+
+  it("fails for a green followed by an error, without a red", async () => {
+    expect(
+      await verdict("TP-1", (s) => [
+        { commit: s.a },
+        { commit: s.b, result: "error" },
+      ]),
+    ).toEqual({ state: "failed", reason: "latest-error" });
   });
 
   it("is proven when the green at a later commit follows a red with a rerun at one commit", async () => {
@@ -257,6 +306,15 @@ describe("closure: static", { timeout: 60_000 }, () => {
     ).toEqual({ state: "failed", reason: "latest-fail" });
   });
 
+  it("is unproven when the latest is a skip", async () => {
+    expect(
+      await verdict("TP-3", (s) => [
+        { commit: s.a },
+        { commit: s.b, result: "skip", command: [] },
+      ]),
+    ).toEqual({ state: "unproven", reason: "latest-skip" });
+  });
+
   it("counts a null-selector envelope although the row's binding carries a selector", async () => {
     const s = await scenario({
       bindings:
@@ -278,6 +336,27 @@ describe("closure: static", { timeout: 60_000 }, () => {
 });
 
 describe("closure: kinds decided by review", { timeout: 60_000 }, () => {
+  it("stays not-decidable when its counted envelopes lie on two unrelated branches", async () => {
+    const s = await scenario({
+      bindings: `${BINDINGS}TP-4:\n  status: existing\n  selector: latency\n`,
+    });
+    await s.repo.checkout("p1", s.spec);
+    const p = await s.repo.commit({ "p1.txt": "1\n" }, "p1");
+    await s.repo.checkout("p2", s.spec);
+    const q = await s.repo.commit({ "p2.txt": "2\n" }, "p2");
+    await s.repo.sh("merge", "-q", "--no-ff", "-m", "merge p1", "p1");
+    writeEvidence(s.repo, "TP-4", [
+      { commit: p, selector: "latency" },
+      { commit: q, selector: "latency" },
+    ]);
+    const row = rowOf(reportIn(s), "TP-4");
+    expect([row.state, row.reason, row.counted]).toEqual([
+      "not-decidable",
+      "kind-needs-review",
+      2,
+    ]);
+  });
+
   it("reports measurement, manual and runtime as not-decidable with their evidence location", async () => {
     const s = await scenario();
     writeEvidence(s.repo, "TP-4", [
