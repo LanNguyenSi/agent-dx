@@ -63,48 +63,47 @@ const EntrypointGlobSchema = z
 // pattern stalls the whole scan. One message per bad pattern, and none when
 // the pattern did not compile (that error already names it).
 function regexPatternSchema(field: string) {
-  return z
-    .string()
-    .superRefine((pattern, ctx) => {
-      try {
-        new RegExp(pattern);
-      } catch {
-        ctx.addIssue({
-          code: "custom",
-          message: `Invalid regular expression in placement config: "${pattern}"`,
-        });
-        return;
-      }
-      const problem = findRegexSafetyProblem(pattern);
-      if (problem?.kind === "too-long") {
-        ctx.addIssue({
-          code: "custom",
-          message: `Regular expression in ${field} is longer than ${MAX_REGEX_LENGTH} characters (${pattern.length}), starting "${pattern.slice(0, 60)}"`,
-        });
-      } else if (problem?.kind === "backreference") {
-        ctx.addIssue({
-          code: "custom",
-          message: `Regular expression in ${field} uses a backreference, which can backtrack without bound: "${pattern}"`,
-        });
-      } else if (problem?.kind === "nested-quantifier") {
-        ctx.addIssue({
-          code: "custom",
-          message: `Regular expression in ${field} can backtrack without bound (nested quantifier): "${pattern}"`,
-        });
-      }
-    })
-    .superRefine((pattern, ctx) => {
-      try {
-        if (new RegExp(pattern).test("")) {
-          ctx.addIssue({
-            code: "custom",
-            message: `Regular expression in placement config matches the empty string, which would match every position in every scanned line: "${pattern}"`,
-          });
-        }
-      } catch {
-        // Already reported by the first `.superRefine` above; don't double-report.
-      }
-    });
+  return z.string().superRefine((pattern, ctx) => {
+    try {
+      new RegExp(pattern);
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        message: `Invalid regular expression in placement config: "${pattern}"`,
+      });
+      return;
+    }
+    const problem = findRegexSafetyProblem(pattern);
+    if (problem?.kind === "too-long") {
+      ctx.addIssue({
+        code: "custom",
+        message: `Regular expression in ${field} is longer than ${MAX_REGEX_LENGTH} characters (${pattern.length}), starting "${pattern.slice(0, 60)}"`,
+      });
+      return;
+    }
+    if (problem?.kind === "backreference") {
+      ctx.addIssue({
+        code: "custom",
+        message: `Regular expression in ${field} uses a backreference, which can backtrack without bound: "${pattern}"`,
+      });
+      return;
+    }
+    if (problem?.kind === "nested-quantifier") {
+      ctx.addIssue({
+        code: "custom",
+        message: `Regular expression in ${field} can backtrack without bound (nested quantifier): "${pattern}"`,
+      });
+      return;
+    }
+    // Only a pattern that compiled and passed the safety check is run here,
+    // so a refused pattern never gets a second message.
+    if (new RegExp(pattern).test("")) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Regular expression in placement config matches the empty string, which would match every position in every scanned line: "${pattern}"`,
+      });
+    }
+  });
 }
 
 // Every config glob compiles through `globToRegex`, which turns each `*` into
