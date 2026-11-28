@@ -640,9 +640,11 @@ on its phase. An envelope whose commit is reachable from the default branch
 after the merge stays valid. Any other envelope stays valid only if its commit
 was on the pull request branch before the squash and the pull request's CI run
 references that commit; otherwise it does not count. Without a squash merge
-the rule does not apply. The three facts are git and host questions: the
-closing check answers them and passes them to `evidenceSurvivesSquash`;
-nothing in the format layer runs git.
+the rule does not apply. The three facts are git and host questions, and
+nothing in the format layer runs git. The closing check does not apply this
+rule yet: an envelope at a commit the head does not hold never counts there
+(see [closure.md](closure.md)); `evidenceSurvivesSquash` is the format-layer
+predicate for when the host facts are available.
 
 **Layout.** Envelopes are stored under `specs/<id>/evidence/`, one file per
 test-plan row, named `TP-<n>.jsonl` after that row's id: the file name is the
