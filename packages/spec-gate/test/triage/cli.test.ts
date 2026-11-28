@@ -187,6 +187,22 @@ describe("spec-gate triage", () => {
     );
   });
 
+  it("a spec directory that is a link is refused in every spelling and the target is untouched", async () => {
+    const real = makeSpecDir(discovererDoc());
+    const file = path.join(real, "triage.json");
+    const before = fs.readFileSync(file);
+    const holder = fs.mkdtempSync(path.join(os.tmpdir(), "spec-gate-triage-"));
+    tmpRoots.push(holder);
+    const link = path.join(holder, "spec-link");
+    fs.symlinkSync(real, link);
+    for (const suffix of ["", "/", "/."]) {
+      const run = await runCli(["triage", `${link}${suffix}`]);
+      expect(run.code).not.toBe(0);
+      expect(run.stderr).toContain("is a symlink, refusing to read it");
+      expect(fs.readFileSync(file)).toEqual(before);
+    }
+  });
+
   it("a read-only triage.json is a named write error with the bytes unchanged", async () => {
     const dir = makeSpecDir(discovererDoc());
     const file = path.join(dir, "triage.json");

@@ -37,11 +37,15 @@ function fail(code: FileErrorCode, message: string): FileRead {
 export type SpecDirState =
   "directory" | "symlink" | "missing" | "not-directory";
 
-/** Classifies the spec directory path without following a link at it. */
+/**
+ * Classifies the spec directory path without following a link at it. The
+ * path is resolved first: the kernel follows a final link when the path ends
+ * in `/` or `/.`, so `link/` would otherwise look like a directory.
+ */
 export function specDirState(specDir: string): SpecDirState {
   let stat: fs.Stats;
   try {
-    stat = fs.lstatSync(specDir);
+    stat = fs.lstatSync(path.resolve(specDir));
   } catch {
     return "missing";
   }

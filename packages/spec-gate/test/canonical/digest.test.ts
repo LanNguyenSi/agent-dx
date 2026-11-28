@@ -442,12 +442,14 @@ describe("loadDigestParts and the spec directory path", () => {
     try {
       const link = path.join(root, "spec-link");
       fs.symlinkSync(base, link);
-      expect(() => loadDigestParts(link)).toThrowError(
-        expect.objectContaining({
-          code: "spec-dir-invalid",
-          message: `${link} is a symlink, refusing to read it`,
-        }),
-      );
+      for (const suffix of ["", "/", "/."]) {
+        expect(() => loadDigestParts(`${link}${suffix}`)).toThrowError(
+          expect.objectContaining({
+            code: "spec-dir-invalid",
+            message: `${link}${suffix} is a symlink, refusing to read it`,
+          }),
+        );
+      }
       const missing = path.join(root, "nope");
       expect(() => loadDigestParts(missing)).toThrowError(
         expect.objectContaining({

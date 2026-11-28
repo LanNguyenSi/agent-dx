@@ -51,15 +51,17 @@ const ack = (rule: string) =>
   `- rule: ${JSON.stringify(rule)}\n  id: "x"\n  reason: "r"\n`;
 
 describe("lintSpecDir and the spec directory path", () => {
-  it("refuses a spec directory that is a symlink before any read", () => {
+  it("refuses a spec directory that is a symlink before any read, in every spelling", () => {
     const dir = scratch();
     const real = specDir();
     const link = path.join(dir, "spec-link");
     fs.symlinkSync(real, link);
-    expect(lintSpecDir(link)).toEqual({
-      ok: false,
-      message: `${link} is a symlink, refusing to read it`,
-    });
+    for (const suffix of ["", "/", "/."]) {
+      expect(lintSpecDir(`${link}${suffix}`)).toEqual({
+        ok: false,
+        message: `${link}${suffix} is a symlink, refusing to read it`,
+      });
+    }
     expect(lintSpecDir(real)).toMatchObject({ ok: true });
   });
 

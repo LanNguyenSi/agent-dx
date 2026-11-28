@@ -51,19 +51,49 @@ describe("spec-gate export --format ow and a symlinked spec directory", () => {
     const repo = await mergedRepo();
     const link = path.join(repo.dir, "specs", "s1-link");
     fs.symlinkSync(repo.spec, link);
-    const run = await runCli(
-      ["export", ...exportArgs(repo).map((a) => (a === repo.spec ? link : a))],
-      EXPORT_TIMEOUT_MS,
-    );
-    expect(run.code).toBe(2);
-    expect(run.stdout).toBe("");
-    expect(run.stderr).toContain("spec-dir-invalid");
-    expect(run.stderr).toContain(`${link} is a symlink, refusing to read it`);
+    for (const suffix of ["", "/", "/."]) {
+      const run = await runCli(
+        [
+          "export",
+          ...exportArgs(repo).map((a) =>
+            a === repo.spec ? `${link}${suffix}` : a,
+          ),
+        ],
+        EXPORT_TIMEOUT_MS,
+      );
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("spec-dir-invalid");
+      expect(run.stderr).toContain(
+        `${link}${suffix} is a symlink, refusing to read it`,
+      );
+    }
     const real = await runCli(
       ["export", ...exportArgs(repo)],
       EXPORT_TIMEOUT_MS,
     );
     expect(real.code).toBe(0);
+  });
+});
+
+describe("spec-gate export --format ow and a missing or non-directory spec path", () => {
+  it("keeps the outcome for a missing path and a regular file", async () => {
+    const repo = await mergedRepo();
+    const swap = (to: string) =>
+      exportArgs(repo).map((a) => (a === repo.spec ? to : a));
+    const missing = path.join(repo.dir, "specs", "nope");
+    const first = await runCli(["export", ...swap(missing)], EXPORT_TIMEOUT_MS);
+    expect(first.code).toBe(2);
+    expect(first.stdout).toBe("");
+    expect(first.stderr).toContain("spec-dir-invalid");
+    expect(first.stderr).toContain(`${missing} does not exist`);
+    const file = path.join(repo.dir, "specs", "plain-file");
+    fs.writeFileSync(file, "x");
+    const second = await runCli(["export", ...swap(file)], EXPORT_TIMEOUT_MS);
+    expect(second.code).toBe(2);
+    expect(second.stdout).toBe("");
+    expect(second.stderr).toContain("not-merged");
+    expect(second.stderr).toContain("specs/plain-file/spec.md is not merged");
   });
 });
 
