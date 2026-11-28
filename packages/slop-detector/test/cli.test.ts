@@ -161,6 +161,23 @@ describe("cli check [paths...]", () => {
     expect(stderr).toContain("review-slop");
   });
 
+  it("exits 2 for an unknown pack id in the config, listing the valid ids", () => {
+    fs.writeFileSync(path.join(tmp, "a.md"), "plain text\n");
+    const cfg = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(cfg, "packs:\n  ui-slp: true\n");
+    const { stderr, stdout, status } = runCli([
+      "check",
+      path.join(tmp, "a.md"),
+      "--config",
+      cfg,
+    ]);
+    expect(status).toBe(2);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("ui-slp");
+    expect(stderr).toContain("ui-slop");
+    expect(stderr).toContain("review-slop");
+  });
+
   it("scans two positional paths, both counted", () => {
     fs.writeFileSync(path.join(tmp, "a.md"), "F1 landed in review round 2.\n");
     fs.writeFileSync(path.join(tmp, "b.md"), "F2a fixed per review.\n");

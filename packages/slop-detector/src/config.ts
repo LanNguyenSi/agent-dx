@@ -274,8 +274,24 @@ const ConfigFileSchema = z.object({
   // `mergeConfig`. A plain `z.record(PackIdSchema, ...)` would be exhaustive
   // here (zod requires every enum key when the key schema is an enum), so
   // `partialRecord` keeps the v3 semantics: any subset of known pack ids,
-  // unknown pack ids rejected.
-  packs: z.partialRecord(PackIdSchema, z.boolean()).optional(),
+  // unknown pack ids rejected. The first stage only produces the error for
+  // unknown ids, naming them and listing every valid id (derived from
+  // `PackIdSchema`); the second stage keeps the partial-map typing.
+  packs: z
+    .record(z.string(), z.unknown())
+    .superRefine((value, ctx) => {
+      const known: readonly string[] = PackIdSchema.options;
+      const unknown = Object.keys(value).filter((k) => !known.includes(k));
+      if (unknown.length === 0) return;
+      ctx.addIssue({
+        code: "custom",
+        message: `Unknown pack id${unknown.length > 1 ? "s" : ""} ${unknown
+          .map((k) => `"${k}"`)
+          .join(", ")} (valid pack ids: ${known.join(", ")})`,
+      });
+    })
+    .pipe(z.partialRecord(PackIdSchema, z.boolean()))
+    .optional(),
   rules: z.record(z.string(), RuleOverrideSchema).optional(),
   ignorePaths: z.array(PlainGlobSchema("ignorePaths")).optional(),
   treatAsProse: z.array(PlainGlobSchema("treatAsProse")).optional(),

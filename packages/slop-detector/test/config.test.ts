@@ -128,6 +128,54 @@ describe("config", () => {
     expect(() => loadConfig(file)).toThrow(/ui-slp/);
   });
 
+  it("loadConfig names every valid pack id when a pack id is unknown", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs:\n  ui-slp: true\n`);
+    let message = "";
+    try {
+      loadConfig(file);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain("ui-slp");
+    expect(message).toContain("packs");
+    const ids = Object.keys(defaultConfig().packs);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) expect(message).toContain(id);
+  });
+
+  it("loadConfig names every unknown pack id when several are given", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs:\n  ui-slp: true\n  prose-slp: false\n`);
+    let message = "";
+    try {
+      loadConfig(file);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain("ui-slp");
+    expect(message).toContain("prose-slp");
+    for (const id of Object.keys(defaultConfig().packs)) {
+      expect(message).toContain(id);
+    }
+  });
+
+  it("loadConfig accepts every known pack id with true or false", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    const ids = Object.keys(defaultConfig().packs);
+    fs.writeFileSync(
+      file,
+      "packs:\n" + ids.map((id, i) => `  ${id}: ${i % 2 === 0}\n`).join(""),
+    );
+    const cfg = loadConfig(file);
+    ids.forEach((id, i) => {
+      expect((cfg.packs as Record<string, boolean>)[id]).toBe(i % 2 === 0);
+    });
+  });
+
   it("loadConfig accepts a partial packs map (omitted keys keep their defaults)", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
     const file = path.join(tmp, "slop.config.yml");
