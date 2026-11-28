@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The composite action's `changed-files-only` input description in `action/action.yml` named only `pull_request` events; it now names `pull_request` and `pull_request_target`, matching what `src/action/run.ts` and the README already handle.
 - `docs/configuration.md` named the rule-override key `ruleOverrides` when
   enabling the corpus rules; the `slop.config.yml` key is `rules`.
+- The README's GitHub Action example now pins commit SHAs (`actions/checkout` and a `<commit-sha>` placeholder for the action) and explains why a tag is not enough; it also says that `v1` does not contain the fixes listed under `[Unreleased]`. `docs/integration.md` no longer recommends pinning the action at `@v1`.
 
 ### Security
 

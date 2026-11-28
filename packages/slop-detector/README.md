@@ -47,11 +47,11 @@ Run `slop-detector list-rules` for the full rule catalogue with severities and r
 
 ## GitHub Action
 
-A composite action builds this package from the checkout at the action's ref and runs the CLI, so the ref you pin is the exact CLI source you run:
+A composite action builds this package from the checkout at the action's ref and runs the CLI, so the ref you pin is the exact CLI source you run. The action builds and runs that code inside your job with your job's permissions, so pin a full commit SHA of a release commit, not a tag (a tag can move); the reusable workflow already enforces the same rule:
 
 ```yaml
-- uses: actions/checkout@v5
-- uses: LanNguyenSi/agent-dx/packages/slop-detector/action@v1
+- uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+- uses: LanNguyenSi/agent-dx/packages/slop-detector/action@<commit-sha> # <version>
   with:
     path: .
     pack: placement-slop
@@ -59,7 +59,7 @@ A composite action builds this package from the checkout at the action's ref and
     severity-threshold: block
 ```
 
-`v1` is the action's first tag and points at the slop-detector 0.9.0 release commit. For an immutable pin, use that commit's SHA instead of the tag. The action does not install from the npm registry because the bare `slop-detector` name there belongs to an unrelated package. To run the `workflow-slop` pack in another repository as a separate, minimally permissioned job, call the reusable workflow instead; see [Use from another repo](docs/workflow-slop.md#use-from-another-repo).
+`v1` points at the slop-detector 0.9.0 release commit. The fixes listed under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) (symlink and MCP path containment, terminal escaping, pinned action dependencies) are in no tag yet, so choose the release commit whose CHANGELOG section contains the fixes you need. The action does not install from the npm registry because the bare `slop-detector` name there belongs to an unrelated package. To run the `workflow-slop` pack in another repository as a separate, minimally permissioned job, call the reusable workflow instead; see [Use from another repo](docs/workflow-slop.md#use-from-another-repo).
 
 | Input | Default | Meaning |
 | --- | --- | --- |
