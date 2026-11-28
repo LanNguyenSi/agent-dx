@@ -148,7 +148,7 @@ async function landEdited(
 
 /**
  * Proposes the spec at `HEAD` of `s` measured from `c1`, where no log of the
- * spec exists, as master's `relogged` fixture does: the default ref is set
+ * spec exists, as the `relogged` fixture in helpers.ts does: the default ref is set
  * to `c1` for the propose and put back to `tip` afterwards. Measured from
  * the default branch the propose would see the log merged there.
  */
