@@ -38,11 +38,17 @@ build can precede a dependent test:
       "name": "knowledge-bundle",
       "phase": "after_preflight",
       "cwd": "packages/example",
-      "argv": ["npx", "okf-kit", "check", "docs/okf"]
+      "argv": ["npx", "-y", "okf-kit@<pinned-version>", "check", "docs/okf"]
     }
   ]
 }
 ```
+
+The example pins the checker: the bundle check runs
+`npx -y okf-kit@<pinned-version>`, the placeholder form of the
+`OKF_KIT_VERSION: <pinned-version>` environment value documented in
+`assets/skill/references/bundle-gate-in-ci.md`, so the worked example cannot
+float to whatever okf-kit release is newest.
 
 The workflow does not execute or validate this file: the orchestrator first
 approves the resolved effective config and scripts, then records a run-local
