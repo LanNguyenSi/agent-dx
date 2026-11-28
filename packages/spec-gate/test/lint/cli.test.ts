@@ -199,13 +199,15 @@ describe("spec-gate lint", () => {
     expect(first.stdout).not.toContain("/Users/");
   });
 
-  it("a symlinked spec directory is read like a directory", async () => {
+  it("a symlinked spec directory is refused with exit 2", async () => {
     const real = specDir();
     const holder = scratch();
     const link = path.join(holder, "link");
     fs.symlinkSync(real, link);
     const run = await runCli(["lint", link]);
-    expect(run.code).toBe(0);
+    expect(run.code).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("is a symlink, refusing to read it");
   });
 });
 

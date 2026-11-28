@@ -72,6 +72,7 @@ The verb never edits `triage.json` in place. It writes the new content to a
 temporary file next to it, created exclusively, gives it the permission bits
 of the original (setuid, setgid and sticky are dropped), and renames it over
 `triage.json`. The rename replaces the file, so a hard link to the old
-`triage.json` keeps the old content. A symlinked `triage.json` is refused. On
+`triage.json` keeps the old content. A symlinked `triage.json`, or a `<spec-dir>` that is itself a symlink, is
+refused before anything is read. On
 any failure the original stays unchanged, and the temporary file is removed
 only if this run created it.

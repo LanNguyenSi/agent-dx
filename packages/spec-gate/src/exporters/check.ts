@@ -20,6 +20,7 @@ import {
 } from "../formats/index.js";
 import { SPEC_FILE, TESTPLAN_FILE } from "../canonical/index.js";
 import { hasOwn, isRecord } from "../formats/validate.js";
+import { specDirState } from "../lint/files.js";
 import { ExportError } from "./errors.js";
 import type { ExportErrorCode } from "./errors.js";
 import { readWorktreeText } from "./worktree.js";
@@ -60,6 +61,12 @@ function collectStrings(value: unknown, out: string[]): void {
 
 /** The qualified ids of the spec directory, AC lines then test-plan rows. */
 function qualifiedIds(specDir: string): string[] | CheckOutcome {
+  if (specDirState(specDir) === "symlink") {
+    return fail(
+      "spec-dir-invalid",
+      `${specDir} is a symlink, refusing to read it`,
+    );
+  }
   let specText: string;
   let planText: string;
   try {

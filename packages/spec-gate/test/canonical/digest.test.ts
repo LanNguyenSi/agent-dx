@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,6 +9,7 @@ import {
   PLAN_FIELD_CLASSES,
   buildDigestInput,
   computeDigest,
+  loadDigestParts,
   referencedCommandNames,
 } from "../../src/canonical/index.js";
 import type { DigestParts } from "../../src/canonical/index.js";
@@ -430,5 +433,40 @@ describe("referencedCommandNames", () => {
       "typecheck",
     ]);
     expect(referencedCommandNames([])).toEqual([]);
+  });
+});
+
+describe("loadDigestParts and the spec directory path", () => {
+  it("refuses a spec directory that is a symlink, even to a valid spec", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "spec-gate-digest-"));
+    try {
+      const link = path.join(root, "spec-link");
+      fs.symlinkSync(base, link);
+      for (const suffix of ["", "/", "/."]) {
+        expect(() => loadDigestParts(`${link}${suffix}`)).toThrowError(
+          expect.objectContaining({
+            code: "spec-dir-invalid",
+            message: `${link}${suffix} is a symlink, refusing to read it`,
+          }),
+        );
+      }
+      const missing = path.join(root, "nope");
+      expect(() => loadDigestParts(missing)).toThrowError(
+        expect.objectContaining({
+          code: "spec-dir-invalid",
+          message: `${missing} is not a directory`,
+        }),
+      );
+      const file = path.join(root, "file");
+      fs.writeFileSync(file, "x");
+      expect(() => loadDigestParts(file)).toThrowError(
+        expect.objectContaining({
+          code: "spec-dir-invalid",
+          message: `${file} is not a directory`,
+        }),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

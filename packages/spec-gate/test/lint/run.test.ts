@@ -14,7 +14,7 @@ import {
   plainHistory,
   specFiles,
 } from "./git-helpers.js";
-import { specDir } from "./helpers.js";
+import { scratch, specDir } from "./helpers.js";
 
 const NO_TRIAGE = { "triage.json": null };
 const BOTH: RuleDef["profiles"] = ["light", "full"];
@@ -49,6 +49,37 @@ function custom(over: Partial<RuleDef> = {}): RuleDef {
 
 const ack = (rule: string) =>
   `- rule: ${JSON.stringify(rule)}\n  id: "x"\n  reason: "r"\n`;
+
+describe("lintSpecDir and the spec directory path", () => {
+  it("refuses a spec directory that is a symlink before any read, in every spelling", () => {
+    const dir = scratch();
+    const real = specDir();
+    const link = path.join(dir, "spec-link");
+    fs.symlinkSync(real, link);
+    for (const suffix of ["", "/", "/."]) {
+      expect(lintSpecDir(`${link}${suffix}`)).toEqual({
+        ok: false,
+        message: `${link}${suffix} is a symlink, refusing to read it`,
+      });
+    }
+    expect(lintSpecDir(real)).toMatchObject({ ok: true });
+  });
+
+  it("keeps the not-a-directory message for a missing path and a regular file", () => {
+    const dir = scratch();
+    const missing = path.join(dir, "nope");
+    expect(lintSpecDir(missing)).toEqual({
+      ok: false,
+      message: `${missing} is not a directory`,
+    });
+    const file = path.join(dir, "file");
+    fs.writeFileSync(file, "x");
+    expect(lintSpecDir(file)).toEqual({
+      ok: false,
+      message: `${file} is not a directory`,
+    });
+  });
+});
 
 describe("the engine stamps the registry fields last", () => {
   it("an error rule that returns level and rule keys still reports an error under its own id", () => {

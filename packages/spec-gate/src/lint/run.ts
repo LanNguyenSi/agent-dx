@@ -11,6 +11,7 @@ import {
   resolveGitInputs,
   type GitRequest,
 } from "./git/resolve.js";
+import { specDirState } from "./files.js";
 import { loadAcks, loadConfig, loadInputs, type FindingSink } from "./load.js";
 import { resolveProfile } from "./profile.js";
 import { RULES, findRule, planRules } from "./registry.js";
@@ -90,6 +91,12 @@ export function lintSpecDir(
   options: LintOptions = {},
   rules: readonly RuleDef[] = RULES,
 ): LintRunResult {
+  if (specDirState(specDir) === "symlink") {
+    return {
+      ok: false,
+      message: `${specDir} is a symlink, refusing to read it`,
+    };
+  }
   let isDir = false;
   try {
     isDir = fs.statSync(specDir).isDirectory();

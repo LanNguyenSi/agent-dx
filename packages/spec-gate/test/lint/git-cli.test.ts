@@ -251,14 +251,14 @@ describe("usage errors", () => {
     fs.rmSync(sibling, { recursive: true });
   });
 
-  it("a spec directory that is a link out of the repository is outside it", async () => {
+  it("a spec directory that is a link out of the repository is refused as a link", async () => {
     const { repo } = await committed();
     const outside = specDir();
     const link = path.join(repo.dir, "linked-spec");
     fs.symlinkSync(outside, link);
     expect(lintSpecDir(link, { git: { ...DEFAULT, repo: repo.dir } })).toEqual({
       ok: false,
-      message: "the spec directory is not inside the repository",
+      message: `${link} is a symlink, refusing to read it`,
     });
   });
 

@@ -53,6 +53,43 @@ afterEach(() => {
   }
 });
 
+describe("runTriage with a symlinked spec directory", () => {
+  for (const suffix of ["", "/", "/."]) {
+    it(`refuses a spec directory that is a link, spelled with the suffix ${JSON.stringify(suffix)}, before any read and leaves the target alone`, () => {
+      const { dir: real, file, before } = makeSpecDir();
+      const mtime = fs.statSync(file).mtimeMs;
+      const link = path.join(mkdtemp("link"), "spec-link");
+      fs.symlinkSync(real, link);
+      const result = runTriage(`${link}${suffix}`);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected a refusal");
+      expect(result.kind).toBe("symlink");
+      expect(result.message).toBe(
+        `triage: ${link}${suffix} is a symlink, refusing to read it`,
+      );
+      expect(fs.readFileSync(file)).toEqual(before);
+      expect(fs.statSync(file).mtimeMs).toBe(mtime);
+      expect(fs.readdirSync(real)).toEqual(["triage.json"]);
+    });
+  }
+
+  it("keeps the outcome for a real directory, a missing path and a regular file", () => {
+    const { dir } = makeSpecDir();
+    expect(runTriage(dir).ok).toBe(true);
+    const root = mkdtemp("plain");
+    const missing = runTriage(path.join(root, "nope"));
+    expect(missing).toMatchObject({ ok: false, kind: "missing-file" });
+    const regular = path.join(root, "file");
+    fs.writeFileSync(regular, "x");
+    const refused = runTriage(regular);
+    expect(refused).toMatchObject({
+      ok: false,
+      kind: "read-error",
+      message: `triage: cannot read ${path.join(regular, "triage.json")}: ENOTDIR`,
+    });
+  });
+});
+
 describe("runTriage write path", () => {
   // A fixed umask that strips group and other write bits, so a mode that
   // carries them (0664, 0666) shows whether the bits are set explicitly.
