@@ -210,7 +210,11 @@ export async function relogged(): Promise<Built & { newer: string }> {
     },
     "back to draft, without the log",
   );
-  const result = proposeSpecDir(s.spec, { repo: s.dir, base: s.c1 });
+  const result = proposeSpecDir(s.spec, {
+    repo: s.dir,
+    defaultRef: REMOTE_MAIN,
+    base: s.c1,
+  });
   if (result.kind !== "written") {
     throw new Error(
       `the second propose did not write: ${JSON.stringify(result)}`,

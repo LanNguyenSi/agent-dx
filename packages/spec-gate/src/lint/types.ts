@@ -128,11 +128,17 @@ export interface GitInputs {
   /** The top level of the work tree; never printed in a report. */
   repo: string;
   /**
-   * The commit the ancestry checks compare against: `--base` when given
-   * (the pull request base), otherwise the commit `--default-ref` names.
+   * The commit the ancestry checks compare against: the commit
+   * `--default-ref` names. Only a caller that measures the change itself
+   * (`callerMeasures`: the approval check, the closing check) gets `--base`
+   * here when one is given.
    */
   reference: string;
-  /** `merge-base(head, reference)`: the commit a diff of the spec change starts at. */
+  /**
+   * The commit a diff of the spec change starts at: the one merge base of
+   * `head` and the `--default-ref` commit. For a caller that measures the
+   * change itself, the merge base of `head` and `reference` git names first.
+   */
   diffBase: string;
   /** `HEAD` of the repository. */
   head: string;
