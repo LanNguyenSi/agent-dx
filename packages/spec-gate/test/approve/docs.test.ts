@@ -457,12 +457,19 @@ describe("the approval sources", () => {
     const text = read(approve.find((file) => named(file) === VERB)!);
     expect(text).toMatch(/createHost: createGitHubHost,/);
     expect(text).not.toMatch(/\bfetch\b|globalThis|node:/);
-    // No environment of its own: the caller hands one in, and one name is
-    // read from it.
+    // No environment of its own: the caller hands one in, and the shared
+    // host construction both host verbs use reads the one name from it.
     expect(text).not.toMatch(/\bprocess\b/);
-    expect([...text.matchAll(/\benv\[[^\]]*\]/g)].map((m) => m[0])).toEqual([
+    expect([...text.matchAll(/\benv\[[^\]]*\]/g)].map((m) => m[0])).toEqual([]);
+    const shared = fs.readFileSync(at("../../src/cli-host.ts"), "utf8");
+    expect([...shared.matchAll(/\benv\[[^\]]*\]/g)].map((m) => m[0])).toEqual([
       "env[TOKEN_VARIABLE]",
     ]);
+    // The shared construction opens no connection and touches no environment
+    // of its own: the caller hands the environment in and the adapter is the
+    // only place a connection is opened.
+    expect(shared).not.toMatch(/\bfetch\b|globalThis|node:/);
+    expect(shared).not.toMatch(/\bprocess\b/);
     expect(TOKEN_VARIABLE).toBe("GITHUB_TOKEN");
     // The token goes to the adapter and to the search of the outputs, and
     // into no text.

@@ -8,8 +8,9 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runBounded } from "../canonical/helpers.js";
+import { Stub } from "../host/stub.js";
 import { REMOTE_MAIN, SPEC_REL } from "../lint/git-helpers.js";
 import {
   COMMANDS,
@@ -27,9 +28,15 @@ interface CliRun {
   stderr: string;
 }
 
-async function cli(args: string[]): Promise<CliRun> {
+async function cli(
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+  options: { cwd?: string } = {},
+): Promise<CliRun> {
   const run = await runBounded(process.execPath, [cliPath, ...args], {
     timeoutMs: 30_000,
+    ...(env !== undefined ? { env } : {}),
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
   });
   if (run.timedOut) throw new Error("the CLI did not finish in time");
   return { code: run.code, stdout: run.stdout, stderr: run.stderr };
@@ -362,7 +369,7 @@ describe("spec-gate closure: read-only", { timeout: 60_000 }, () => {
     );
   });
 
-  it("starts git only through the hardened runner and makes no request", () => {
+  it("starts git only through the hardened runner and asks for nothing itself: the only host the code calls is the adapter imported from src/host", () => {
     const dir = fileURLToPath(new URL("../../src/closure/", import.meta.url));
     for (const name of fs.readdirSync(dir)) {
       const text = fs.readFileSync(path.join(dir, name), "utf8");
@@ -375,3 +382,227 @@ describe("spec-gate closure: read-only", { timeout: 60_000 }, () => {
     }
   });
 });
+
+const HOST_TOKEN = "closure-cli-token-4a7c1e93";
+const RUN_CLI = "8123456789";
+
+describe("spec-gate closure: the host flags", { timeout: 60_000 }, () => {
+  let stub: Stub;
+
+  beforeAll(async () => {
+    stub = await Stub.start();
+  });
+  afterAll(async () => {
+    await stub.close();
+  });
+
+  it("refuses an unknown option (a token given by mistake) without printing its value", async () => {
+    const s = await scenario();
+    const run = await cli([...argsOf(s), "--token=oops-cli-secret-58"]);
+    expect(run.code).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(
+      /^spec-gate: closure: unknown-argument: [^\n]+\n$/,
+    );
+    expect(run.stderr).not.toContain("oops-cli-secret-58");
+  });
+
+  it("takes --help for an unknown option and refuses it; the program's help still lists the verb", async () => {
+    const s = await scenario();
+    const run = await cli([...argsOf(s), "--help"]);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain("closure: unknown-argument");
+    const help = await cli(["help", "closure"]);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toContain("--github-repo <owner/name>");
+    expect(help.stdout).toContain("--api-url <url>");
+  });
+
+  it("refuses --github-repo without GITHUB_TOKEN, naming the variable", async () => {
+    const s = await scenario();
+    const run = await cli([...argsOf(s), "--github-repo", "acme/widgets"], {
+      ...process.env,
+      GITHUB_TOKEN: "",
+    });
+    expect(run.code).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(
+      /^spec-gate: closure: token-missing: [^\n]+GITHUB_TOKEN[^\n]*\n$/,
+    );
+  });
+
+  it("refuses --api-url without --github-repo without echoing its value", async () => {
+    const s = await scenario();
+    const run = await cli([
+      ...argsOf(s),
+      "--api-url",
+      "https://api.invalid/secret-root",
+    ]);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain("closure: host-input-invalid");
+    expect(run.stderr).not.toContain("secret-root");
+  });
+
+  it("with --github-repo and a reachable host: the line gains host and ci_status verified", async () => {
+    const s = await scenario();
+    writeEvidence(s.repo, "TP-2", [
+      { commit: s.a, producer: "ci", ci_run: RUN_CLI },
+    ]);
+    stub.on(`/repos/acme/widgets/actions/runs/${RUN_CLI}`, {
+      json: {
+        id: Number(RUN_CLI),
+        head_sha: s.a,
+        status: "completed",
+        conclusion: "success",
+        repository: { full_name: "acme/widgets" },
+      },
+    });
+    const run = await cli(
+      [...argsOf(s), "--github-repo", "acme/widgets", "--api-url", stub.url],
+      { ...process.env, GITHUB_TOKEN: HOST_TOKEN },
+    );
+    expect(run.code).toBe(1); // TP-1 has no evidence at all
+    expect(run.stdout).not.toContain(HOST_TOKEN);
+    const report = JSON.parse(run.stdout) as {
+      host?: { repo: string; api_url: string | null };
+      rows: { id: string; ci_status?: string; ci_unverified?: boolean }[];
+    };
+    expect(report.host).toEqual({ repo: "acme/widgets", api_url: stub.url });
+    const row = report.rows.find((r) => r.id === "TP-2")!;
+    expect(row.ci_status).toBe("verified");
+    expect(row.ci_unverified).toBe(false);
+    expect(
+      stub.hitsOf(`/repos/acme/widgets/actions/runs/${RUN_CLI}`),
+    ).toHaveLength(1);
+  });
+
+  it("with --github-repo and an unreachable host: host-failed, the report still printed, exit unchanged by the failure", async () => {
+    const s = await scenario();
+    writeEvidence(s.repo, "TP-2", [
+      { commit: s.a, producer: "ci", ci_run: RUN_CLI },
+    ]);
+    const run = await cli(
+      [
+        ...argsOf(s),
+        "--github-repo",
+        "acme/widgets",
+        "--api-url",
+        "http://127.0.0.1:1",
+      ],
+      { ...process.env, GITHUB_TOKEN: HOST_TOKEN },
+    );
+    expect(run.code).toBe(1); // the same code the offline run gives
+    const offline = await cli(argsOf(s));
+    expect(offline.code).toBe(1);
+    const report = JSON.parse(run.stdout) as {
+      rows: { id: string; ci_status?: string }[];
+    };
+    const row = report.rows.find((r) => r.id === "TP-2")!;
+    expect(row.ci_status).toBe("host-failed");
+  });
+
+  it("makes no request without --github-repo even with GITHUB_TOKEN set", async () => {
+    const s = await scenario();
+    writeEvidence(s.repo, "TP-2", [
+      { commit: s.a, producer: "ci", ci_run: RUN_CLI },
+    ]);
+    const before = stub.hits.length;
+    const run = await cli(argsOf(s), {
+      ...process.env,
+      GITHUB_TOKEN: HOST_TOKEN,
+    });
+    expect(stub.hits).toHaveLength(before);
+    expect(run.stdout).not.toContain('"host"');
+    expect(run.stdout).not.toContain("ci_status");
+  });
+});
+
+const LEAK = "closure-leak-7b41d2";
+
+describe(
+  "spec-gate closure: a <spec-dir> that starts with a dash is an unknown argument",
+  { timeout: 60_000 },
+  () => {
+    /** The verb's options with the <spec-dir> slot filled by `token`. */
+    function withToken(s: Scenario, token: string, first: boolean): string[] {
+      const tail = [
+        "--repo",
+        s.repo.dir,
+        "--default-ref",
+        REMOTE_MAIN,
+        "--start",
+        s.spec,
+      ];
+      return first
+        ? ["closure", token, ...tail]
+        : ["closure", ...tail, "--", token];
+    }
+
+    /** A token put where the <spec-dir> belongs is refused, never echoed. */
+    async function refusedUnechoed(args: string[]): Promise<void> {
+      const run = await cli(args);
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toMatch(
+        /^spec-gate: closure: unknown-argument: [^\n]+\n$/,
+      );
+      expect(run.stderr).not.toContain(LEAK);
+      expect(run.stdout).not.toContain(LEAK);
+    }
+
+    it("refuses --token=<v> given in the <spec-dir> slot", async () => {
+      const s = await scenario();
+      await refusedUnechoed(withToken(s, `--token=${LEAK}`, true));
+    });
+
+    it("refuses -t<v> given in the <spec-dir> slot", async () => {
+      const s = await scenario();
+      await refusedUnechoed(withToken(s, `-t${LEAK}`, true));
+    });
+
+    it("refuses -- --token=<v> given in the <spec-dir> slot", async () => {
+      const s = await scenario();
+      await refusedUnechoed(withToken(s, `--token=${LEAK}`, false));
+    });
+
+    it("takes a real directory named ./-x as the <spec-dir>, not as an unknown argument", async () => {
+      const s = await scenario();
+      fs.mkdirSync(path.join(s.repo.dir, "-x"));
+      // The same real directory: the dash-prefixed token is the unknown
+      // argument, the `./`-prefixed one is the directory.
+      const asDash = await cli(
+        [
+          "closure",
+          "-x",
+          "--repo",
+          s.repo.dir,
+          "--default-ref",
+          REMOTE_MAIN,
+          "--start",
+          s.spec,
+        ],
+        undefined,
+        { cwd: s.repo.dir },
+      );
+      expect(asDash.code).toBe(2);
+      expect(asDash.stderr).toContain("closure: unknown-argument");
+      const asDir = await cli(
+        [
+          "closure",
+          "./-x",
+          "--repo",
+          s.repo.dir,
+          "--default-ref",
+          REMOTE_MAIN,
+          "--start",
+          s.spec,
+        ],
+        undefined,
+        { cwd: s.repo.dir },
+      );
+      expect(asDir.code).toBe(2);
+      expect(asDir.stderr).toContain("closure: spec-dir-invalid");
+      expect(asDir.stderr).not.toContain("unknown-argument");
+    });
+  },
+);

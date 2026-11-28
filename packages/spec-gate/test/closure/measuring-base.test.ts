@@ -19,7 +19,7 @@ function run(
   dir: string,
   s: Scenario,
   options: { head?: string } = {},
-): ClosureResult {
+): Promise<ClosureResult> {
   return runClosure(path.join(dir, SPEC_REL), {
     repo: dir,
     defaultRef: REMOTE_MAIN,
@@ -34,7 +34,7 @@ describe(
   () => {
     it("a shallow clone that holds every commit the check reads gives the report of the full repository", async () => {
       const s = await scenario();
-      const full = run(s.repo.dir, s);
+      const full = await run(s.repo.dir, s);
       expect(full.ok).toBe(true);
       // b, a, the spec commit and c1 (the commands_ref); c0 is behind the
       // shallow boundary.
@@ -57,7 +57,7 @@ describe(
         "true",
       );
       expect(await git(dir, ["rev-parse", REMOTE_MAIN])).toBe(s.spec);
-      expect(run(dir, s)).toEqual(full);
+      expect(await run(dir, s)).toEqual(full);
     });
 
     it("a head with two merge bases with the default branch gives the report the plain default commit gives", async () => {
@@ -86,12 +86,12 @@ describe(
       expect(bases).toEqual([s.b, d1].sort());
 
       await s.repo.setRef(REMOTE_MAIN, crossed);
-      const result = run(s.repo.dir, s, { head });
+      const result = await run(s.repo.dir, s, { head });
       expect(result.ok, JSON.stringify(result)).toBe(true);
       // The same spec commit and rows as with the default ref at the spec
       // commit, where there is one merge base.
       await s.repo.setRef(REMOTE_MAIN, s.spec);
-      expect(result).toEqual(run(s.repo.dir, s, { head }));
+      expect(result).toEqual(await run(s.repo.dir, s, { head }));
     });
   },
 );

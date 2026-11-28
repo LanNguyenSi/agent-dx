@@ -208,10 +208,10 @@ export function writeEvidence(
 }
 
 /** Runs the check in the scenario; `start` defaults to the spec commit. */
-export function closureIn(
+export async function closureIn(
   s: Scenario,
   options: { start?: string; head?: string; defaultRef?: string } = {},
-): ClosureResult {
+): Promise<ClosureResult> {
   return runClosure(s.repo.spec, {
     repo: s.repo.dir,
     defaultRef: options.defaultRef ?? REMOTE_MAIN,
@@ -221,11 +221,11 @@ export function closureIn(
 }
 
 /** The report of a run that must not be refused. */
-export function reportIn(
+export async function reportIn(
   s: Scenario,
   options: { start?: string; head?: string } = {},
-): ClosureReport {
-  const result = closureIn(s, options);
+): Promise<ClosureReport> {
+  const result = await closureIn(s, options);
   if (!result.ok) {
     throw new Error(`refused: ${result.code}: ${result.message}`);
   }

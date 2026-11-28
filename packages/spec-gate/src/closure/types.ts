@@ -5,6 +5,7 @@
  * order of the JSON line.
  */
 import type { TestPlanKind } from "../formats/index.js";
+import type { CiRunStatus } from "../host/index.js";
 
 export const CLOSURE_FORMAT = "spec-gate-closure/1";
 
@@ -32,6 +33,21 @@ export const IGNORE_REASONS = [
 ] as const;
 export type IgnoreReason = (typeof IGNORE_REASONS)[number];
 
+/**
+ * How a counted `producer: ci` envelope is marked after the host was asked
+ * about its run, worst first: `unknown` and `unverified` are answers of the
+ * host (`CiRunStatus`), `host-failed` is what a host that throws or answers
+ * with a value outside `CI_RUN_STATES` is marked as. A row's `ci_status` is
+ * the worst status of its counted ci envelopes.
+ */
+export const CI_STATUSES: readonly CiStatus[] = [
+  "host-failed",
+  "unknown",
+  "unverified",
+  "verified",
+];
+export type CiStatus = "host-failed" | CiRunStatus;
+
 export interface IgnoredEnvelope {
   /** 1-based line of the envelope in `evidence/TP-<n>.jsonl`. */
   line: number;
@@ -45,8 +61,10 @@ export interface ClosureRow {
   reason: string;
   /** A counted envelope has `producer: local`. */
   self_reported: boolean;
-  /** A counted envelope has `producer: ci`, whose run is not verified here. */
+  /** A counted envelope has `producer: ci` whose run the host did not vouch for; without a host, any counted `producer: ci` envelope. */
   ci_unverified: boolean;
+  /** Only when the host was asked and a `ci` envelope counted, added last: the worst status of the counted ci envelopes. It never changes `state` or `ok`. */
+  ci_status?: CiStatus;
   /** How many envelopes count. */
   counted: number;
   ignored: IgnoredEnvelope[];
@@ -66,6 +84,8 @@ export interface ClosureReport {
   head: string;
   /** The merged spec commit: the last commit on the default branch that changed `spec.md` or `testplan.yaml`. */
   spec_commit: string;
+  /** Only with `--github-repo`, after `spec_commit`: the host the CI runs were checked with; `api_url` is the `--api-url` value, `null` when the adapter's default root was used. */
+  host?: { repo: string; api_url: string | null };
   /** No row is `failed` or `unproven`. */
   ok: boolean;
   rows: ClosureRow[];
@@ -83,6 +103,12 @@ export interface ClosureRequest {
   start: string;
   /** `--head`: the full id of the commit the work is evaluated at; default the checkout's `HEAD`. */
   head?: string;
+  /** `--github-repo`: `<owner>/<name>`. With it the run of every counted `producer: ci` envelope is checked with the host; without it nothing is asked and no request is made. */
+  githubRepo?: string;
+  /** `--api-url`: the API root of the host; only read with `--github-repo`. */
+  apiUrl?: string;
+  /** How many arguments and options the command line held that the verb does not know. */
+  unknownArguments?: number;
 }
 
 export type ClosureResult =

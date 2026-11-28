@@ -109,7 +109,8 @@ described in [docs/approve.md](docs/approve.md) ("CLI"); the code lives in
 `src/approve/` and `src/host/`.
 
 `spec-gate closure <spec-dir> --repo <dir> --default-ref <ref> --start
-<commit> [--head <commit>]` prints one JSON report line
+<commit> [--head <commit>] [--github-repo <owner/name> [--api-url <url>]]`
+prints one JSON report line
 (`spec-gate-closure/1`) that says for every row of the test plan, as the
 merged spec commit holds it, whether the evidence files in the spec directory
 prove it at or after the start commit: `proven`, `failed`, `unproven`,
@@ -124,8 +125,12 @@ match the row's command and binding. It exits 0 when no row is `failed` or
 that is not after the merged spec commit or not on the default branch, a head
 that is not after the start, a merged spec that is not proposed, a command set
 that cannot be read, an evidence or bindings file that does not load). It is
-read-only and offline; CI runs are not verified with the host yet and the
-squash rule is not applied. It is described in
+read-only, and offline unless `--github-repo <owner/name>` asks for the host:
+with it the run of every counted `producer: ci` envelope is checked against
+that GitHub repository (the token from `GITHUB_TOKEN`, as for
+`approve-check`) and the row is marked verified only when the host vouches
+for the run; no host answer changes a row's state. The squash rule is not
+applied. It is described in
 [docs/closure.md](docs/closure.md); the code lives in `src/closure/`.
 
 ## Formats
