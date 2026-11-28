@@ -66,7 +66,7 @@ review:
     - "**/CHANGELOG.md"
 ```
 
-Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, `workflow.node20MajorsIgnore`, `workflow.auditGateTemplates`, and `workflow.executedActionInputs` default to `[]`; `review.allow` defaults to `[]` and `review.allowPaths` defaults to `["**/CHANGELOG.md"]` (a configured list replaces it; see [the review-slop docs](review-slop.md)).
+Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles (`*.lock` such as `yarn.lock` and `bun.lock`, `package-lock.json`, `pnpm-lock.yaml`, `bun.lockb`); `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, `workflow.node20MajorsIgnore`, `workflow.auditGateTemplates`, and `workflow.executedActionInputs` default to `[]`; `review.allow` defaults to `[]` and `review.allowPaths` defaults to `["**/CHANGELOG.md"]` (a configured list replaces it; see [the review-slop docs](review-slop.md)).
 
 ## Path pattern anchor
 
