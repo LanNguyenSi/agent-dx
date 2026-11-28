@@ -1158,7 +1158,12 @@ Named here instead of closed:
   a recomputed hash chain and bindings that match it) is not noticed, as
   long as the log the approved head holds is still extended and the bindings
   at the tip are the replay of the entries after it. The removal of a log is
-  noticed in both modes, by condition 8.
+  noticed in both modes, by condition 8. Nor is `bindings.yaml` at the
+  approved head compared with the head's own log when the propose commit
+  already lies on the default branch: a head whose bindings were changed by
+  hand without an entry is refused right after the merge, but approved once
+  a later commit of the default branch puts the bindings back to what the
+  log replays.
 - Which pull request, in the open mode: an approval of a commit counts for
   every spec in the tree of that commit, whether the pull request changed
   that spec or not. The check after the merge asks that the pull request
