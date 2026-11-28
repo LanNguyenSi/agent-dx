@@ -111,6 +111,48 @@ describe("spec-gate CLI", () => {
     expect(run.stderr).toContain("Usage: spec-gate");
   });
 
+  describe("an option's value is never echoed by a parser error", () => {
+    it("an unknown option with a value before a verb: exit 1, the name stays, the value and the usage text do not hold it", async () => {
+      const run = await runCli(["--nope=some-secret-value", "lint", "x"]);
+      expect(run.code).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("unknown option '--nope=");
+      expect(run.stderr).toContain("Usage: spec-gate");
+      expect(run.stderr).not.toContain("some-secret-value");
+    });
+
+    it("an unknown option with a value after a verb: exit 2 as before, the value is not echoed (the verbs inherit the setting)", async () => {
+      const run = await runCli(["lint", "--nope=some-secret-value", "x"]);
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("unknown option '--nope=");
+      expect(run.stderr).toContain("Usage: spec-gate lint");
+      expect(run.stderr).not.toContain("some-secret-value");
+    });
+
+    it.each([
+      ["--profile=some-secret-value"],
+      ["--profile", "some-secret-value"],
+    ])(
+      "a refused value of a known option (%s): exit 2, the allowed choices stay, the value does not",
+      async (...args) => {
+        const run = await runCli(["lint", ...args, "x"]);
+        expect(run.code).toBe(2);
+        expect(run.stdout).toBe("");
+        expect(run.stderr).toContain("option '--profile <profile>' argument '");
+        expect(run.stderr).toContain("Allowed choices are light, full.");
+        expect(run.stderr).not.toContain("some-secret-value");
+      },
+    );
+
+    it("a verb without exitOverride (intake) is covered too", async () => {
+      const run = await runCli(["intake", "--nope=some-secret-value"]);
+      expect(run.code).not.toBe(0);
+      expect(run.stderr).toContain("unknown option '--nope=");
+      expect(run.stderr).not.toContain("some-secret-value");
+    });
+  });
+
   describe("version source", () => {
     const tmpRoots: string[] = [];
     afterEach(() => {
@@ -833,18 +875,37 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
       expect(run.stdout).not.toContain("--help");
     });
 
-    it("placed before the verb name by mistake, an option is handled by the program: it is echoed, with exit 1 and no report", async () => {
+    it("placed before the verb name by mistake, an option is handled by the program: its name is echoed, its value is not, with exit 1 and no report", async () => {
       // The documented limit. Not the test token: the scan of every run
       // would fail on it, which is the point of the limit.
       const run = await approveCheck(
-        ["--token=some-value", ...argsFor(S)],
+        ["--token=some-secret-value", ...argsFor(S)],
         null,
       );
       expect(run.code).toBe(1);
       expect(run.stdout).toBe("");
-      expect(run.stderr).toContain(
-        "error: unknown option '--token=some-value'",
+      expect(run.stderr).toContain("unknown option '--token=");
+      expect(run.stderr).not.toContain("some-secret-value");
+      expect(stub.hits).toEqual([]);
+    });
+
+    it("placed before the verb name as a separate argument, the value of an unknown option is not echoed either", async () => {
+      const run = await approveCheck(
+        ["--token", "some-secret-value", ...argsFor(S)],
+        null,
       );
+      expect(run.code).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("unknown option '--token'");
+      expect(run.stderr).not.toContain("some-secret-value");
+      expect(stub.hits).toEqual([]);
+    });
+
+    it("a bare argument before the verb name is reported as an unknown command: the one place a value is echoed", async () => {
+      const run = await approveCheck(["some-bare-word", ...argsFor(S)], null);
+      expect(run.code).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("unknown command 'some-bare-word'");
       expect(stub.hits).toEqual([]);
     });
   });
