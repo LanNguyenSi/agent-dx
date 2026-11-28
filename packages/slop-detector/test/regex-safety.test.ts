@@ -88,6 +88,11 @@ describe("findRegexSafetyProblem", () => {
       ["a negative lookbehind", "(?<!a)(b+)+>"],
       ["a named group", "(?<n>a)(b+)+:"],
       ["a plain group", "(a)(b+)+:"],
+      ["a modifier group", "(?i:a)(b+)+:"],
+      ["a modifier group that is itself repeated", "(?i:a+)+"],
+      // The body starts right after the `:`; a skip one character too far
+      // would swallow the inner `(` and lose the group that holds the repeat.
+      ["a modifier group whose body opens with a group", "(?i:(a+))+"],
     ];
     it.each(openers)("%s: %s", (_label, pattern) => {
       expect(findRegexSafetyProblem(pattern)).toEqual({
@@ -151,6 +156,7 @@ describe("findRegexSafetyProblem", () => {
       ["a fixed count under a plus", "(?:a{2})+"],
       ["a lazy fixed count under a plus", "(?:a{2}?)+"],
       ["a named group opener under a plus", "(?<name>ab)+"],
+      ["a modifier group opener under a plus", "(?i:ab)+"],
       ["a lookahead opener under a star", "(?=ab)*c"],
       ["a negative lookbehind opener without a repeat", "(?<!a)b+"],
       ["a literal count at the outer bound", "(a+){2}x"],
