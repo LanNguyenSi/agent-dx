@@ -33,6 +33,22 @@ function fail(code: FileErrorCode, message: string): FileRead {
   return { ok: false, code, message };
 }
 
+/** What `<spec-dir>` itself is on disk; a link is reported, never followed. */
+export type SpecDirState =
+  "directory" | "symlink" | "missing" | "not-directory";
+
+/** Classifies the spec directory path without following a link at it. */
+export function specDirState(specDir: string): SpecDirState {
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(specDir);
+  } catch {
+    return "missing";
+  }
+  if (stat.isSymbolicLink()) return "symlink";
+  return stat.isDirectory() ? "directory" : "not-directory";
+}
+
 /**
  * Reads `rel` (`/` separated, below `dir`) as text. Every directory above
  * the file must be a real directory, not a link.

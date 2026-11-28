@@ -36,6 +36,29 @@ async function checkRun(name: string, extraArgs: string[] = []) {
   ]);
 }
 
+describe("spec-gate export --check and the spec directory path", () => {
+  it("refuses a spec directory that is a symlink before reading spec.md", async () => {
+    const real = checkDir();
+    const link = path.join(scratch(), "spec-link");
+    fs.symlinkSync(real, link);
+    const run = await runCli([
+      "export",
+      link,
+      "--check",
+      path.join(CHECK_FIXTURES, "return-ok.yaml"),
+    ]);
+    expect(run.code).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("spec-dir-invalid");
+    expect(run.stderr).toContain(`${link} is a symlink, refusing to read it`);
+  });
+
+  it("keeps the outcome for a real spec directory", async () => {
+    const run = await checkRun("return-ok.yaml");
+    expect(run.code).toBe(0);
+  });
+});
+
 describe("spec-gate export --check", () => {
   it("exits 0 when every qualified id appears in a task", async () => {
     const run = await checkRun("return-ok.yaml");

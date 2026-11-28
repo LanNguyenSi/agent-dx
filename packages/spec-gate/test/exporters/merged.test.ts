@@ -46,6 +46,27 @@ const dropRef = (text: string): string =>
     .filter((line) => !line.startsWith("spec_ref:"))
     .join("\n");
 
+describe("spec-gate export --format ow and a symlinked spec directory", () => {
+  it("refuses a spec directory that is a link even when it points inside the repository", async () => {
+    const repo = await mergedRepo();
+    const link = path.join(repo.dir, "specs", "s1-link");
+    fs.symlinkSync(repo.spec, link);
+    const run = await runCli(
+      ["export", ...exportArgs(repo).map((a) => (a === repo.spec ? link : a))],
+      EXPORT_TIMEOUT_MS,
+    );
+    expect(run.code).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("spec-dir-invalid");
+    expect(run.stderr).toContain(`${link} is a symlink, refusing to read it`);
+    const real = await runCli(
+      ["export", ...exportArgs(repo)],
+      EXPORT_TIMEOUT_MS,
+    );
+    expect(real.code).toBe(0);
+  });
+});
+
 describe("spec-gate export --format ow", () => {
   it("prints the golden briefing of a spec merged unchanged on the default branch", async () => {
     const repo = await mergedRepo();

@@ -6,6 +6,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { specDirState } from "../lint/files.js";
 import {
   parseTriage,
   type FormatError,
@@ -62,6 +63,14 @@ export function triageFilePath(specDir: string): string {
  */
 export function runTriage(specDir: string): TriageRunResult {
   const file = triageFilePath(specDir);
+  if (specDirState(specDir) === "symlink") {
+    return {
+      ok: false,
+      kind: "symlink",
+      file,
+      message: `triage: ${specDir} is a symlink, refusing to read it`,
+    };
+  }
   try {
     if (fs.lstatSync(file).isSymbolicLink()) {
       return {

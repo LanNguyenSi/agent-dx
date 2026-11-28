@@ -36,6 +36,7 @@ import {
   readBlobAtCommit,
   resolveRef,
 } from "../lint/git/index.js";
+import { specDirState } from "../lint/files.js";
 import { MAX_OUTPUT_BYTES, runGit } from "../lint/git/exec.js";
 import { ExportError } from "./errors.js";
 import type { ExportErrorCode } from "./errors.js";
@@ -139,6 +140,12 @@ export function loadMergedSpecDir(
     throw new ExportError(
       "git-failed",
       "the repository top level git reported could not be resolved",
+    );
+  }
+  if (specDirState(specDir) === "symlink") {
+    throw new ExportError(
+      "spec-dir-invalid",
+      `${specDir} is a symlink, refusing to read it`,
     );
   }
   let specReal: string;

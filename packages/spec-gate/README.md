@@ -18,8 +18,8 @@ format is described in [docs/formats.md](docs/formats.md).
 `spec-gate triage <spec-dir>` derives the triage class from
 `<spec-dir>/triage.json`, writes `class` and `rule_version` back through a
 temporary file renamed into place, and prints the derivation; a
-`triage.json` that is a symlink, or a file or directory that cannot be
-written, is refused with a named error. The rule is documented in
+`triage.json` or a `<spec-dir>` that is a symlink, or a file or directory that
+cannot be written, is refused with a named error. The rule is documented in
 [docs/triage.md](docs/triage.md).
 
 `spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>] [--config <path>] [--repo <dir>] [--default-ref <ref>] [--base <commit>]`
