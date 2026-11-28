@@ -243,6 +243,20 @@ const DEFAULT_PACKS: Record<PackId, boolean> = {
 };
 
 /**
+ * The pack ids whose default is `false`, derived from `DEFAULT_PACKS` so a
+ * new pack (or a flipped default) lands here automatically. Exported for
+ * `mcp-descriptions.ts`, which builds the MCP `packs` argument description
+ * from this list; `test/mcp-descriptions.test.ts` pins the derivation
+ * against `defaultConfig()` so the description cannot drift from the
+ * registry again.
+ */
+export const OFF_BY_DEFAULT_PACKS: PackId[] = (
+  Object.entries(DEFAULT_PACKS) as [PackId, boolean][]
+)
+  .filter(([, enabled]) => !enabled)
+  .map(([id]) => id);
+
+/**
  * Exported so `review-slop.ts`'s `isAllowedPath` can fall back to the exact
  * same array (rather than a second, drift-prone `["**\/CHANGELOG.md"]`
  * literal) when it receives a hand-built `ResolvedConfig` that omits
@@ -251,6 +265,13 @@ const DEFAULT_PACKS: Record<PackId, boolean> = {
  */
 export const DEFAULT_REVIEW_ALLOW_PATHS = ["**/CHANGELOG.md"];
 
+// The lockfile set mirrors what `docs/configuration.md` ("Defaults applied
+// even without a config") promises: `**/*.lock` already covers `yarn.lock`
+// and bun's text format `bun.lock`; `package-lock.json`, `pnpm-lock.yaml`
+// and bun's binary format `bun.lockb` each need their own entry, and none
+// of the three matches any other default pattern (`.yaml` is scanned as
+// YAML code, `bun.lockb` falls through the extension tables to prose, so
+// without its entry a real binary would be scanned as text).
 const DEFAULT_IGNORES = [
   "**/node_modules/**",
   "**/dist/**",
@@ -259,6 +280,8 @@ const DEFAULT_IGNORES = [
   "**/.git/**",
   "**/*.lock",
   "**/package-lock.json",
+  "**/pnpm-lock.yaml",
+  "**/bun.lockb",
 ];
 
 export function loadConfig(configPath?: string): ResolvedConfig {
