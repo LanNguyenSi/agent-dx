@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/configuration.md` named the rule-override key `ruleOverrides` when
   enabling the corpus rules; the `slop.config.yml` key is `rules`.
 - The default ignores now include `**/pnpm-lock.yaml` and `**/bun.lockb`, so the documented "lockfiles" claim holds for pnpm and bun as it already did for npm and yarn (`pnpm-lock.yaml` used to be scanned as YAML and `bun.lockb`, which has no known extension, as prose). The MCP `slop_check` tool's pack lists can no longer drift from the registry: the off-by-default list in the `packs` argument description is generated from `DEFAULT_PACKS` through a new exported `OFF_BY_DEFAULT_PACKS`, the tool description names all eight packs including `ui-slop` and `review-slop`, and a parity test pins both against the registry and the pack defaults.
+- The README's pre-commit example (`xargs cat | slop-detector check --stdin-path PR_BODY.md`)
+  merged every staged file into one invented document: file names with
+  spaces broke the pipeline silently, line numbers and path-scoped rules
+  pointed at `PR_BODY.md` instead of the real files, and a staged deletion
+  was passed to `cat`. The example is now
+  `git diff --cached --name-only -z --diff-filter=ACMR | xargs -0 -r slop-detector check`,
+  which scans each staged file under its own path and does nothing when
+  nothing is staged, and stdin is shown only for one document (for
+  example a commit message through `--stdin-path`).
 
 ### Security
 
