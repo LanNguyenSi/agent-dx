@@ -168,8 +168,19 @@ describe("findRegexSafetyProblem", () => {
       ["a non-capturing group without a repeat", "(?:a+b)c"],
       ["a lookbehind without a repeat", "(?<=a+)b"],
     ];
+    // Modifier groups such as (?i:...) compile only on newer engines (not on
+    // Node 22); the scanner verdict is engine-independent, so the compile
+    // check is skipped where the engine rejects the syntax.
+    let modifierGroupsCompile = true;
+    try {
+      new RegExp("(?i:a)");
+    } catch {
+      modifierGroupsCompile = false;
+    }
     it.each(accepted)("%s: %s", (_label, pattern) => {
-      expect(() => new RegExp(pattern)).not.toThrow();
+      if (modifierGroupsCompile || !pattern.startsWith("(?i:")) {
+        expect(() => new RegExp(pattern)).not.toThrow();
+      }
       expect(findRegexSafetyProblem(pattern)).toBeNull();
     });
   });
