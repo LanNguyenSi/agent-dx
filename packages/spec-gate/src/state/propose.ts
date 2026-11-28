@@ -2,8 +2,8 @@
  * `spec-gate propose`: the step from `draft` to `proposed`.
  *
  * It refuses, writing nothing, unless all of this holds: git inputs are
- * given (`--repo` and `--default-ref` or `--base`, resolved as for the lint),
- * the spec directory is `specs/<name>`, one level below the top-level
+ * given (`--repo` and `--default-ref`, `--base` optional, resolved as for
+ * the lint), the spec directory is `specs/<name>`, one level below the top-level
  * `specs/` of the repository, the frontmatter status is `draft`, no
  * `bindings.log` exists, and
  * `spec.md` and `bindings.yaml` in the work tree are byte for byte the files
@@ -140,7 +140,7 @@ export function proposeSpecDir(
 
   if (!hasGitInputs(request)) {
     return refuse(
-      "needs git inputs: --repo <dir> and --default-ref <ref> or --base <commit>; the final lint it runs does not pass without them",
+      "needs git inputs: --repo <dir> and --default-ref <ref>; the final lint it runs does not pass without them",
     );
   }
   const resolved = resolveGitInputs(dir, request);

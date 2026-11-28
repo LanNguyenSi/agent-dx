@@ -58,7 +58,15 @@ describe("spec-gate repo-check (CLI)", { timeout: 60_000 }, () => {
   it("exits 1 with the findings when a protected spec is deleted", async () => {
     const { repo, main } = await repoWithProposed();
     await repo.commit({ "specs/a/spec.md": null }, "delete");
-    const run = await cli(["repo-check", "--repo", repo.dir, "--base", main]);
+    const run = await cli([
+      "repo-check",
+      "--repo",
+      repo.dir,
+      "--default-ref",
+      REMOTE_MAIN,
+      "--base",
+      main,
+    ]);
     expect(run.code).toBe(1);
     const report = JSON.parse(run.stdout) as {
       ok: boolean;
@@ -75,7 +83,7 @@ describe("spec-gate repo-check (CLI)", { timeout: 60_000 }, () => {
     const run = await cli(["repo-check", "--repo", repo.dir]);
     expect(run.code).toBe(2);
     expect(run.stdout).toBe("");
-    expect(run.stderr).toContain("--default-ref <ref> or --base <commit>");
+    expect(run.stderr).toContain("repo-check needs --default-ref <ref>");
   });
 
   it("exits 2 without --repo", async () => {

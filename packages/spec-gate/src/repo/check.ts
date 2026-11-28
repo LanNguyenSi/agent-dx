@@ -270,10 +270,11 @@ export function checkRepository(git: GitInputs): RepoCheckReport {
 
 /**
  * Resolves the git flags as the lint does (`--repo` is the trusted checkout
- * root, never discovered; `--default-ref` or `--base` names the reference;
- * the diff base is the merge base of HEAD and the reference) and runs the
- * check. A usage error or a git failure is `ok: false` with a message that
- * names no path and holds none of git's output.
+ * root, never discovered; `--default-ref` names the reference; the diff base
+ * is the one merge base of HEAD and the reference, and `--base` moves
+ * neither) and runs the check. A usage error or a git failure is
+ * `ok: false` with a message that names no path and holds none of git's
+ * output.
  */
 export function repoCheck(request: GitRequest): RepoCheckResult {
   if (request.repo === undefined) {
@@ -282,7 +283,7 @@ export function repoCheck(request: GitRequest): RepoCheckResult {
   if (!hasGitInputs(request)) {
     return {
       ok: false,
-      message: "repo-check needs --default-ref <ref> or --base <commit>",
+      message: "repo-check needs --default-ref <ref>",
     };
   }
   const resolved = resolveGitInputs(request.repo, request);
@@ -290,7 +291,7 @@ export function repoCheck(request: GitRequest): RepoCheckResult {
   if (resolved.git === undefined) {
     return {
       ok: false,
-      message: "repo-check needs --default-ref <ref> or --base <commit>",
+      message: "repo-check needs --default-ref <ref>",
     };
   }
   try {

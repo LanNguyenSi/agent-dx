@@ -175,6 +175,57 @@ export function mergeBase(repo: string, a: string, b: string): string | null {
 }
 
 /**
+ * Every merge base of the commits `a` and `b`: each common ancestor that no
+ * other common ancestor descends from, as full commit ids in the order git
+ * lists them. No entry when the two share no history. Histories that
+ * crossed (each side merged a commit of the other that the other reached on
+ * its own) have more than one, and git's plain `merge-base` then prints one
+ * of them; a caller that needs one commit to measure a change from must
+ * know that there are several.
+ */
+export function mergeBases(repo: string, a: string, b: string): string[] {
+  if (!COMMIT_RE.test(a) || !COMMIT_RE.test(b)) {
+    throw new LintGitError(
+      "not-a-commit",
+      "a value is not a full commit id (40 or 64 lower-case hex digits)",
+    );
+  }
+  const run = runGit(repo, ["merge-base", "--all", "--end-of-options", a, b]);
+  // Exit 1 with no output is git's answer for two histories without a
+  // common commit.
+  if (run.status === 1 && run.stdout.length === 0) return [];
+  const ids = run.stdout
+    .toString("utf8")
+    .split("\n")
+    .filter((line) => line !== "");
+  if (
+    run.status !== 0 ||
+    ids.length === 0 ||
+    ids.some((id) => !COMMIT_RE.test(id))
+  ) {
+    throw new LintGitError("git-failed", "git could not find the merge bases");
+  }
+  return ids;
+}
+
+/**
+ * Whether the repository is shallow: its history ends at a boundary below
+ * which git holds no commits. There a commit shows no parents, and a merge
+ * base can be an older commit than the one the full history has.
+ */
+export function isShallow(repo: string): boolean {
+  const run = runGit(repo, ["rev-parse", "--is-shallow-repository"]);
+  const text = run.stdout.toString("utf8");
+  if (run.status !== 0 || (text !== "true\n" && text !== "false\n")) {
+    throw new LintGitError(
+      "git-failed",
+      "git could not say whether the repository is shallow",
+    );
+  }
+  return text === "true\n";
+}
+
+/**
  * The paths that differ between the trees of two commits, relative to the
  * repository root. Rename detection is off (a rename is a delete and an add,
  * so both paths show), and no textconv or external diff program runs:

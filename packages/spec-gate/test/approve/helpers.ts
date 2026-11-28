@@ -185,9 +185,14 @@ export const OTHER_BINDINGS = BIND_BINDINGS.replace(
  * proposed and merged into the default branch (`newer`, where the default
  * ref is set); the branch `pr2` starts at `c1`, which the host reports as
  * its base, merges the default branch, commits the spec back to `draft`
- * without its log and with other bindings, and proposes again with the base
- * `c1`. Measured from `c1` there is no merged log to compare with, so that
- * propose writes; measured from the default branch the log was replaced.
+ * without its log and with other bindings, and proposes again. Propose
+ * measures from the default branch, where its final lint sees the merged
+ * log removed and writes nothing. The second propose here therefore runs
+ * while the default ref still names `c1` and the ref is moved back to
+ * `newer` after it: that stands in for an author who forges the propose
+ * output by hand, and the log it writes is the one a forged propose would
+ * write. Measured from `c1` there is no merged log to compare with;
+ * measured from the default branch the log was replaced.
  */
 export async function relogged(): Promise<Built & { newer: string }> {
   const s = await build();
@@ -210,7 +215,13 @@ export async function relogged(): Promise<Built & { newer: string }> {
     },
     "back to draft, without the log",
   );
-  const result = proposeSpecDir(s.spec, { repo: s.dir, base: s.c1 });
+  await s.repo.setRef(REMOTE_MAIN, s.c1);
+  const result = proposeSpecDir(s.spec, {
+    repo: s.dir,
+    defaultRef: REMOTE_MAIN,
+    base: s.c1,
+  });
+  await s.repo.setRef(REMOTE_MAIN, newer);
   if (result.kind !== "written") {
     throw new Error(
       `the second propose did not write: ${JSON.stringify(result)}`,
