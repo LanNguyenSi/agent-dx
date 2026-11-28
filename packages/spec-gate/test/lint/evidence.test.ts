@@ -162,7 +162,7 @@ describe("self-reported: a local envelope is judged, ci and host are not", () =>
     expect(flagged(run({ "evidence/TP-1.jsonl": envelope() }))).toEqual([]);
   });
 
-  it("producer ci is not judged by lint: the closing check verifies it through the host", () => {
+  it("producer ci is not judged by lint: closure marks it verified only when the host vouches for its run", () => {
     expect(
       flagged(
         run({

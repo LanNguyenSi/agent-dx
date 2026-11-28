@@ -22,8 +22,9 @@
  *   (commit, dirty, selector); the digest cause belongs to
  *   `stale-evidence`, the only evidence rule that reads the repository.
  * - `self-reported`: a row whose file holds an envelope of `producer:
- *   local`. `producer: ci` is not judged here: the closing check verifies
- *   a CI run through the host, which lint has no part of.
+ *   local`. `producer: ci` is not judged here: closure marks it verified
+ *   only when the host vouches for its run (`--github-repo`), which lint
+ *   has no part of.
  * - `evidence-unknown-row`: a well-named `evidence/TP-<n>.jsonl` whose
  *   `TP-<n>` is no test-plan row.
  */
@@ -275,7 +276,7 @@ export function checkSelfReported(ctx: RuleContext): RuleFinding[] {
       file: evidenceFile(tpId),
       path: "$",
       id: tpId,
-      message: `${tpId} has an envelope of producer local: a run the spec directory itself reports. producer ci is not judged here: the closing check verifies it through the host`,
+      message: `${tpId} has an envelope of producer local: a run the spec directory itself reports. producer ci is not judged here: closure marks it verified only when the host vouches for its run (--github-repo)`,
     });
   }
   return findings;
@@ -341,7 +342,7 @@ export const EVIDENCE_RULES: readonly RuleDef[] = [
     gated: false,
     ackable: true,
     summary:
-      "A row's evidence file holds an envelope of producer local. producer ci is not judged by lint: the closing check verifies it through the host. Acknowledge with the row ID.",
+      "A row's evidence file holds an envelope of producer local. producer ci is not judged by lint: closure marks it verified only when the host vouches for its run (closure --github-repo). Acknowledge with the row ID.",
     needs: [],
     uses: ["evidence"],
     check: checkSelfReported,

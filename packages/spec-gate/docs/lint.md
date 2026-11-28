@@ -469,7 +469,7 @@ that they exist; the rules that need git are covered as described under
 | `bindings-log` | error | light, full | yes | no | At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; when the propose commit is not a commit or not an ancestor of HEAD (after a squash or rebase merge) and the diff base holds the log of this spec at the same path with the same propose entry, bindings.yaml read from git at the diff base is the anchor instead and only the bind entries after that log are checked and replayed over it; the spec directory is specs/<name>, one level below the top-level specs/; every log the diff base holds there for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory. |
 | `stale-evidence` | warning | full | no | yes | A baseline envelope is stale: its commit is not the frontmatter base_commit, its work tree was dirty, its commands_digest is not the expected digest of the one command its row uses at commands_ref, its row has no determinable command (the row is not static and its binding has no selector, or the row is selector-bound and no command of the set carries {selector}), or its selector is not its row's binding selector; closure envelopes are never stale. Acknowledge with the row ID; an unreadable command set is acknowledged with ID commands. |
 | `unproven` | warning | full | no | yes | A stays-green row has no baseline envelope with result pass that is unstale by its own fields: commit equal to base_commit, work tree clean, selector equal to the row's binding selector. The digest cause is judged by stale-evidence, the only evidence rule that reads the repository. Acknowledge with the row ID. |
-| `self-reported` | warning | full | no | yes | A row's evidence file holds an envelope of producer local. producer ci is not judged by lint: the closing check verifies it through the host. Acknowledge with the row ID. |
+| `self-reported` | warning | full | no | yes | A row's evidence file holds an envelope of producer local. producer ci is not judged by lint: closure marks it verified only when the host vouches for its run (closure --github-repo). Acknowledge with the row ID. |
 | `evidence-unknown-row` | error | full | no | no | Every well-named evidence/TP-<n>.jsonl names a test-plan row: the file name is the mapping from an envelope to its row, and a file for an unknown TP ID is an error. |
 <!-- END generated: rules -->
 
@@ -719,8 +719,9 @@ cause is not judged here: `stale-evidence` owns it, being the only evidence
 rule that reads the repository. `self-reported` (warning): a file holding a
 `baseline` or `closure` envelope of `producer: local` is one warning for
 that row; a `host` producer is not flagged and `producer: ci` is not judged
-by lint at all, because the closing check verifies a CI run through the
-host. `stale-evidence` (warning, needs git inputs, skipped `no-git`
+by lint at all, because `closure` asks the host to vouch for a CI run and
+marks the row verified only when the host does, with `--github-repo` (see
+[closure.md](closure.md)). `stale-evidence` (warning, needs git inputs, skipped `no-git`
 without; a skipped warning never becomes a `rule-skipped` error): every
 `baseline` envelope (closure envelopes are never stale, see
 `staleEvidenceApplies` in [formats.md](formats.md)) is judged on five
