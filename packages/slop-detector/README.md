@@ -36,14 +36,20 @@ Without the alias, invoke the built CLI directly: `node packages/slop-detector/d
 # scan a path (file or directory)
 slop-detector check packages/
 
-# scan stdin (use in pre-commit pipes)
-git diff --cached --name-only | xargs cat | slop-detector check --stdin-path PR_BODY.md
+# pre-commit: scan each staged file under its own path; -z and -0 keep
+# names with spaces intact, --diff-filter=ACMR drops deleted files, and
+# xargs -r does nothing when nothing is staged
+git diff --cached --name-only -z --diff-filter=ACMR | xargs -0 -r slop-detector check
+
+# stdin is exactly one document, for example the last commit message or a
+# PR body file; --stdin-path gives that document a name for path-scoped rules
+git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG.md
 
 # only run a specific pack, and see why a rule fires
 slop-detector check . --pack agent-tics --explain
 ```
 
-Run `slop-detector list-rules` for the full rule catalogue with severities and rationales. See [What a run looks like](docs/integration.md#what-a-run-looks-like) for sample output.
+Run `slop-detector list-rules` for the full rule catalogue with severities and rationales. See [What a run looks like](docs/integration.md#what-a-run-looks-like) for sample output. To run the scanner from a commit hook (Husky or lint-staged), see the [pre-commit recipe](docs/integration.md#pre-commit-recipe-husky).
 
 ## GitHub Action
 

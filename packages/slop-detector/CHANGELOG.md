@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The composite action's `changed-files-only` input description in `action/action.yml` named only `pull_request` events; it now names `pull_request` and `pull_request_target`, matching what `src/action/run.ts` and the README already handle.
 - `docs/configuration.md` named the rule-override key `ruleOverrides` when
   enabling the corpus rules; the `slop.config.yml` key is `rules`.
+- The README's pre-commit example (`xargs cat | slop-detector check --stdin-path PR_BODY.md`)
+  merged every staged file into one invented document: file names with
+  spaces broke the pipeline silently, line numbers and path-scoped rules
+  pointed at `PR_BODY.md` instead of the real files, and a staged deletion
+  was passed to `cat`. The example is now
+  `git diff --cached --name-only -z --diff-filter=ACMR | xargs -0 -r slop-detector check`,
+  which scans each staged file under its own path and does nothing when
+  nothing is staged, and stdin is shown only for one document (for
+  example a commit message through `--stdin-path`).
 
 ### Security
 
