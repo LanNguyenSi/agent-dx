@@ -1074,6 +1074,8 @@ fine-grained personal access tokens"; in a workflow the keys of
 The token of a workflow run cannot be given the administration permission.
 With such a token the classic protection is not readable, and a repository
 that enforces the review through a classic protection alone gets `unknown`.
+A branch without any classic protection gets `unknown` the same way,
+because the host answers both cases alike.
 A ruleset is readable with every token that can read the repository.
 With a workflow token, enforce the review through a ruleset: classic
 protection alone reads as `unknown` and the check fails closed.
