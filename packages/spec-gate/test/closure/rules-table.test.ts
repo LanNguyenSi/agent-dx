@@ -3,9 +3,9 @@
  * here from the per-kind table of docs/closure.md (it does not call the
  * implementation) is compared with `judgeRow` for every sequence of 0 to 4
  * counted envelopes on three commits of one line of history (start, a, b),
- * each envelope a pass, a pass with another exit, a fail, an error or a
- * skip. The sequences are in the order closure hands them over: by commit
- * ancestry, so the commits never go back.
+ * each envelope a pass, a pass with another exit (a positive one, a negative
+ * one or none), a fail, an error or a skip. The sequences are in the order
+ * closure hands them over: by commit ancestry, so the commits never go back.
  */
 import { describe, expect, it } from "vitest";
 import { judgeRow, type CountedEnvelope } from "../../src/closure/index.js";
@@ -23,6 +23,8 @@ type Step = {
 const OUTCOMES: Omit<Step, "commit">[] = [
   { result: "pass", exit: 0 },
   { result: "pass", exit: 3 },
+  { result: "pass", exit: -1 },
+  { result: "pass", exit: null },
   { result: "fail", exit: 1 },
   { result: "error", exit: null },
   { result: "skip", exit: null },
@@ -110,8 +112,8 @@ describe("closure: the per-kind rules over every short sequence", () => {
   const all = sequences(4);
 
   it("enumerates the sequences it means to", () => {
-    // 1 empty; then non-decreasing commit sequences times 5 outcomes each.
-    expect(all.length).toBe(1 + 15 + 150 + 1250 + 9375);
+    // 1 empty; then non-decreasing commit sequences times 7 outcomes each.
+    expect(all.length).toBe(1 + 3 * 7 + 6 * 7 ** 2 + 10 * 7 ** 3 + 15 * 7 ** 4);
   });
 
   for (const kind of TEST_PLAN_KINDS) {
@@ -128,7 +130,8 @@ describe("closure: the per-kind rules over every short sequence", () => {
         if (got.state !== want.state || got.reason !== want.reason) {
           const text = seq
             .map(
-              (s) => `${s.result}${s.exit === 3 ? "(exit 3)" : ""}@${s.commit}`,
+              (s) =>
+                `${s.result}${s.result === "pass" && s.exit !== 0 ? `(exit ${String(s.exit)})` : ""}@${s.commit}`,
             )
             .join(",");
           wrong.push(
