@@ -8,9 +8,29 @@ describe("maskOptionValues", () => {
     );
   });
 
-  it("masks a short option the same way", () => {
-    expect(maskOptionValues("error: unknown option '-t=b'\n")).toBe(
-      `error: unknown option '-t=${REDACTED}'\n`,
+  it("masks what is attached to a short option and keeps its letter", () => {
+    expect(maskOptionValues("error: unknown option '-tSECRET'\n")).toBe(
+      `error: unknown option '-t${REDACTED}'\n`,
+    );
+    expect(maskOptionValues("error: unknown option '-t=SECRET'\n")).toBe(
+      `error: unknown option '-t${REDACTED}'\n`,
+    );
+    expect(maskOptionValues("error: unknown option '-abc d'e'\n")).toBe(
+      `error: unknown option '-a${REDACTED}'\n`,
+    );
+  });
+
+  it("leaves a bare short option unchanged: no placeholder is added", () => {
+    const line = "error: unknown option '-t'\n";
+    expect(maskOptionValues(line)).toBe(line);
+    expect(maskOptionValues("error: unknown option '-t'")).toBe(
+      "error: unknown option '-t'",
+    );
+  });
+
+  it("masks from the first equals sign to the last quote when a line holds two options", () => {
+    expect(maskOptionValues("error: unknown option '--a=b --c=d'\n")).toBe(
+      `error: unknown option '--a=${REDACTED}'\n`,
     );
   });
 
@@ -75,6 +95,16 @@ describe("maskOptionValues", () => {
     const withSuggestion =
       "error: unknown command 'lnit'\n(Did you mean lint?)\n";
     expect(maskOptionValues(withSuggestion)).toBe(withSuggestion);
+  });
+
+  it("masks a refused value that holds a quote and a space", () => {
+    expect(
+      maskOptionValues(
+        "error: option '--profile <profile>' argument 'a'b c' is invalid. Allowed choices are light, full.\n",
+      ),
+    ).toBe(
+      `error: option '--profile <profile>' argument '${REDACTED}' is invalid. Allowed choices are light, full.\n`,
+    );
   });
 
   it("leaves a line with no option value unchanged", () => {

@@ -739,7 +739,8 @@ All of this holds from the verb name on. Arguments before the verb name are
 handled by the program, not by the verb: an option the program does not know
 there is reported on stderr with the usage, and the exit code is 1 with an
 empty stdout, not 2. The report names the option and never repeats its value
-(`--token=<redacted>`, in the `--name=value` form; the value of
+(`--token=<redacted>`, in the `--name=value` form; a short option with
+something attached, `-tVALUE`, is reported as `-t<redacted>`; the value of
 `--name value` is not part of the report at all). A bare argument there is not
 an option: it is reported as an unknown command and printed as it is, so the
 token is passed in `GITHUB_TOKEN` only, never on the command line.

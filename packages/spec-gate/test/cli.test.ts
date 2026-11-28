@@ -133,6 +133,7 @@ describe("spec-gate CLI", () => {
     it.each([
       ["--profile=some-secret-value"],
       ["--profile", "some-secret-value"],
+      ["--profile", "a'some-secret-value b"],
     ])(
       "a refused value of a known option (%s): exit 2, the allowed choices stay, the value does not",
       async (...args) => {
@@ -144,6 +145,29 @@ describe("spec-gate CLI", () => {
         expect(run.stderr).not.toContain("some-secret-value");
       },
     );
+
+    it("a short option with its value attached before a verb: exit 1, the letter stays, the value does not", async () => {
+      const run = await runCli(["-tsome-secret-value", "lint", "x"]);
+      expect(run.code).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("unknown option '-t<redacted>'");
+      expect(run.stderr).not.toContain("some-secret-value");
+    });
+
+    it("a short option with its value attached after a verb: exit 2, the value is not echoed", async () => {
+      const run = await runCli(["lint", "-Zsome-secret-value", "x"]);
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("unknown option '-Z<redacted>'");
+      expect(run.stderr).not.toContain("some-secret-value");
+    });
+
+    it("a bare short option is reported as given", async () => {
+      const run = await runCli(["lint", "-Z", "x"]);
+      expect(run.code).toBe(2);
+      expect(run.stderr).toContain("unknown option '-Z'");
+      expect(run.stderr).not.toContain("<redacted>");
+    });
 
     it("a verb without exitOverride (intake) is covered too", async () => {
       const run = await runCli(["intake", "--nope=some-secret-value"]);
@@ -884,7 +908,7 @@ describe("spec-gate approve-check", { timeout: 60_000 }, () => {
       );
       expect(run.code).toBe(1);
       expect(run.stdout).toBe("");
-      expect(run.stderr).toContain("unknown option '--token=");
+      expect(run.stderr).toContain("unknown option '--token=<redacted>'");
       expect(run.stderr).not.toContain("some-secret-value");
       expect(stub.hits).toEqual([]);
     });
