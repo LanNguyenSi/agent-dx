@@ -10,6 +10,11 @@ export {
   remoteBaseCommit,
   runProcess,
 } from "./git.js";
+export {
+  DEFAULT_GIT_TIMEOUT_SECONDS,
+  GIT_TIMEOUT_ENV,
+  resolveGitTimeoutMs,
+} from "./timeout.js";
 export { parseRecordedMeta, serializeMeta, sha256Hex } from "./meta.js";
 export type {
   SourceAttachment,

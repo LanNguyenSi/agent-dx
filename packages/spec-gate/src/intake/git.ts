@@ -13,9 +13,13 @@ import {
   gitConfigOverrides,
 } from "../canonical/git-hardening.js";
 import { IntakeError } from "./errors.js";
+import { DEFAULT_GIT_TIMEOUT_SECONDS } from "./timeout.js";
 
-/** Every `git` call gets this timeout, in milliseconds. */
-export const GIT_TIMEOUT_MS = 15_000;
+/**
+ * The default timeout of a `git` call, in milliseconds; a run can set another
+ * one with `--git-timeout` or `SPEC_GATE_GIT_TIMEOUT` (see `timeout.ts`).
+ */
+export const GIT_TIMEOUT_MS = DEFAULT_GIT_TIMEOUT_SECONDS * 1000;
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 /**
@@ -158,28 +162,41 @@ export function runProcess(
 }
 
 /**
- * One git call in `repoDir`; a failure to run is a `ProcessFailure`. The
- * calls carry the overrides every git call of the package carries, except
- * `protocol.allow=never`: intake fetches from the remote on purpose.
+ * One git call in `repoDir` with a required timeout; every intake helper goes
+ * through this, so a call site that drops the timeout does not compile. A
+ * failure to run is a `ProcessFailure`. The calls carry the overrides every
+ * git call of the package carries, except `protocol.allow=never`: intake
+ * fetches from the remote on purpose.
  */
-export function runGit(
+function runGitWithin(
   repoDir: string,
   args: readonly string[],
+  timeoutMs: number,
 ): Promise<ProcessRun> {
   const overrides = gitConfigOverrides({ fetching: true });
   return runProcess("git", ["-C", repoDir, ...overrides, ...args], {
     env: gitEnv(),
-    timeoutMs: GIT_TIMEOUT_MS,
+    timeoutMs,
   });
+}
+
+/** `runGitWithin` with the default timeout, for callers outside intake. */
+export function runGit(
+  repoDir: string,
+  args: readonly string[],
+  timeoutMs: number = GIT_TIMEOUT_MS,
+): Promise<ProcessRun> {
+  return runGitWithin(repoDir, args, timeoutMs);
 }
 
 /** Runs git and returns stdout, or null on a non-zero status or any failure. */
 async function gitOrNull(
   repoDir: string,
   args: readonly string[],
+  timeoutMs: number,
 ): Promise<string | null> {
   try {
-    const run = await runGit(repoDir, args);
+    const run = await runGitWithin(repoDir, args, timeoutMs);
     return run.status === 0 ? run.stdout : null;
   } catch {
     return null;
@@ -192,8 +209,11 @@ function failureReason(err: unknown): string {
 }
 
 /** The git toplevel of `cwd`, or a `no-git-toplevel` error. */
-export async function gitToplevel(cwd: string): Promise<string> {
-  const out = await gitOrNull(cwd, ["rev-parse", "--show-toplevel"]);
+export async function gitToplevel(
+  cwd: string,
+  timeoutMs: number,
+): Promise<string> {
+  const out = await gitOrNull(cwd, ["rev-parse", "--show-toplevel"], timeoutMs);
   const toplevel = out?.trim() ?? "";
   if (toplevel === "") {
     throw new IntakeError(
@@ -214,6 +234,7 @@ const REMOTE_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
 export async function requireConfiguredRemote(
   repoDir: string,
   remote: string,
+  timeoutMs: number,
 ): Promise<void> {
   if (!REMOTE_NAME_RE.test(remote)) {
     throw new IntakeError(
@@ -221,11 +242,11 @@ export async function requireConfiguredRemote(
       "--remote must be the name of a configured remote (letters, digits, '.', '_' and '-', not starting with '.' or '-'); a URL or a path is refused",
     );
   }
-  const url = await gitOrNull(repoDir, [
-    "config",
-    "--get",
-    `remote.${remote}.url`,
-  ]);
+  const url = await gitOrNull(
+    repoDir,
+    ["config", "--get", `remote.${remote}.url`],
+    timeoutMs,
+  );
   if (url === null || url.trim() === "") {
     throw new IntakeError(
       "no-remote",
@@ -245,16 +266,15 @@ const HEADS = "refs/heads/";
 export async function remoteDefaultBranch(
   repoDir: string,
   remote: string,
+  timeoutMs: number,
 ): Promise<string> {
   let out: string;
   try {
-    const run = await runGit(repoDir, [
-      "ls-remote",
-      "--symref",
-      "--end-of-options",
-      remote,
-      "HEAD",
-    ]);
+    const run = await runGitWithin(
+      repoDir,
+      ["ls-remote", "--symref", "--end-of-options", remote, "HEAD"],
+      timeoutMs,
+    );
     if (run.status !== 0) {
       throw new ProcessFailure(
         "spawn",
@@ -279,7 +299,11 @@ export async function remoteDefaultBranch(
   const branch = target.startsWith(HEADS) ? target.slice(HEADS.length) : "";
   const named =
     branch !== "" && !branch.startsWith("-")
-      ? await gitOrNull(repoDir, ["check-ref-format", "--branch", branch])
+      ? await gitOrNull(
+          repoDir,
+          ["check-ref-format", "--branch", branch],
+          timeoutMs,
+        )
       : null;
   if (named === null || named.trim() !== branch) {
     throw new IntakeError(
@@ -326,6 +350,7 @@ export async function remoteHeadCommit(
   repoDir: string,
   remote: string,
   branch: string,
+  timeoutMs: number,
 ): Promise<string> {
   const failed = (why: string): IntakeError =>
     new IntakeError(
@@ -334,29 +359,33 @@ export async function remoteHeadCommit(
     );
   let fetchHead: string;
   try {
-    const fetched = await runGit(repoDir, [
-      "-c",
-      "gc.auto=0",
-      "-c",
-      "maintenance.auto=false",
-      "fetch",
-      "--no-tags",
-      "--no-recurse-submodules",
-      "--no-prune",
-      "--refmap=",
-      "--write-fetch-head",
-      "--end-of-options",
-      remote,
-      `${HEADS}${branch}`,
-    ]);
+    const fetched = await runGitWithin(
+      repoDir,
+      [
+        "-c",
+        "gc.auto=0",
+        "-c",
+        "maintenance.auto=false",
+        "fetch",
+        "--no-tags",
+        "--no-recurse-submodules",
+        "--no-prune",
+        "--refmap=",
+        "--write-fetch-head",
+        "--end-of-options",
+        remote,
+        `${HEADS}${branch}`,
+      ],
+      timeoutMs,
+    );
     if (fetched.status !== 0) {
       throw failed(`git fetch exited with status ${fetched.status}`);
     }
-    const where = await runGit(repoDir, [
-      "rev-parse",
-      "--git-path",
-      "FETCH_HEAD",
-    ]);
+    const where = await runGitWithin(
+      repoDir,
+      ["rev-parse", "--git-path", "FETCH_HEAD"],
+      timeoutMs,
+    );
     if (where.status !== 0) throw failed("FETCH_HEAD cannot be located");
     try {
       fetchHead = fs.readFileSync(
@@ -371,11 +400,11 @@ export async function remoteHeadCommit(
     throw failed(failureReason(err));
   }
   const sha = parseFetchHead(fetchHead, branch);
-  const peeled = await gitOrNull(repoDir, [
-    "rev-parse",
-    "--verify",
-    `${sha}^{commit}`,
-  ]);
+  const peeled = await gitOrNull(
+    repoDir,
+    ["rev-parse", "--verify", `${sha}^{commit}`],
+    timeoutMs,
+  );
   const commit = peeled?.trim() ?? "";
   if (!COMMIT_RE.test(commit)) throw failed("the fetched object is no commit");
   return commit;
@@ -385,8 +414,9 @@ export async function remoteHeadCommit(
 export async function remoteBaseCommit(
   repoDir: string,
   remote: string,
+  timeoutMs: number,
 ): Promise<string> {
-  await requireConfiguredRemote(repoDir, remote);
-  const branch = await remoteDefaultBranch(repoDir, remote);
-  return remoteHeadCommit(repoDir, remote, branch);
+  await requireConfiguredRemote(repoDir, remote, timeoutMs);
+  const branch = await remoteDefaultBranch(repoDir, remote, timeoutMs);
+  return remoteHeadCommit(repoDir, remote, branch, timeoutMs);
 }

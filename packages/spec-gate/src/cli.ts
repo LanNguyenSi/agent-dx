@@ -85,6 +85,10 @@ intake
     "the remote whose default branch sets base_commit and commands_ref",
     "origin",
   )
+  .option(
+    "--git-timeout <seconds>",
+    "the timeout of every git call, a whole number from 1 to 3600 (default: SPEC_GATE_GIT_TIMEOUT, else 15)",
+  )
   .option("--author <name>", "the author recorded on the body section")
   .option(
     "--attach <path>",
@@ -111,10 +115,12 @@ intake
         attach: string[];
         raw: boolean;
         check: boolean;
+        gitTimeout?: string;
       },
     ) => {
       try {
         const run = await intakeFile({
+          gitTimeout: opts.gitTimeout,
           sourcePath: filePath,
           id: opts.id,
           repo: opts.repo,

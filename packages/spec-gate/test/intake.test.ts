@@ -1048,6 +1048,199 @@ it("a timeout kills the whole process group of a git call", async () => {
 }, 20_000);
 
 // ---------------------------------------------------------------------------
+// --git-timeout and SPEC_GATE_GIT_TIMEOUT
+// ---------------------------------------------------------------------------
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A remote whose upload-pack answers its first `answered` calls through the
+ * real git and then never answers; the pid of the sleeping child is written
+ * to a file. `answered: 0` hangs `ls-remote`, `answered: 1` lets `ls-remote`
+ * through and hangs the fetch.
+ */
+async function makeHangingRemote(
+  answered = 0,
+): Promise<{ fx: Fixture; pidFile: string }> {
+  const fx = await makeFixture();
+  const pidFile = path.join(fx.root, "hang.pid");
+  const counter = path.join(fx.root, "calls.count");
+  const script = path.join(fx.root, "hang.sh");
+  fs.writeFileSync(
+    script,
+    `#!/bin/sh\nn=$(cat "${counter}" 2>/dev/null || echo 0)\nn=$((n + 1))\necho $n > "${counter}"\n` +
+      `if [ $n -le ${answered} ]; then exec git upload-pack "$@"; fi\n` +
+      `sleep 20 &\necho $! > "${pidFile}"\nwait\n`,
+    { mode: 0o755 },
+  );
+  await git(fx.repo, "config", "remote.origin.uploadpack", script);
+  return { fx, pidFile };
+}
+
+async function expectHangTimedOut(
+  run: CliRun,
+  pidFile: string,
+  started: number,
+  code: "no-remote" | "fetch-failed" = "no-remote",
+): Promise<void> {
+  expect(run.code).toBe(2);
+  expect(run.stdout).toBe("");
+  expect(run.stderr).toContain(`spec-gate: ${code}:`);
+  expect(run.stderr).toContain("within 1 seconds");
+  expect(Date.now() - started).toBeLessThan(10_000);
+  const hung = Number(fs.readFileSync(pidFile, "utf8"));
+  for (let i = 0; i < 50 && pidAlive(hung); i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  const stillAlive = pidAlive(hung);
+  if (stillAlive) process.kill(hung, "SIGKILL");
+  expect(stillAlive).toBe(false);
+}
+
+it("--git-timeout 1 stops a hanging remote after one second and kills its process group", async () => {
+  const { fx, pidFile } = await makeHangingRemote();
+  const ticket = writeTicket(fx.repo);
+  const started = Date.now();
+  const run = await runCli(
+    [
+      "intake",
+      "file",
+      ticket,
+      "--id",
+      "sg-hang",
+      "--repo",
+      fx.repo,
+      "--git-timeout",
+      "1",
+    ],
+    fx.repo,
+  );
+  await expectHangTimedOut(run, pidFile, started);
+  expect(fs.existsSync(path.join(fx.repo, "specs"))).toBe(false);
+}, 60_000);
+
+it("--git-timeout 1 stops a fetch that hangs after ls-remote answered", async () => {
+  const { fx, pidFile } = await makeHangingRemote(1);
+  const ticket = writeTicket(fx.repo);
+  const started = Date.now();
+  const run = await runCli(
+    [
+      "intake",
+      "file",
+      ticket,
+      "--id",
+      "sg-hang-fetch",
+      "--repo",
+      fx.repo,
+      "--git-timeout",
+      "1",
+    ],
+    fx.repo,
+  );
+  await expectHangTimedOut(run, pidFile, started, "fetch-failed");
+  expect(
+    fs.readFileSync(path.join(fx.root, "calls.count"), "utf8").trim(),
+  ).toBe("2");
+  expect(fs.existsSync(path.join(fx.repo, "specs"))).toBe(false);
+}, 60_000);
+
+it("SPEC_GATE_GIT_TIMEOUT=1 stops a hanging remote after one second and kills its process group", async () => {
+  const { fx, pidFile } = await makeHangingRemote();
+  const ticket = writeTicket(fx.repo);
+  const started = Date.now();
+  const run = await runCli(
+    ["intake", "file", ticket, "--id", "sg-hang", "--repo", fx.repo],
+    fx.repo,
+    { ...process.env, SPEC_GATE_GIT_TIMEOUT: "1" },
+  );
+  await expectHangTimedOut(run, pidFile, started);
+}, 60_000);
+
+it("a refused git timeout exits 2 before any git call, with the value not echoed, for the flag and the env", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "spec-gate-intake-"));
+  created.push(root);
+  const notARepo = path.join(root, "plain");
+  fs.mkdirSync(notARepo);
+  const ticket = path.join(root, "ticket.txt");
+  fs.writeFileSync(ticket, TICKET);
+  for (const extra of [[], ["--check"]]) {
+    const byFlag = await runCli(
+      [
+        "intake",
+        "file",
+        ticket,
+        "--id",
+        "sg-bad",
+        "--repo",
+        notARepo,
+        "--git-timeout",
+        "9999",
+        ...extra,
+      ],
+      root,
+    );
+    expect([byFlag.code, byFlag.stdout]).toEqual([2, ""]);
+    expect(byFlag.stderr).toContain("bad-git-timeout");
+    expect(byFlag.stderr).not.toContain("9999");
+    const byEnv = await runCli(
+      [
+        "intake",
+        "file",
+        ticket,
+        "--id",
+        "sg-bad",
+        "--repo",
+        notARepo,
+        ...extra,
+      ],
+      root,
+      { ...process.env, SPEC_GATE_GIT_TIMEOUT: "" },
+    );
+    expect([byEnv.code, byEnv.stdout]).toEqual([2, ""]);
+    expect(byEnv.stderr).toContain("bad-git-timeout");
+  }
+  expect(fs.existsSync(path.join(notARepo, "specs"))).toBe(false);
+  // Without --repo the repository would be found with git; the refusal still
+  // comes first, so the error is the timeout and not a missing repository.
+  const noRepo = await runCli(
+    ["intake", "file", ticket, "--id", "sg-bad", "--git-timeout", "0x10"],
+    notARepo,
+  );
+  expect([noRepo.code, noRepo.stdout]).toEqual([2, ""]);
+  expect(noRepo.stderr).toContain("bad-git-timeout");
+  expect(noRepo.stderr).not.toContain("no-git-toplevel");
+}, 60_000);
+
+it("a valid --git-timeout leaves a normal run unchanged, and the flag wins over a bad env", async () => {
+  const fx = await makeFixture();
+  const ticket = writeTicket(fx.repo);
+  const run = await runCli(
+    [
+      "intake",
+      "file",
+      ticket,
+      "--id",
+      "sg-ok",
+      "--repo",
+      fx.repo,
+      "--git-timeout",
+      "30",
+    ],
+    fx.repo,
+    { ...process.env, SPEC_GATE_GIT_TIMEOUT: "abc" },
+  );
+  expect([run.code, run.stderr]).toEqual([0, ""]);
+  expect(readMeta(fx.repo, "sg-ok").base_commit).toBe(fx.remoteHead);
+}, 60_000);
+
+// ---------------------------------------------------------------------------
 // --remote
 // ---------------------------------------------------------------------------
 
