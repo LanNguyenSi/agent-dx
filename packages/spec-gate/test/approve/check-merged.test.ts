@@ -1807,7 +1807,12 @@ describe(
         { reviews: [review("alice", "APPROVED", draftHead)] },
       );
       // At the tip the spec is proposed, and its digest is the approved one.
-      expect(cond(report, 4)).toMatchObject({ ok: true });
+      // The approved head is a draft without a bindings.log, so the bindings
+      // at the tip have no approved log to be measured from.
+      expect(cond(report, 4)).toMatchObject({
+        ok: false,
+        code: "bindings-after-merge",
+      });
       expect(cond(report, 3)).toEqual({
         condition: 3,
         name: "digest-unchanged",
@@ -1815,7 +1820,7 @@ describe(
         code: "review-not-proposed",
         message: `the spec is not proposed at the commit ${draftHead} of an approving review; an approval of a draft does not count, whatever status the default branch gave the spec later`,
       });
-      expect(failing(report)).toEqual([3]);
+      expect(failing(report)).toEqual([3, 4]);
       expect(report.approved).toBe(false);
       // The pull request that proposed it has no approval at all.
       const proposing = await checkLanded(

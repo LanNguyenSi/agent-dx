@@ -446,7 +446,11 @@ moves on.
   replay of the entries after it over `bindings.yaml` read from git there
   (or over the propose commit, when that is an ancestor of the tip). A
   commit of the steps that holds no log for the spec is not asked: it has
-  no log to extend. A finding is `bindings-after-merge`; the message names
+  no log to extend. The head commit must hold a `bindings.log` at the path
+  of the spec that parses, so that it has a propose entry; a head without
+  one (no log, an empty or a cut-off one) is `bindings-after-merge`, since a
+  log written on the default branch later would be anchored at whatever
+  commit it names. A finding is `bindings-after-merge`; the message names
   the commit it was measured from (the head commit, the first parent, or a
   step below it) and the codes of the rule, never the content of a file.
   This covers a squash that carried other bindings than the approved head,

@@ -3,16 +3,18 @@
  * are the ones the pull request was approved with.
  *
  * The final lint at the tip compares the tip with itself, so the
- * `bindings-log` rule is run once more, alone, from two diff bases: the head
- * commit the host reports (where the approving reviews stand) and the first
- * parent of the merge commit (what the default branch held before). From
- * each, every log that commit holds for the spec must be extended by the log
- * at the tip, and the bindings at the tip must be the replay of the entries
- * after it.
+ * `bindings-log` rule is run once more, alone, from the head commit the
+ * host reports (where the approving reviews stand) and the start of every
+ * measured first-parent step (the first parent of the merge commit first).
+ * The head commit must hold a `bindings.log` that parses. From each, every
+ * log that commit holds for the spec must be extended by the log at the
+ * tip, and the bindings at the tip must be the replay of the entries after
+ * it.
  *
  * | case | verdict |
  * |---|---|
  * | tip log = head log + valid bind entries, bindings = replay | holds |
+ * | the head holds no log that parses (absent, empty, truncated) | `bindings-after-merge` |
  * | tip log rewrites or drops an entry of the head's log | `bindings-after-merge` |
  * | squash carried other bindings / later default commit changed `bindings.yaml` without an entry | `bindings-after-merge` |
  * | the first parent holds a log the tip's log does not extend (draft and a second propose) | `bindings-after-merge` |
@@ -27,7 +29,7 @@ import { LintGitError } from "../../src/lint/git/index.js";
 import type { GitInputs } from "../../src/lint/types.js";
 import { proposeSpecDir } from "../../src/state/index.js";
 import { REMOTE_MAIN, SPEC_REL, cloneMain } from "../lint/git-helpers.js";
-import { bindOk, commitSpec } from "../state/helpers.js";
+import { BIND_BINDINGS, bindOk, commitSpec } from "../state/helpers.js";
 import {
   FILLERS,
   OTHER_BINDINGS,
@@ -225,7 +227,7 @@ describe("the bindings after the merge hold", { timeout: 60_000 }, () => {
     },
   );
 
-  it.each(["merge-commit", "squash"] as const)(
+  it.each(["merge-commit", "squash", "rebase"] as const)(
     "%s: a valid bind entry on the default branch after the merge, the bindings its replay",
     async (how) => {
       const merged = await land(await bound(), how);
@@ -362,6 +364,19 @@ describe(
       );
     });
 
+    it("a testplan.yaml at the tip that does not parse: the rule does not run, and that is no pass", async () => {
+      const merged = await land(await build(), "squash");
+      const m = await afterMerge(merged, {
+        [`${SPEC_REL}/testplan.yaml`]: "- id: [\n",
+      });
+      const report = await checkLanded(m);
+      expect(cond(report, 4)).toMatchObject({
+        ok: false,
+        code: "bindings-after-merge",
+        message: `the bindings log at the tip of the default branch is not checked ${FROM_HEAD}: the input testplan of the spec directory did not load`,
+      });
+    });
+
     it("a bindings.yaml at the tip that does not parse: the rule does not run, and that is no pass", async () => {
       const merged = await land(await build(), "squash");
       const m = await afterMerge(merged, { [BINDINGS]: "TP-1: [\n" });
@@ -454,3 +469,81 @@ describe("the open mode is unchanged", { timeout: 60_000 }, () => {
     expect(seam.runs).toEqual([]);
   });
 });
+
+/** What the head of the pull request holds as its `bindings.log`. */
+type HeadLog = "absent" | "empty" | "truncated";
+
+/**
+ * The spec is a draft on the default branch at `draft`; the head of the
+ * pull request sets it to proposed by hand, with other bindings and the
+ * log `headLog`. After the merge, as `how` says, a later commit of the
+ * default branch writes a valid log whose propose entry names `draft` and
+ * puts the bindings back to the ones at `draft`, with no bind entry. The
+ * replay from that propose commit matches the tip.
+ */
+async function proposedByHand(
+  how: MergeHow,
+  headLog: HeadLog,
+): Promise<Built & Landed> {
+  const s = await build({ propose: false });
+  await s.repo.checkout("main");
+  await s.repo.sh("merge", "-q", "--ff-only", "pr");
+  const draft = await s.repo.head();
+  await s.repo.setRef(REMOTE_MAIN, draft);
+  await s.repo.checkout("side", draft);
+  const result = proposeSpecDir(s.spec, { repo: s.dir, base: s.c1 });
+  if (result.kind !== "written") {
+    throw new Error(`the propose did not write: ${JSON.stringify(result)}`);
+  }
+  const log = fs.readFileSync(path.join(s.spec, "bindings.log"), "utf8");
+  const proposed = fs.readFileSync(path.join(s.spec, "spec.md"), "utf8");
+  await commitSpec(s.repo, "propose on a side branch");
+  await s.repo.checkout("pr2", draft);
+  const head = await s.repo.commit(
+    {
+      [`${SPEC_REL}/spec.md`]: proposed,
+      [BINDINGS]: OTHER_BINDINGS,
+      [LOG]:
+        headLog === "absent"
+          ? null
+          : headLog === "empty"
+            ? ""
+            : log.slice(0, Math.floor(log.length / 2)),
+    },
+    "proposed by hand, other bindings",
+  );
+  // `land` merges the branch `pr`.
+  await s.repo.sh("branch", "-f", "pr", head);
+  const merged = await land({ ...s, head }, how);
+  return afterMerge(merged, { [LOG]: log, [BINDINGS]: BIND_BINDINGS });
+}
+
+describe(
+  "the head commit holds no bindings.log that parses",
+  { timeout: 60_000 },
+  () => {
+    const cases = (["merge-commit", "squash", "rebase"] as const).flatMap(
+      (how) =>
+        (["absent", "empty", "truncated"] as const).map(
+          (headLog) => [how, headLog] as const,
+        ),
+    );
+    it.each(cases)(
+      "%s, head log %s: a log written later on the default branch anchors nothing",
+      async (how, headLog) => {
+        const m = await proposedByHand(how, headLog);
+        const report = await checkLanded(m);
+        expect(cond(report, 4)).toEqual({
+          condition: 4,
+          name: "proposed-and-clean",
+          ok: false,
+          code: "bindings-after-merge",
+          message:
+            "the head commit of the pull request holds no bindings.log for this spec that parses; the bindings at the tip of the default branch have no approved log to be measured from",
+        });
+        expect(failing(report)).toEqual([4]);
+        expect(seam.runs).toEqual([]);
+      },
+    );
+  },
+);

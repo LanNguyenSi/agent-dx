@@ -27,7 +27,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { SPEC_FILE } from "../canonical/index.js";
-import { validateConfig, type SpecGateConfig } from "../formats/index.js";
+import {
+  BINDINGS_LOG_FILE,
+  parseBindingsLog,
+  validateConfig,
+  type SpecGateConfig,
+} from "../formats/index.js";
 import { REVIEW_PATHS, type HostPullRequest } from "../host/index.js";
 import { loadConfigAtReference } from "../lint/git/config.js";
 import {
@@ -45,8 +50,10 @@ import type { GitInputs, Loaded, RuleContext } from "../lint/types.js";
 import { checkRepository, type RepoCheckFinding } from "../repo/index.js";
 import {
   SPECS_DIR,
+  decodeUtf8,
   isRepoPath,
   isSpecLayoutPath,
+  regularBlobBytes,
   repoPathOf,
   specPathIn,
 } from "../state/git.js";
@@ -474,10 +481,15 @@ function bindingProblem(
  *
  * The final lint at the tip compares the tip with itself, so its
  * `bindings-log` rule sees no log that was merged before. The rule is run
- * once more, alone, from each of two diff bases, with the tip as `HEAD`:
+ * once more, alone, with the tip as `HEAD`, from the head commit and from
+ * the start of every measured first-parent step:
  *
  * - the head commit the host reports, where the approving reviews stand:
- *   its log must be extended by the log at the tip, and the bindings at the
+ *   it must hold a `bindings.log` at the spec's path that parses (so it
+ *   has a propose entry; a head without one was never a proposed spec the
+ *   lint passes, and a log written on the default branch later would
+ *   anchor at whatever commit it names). Its log must be extended by the
+ *   log at the tip, and the bindings at the
  *   tip must be the replay of the entries after it (a squash that carried
  *   other bindings, an entry dropped or rewritten after the review, a later
  *   commit that changed `bindings.yaml` without an entry);
@@ -506,6 +518,18 @@ function bindingsProblem(
   id: string,
 ): Failure | null {
   const repo = s.git.repo;
+  const headLog = regularBlobBytes(
+    repo,
+    landing.head,
+    repoPathOf(s.specPath, BINDINGS_LOG_FILE),
+  );
+  const headText = headLog === null ? null : decodeUtf8(headLog);
+  if (headText === null || !parseBindingsLog(headText).ok) {
+    return fails(
+      "bindings-after-merge",
+      `the head commit of the pull request holds no ${BINDINGS_LOG_FILE} for this spec that parses; the bindings at ${whereOf(s)} have no approved log to be measured from`,
+    );
+  }
   const bases = [
     {
       name: "the head commit of the pull request",
@@ -558,8 +582,8 @@ function bindingsProblem(
  * clean. In the open mode the lint measures from the measuring base, never
  * from a base commit given. In the merged mode the checkout must be at the
  * tip of the default branch, the lint compares that tip with itself, and
- * the `bindings-log` rule is run once more from the approved head and from
- * the first parent of the merge commit (`bindingsProblem`).
+ * the `bindings-log` rule is run once more from the head commit and the
+ * start of every measured first-parent step (`bindingsProblem`).
  */
 function proposedAndClean(
   s: Subject,
@@ -594,7 +618,8 @@ function proposedAndClean(
   if (s.history !== null) return s.history;
   // In the open mode the lint measures from the measuring base. After the
   // merge the lint measures nothing from the pull request, but the bindings
-  // are measured from two commits of the landing, so it must be known.
+  // are measured from the head commit and the start of every measured
+  // first-parent step of the landing, so it must be known.
   if (!s.spans.ok) return s.spans.outcome;
   if (s.mode === "merged") {
     if (s.landing === null) {

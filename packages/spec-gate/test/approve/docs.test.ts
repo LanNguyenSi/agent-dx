@@ -191,6 +191,7 @@ describe('docs/approve.md, "After the merge"', () => {
       "`HEAD` must be the commit `defaultRef` names",
       "each of these commits as the diff base: the head commit the host reports, where the approving reviews stand, and the start of every measured first-parent step",
       "A commit of the steps that holds no log for the spec is not asked: it has no log to extend",
+      "The head commit must hold a `bindings.log` at the path of the spec that parses, so that it has a propose entry",
       "the message names the commit it was measured from (the head commit, the first parent, or a step below it) and the codes of the rule, never the content of a file",
       "an approver taken off the list on the default branch after the merge does not count",
       "The first range runs from the first parent of the merge commit to the merge commit",
