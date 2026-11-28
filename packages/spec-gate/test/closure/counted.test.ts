@@ -19,7 +19,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
   it("counts a clean closure envelope at the start commit and on start..head", async () => {
     const s = await scenario();
     writeEvidence(s.repo, "TP-2", [{ commit: s.spec }, { commit: s.b }]);
-    const row = rowOf(reportIn(s), "TP-2");
+    const row = rowOf(await reportIn(s), "TP-2");
     expect(row.counted).toBe(2);
     expect(row.ignored).toEqual([]);
     expect(row.state).toBe("proven");
@@ -69,7 +69,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
       const odd = await build(s);
       // Line 1 counts, line 2 is the one odd envelope.
       writeEvidence(s.repo, "TP-2", [{ commit: s.spec }, odd]);
-      const row = rowOf(reportIn(s), "TP-2");
+      const row = rowOf(await reportIn(s), "TP-2");
       expect(row.ignored).toEqual([{ line: 2, reason }]);
       expect(row.counted).toBe(1);
     });
@@ -81,7 +81,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
     const forked = await s.repo.commit({ "old.txt": "x\n" }, "forked early");
     await s.repo.checkout("work");
     writeEvidence(s.repo, "TP-2", [{ commit: s.spec }, { commit: forked }]);
-    expect(rowOf(reportIn(s), "TP-2").ignored).toEqual([
+    expect(rowOf(await reportIn(s), "TP-2").ignored).toEqual([
       { line: 2, reason: "not-on-head" },
     ]);
   });
@@ -92,7 +92,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
       { commit: s.spec },
       { commit: "a".repeat(40) },
     ]);
-    expect(rowOf(reportIn(s), "TP-2").ignored).toEqual([
+    expect(rowOf(await reportIn(s), "TP-2").ignored).toEqual([
       { line: 2, reason: "not-on-head" },
     ]);
   });
@@ -100,7 +100,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
   it("ignores an envelope after the head (not-on-head) when --head is earlier", async () => {
     const s = await scenario();
     writeEvidence(s.repo, "TP-2", [{ commit: s.spec }, { commit: s.b }]);
-    expect(rowOf(reportIn(s, { head: s.a }), "TP-2").ignored).toEqual([
+    expect(rowOf(await reportIn(s, { head: s.a }), "TP-2").ignored).toEqual([
       { line: 2, reason: "not-on-head" },
     ]);
   });
@@ -113,7 +113,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
       "TP-1:\n  status: new\n  selector: token rejected\nTP-2:\n  status: existing\n",
     );
     writeEvidence(s.repo, "TP-2", [{ commit: s.spec, selector: null }]);
-    const row = rowOf(reportIn(s), "TP-2");
+    const row = rowOf(await reportIn(s), "TP-2");
     expect(row.ignored).toEqual([{ line: 1, reason: "command-unknown" }]);
     expect(row.state).toBe("unproven");
     expect(row.reason).toBe("no-counted-evidence");
@@ -127,7 +127,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
       ),
     });
     writeEvidence(s.repo, "TP-3", [{ commit: s.a }]);
-    expect(rowOf(reportIn(s), "TP-3").ignored).toEqual([
+    expect(rowOf(await reportIn(s), "TP-3").ignored).toEqual([
       { line: 1, reason: "command-unknown" },
     ]);
   });
@@ -135,7 +135,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
   it("checks the static row's selector against null", async () => {
     const s = await scenario();
     writeEvidence(s.repo, "TP-3", [{ commit: s.a, selector: "x" }]);
-    expect(rowOf(reportIn(s), "TP-3").ignored).toEqual([
+    expect(rowOf(await reportIn(s), "TP-3").ignored).toEqual([
       { line: 1, reason: "selector-mismatch" },
     ]);
   });
@@ -149,7 +149,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
     writeEvidence(s.repo, "TP-2", [
       { commit: s.a, commands_digest: substituted },
     ]);
-    expect(rowOf(reportIn(s), "TP-2").ignored).toEqual([
+    expect(rowOf(await reportIn(s), "TP-2").ignored).toEqual([
       { line: 1, reason: "digest-mismatch" },
     ]);
   });
@@ -168,7 +168,7 @@ describe("closure: counted envelopes", { timeout: 60_000 }, () => {
       { commit: s.spec },
       { commit: branchCommit },
     ]);
-    const row = rowOf(reportIn(s, { head: squash }), "TP-2");
+    const row = rowOf(await reportIn(s, { head: squash }), "TP-2");
     expect(row.ignored).toEqual([{ line: 2, reason: "not-on-head" }]);
   });
 });

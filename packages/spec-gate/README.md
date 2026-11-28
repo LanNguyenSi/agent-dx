@@ -29,18 +29,21 @@ checks a spec directory and prints one JSON report line (`spec-gate-lint/1`);
 it exits 0 without errors, 1 with findings (with `--strict`, also for
 unacknowledged warnings) and 2 on a usage error (including `--config` with an
 empty path or together with `--default-ref` or `--base`, and a git input that
-does not resolve). With `--default-ref <full ref name>` or `--base <full commit
-id>` it also checks the reference states of the spec against git, offline and
-read-only (it never fetches), in the repository `--repo <dir>` names, which is
-required with either flag and never discovered from `<spec-dir>`; without
-them those rules are skipped, and under `--final` a skipped error rule fails
-the run. `spec-gate lint-ack <spec-dir>
+does not resolve). With `--default-ref <full ref name>` it also checks the
+reference states of the spec against git, offline and read-only (it never
+fetches), in the repository `--repo <dir>` names, which is required with it
+and never discovered from `<spec-dir>`; a change is measured from the one merge
+base of `HEAD` and the `--default-ref` commit, and several merge bases, none or
+a shallow repository exit 2. `--base <full commit id>` is optional: it must lie
+on `--default-ref`, measures nothing, and without `--default-ref` exits 2.
+Without git inputs those rules are skipped, and under `--final` a skipped error
+rule fails the run. `spec-gate lint-ack <spec-dir>
 <rule> <id> --reason <text>` acknowledges one warning in `acks.yaml`. The
 rules, the report, profiles and exit codes are described in
 [docs/lint.md](docs/lint.md); the code lives in `src/lint/`.
 
-`spec-gate propose <spec-dir> --repo <dir> (--default-ref <ref> | --base
-<commit>)` runs the final lint with those git inputs and, when it is clean,
+`spec-gate propose <spec-dir> --repo <dir> --default-ref <ref> [--base
+<commit>]` runs the final lint with those git inputs (resolved as for `lint`) and, when it is clean,
 sets the frontmatter `status` to `proposed` and creates `bindings.log` with the
 commit it ran at; it exits 0 when written, 1 when the final lint has findings
 and 2 on any refusal. `spec-gate bind <spec-dir> <tp-id> --status
@@ -51,9 +54,10 @@ written and 2 on any refusal. Both are described in
 [docs/lint.md](docs/lint.md), the log format in
 [docs/formats.md](docs/formats.md); the code lives in `src/state/`.
 
-`spec-gate repo-check --repo <dir> (--default-ref <ref> | --base <commit>)`
+`spec-gate repo-check --repo <dir> --default-ref <ref> [--base <commit>]`
 checks the whole repository rather than one spec directory: every `spec.md`
-at the diff base that is not a draft or has a `bindings.log` must still be
+at the diff base (the one merge base of `HEAD` and the `--default-ref`
+commit, resolved as for `lint`) that is not a draft or has a `bindings.log` must still be
 at its path at `HEAD`, parse, keep its id, not go back to `draft` and keep
 its log. It prints one JSON report line (`spec-gate-repo-check/1`) and exits
 0 without findings, 1 with findings and 2 on a usage error. CI runs it on
@@ -105,7 +109,8 @@ described in [docs/approve.md](docs/approve.md) ("CLI"); the code lives in
 `src/approve/` and `src/host/`.
 
 `spec-gate closure <spec-dir> --repo <dir> --default-ref <ref> --start
-<commit> [--head <commit>]` prints one JSON report line
+<commit> [--head <commit>] [--github-repo <owner/name> [--api-url <url>]]`
+prints one JSON report line
 (`spec-gate-closure/1`) that says for every row of the test plan, as the
 merged spec commit holds it, whether the evidence files in the spec directory
 prove it at or after the start commit: `proven`, `failed`, `unproven`,
@@ -120,8 +125,12 @@ match the row's command and binding. It exits 0 when no row is `failed` or
 that is not after the merged spec commit or not on the default branch, a head
 that is not after the start, a merged spec that is not proposed, a command set
 that cannot be read, an evidence or bindings file that does not load). It is
-read-only and offline; CI runs are not verified with the host yet and the
-squash rule is not applied. It is described in
+read-only, and offline unless `--github-repo <owner/name>` asks for the host:
+with it the run of every counted `producer: ci` envelope is checked against
+that GitHub repository (the token from `GITHUB_TOKEN`, as for
+`approve-check`) and the row is marked verified only when the host vouches
+for the run; no host answer changes a row's state. The squash rule is not
+applied. It is described in
 [docs/closure.md](docs/closure.md); the code lives in `src/closure/`.
 
 ## Formats

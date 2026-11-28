@@ -10,12 +10,20 @@
  * The token comes from the environment variable `GITHUB_TOKEN` and from
  * nowhere else. There is no option for it, and nothing this module returns
  * holds it: a refusal names the input that is wrong and never its value,
- * and an output that would hold the token is withheld as a whole.
+ * and an output that would hold the token is withheld as a whole. The
+ * reading of the variable, the building of the adapter and the last check
+ * are shared with the closing check in `src/cli-host.ts`.
  *
  * Exit codes: 0 for a report that says approved, 1 for a report that does
  * not, 2 for everything else (a usage error, a refusal, an exception).
  * Only exit 0 means approved.
  */
+import {
+  buildHost,
+  holdsToken,
+  readToken,
+  TOKEN_VARIABLE,
+} from "../cli-host.js";
 import {
   createGitHubHost,
   type GitHubHostOptions,
@@ -25,7 +33,7 @@ import { checkApproval } from "./check.js";
 import type { ApproveRequest, ApproveResult } from "./types.js";
 
 /** The environment variable the token is read from. */
-export const TOKEN_VARIABLE = "GITHUB_TOKEN";
+export { TOKEN_VARIABLE };
 
 /** The values of the command line, as texts. */
 export interface ApproveCheckArgs {
@@ -98,19 +106,21 @@ async function attempt(
       `needs a token in the environment variable ${TOKEN_VARIABLE}; it is read from there only, never from an option`,
     );
   }
-  let host: HostAdapter;
-  try {
-    host = seams.createHost({
-      repository: args.githubRepo,
+  const built = buildHost(
+    seams.createHost,
+    {
+      githubRepo: args.githubRepo,
       pullRequest: Number(args.pr),
-      token,
       ...(args.apiUrl !== undefined ? { apiUrl: args.apiUrl } : {}),
-    });
-  } catch (err) {
+    },
+    token,
+  );
+  if (!built.ok) {
     // The adapter names the option that does not fit, never its value:
     // `repository` is --github-repo, `apiUrl` is --api-url.
-    return refusal(err instanceof Error ? err.message : String(err));
+    return refusal(built.message);
   }
+  const host = built.host;
   const result = await seams.check({
     repo: args.repo,
     specDir: args.specDir,
@@ -135,19 +145,13 @@ async function attempt(
 }
 
 /**
- * `run`, unless one of its outputs holds the token, as it is or as a JSON
- * text holds it: then nothing of the run is passed on and the exit code is
- * 2. No path of the verb is known to put the token into an output; this is
- * the last check before anything is written.
+ * `run`, unless one of its outputs holds the token (see `holdsToken` in
+ * `src/cli-host.ts`): then nothing of the run is passed on and the exit
+ * code is 2. No path of the verb is known to put the token into an output;
+ * this is the last check before anything is written.
  */
 function withoutToken(run: ApproveCheckRun, token: string): ApproveCheckRun {
-  if (token === "") return run;
-  const forms = [token, JSON.stringify(token).slice(1, -1)];
-  if (
-    !forms.some(
-      (form) => run.stdout.includes(form) || run.stderr.includes(form),
-    )
-  ) {
+  if (!holdsToken(run.stdout, token) && !holdsToken(run.stderr, token)) {
     return run;
   }
   return refusal(
@@ -167,7 +171,7 @@ export async function runApproveCheck(
     check: checkApproval,
   },
 ): Promise<ApproveCheckRun> {
-  const token = env[TOKEN_VARIABLE] ?? "";
+  const token = readToken(env);
   let run: ApproveCheckRun;
   try {
     run = await attempt(args, token, seams);

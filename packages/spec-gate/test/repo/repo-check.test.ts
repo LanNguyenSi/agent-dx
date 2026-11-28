@@ -45,7 +45,7 @@ function check(repo: Repo, base?: string): RepoCheckReport {
   const result = repoCheck(
     base === undefined
       ? { repo: repo.dir, defaultRef: REMOTE_MAIN }
-      : { repo: repo.dir, base },
+      : { repo: repo.dir, defaultRef: REMOTE_MAIN, base },
   );
   if (!result.ok) throw new Error(`usage error: ${result.message}`);
   return result.report;
@@ -499,6 +499,7 @@ describe("spec-gate repo-check", { timeout: 60_000 }, () => {
     expect(byBase.reference).toBe(main);
     expect(byBase.diff_base).toBe(main);
     expect(byBase.findings.map((f) => f.code)).toEqual(["spec-removed"]);
+    expect(byBase).toEqual(check(repo));
   });
 
   it("the diff base is the merge base, so a spec merged after the branch point is not checked", async () => {
@@ -597,7 +598,7 @@ describe("spec-gate repo-check", { timeout: 60_000 }, () => {
       const result = repoCheck({ repo: repo.dir });
       expect(result).toEqual({
         ok: false,
-        message: "repo-check needs --default-ref <ref> or --base <commit>",
+        message: "repo-check needs --default-ref <ref>",
       });
     });
 

@@ -1055,11 +1055,16 @@ export async function checkApproval(
   if (!dirStat.isDirectory()) {
     return refuse("the spec directory is not a directory, or is a link");
   }
-  const resolved = resolveGitInputs(dir, {
-    repo: request.repo,
-    defaultRef: request.defaultRef,
-    ...(request.base !== undefined ? { base: request.base } : {}),
-  });
+  // The check derives its own measuring base and history check below.
+  const resolved = resolveGitInputs(
+    dir,
+    {
+      repo: request.repo,
+      defaultRef: request.defaultRef,
+      ...(request.base !== undefined ? { base: request.base } : {}),
+    },
+    { callerMeasures: true },
+  );
   if (!resolved.ok) return refuse(resolved.message);
   const git = resolved.git!;
   const specPath = specPathIn(git.repo, dir);

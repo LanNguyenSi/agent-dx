@@ -1,10 +1,16 @@
 /**
- * `spec-gate closure`: the per-row closing report. Read-only and offline:
- * `spec.md` and `testplan.yaml` are read at the merged spec commit, the
+ * `spec-gate closure`: the per-row closing report. Read-only, and offline
+ * unless `--github-repo` asks for the host: `spec.md` and `testplan.yaml`
+ * are read at the merged spec commit, the
  * history and `.spec-gate/commands.yaml` at `commands_ref` from git, all
  * through the hardened runner; only `bindings.yaml` and `evidence/` are
  * read from the spec directory on disk. Nothing is written and nothing is
- * fetched.
+ * fetched. With `--github-repo` the one network call the run makes is the
+ * CI-run check of every distinct `(commit, ci_run)` a counted
+ * `producer: ci` envelope names, through the GitHub host adapter; it marks
+ * rows, it decides nothing: no host answer changes a row's state, and a
+ * host that fails or cannot be reached marks `host-failed` and never turns
+ * into a pass or a refusal.
  *
  * An envelope counts only when it can be attributed to the work: phase
  * `closure`, a commit on `start..head` (the start commit or a descendant
@@ -16,6 +22,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  buildHost,
+  holdsToken,
+  readToken,
+  TOKEN_VARIABLE,
+} from "../cli-host.js";
+import {
   expectedCommandsDigest,
   parseSpec,
   parseTestPlan,
@@ -24,6 +36,12 @@ import {
   type TestPlanRow,
 } from "../formats/index.js";
 import { COMMIT_RE } from "../formats/validate.js";
+import {
+  CI_RUN_STATES,
+  createGitHubHost,
+  type GitHubHostOptions,
+  type HostAdapter,
+} from "../host/index.js";
 import {
   rowTemplate,
   templatesAtCommandsRef,
@@ -48,7 +66,9 @@ import { isRepoPath, lastFirstParentChange } from "./git.js";
 import { judgeRow, kindNeedsEnvelopes, type CountedEnvelope } from "./rules.js";
 import {
   CLOSURE_FORMAT,
+  CI_STATUSES,
   ROW_STATES,
+  type CiStatus,
   type ClosureReport,
   type ClosureRequest,
   type ClosureResult,
@@ -188,7 +208,21 @@ function loadFailure(findings: readonly RuleFinding[], file: string): string {
   return own?.code ?? "input-invalid";
 }
 
-function judge(specDir: string, request: ClosureRequest): ClosureReport {
+/** One counted `producer: ci` envelope, waiting for its run to be checked. */
+interface CiTarget {
+  /** Index of the row in the report's `rows`. */
+  row: number;
+  commit: string;
+  run: string;
+}
+
+/** The report, and the counted `producer: ci` envelopes the host must be asked about. */
+interface Judged {
+  report: ClosureReport;
+  ci: CiTarget[];
+}
+
+function judge(specDir: string, request: ClosureRequest): Judged {
   // Flag shapes first: nothing is read for a value that is not a full id.
   if (!COMMIT_RE.test(request.start)) {
     refuse("start-invalid", "--start is not a full commit id");
@@ -235,10 +269,13 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
     loadedEvidence?.state === "ok" ? loadedEvidence.value : {};
 
   // The repository and the default branch, resolved as lint resolves them.
-  const resolved = resolveGitInputs(specDir, {
-    repo: request.repo,
-    defaultRef: request.defaultRef,
-  });
+  // Only the repository, the default commit and the head are read here; the
+  // closing check measures no range from a merge base.
+  const resolved = resolveGitInputs(
+    specDir,
+    { repo: request.repo, defaultRef: request.defaultRef },
+    { callerMeasures: true },
+  );
   if (!resolved.ok) refuse("git-input-invalid", resolved.message);
   const repo = resolved.git!.repo;
   const defaultCommit = resolved.git!.reference;
@@ -338,7 +375,9 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
   );
   if (!templates.ok) refuse(templates.code, templates.message);
 
-  const rows: ClosureRow[] = plan.map((row: TestPlanRow) => {
+  const rows: ClosureRow[] = [];
+  const ci: CiTarget[] = [];
+  plan.forEach((row: TestPlanRow, rowIndex) => {
     const binding = bindings[row.id];
     const commands: RowCommands = {
       template:
@@ -389,7 +428,12 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
     ) {
       out.evidence_location = row.evidence_location ?? null;
     }
-    return out;
+    for (const { env } of counted) {
+      if (env.producer === "ci" && env.ci_run !== undefined) {
+        ci.push({ row: rowIndex, commit: env.commit, run: env.ci_run });
+      }
+    }
+    rows.push(out);
   });
 
   const counts = Object.fromEntries(ROW_STATES.map((s) => [s, 0])) as Record<
@@ -401,41 +445,210 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
   const unknown = Object.keys(evidence)
     .filter((id) => !planIds.has(id))
     .sort((a, b) => tpNumber(a) - tpNumber(b));
-  return {
+  const report: ClosureReport = {
     format: CLOSURE_FORMAT,
     spec: spec.frontmatter.id,
     start,
     head,
     spec_commit: specCommit,
+    ...(request.githubRepo === undefined
+      ? {}
+      : {
+          host: {
+            repo: request.githubRepo,
+            api_url: request.apiUrl ?? null,
+          },
+        }),
     ok: counts.failed === 0 && counts.unproven === 0,
     rows,
     counts,
     unknown_rows: unknown,
   };
+  return { report, ci };
+}
+
+/**
+ * Asks the host about one `(commit, run)` and marks what comes back: an
+ * answer outside `CI_RUN_STATES` and a throw are `host-failed`, which is
+ * the marking of a run nobody vouched for, never a pass and never a
+ * refusal.
+ */
+async function askRun(
+  host: HostAdapter,
+  commit: string,
+  run: string,
+): Promise<CiStatus> {
+  try {
+    const answer = await host.ciRunStatus(commit, run);
+    return CI_RUN_STATES.includes(answer) ? answer : "host-failed";
+  } catch {
+    return "host-failed";
+  }
+}
+
+/**
+ * Marks the rows that hold a counted `producer: ci` envelope: one host call
+ * per distinct `(commit, ci_run)`, `ci_unverified` set when any of the
+ * row's counted ci envelopes was not `verified`, and `ci_status` set to the
+ * worst of them in the order of `CI_STATUSES`. Nothing here touches a row's
+ * `state` or the report's `ok`: the host's answer marks, it does not gate.
+ * At most `CI_FAN_OUT` distinct pairs are asked at a time.
+ */
+const CI_FAN_OUT = 4;
+
+async function verifyCi(judged: Judged, host: HostAdapter): Promise<void> {
+  // One distinct pair, asked at most once.
+  const pairs: { key: string; commit: string; run: string }[] = [];
+  const seen = new Set<string>();
+  for (const target of judged.ci) {
+    const key = JSON.stringify([target.commit, target.run]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push({ key, commit: target.commit, run: target.run });
+  }
+  // At most CI_FAN_OUT pairs are asked at a time, so a large evidence set
+  // never opens a host call per pair at once.
+  const marked = new Map<string, CiStatus>();
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < pairs.length) {
+      const pair = pairs[next]!;
+      next += 1;
+      marked.set(pair.key, await askRun(host, pair.commit, pair.run));
+    }
+  };
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(CI_FAN_OUT, pairs.length); i += 1) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+  const byRow = new Map<number, CiStatus[]>();
+  for (const target of judged.ci) {
+    const list = byRow.get(target.row) ?? [];
+    list.push(marked.get(JSON.stringify([target.commit, target.run]))!);
+    byRow.set(target.row, list);
+  }
+  for (const [rowIndex, statuses] of byRow) {
+    const row = judged.report.rows[rowIndex]!;
+    row.ci_unverified = statuses.some((status) => status !== "verified");
+    row.ci_status = CI_STATUSES.find((status) => statuses.includes(status))!;
+  }
+}
+
+/**
+ * What `--github-repo` asked for, before anything is read: the token, then
+ * the adapter. An unknown argument or option is refused here and never
+ * repeated: a token given by mistake is not printed.
+ */
+function makeHost(
+  request: ClosureRequest,
+  token: string,
+  // The base no-unused-vars rule reads the names in a signature as variables.
+  // eslint-disable-next-line no-unused-vars
+  createHost: (options: GitHubHostOptions) => HostAdapter,
+): HostAdapter {
+  const built = buildHost(
+    createHost,
+    {
+      githubRepo: request.githubRepo!,
+      ...(request.apiUrl !== undefined ? { apiUrl: request.apiUrl } : {}),
+    },
+    token,
+  );
+  if (!built.ok) refuse("host-input-invalid", built.message);
+  return built.host;
 }
 
 /**
  * Runs the closing check. A refusal (a precondition that does not hold, a
  * git read that could not run) carries a code and a message that never
- * holds git's output; no report is made then.
+ * holds git's output; no report is made then. With `--github-repo` the
+ * token is read from `GITHUB_TOKEN` only, the CI runs of the counted
+ * `producer: ci` envelopes are checked with the host, and both outputs are
+ * searched for the token before anything is returned: an output that holds
+ * it is withheld as a whole.
  */
-export function runClosure(
+export async function runClosure(
   specDir: string,
   request: ClosureRequest,
-): ClosureResult {
+  env: Readonly<Record<string, string | undefined>> = {},
+  // The base no-unused-vars rule reads the names in a signature as variables.
+  // eslint-disable-next-line no-unused-vars
+  seams: { createHost: (options: GitHubHostOptions) => HostAdapter } = {
+    createHost: createGitHubHost,
+  },
+): Promise<ClosureResult> {
+  const token = request.githubRepo === undefined ? "" : readToken(env);
+  let result: ClosureResult;
   try {
-    return { ok: true, report: judge(specDir, request) };
+    if ((request.unknownArguments ?? 0) > 0 || specDir.startsWith("-")) {
+      // What was not understood is not repeated: an argument given by
+      // mistake may be a secret. A <spec-dir> that starts with `-` is such
+      // an argument (an option given in its place), never a directory: a
+      // directory so named is given as `./-x`.
+      refuse(
+        "unknown-argument",
+        "takes one <spec-dir> and the options --repo, --default-ref, --start, --head, --github-repo and --api-url; an argument or option it does not know was given (it is not repeated here). The token is read from " +
+          TOKEN_VARIABLE +
+          " only",
+      );
+    }
+    let host: HostAdapter | undefined;
+    if (request.githubRepo !== undefined) {
+      if (token === "") {
+        refuse(
+          "token-missing",
+          "--github-repo needs a token in the environment variable " +
+            TOKEN_VARIABLE +
+            "; it is read from there only, never from an option",
+        );
+      }
+      host = makeHost(request, token, seams.createHost);
+    } else if (request.apiUrl !== undefined) {
+      refuse(
+        "host-input-invalid",
+        "--api-url is only read with --github-repo; give --github-repo or leave it out",
+      );
+    }
+    const judged = judge(specDir, request);
+    if (host !== undefined) await verifyCi(judged, host);
+    result = { ok: true, report: judged.report };
   } catch (err) {
     if (err instanceof Refusal) {
-      return { ok: false, code: err.code, message: err.message };
-    }
-    if (err instanceof LintGitError) {
-      return {
+      result = { ok: false, code: err.code, message: err.message };
+    } else if (err instanceof LintGitError) {
+      result = {
         ok: false,
         code: err.code,
         message: "git could not be read",
       };
+    } else {
+      // The unexpected error text is printed as it is; when a host was in
+      // play, the stack could have picked up the token: withhold it then.
+      const text =
+        err instanceof Error ? (err.stack ?? err.message) : String(err);
+      if (holdsToken(text, token)) {
+        return {
+          ok: false,
+          code: "token-in-output",
+          message:
+            "an output held the token and was withheld; nothing is reported",
+        };
+      }
+      throw err;
     }
-    throw err;
   }
+  if (
+    holdsToken(
+      result.ok ? JSON.stringify(result.report) : result.message,
+      token,
+    )
+  ) {
+    return {
+      ok: false,
+      code: "token-in-output",
+      message: "an output held the token and was withheld; nothing is reported",
+    };
+  }
+  return result;
 }

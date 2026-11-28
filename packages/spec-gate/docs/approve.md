@@ -41,9 +41,10 @@ tree.
 | `merged` | `true` for the check after the merge (see "After the merge"); optional. Left out or `false`, an open pull request is judged. Any other value is refused |
 | `host` | the host adapter |
 
-`repo`, `defaultRef` and `base` are resolved exactly as the lint resolves its
-git inputs: `base` must be the full id of a commit and lie on the default
-ref. That is all `base` is checked for, and it has one use: condition 2
+`repo`, `defaultRef` and `base` are validated as the lint validates its git
+inputs, but the check derives its own measuring base and history check
+instead of the lint's: `base` must be the full id of a commit and lie on the
+default ref. That is all `base` is checked for, and it has one use: condition 2
 compares it with the base commit the host reports. The final lint is given
 `repo` and `defaultRef` only, never `base`. What the pull request changes is
 measured from one commit, the measuring base (see "The measuring base"),

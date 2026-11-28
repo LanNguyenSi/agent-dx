@@ -28,7 +28,7 @@ type Build = (s: Scenario) => EnvelopeFields[];
 async function verdict(tp: string, build: Build | null) {
   const s = await scenario();
   if (build !== null) writeEvidence(s.repo, tp, build(s));
-  const row = rowOf(reportIn(s), tp);
+  const row = rowOf(await reportIn(s), tp);
   return { state: row.state, reason: row.reason };
 }
 
@@ -99,7 +99,7 @@ describe("closure: stays-green", { timeout: 60_000 }, () => {
 
   it("carries probe: not-checked", async () => {
     const s = await scenario();
-    expect(rowOf(reportIn(s), "TP-2").probe).toBe("not-checked");
+    expect(rowOf(await reportIn(s), "TP-2").probe).toBe("not-checked");
   });
 
   it("is unproven when counted envelopes lie on two unrelated branches merged into the head", async () => {
@@ -114,7 +114,7 @@ describe("closure: stays-green", { timeout: 60_000 }, () => {
       { commit: p },
       { commit: q, result: "fail" },
     ]);
-    const row = rowOf(reportIn(s), "TP-2");
+    const row = rowOf(await reportIn(s), "TP-2");
     expect(row.counted).toBe(3);
     expect({ state: row.state, reason: row.reason }).toEqual({
       state: "unproven",
@@ -285,7 +285,7 @@ describe("closure: red-first", { timeout: 60_000 }, () => {
 
   it("carries red_reason: not-checked", async () => {
     const s = await scenario();
-    expect(rowOf(reportIn(s), "TP-1").red_reason).toBe("not-checked");
+    expect(rowOf(await reportIn(s), "TP-1").red_reason).toBe("not-checked");
   });
 });
 
@@ -323,7 +323,7 @@ describe("closure: static", { timeout: 60_000 }, () => {
         "TP-3:\n  status: existing\n  selector: something\n",
     });
     writeEvidence(s.repo, "TP-3", [{ commit: s.b, selector: null }]);
-    const row = rowOf(reportIn(s), "TP-3");
+    const row = rowOf(await reportIn(s), "TP-3");
     expect([row.state, row.counted, row.ignored]).toEqual(["proven", 1, []]);
   });
 
@@ -349,7 +349,7 @@ describe("closure: kinds decided by review", { timeout: 60_000 }, () => {
       { commit: p, selector: "latency" },
       { commit: q, selector: "latency" },
     ]);
-    const row = rowOf(reportIn(s), "TP-4");
+    const row = rowOf(await reportIn(s), "TP-4");
     expect([row.state, row.reason, row.counted]).toEqual([
       "not-decidable",
       "kind-needs-review",
@@ -362,7 +362,7 @@ describe("closure: kinds decided by review", { timeout: 60_000 }, () => {
     writeEvidence(s.repo, "TP-4", [
       { commit: s.a, selector: null, dirty: true },
     ]);
-    const report = reportIn(s);
+    const report = await reportIn(s);
     const pick = (id: string) => {
       const row = rowOf(report, id);
       return [row.state, row.reason, row.evidence_location];
@@ -398,7 +398,7 @@ describe("closure: producer marks", { timeout: 60_000 }, () => {
   const marks = async (producer: "ci" | "host" | "local") => {
     const s = await scenario();
     writeEvidence(s.repo, "TP-2", [{ commit: s.spec, producer }]);
-    const row = rowOf(reportIn(s), "TP-2");
+    const row = rowOf(await reportIn(s), "TP-2");
     return {
       state: row.state,
       counted: row.counted,
@@ -440,7 +440,7 @@ describe("closure: producer marks", { timeout: 60_000 }, () => {
       { commit: s.spec },
       { commit: s.a, producer: "local", dirty: true },
     ]);
-    expect(rowOf(reportIn(s), "TP-2").self_reported).toBe(false);
+    expect(rowOf(await reportIn(s), "TP-2").self_reported).toBe(false);
   });
 });
 
@@ -454,7 +454,7 @@ describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
       { "specs/s1/testplan.yaml": plan },
       "edit the plan on the work branch",
     );
-    const report = reportIn(s);
+    const report = await reportIn(s);
     expect(report.spec_commit).toBe(s.spec);
     expect(report.head).toBe(changed);
     expect(rowOf(report, "TP-1").kind).toBe("red-first");
@@ -465,7 +465,7 @@ describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
   it("reports every row of the merged plan when rows are removed on disk", async () => {
     const s = await scenario();
     fs.writeFileSync(path.join(s.repo.spec, "testplan.yaml"), "[]\n");
-    const report = reportIn(s);
+    const report = await reportIn(s);
     expect(report.rows.map((r) => r.id)).toEqual([
       "TP-1",
       "TP-2",
@@ -487,7 +487,7 @@ describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
       .replace(/^id: .*$/m, "id: other-spec");
     fs.writeFileSync(path.join(s.repo.spec, "spec.md"), spec);
     writeEvidence(s.repo, "TP-2", [{ commit: s.spec }]);
-    const report = reportIn(s);
+    const report = await reportIn(s);
     expect(report.spec).toBe("tiny-valid");
     expect(rowOf(report, "TP-2").state).toBe("proven");
   });
@@ -496,7 +496,7 @@ describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
     const s = await scenario();
     fs.writeFileSync(path.join(s.repo.spec, "spec.md"), "no frontmatter\n");
     fs.writeFileSync(path.join(s.repo.spec, "testplan.yaml"), "- id: TP-1\n");
-    expect(reportIn(s).rows).toHaveLength(7);
+    expect((await reportIn(s)).rows).toHaveLength(7);
   });
 
   it("is the latest change on the default branch, also when the start commit is later", async () => {
@@ -513,7 +513,7 @@ describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
     const tip = await s.repo.commit({ "README.md": "two\n" }, "unrelated");
     await s.repo.setRef(REMOTE_MAIN, tip);
     // The bindings-only commit touched neither spec.md nor testplan.yaml.
-    const report = reportIn(s, { start: later, head: tip });
+    const report = await reportIn(s, { start: later, head: tip });
     expect(report.spec_commit).toBe(s.spec);
   });
 
@@ -534,11 +534,11 @@ describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
     await repo.sh("merge", "-q", "--no-ff", "-m", "merge spec", "specpr");
     const merge = await repo.head();
     await repo.setRef(REMOTE_MAIN, merge);
-    const run = (start: string) =>
+    const run = async (start: string) =>
       runClosure(repo.spec, { repo: repo.dir, defaultRef: REMOTE_MAIN, start });
-    const ok = run(merge);
+    const ok = await run(merge);
     expect(ok.ok && ok.report.spec_commit).toBe(merge);
-    const refused = run(branchCommit);
+    const refused = await run(branchCommit);
     expect(refused.ok ? "" : refused.code).toBe("start-before-spec");
   });
 
@@ -551,7 +551,7 @@ describe("closure: the merged spec commit", { timeout: 60_000 }, () => {
       "plan only",
     );
     await s.repo.setRef(REMOTE_MAIN, tip);
-    const result = closureIn(s, { start: s.spec, head: tip });
+    const result = await closureIn(s, { start: s.spec, head: tip });
     expect(result.ok ? "" : result.code).toBe("start-before-spec");
   });
 });
@@ -565,7 +565,7 @@ describe(
       fs.rmSync(path.join(s.repo.spec, "bindings.yaml"));
       writeEvidence(s.repo, "TP-2", [{ commit: s.spec }]);
       writeEvidence(s.repo, "TP-3", [{ commit: s.b }]);
-      const report = reportIn(s);
+      const report = await reportIn(s);
       expect(rowOf(report, "TP-2").ignored).toEqual([
         { line: 1, reason: "command-unknown" },
       ]);
@@ -577,7 +577,7 @@ describe(
       const s = await scenario();
       const file = path.join(s.repo.dir, "specs", "file");
       fs.writeFileSync(file, "x\n");
-      const result = runClosure(file, {
+      const result = await runClosure(file, {
         repo: s.repo.dir,
         defaultRef: REMOTE_MAIN,
         start: s.spec,
@@ -589,7 +589,7 @@ describe(
       const s = await scenario();
       const link = path.join(s.repo.dir, "specs", "link");
       fs.symlinkSync("s1", link);
-      const result = runClosure(link, {
+      const result = await runClosure(link, {
         repo: s.repo.dir,
         defaultRef: REMOTE_MAIN,
         start: s.spec,
@@ -604,6 +604,6 @@ describe("closure: unknown rows", { timeout: 60_000 }, () => {
     const s = await scenario();
     writeEvidence(s.repo, "TP-10", [{ commit: s.a }]);
     writeEvidence(s.repo, "TP-9", [{ commit: s.a }]);
-    expect(reportIn(s).unknown_rows).toEqual(["TP-9", "TP-10"]);
+    expect((await reportIn(s)).unknown_rows).toEqual(["TP-9", "TP-10"]);
   });
 });

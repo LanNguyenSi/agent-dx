@@ -223,15 +223,15 @@ program
     "--default-ref <ref>",
     "full ref name under refs/ of the fetched target branch of the pull request " +
       "(for example refs/remotes/origin/main when it targets main), " +
-      "the reference commit for the ancestry checks; resolved offline, never fetched. " +
+      "the reference commit for the ancestry checks; a change is measured from the one merge base of HEAD and it " +
+      "(several, none or a shallow repository is a usage error); resolved offline, never fetched. " +
       "Must be a remote-tracking ref (or the event's base) the spec author cannot move, never a local branch " +
       "or the pull request head. Needs --repo. Without --default-ref and --base the git rules are skipped (no-git)",
   )
   .option(
     "--base <commit>",
-    "full commit id of the pull request base from the host event: the reference commit for the ancestry checks " +
-      "and, with HEAD, the merge base the diff of .spec-gate/ starts at; wins over --default-ref, " +
-      "but with both it must be an ancestor of (or equal to) the --default-ref commit. Needs --repo",
+    "full commit id of the pull request base from the host event: validated only, it must be an ancestor of " +
+      "(or equal to) the --default-ref commit and measures nothing. Needs --repo and --default-ref",
   )
   .exitOverride((err: CommanderError) => {
     throw err;
@@ -325,11 +325,11 @@ program
   )
   .option(
     "--default-ref <ref>",
-    "full ref name of the fetched target branch, as for lint",
+    "full ref name of the fetched target branch, as for lint; required",
   )
   .option(
     "--base <commit>",
-    "full commit id of the pull request base, as for lint",
+    "full commit id of the pull request base, as for lint: validated only, needs --default-ref",
   )
   .exitOverride((err: CommanderError) => {
     throw err;
@@ -424,11 +424,11 @@ program
   )
   .option(
     "--default-ref <ref>",
-    "full ref name of the fetched target branch, as for lint",
+    "full ref name of the fetched target branch, as for lint; required, the diff base is the one merge base of HEAD and it",
   )
   .option(
     "--base <commit>",
-    "full commit id of the pull request base, as for lint; wins over --default-ref and must lie on it",
+    "full commit id of the pull request base, as for lint: must lie on --default-ref and measures nothing",
   )
   .exitOverride((err: CommanderError) => {
     throw err;
@@ -654,11 +654,19 @@ program
 // `closure` exits 0 for a report with no row failed or unproven, 1 for a
 // report with one, and 2 for a usage error, a refusal (a precondition that
 // does not hold; no report is printed then) or an unexpected exception.
+// The token of the host check has no option and is read from the
+// environment; an option the verb does not know is counted here and refused
+// by the verb itself, so commander never repeats it on stderr: a token
+// given as `--token=...` by mistake is not printed. The verb has no help
+// option of its own, so `--help` among its arguments is such an option and
+// exits 2 instead of 0; `spec-gate help closure` prints the help.
 program
   .command("closure")
   .description(
     "print one JSON report line (spec-gate-closure/1) that says for every test-plan row of the merged spec whether " +
-      "the evidence files in the spec directory prove it at or after the start commit, read-only and offline; exits 0 when no row is failed or " +
+      "the evidence files in the spec directory prove it at or after the start commit, read-only, and offline unless --github-repo is given: with it " +
+      "the run of every counted producer: ci envelope is additionally checked against that GitHub repository, the token read from " +
+      "GITHUB_TOKEN only, and the row is marked verified only when the host vouches for the run; exits 0 when no row is failed or " +
       "unproven, 1 when one is, 2 on a usage error or refusal",
   )
   .argument(
@@ -681,25 +689,48 @@ program
     "--head <commit>",
     "full commit id the work is evaluated at, the start commit or a descendant of it (default: HEAD of the checkout)",
   )
+  .option(
+    "--github-repo <owner/name>",
+    "check every counted producer: ci envelope against this GitHub repository; needs a token in the environment variable GITHUB_TOKEN",
+  )
+  .option(
+    "--api-url <url>",
+    "the API root of the host (default: https://api.github.com); https, or http for a loopback host",
+  )
+  .helpOption(false)
+  .allowUnknownOption()
+  .allowExcessArguments(true)
   .exitOverride((err: CommanderError) => {
     throw err;
   })
   .action(
-    (
+    async (
       specDir: string,
       options: {
         repo: string;
         defaultRef: string;
         start: string;
         head?: string;
+        githubRepo?: string;
+        apiUrl?: string;
       },
+      command: Command,
     ) => {
-      const result = runClosure(specDir, {
-        repo: options.repo,
-        defaultRef: options.defaultRef,
-        start: options.start,
-        ...(options.head !== undefined ? { head: options.head } : {}),
-      });
+      const result = await runClosure(
+        specDir,
+        {
+          repo: options.repo,
+          defaultRef: options.defaultRef,
+          start: options.start,
+          ...(options.head !== undefined ? { head: options.head } : {}),
+          ...(options.githubRepo !== undefined
+            ? { githubRepo: options.githubRepo }
+            : {}),
+          ...(options.apiUrl !== undefined ? { apiUrl: options.apiUrl } : {}),
+          unknownArguments: command.args.length - 1,
+        },
+        process.env,
+      );
       if (!result.ok) {
         process.stderr.write(
           `spec-gate: closure: ${result.code}: ${result.message}\n`,

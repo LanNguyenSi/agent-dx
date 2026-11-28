@@ -460,12 +460,19 @@ describe("the approval sources", () => {
     const text = read(approve.find((file) => named(file) === VERB)!);
     expect(text).toMatch(/createHost: createGitHubHost,/);
     expect(text).not.toMatch(/\bfetch\b|globalThis|node:/);
-    // No environment of its own: the caller hands one in, and one name is
-    // read from it.
+    // No environment of its own: the caller hands one in, and the shared
+    // host construction both host verbs use reads the one name from it.
     expect(text).not.toMatch(/\bprocess\b/);
-    expect([...text.matchAll(/\benv\[[^\]]*\]/g)].map((m) => m[0])).toEqual([
+    expect([...text.matchAll(/\benv\[[^\]]*\]/g)].map((m) => m[0])).toEqual([]);
+    const shared = fs.readFileSync(at("../../src/cli-host.ts"), "utf8");
+    expect([...shared.matchAll(/\benv\[[^\]]*\]/g)].map((m) => m[0])).toEqual([
       "env[TOKEN_VARIABLE]",
     ]);
+    // The shared construction opens no connection and touches no environment
+    // of its own: the caller hands the environment in and the adapter is the
+    // only place a connection is opened.
+    expect(shared).not.toMatch(/\bfetch\b|globalThis|node:/);
+    expect(shared).not.toMatch(/\bprocess\b/);
     expect(TOKEN_VARIABLE).toBe("GITHUB_TOKEN");
     // The token goes to the adapter and to the search of the outputs, and
     // into no text.
@@ -473,27 +480,37 @@ describe("the approval sources", () => {
   });
 
   it("the only git arguments they write are reads: a tree, merge bases, parents, first parents, a count of commits and whether the repository is shallow", () => {
-    const calls = sources.flatMap((file) =>
-      [
-        ...fs
-          .readFileSync(file, "utf8")
-          .matchAll(/runGit\(\s*\w+,\s*\[([^\]]*)\]/g),
-      ].map((m) => m[1]!.replace(/\s+/g, " ").trim()),
+    // The merge bases and the shallow check are the lint's reads, which
+    // src/approve/git.ts re-exports: their section of the lint's git module
+    // is counted first, then the approval sources.
+    const lintGit = read(at("../../src/lint/git/index.ts"));
+    const from = lintGit.indexOf("export function mergeBases(");
+    const to = lintGit.indexOf("export function changedPaths(");
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    const texts = [
+      lintGit.slice(from, to),
+      ...sources.map((file) => fs.readFileSync(file, "utf8")),
+    ];
+    const calls = texts.flatMap((text) =>
+      [...text.matchAll(/runGit\(\s*\w+,\s*\[([^\]]*)\]/g)].map((m) =>
+        m[1]!.replace(/\s+/g, " ").trim(),
+      ),
     );
     expect(calls).toHaveLength(6);
     expect(calls[0]).toMatch(
       /^"merge-base", "--all", "--end-of-options", a, b,?$/,
     );
-    expect(calls[1]).toMatch(
+    expect(calls[1]).toBe('"rev-parse", "--is-shallow-repository"');
+    expect(calls[2]).toMatch(
       /^"rev-list", "--parents", "--max-count=1", "--end-of-options", commit,?$/,
     );
-    expect(calls[2]).toBe(
+    expect(calls[3]).toBe(
       '"rev-list", "--first-parent", `--max-count=${count}`, "--end-of-options", commit,',
     );
-    expect(calls[3]).toBe(
+    expect(calls[4]).toBe(
       '"rev-list", "--count", `--max-count=${cap}`, "--end-of-options", `${from}..${to}`,',
     );
-    expect(calls[4]).toBe('"rev-parse", "--is-shallow-repository"');
     expect(calls[5]).toMatch(
       /^"ls-tree", "-r", "-z", "--full-tree", "--end-of-options", commit, "--", prefix,?$/,
     );
@@ -501,9 +518,8 @@ describe("the approval sources", () => {
     for (const call of calls) expect(call).not.toMatch(/merge-tree|write/);
     // Every runGit call of these sources is one of the six above: none is
     // written in a form the pattern does not see.
-    const written = sources.reduce(
-      (n, file) =>
-        n + (fs.readFileSync(file, "utf8").match(/\brunGit\(/g) ?? []).length,
+    const written = texts.reduce(
+      (n, text) => n + (text.match(/\brunGit\(/g) ?? []).length,
       0,
     );
     expect(written).toBe(6);

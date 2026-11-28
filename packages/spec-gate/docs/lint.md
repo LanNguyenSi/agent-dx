@@ -11,7 +11,7 @@ read-only: it never fetches and never writes.
 spec-gate lint <spec-dir> [--strict] [--final] [--profile <light|full>] [--config <path>]
                           [--repo <dir>] [--default-ref <ref>] [--base <commit>]
 spec-gate lint-ack <spec-dir> <rule> <id> --reason <text>
-spec-gate propose <spec-dir> --repo <dir> (--default-ref <ref> | --base <commit>)
+spec-gate propose <spec-dir> --repo <dir> --default-ref <ref> [--base <commit>]
 spec-gate bind <spec-dir> <tp-id> --status <new|existing> [--selector <s>] [--file <path>]
                [--fixtures <path>]... [--notes <text>]
 ```
@@ -181,7 +181,7 @@ The lint looks at one spec directory, the one it is run on. It cannot see a
 spec that no longer has a directory at `HEAD`: a deleted spec directory, a
 rename together with a new id, or a spec moved from anywhere into `specs/`
 with a fresh `bindings.log` all leave no directory to lint under the old id.
-`spec-gate repo-check --repo <dir> (--default-ref <ref> | --base <commit>)`
+`spec-gate repo-check --repo <dir> --default-ref <ref> [--base <commit>]`
 closes that gap from the other side: it starts at the diff base and walks its
 whole tree.
 
@@ -189,9 +189,11 @@ CI must run it on every pull request, not only on pull requests that touch a
 spec: the pull request that deletes a spec is exactly the one a spec-only
 trigger would skip. Give it the same git inputs as the lint; they are
 resolved the same way (see "Git inputs"): `--repo` is the trusted checkout
-root and never discovered, `--default-ref` is a full ref name, `--base` a
-full commit id that must lie on `--default-ref` when both are given, and the
-diff base is the merge base of `HEAD` and the reference commit. Every git
+root and never discovered, `--default-ref` is a full ref name and required,
+`--base` a full commit id that must lie on `--default-ref` and measures
+nothing, and the diff base is the measuring base: the one merge base of `HEAD`
+and the `--default-ref` commit (several, none or a shallow repository is a
+usage error). Every git
 call goes through the lint's hardened runner; nothing is fetched or written,
 and both trees are read from the object database, never from the work tree,
 so a file restored in the work tree but not committed does not count.
@@ -236,15 +238,20 @@ The report is one JSON line:
 {"format":"spec-gate-repo-check/1","ok":false,"reference":"<commit>","diff_base":"<commit>","head":"<commit>","spec_files":3,"findings":[{"path":"specs/a/spec.md","code":"spec-removed","message":"..."}]}
 ```
 
+`reference` is the `--default-ref` commit, `diff_base` the measuring base the
+two trees are compared from (the tree of the diff base against the tree of
+`HEAD`), and `head` the commit `HEAD` names, all full commit ids; `--base`
+changes none of them.
 `spec_files` counts the regular files named `spec.md` at the diff base.
 Findings are sorted by `path`, then `code`, then `message`; a path is
 repository-relative and the report holds no absolute path. Exit codes: 0
 without findings, 1 with findings, 2 on a usage error (a missing `--repo`, no
-`--default-ref` and no `--base`, a git input that does not resolve) or a git
-read that fails. The code lives in `src/repo/`. `spec-gate approve-check` runs
-this check as its condition 8, from the one merge base of `HEAD` and the
-default commit and never from `--base` (see [approve.md](approve.md)); that
-does not replace the run on every pull request.
+`--default-ref`, a `--base` without `--default-ref`, a git input that does not
+resolve, several merge bases, none, a shallow repository) or a git read that
+fails. The code lives in `src/repo/`. `spec-gate approve-check` runs this check
+as its condition 8, from the same measuring base and never from `--base` (see
+[approve.md](approve.md)); that does not replace the run on every pull
+request.
 
 ## Git inputs
 
@@ -255,12 +262,12 @@ never reads a remote, so the same repository gives the same report.
 
 | Flag | Meaning |
 |---|---|
-| `--default-ref <ref>` | a full ref name under `refs/` (for example `refs/remotes/origin/main`): the remote-tracking ref of the pull request's target branch, fetched by the job; resolved to a commit once, offline. An annotated tag peels to its commit |
-| `--base <commit>` | the full id of the pull request base commit (a commit object; an abbreviation and the id of a tag object are refused) |
+| `--default-ref <ref>` | a full ref name under `refs/` (for example `refs/remotes/origin/main`): the remote-tracking ref of the pull request's target branch, fetched by the job; resolved to a commit once, offline. An annotated tag peels to its commit. Required with every git input |
+| `--base <commit>` | the full id of the pull request base commit (a commit object; an abbreviation and the id of a tag object are refused); validated, it must lie on `--default-ref`, and it measures nothing |
 | `--repo <dir>` | the trusted checkout root: a directory inside the git work tree to read; required with `--default-ref` and `--base`, never discovered from `<spec-dir>`; `<spec-dir>` must lie inside that work tree |
 
 Git inputs are given when `--default-ref` or `--base` is, and they need
-`--repo`: without it the run is a usage error. The repository is never found
+`--repo` and `--default-ref`: without either the run is a usage error. The repository is never found
 by walking up from `<spec-dir>`, because the spec author writes that
 directory, and a spec pull request can commit files that look like a git
 directory (`HEAD`, `objects/`, `refs/`, `config`, `info/grafts`) and so
@@ -269,33 +276,45 @@ not a git input: the git rules are skipped with `no-git` (and fail a `--final`
 run, see above). Everything git needs is resolved once, before any rule runs,
 into full commit ids:
 
-- the reference commit: the `--base` commit when given, else the commit
-  `--default-ref` names. It is the commit the ancestry checks compare
-  against. With both flags `--base` wins, and `--default-ref` is still
-  validated, so a bad value is never ignored; `--base` must then be an
-  ancestor of the `--default-ref` commit, or equal to it (a usage error
-  otherwise: a base that is not on `--default-ref` is a commit the author
-  could have put on a branch of their own).
+- the reference commit: the commit `--default-ref` names. It is the commit
+  the ancestry checks compare against and the commit the config is read at.
+- the base: `--base` is validated and measures nothing. It must be the full
+  id of a commit and an ancestor of the `--default-ref` commit, or equal to
+  it (a usage error otherwise: a base that is not on `--default-ref` is a
+  commit the author could have put on a branch of their own), and both flags
+  are validated, so a bad value is never ignored. `--base` without
+  `--default-ref` is a usage error. A host can report a base that is older
+  than a default commit the head has merged since; measured from that older
+  commit a file the pull request puts back to its old content shows no
+  change, and a spec or a log the default branch gained in between is not in
+  the tree a check starts from.
 - the head: `HEAD` of the repository. The rules read committed state; the
   working tree is not diffed (the spec files themselves are read from the
   working tree as always).
-- the diff base: `merge-base(HEAD, reference commit)`. A change made only on
-  the base side after the fork does not count against the spec change.
-  When several merge bases exist the one git names first is used; a change
-  from another side can then only be over-reported, never missed.
+- the diff base: the measuring base, the one merge base of `HEAD` and the
+  `--default-ref` commit (`git merge-base --all`). A change made only on the
+  default branch after the fork does not count against the spec change.
+  Several merge bases (histories that crossed: each side merged a commit of
+  the other that the other reached on its own) are a usage error, because git
+  would pick one and from one whose tree lacks a spec or a log a change can
+  fail to show: merge the default branch into the branch, or rebase onto it,
+  so that one remains. A shallow repository is a usage error as well, checked
+  first: behind the shallow boundary git can name an older commit as the one
+  merge base.
 
 A value that cannot be used is a usage error (exit 2, one line on stderr, no
 report), never a finding: a `--default-ref` that is not a valid full ref name
 under `refs/` (a short name, a leading dash, a name `git check-ref-format`
 refuses), that names no ref, or that does not lead to a commit; a `--base`
 that is not the full id of a commit in the repository, or not an ancestor of
-(or equal to) the `--default-ref` commit when both are given; a git input
-without `--repo`; a `--repo` with no path or outside a git work tree, or in a
+(or equal to) the `--default-ref` commit; a `--base` without `--default-ref`; a
+git input without `--repo`; a `--repo` with no path or outside a git work tree, or in a
 repository that is not the one the `.git` entry of its work tree names (see
 the repository check below); a spec
 directory outside the repository; a
-repository without a commit at `HEAD`; a `HEAD` that shares no history with
-the reference commit; and `--config` together with git inputs. The message
+repository without a commit at `HEAD`; a shallow repository; a `HEAD` that
+shares no history with the reference commit or has several merge bases with
+it; and `--config` together with git inputs. The message
 names the flag, never git's output, an argument or a path.
 
 Every git call is an argument list (no shell) with a scrubbed environment (no
@@ -350,12 +369,13 @@ repository state it is given.
   or the base the host event names, that the spec author cannot move. It is never a local branch
   and never the head of the pull request, and a ref the author can push to is
   the author's own input.
-- `--base` is the pull request base id from the host event (for example the
-  base sha of a `pull_request` event), a full commit id.
-- The full history is fetched. A shallow clone does not hold the commits the
-  ancestry checks compare, so `base_commit` and `commands_ref` report as not
-  being commits, and the diff base may not be found or, when the shallow
-  boundary hides the true merge base, may be an older commit.
+- `--base`, when given, is the pull request base id from the host event (for
+  example the base sha of a `pull_request` event), a full commit id. It is
+  checked to lie on `--default-ref` and moves nothing the lint measures.
+- The full history is fetched. A shallow repository is refused with exit 2:
+  it may not hold the commits the ancestry checks compare, and when the
+  shallow boundary hides the true merge base git names an older commit, from
+  which a change can fail to show.
 - The checkout is the one the job trusts: the lint refuses a repository that
   the `.git` entry of its work tree does not name (the repository check
   above), but it does not vouch for a checkout whose `.git` the pull request
@@ -380,6 +400,17 @@ spec-gate lint specs/<id> --final \
   --default-ref "refs/remotes/origin/$PR_BASE_REF" \
   --base "$PR_BASE_SHA"
 ```
+
+Full history means a checkout that is not shallow: with `actions/checkout`
+that is `fetch-depth: 0`, and its default of one commit is a shallow
+repository, which lint, propose and repo-check refuse with exit 2. `--base` is
+optional; given, it is checked to lie on the default branch and changes
+nothing else, and a job that passes `--base` without `--default-ref` exits 2.
+When the job checks out the head commit of the pull request, a pull request
+whose history crossed the default branch's (several merge bases) also exits 2
+until the default branch is merged into it or it is rebased onto it. With the
+merge commit checked out, made against the default commit the job names,
+that commit is an ancestor of `HEAD` and the one merge base.
 
 The config. With git inputs `.spec-gate/config.yaml` is read at the reference
 commit, never from the working tree and never from the head of the spec pull
@@ -462,14 +493,14 @@ that they exist; the rules that need git are covered as described under
 | `question-budget` | warning | full | no | yes | The number of unanswered questions is at most questions.warn_above (default 7, set with --config). Acknowledge with id questions. |
 | `triage-stale` | error | light, full | no | no | triage.json stores the class its own fields derive and the current rule version; it runs in both profiles. |
 | `meta-frontmatter-mismatch` | error | light, full | no | no | base_commit and commands_ref in source/meta.json equal those in the spec.md frontmatter; it needs no repository and runs in both profiles. |
-| `base-commit-not-ancestor` | error | light, full | no | no | The frontmatter base_commit is the full id of a commit in the repository and an ancestor of the reference commit (the --base commit, else the --default-ref commit); a commit that exists only on the pull request head or a fork is an error. |
+| `base-commit-not-ancestor` | error | light, full | no | no | The frontmatter base_commit is the full id of a commit in the repository and an ancestor of the reference commit (the --default-ref commit; --base never moves it); a commit that exists only on the pull request head or a fork is an error. |
 | `commands-ref-not-ancestor` | error | light, full | no | no | The frontmatter commands_ref is the full id of a commit in the repository and an ancestor of the reference commit, checked like base_commit. |
-| `spec-changes-config` | error | light, full | no | no | No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between merge-base(HEAD, reference commit) and HEAD, renames not detected; changes made only on the base side do not count. |
+| `spec-changes-config` | error | light, full | no | no | No path under .spec-gate/ (the first path component compared without regard to case, after Unicode normalisation) differs between the measuring base (the one merge base of HEAD and the --default-ref commit) and HEAD, renames not detected; changes made only on the default branch do not count. |
 | `static-command-unknown` | error | light, full | no | no | Every static test-plan row's check_command_ref names a command of .spec-gate/commands.yaml at commands_ref; a missing or invalid command set there is an error, and the set is not read at a commands_ref that failed its ancestry check. |
 | `bindings-log` | error | light, full | yes | no | At proposed bindings.log exists; it parses (seq from 1 in steps of 1, one propose entry and it is first, entry shapes, hash chain); its propose commit is an ancestor of HEAD where spec.md was a draft without a log; bindings.yaml read from git at that commit hashes to the propose entry; every bind entry names a TP ID it had and keeps to its row's kind; the replay of the bind entries over it equals bindings.yaml, compared as parsed bindings; when the propose commit is not a commit or not an ancestor of HEAD (after a squash or rebase merge) and the diff base holds the log of this spec at the same path with the same propose entry, bindings.yaml read from git at the diff base is the anchor instead and only the bind entries after that log are checked and replayed over it; the spec directory is specs/<name>, one level below the top-level specs/; every log the diff base holds there for a spec of the same id is extended, not rewritten or removed; and a proposed spec has not left its directory. |
 | `stale-evidence` | warning | full | no | yes | A baseline envelope is stale: its commit is not the frontmatter base_commit, its work tree was dirty, its commands_digest is not the expected digest of the one command its row uses at commands_ref, its row has no determinable command (the row is not static and its binding has no selector, or the row is selector-bound and no command of the set carries {selector}), or its selector is not its row's binding selector; closure envelopes are never stale. Acknowledge with the row ID; an unreadable command set is acknowledged with ID commands. |
 | `unproven` | warning | full | no | yes | A stays-green row has no baseline envelope with result pass that is unstale by its own fields: commit equal to base_commit, work tree clean, selector equal to the row's binding selector. The digest cause is judged by stale-evidence, the only evidence rule that reads the repository. Acknowledge with the row ID. |
-| `self-reported` | warning | full | no | yes | A row's evidence file holds an envelope of producer local. producer ci is not judged by lint: the closing check verifies it through the host. Acknowledge with the row ID. |
+| `self-reported` | warning | full | no | yes | A row's evidence file holds an envelope of producer local. producer ci is not judged by lint: closure marks it verified only when the host vouches for its run (closure --github-repo). Acknowledge with the row ID. |
 | `evidence-unknown-row` | error | full | no | no | Every well-named evidence/TP-<n>.jsonl names a test-plan row: the file name is the mapping from an envelope to its row, and a file for an unknown TP ID is an error. |
 <!-- END generated: rules -->
 
@@ -719,8 +750,9 @@ cause is not judged here: `stale-evidence` owns it, being the only evidence
 rule that reads the repository. `self-reported` (warning): a file holding a
 `baseline` or `closure` envelope of `producer: local` is one warning for
 that row; a `host` producer is not flagged and `producer: ci` is not judged
-by lint at all, because the closing check verifies a CI run through the
-host. `stale-evidence` (warning, needs git inputs, skipped `no-git`
+by lint at all, because `closure` asks the host to vouch for a CI run and
+marks the row verified only when the host does, with `--github-repo` (see
+[closure.md](closure.md)). `stale-evidence` (warning, needs git inputs, skipped `no-git`
 without; a skipped warning never becomes a `rule-skipped` error): every
 `baseline` envelope (closure envelopes are never stale, see
 `staleEvidenceApplies` in [formats.md](formats.md)) is judged on five
