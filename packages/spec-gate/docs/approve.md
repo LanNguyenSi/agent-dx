@@ -277,7 +277,9 @@ nothing is fetched), `review-digest-unavailable`, `digest-mismatch`,
 Codes: `spec-unreadable`, `status-not-proposed`, `worktree-not-head`,
 `ambiguous-merge-base`, `lint-failed`, `lint-errors`, `head-moved`,
 `git-failed`, `shallow-repository`; after the merge also
-`checkout-not-default-tip`.
+`checkout-not-default-tip`, `bindings-after-merge`, and, when where the
+pull request landed is not known, `host-failed`, `not-merged`,
+`merge-not-on-default`, `head-unavailable`, `merge-shape-unknown`.
 
 ### 5. Agent identities are set apart
 
@@ -386,7 +388,7 @@ all of them:
 | 1 | The host reports the pull request as merged, and an approving review stands on the head commit the host reports for it. |
 | 2 | An approver of that head commit is in `approvers`, is not the pull request author and is not an agent identity; the settings are read at the tip of the default branch, the pull request targeted the default branch, its merge commit is on the default branch and no range of the merge changes a path under `.spec-gate/`. |
 | 3 | The digest of the spec at the tip of the default branch equals the digest at the commit of every approving review considered, the spec is `proposed` at each of those commits, and the state judged at the tip (`proposed`, with the digest at the tip) arrives both over the reviewed commits and over a measured step of the default branch. |
-| 4 | The spec is `proposed` at the tip of the default branch, the checkout is at that commit, the spec directory of the work tree is the one it holds, and the final lint has no error. |
+| 4 | The spec is `proposed` at the tip of the default branch, the checkout is at that commit, the spec directory of the work tree is the one it holds, the bindings at the tip are the ones the approved head and the default branch before the merge hold, extended by log entries only, and the final lint has no error. |
 | 5 | `agent_identities` is not empty and shares no account with `approvers`. |
 | 6 | The host enforces a review for `specs/` and for `.spec-gate/`, and reports the last change under `.spec-gate/`. |
 | 7 | No path under `.spec-gate/` differs over a range of the merge. |
@@ -433,6 +435,34 @@ moves on.
   commit `defaultRef` names (`checkout-not-default-tip`) and the spec
   directory of the work tree must be the one that commit holds
   (`worktree-not-head`).
+- Condition 4 also checks the bindings after the merge. The final lint at
+  the tip compares the tip with itself, so its `bindings-log` rule (see
+  [lint.md](lint.md)) is run once more, alone, with the tip as `HEAD` and
+  each of these commits as the diff base: the head commit the host reports,
+  where the approving reviews stand, and the start of every measured
+  first-parent step (see "The ranges of the merge"), the first parent of the
+  merge commit first. From each, every `bindings.log` that commit holds for
+  a spec of this id must be extended by the log at the tip, entry for entry
+  with the hash chain continued, and `bindings.yaml` at the tip must be the
+  replay of the entries after it over `bindings.yaml` read from git there
+  (or over the propose commit, when that is an ancestor of the tip). A
+  commit of the steps that holds no log for the spec is not asked: it has
+  no log to extend. The head commit must hold a `bindings.log` at the path
+  of the spec that parses, so that it has a propose entry; a head without
+  one (no log, an empty or a cut-off one) is `bindings-after-merge`, since a
+  log written on the default branch later would be anchored at whatever
+  commit it names. A finding is `bindings-after-merge`; the message names
+  the commit it was measured from (the head commit, the first parent, or a
+  step below it) and the codes of the rule, never the content of a file.
+  This covers a squash that carried other bindings than the approved head,
+  a log entry of the head dropped or rewritten on the way to the tip, a
+  later commit that changed `bindings.yaml` without a log entry, and a pull
+  request that put a merged spec back to `draft` and proposed it again. The
+  rule does not run when `bindings.yaml` or `testplan.yaml` of the spec
+  directory does not parse; that is `bindings-after-merge` as well. A git
+  read that fails is `git-failed`. Where the pull request landed must be
+  known for this; when it is not, condition 4 carries the code of the
+  landing, as conditions 2, 7 and 8 do.
 - The settings of conditions 2 and 5 are read at the tip, as in the open mode:
   an approver taken off the list on the default branch after the merge does
   not count, and neither does an account made an agent identity there since.
@@ -1122,17 +1152,19 @@ Named here instead of closed:
   commits the replay drops: N counts them, the replay makes no commit for
   them, and as many commits of the default branch below the replayed ones
   are measured.
-- Bindings after the merge: `bindings.yaml` and `bindings.log` are not part
-  of the digest, and the final lint of the check after the merge compares the
-  tip of the default branch with itself. After the merge the bindings are
-  therefore compared neither with their log as it was merged before nor with
-  the bindings of the approved head. A pull request that replaced a
-  `bindings.log` merged before (back to `draft` and a second propose) is not
-  noticed once it is merged, neither is a squash that carried other bindings
-  than the approved head, and neither is a later commit of the default branch
-  that changes `bindings.yaml` without a log entry. The open mode notices the
-  first (`lint-errors`). The removal of a log is noticed in both modes, by
-  condition 8.
+- Bindings after the merge: condition 4 measures the log at the tip from the
+  approved head and from the start of every measured first-parent step, not
+  from a commit of the default branch after the merge commit. An entry that
+  a later pull request appended there and a still later commit rewrote (with
+  a recomputed hash chain and bindings that match it) is not noticed, as
+  long as the log the approved head holds is still extended and the bindings
+  at the tip are the replay of the entries after it. The removal of a log is
+  noticed in both modes, by condition 8. Nor is `bindings.yaml` at the
+  approved head compared with the head's own log when the propose commit
+  already lies on the default branch: a head whose bindings were changed by
+  hand without an entry is refused right after the merge, but approved once
+  a later commit of the default branch puts the bindings back to what the
+  log replays.
 - Which pull request, in the open mode: an approval of a commit counts for
   every spec in the tree of that commit, whether the pull request changed
   that spec or not. The check after the merge asks that the pull request

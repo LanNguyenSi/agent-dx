@@ -69,7 +69,7 @@ function at(code: string, message: string, line?: number): RuleFinding {
 }
 
 /** A spec directory at the diff base that carries the same spec id. */
-interface Kin {
+export interface Kin {
   /** Its repository path, `specs/<name>`. */
   path: string;
   /** Its frontmatter status at the diff base. */
@@ -107,7 +107,11 @@ function statusAt(
  * anywhere else, so no merged log can live anywhere else. Only a regular
  * `spec.md` that parses counts.
  */
-function kinAtDiffBase(repo: string, diffBase: string, id: string): Kin[] {
+export function kinAtDiffBase(
+  repo: string,
+  diffBase: string,
+  id: string,
+): Kin[] {
   const kin: Kin[] = [];
   for (const dir of specDirsAt(repo, diffBase)) {
     const at = statusOf(
@@ -178,7 +182,12 @@ function checkHistory(
   return { found, merged };
 }
 
-function checkLog(ctx: RuleContext): RuleFinding[] {
+/**
+ * The bindings-log check without its guard: a git read that fails throws
+ * its `LintGitError` instead of becoming a finding. `checkBindingsLog` is
+ * the rule; a caller that must tell a failed read from a finding calls this.
+ */
+export function checkLog(ctx: RuleContext): RuleFinding[] {
   const git = ctx.git;
   const specDir = ctx.specDir;
   if (git === undefined || specDir === undefined) {
