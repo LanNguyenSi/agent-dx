@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { defaultConfig, loadConfig, mergeConfig } from "../src/config.js";
-import { checkText } from "../src/engine.js";
+import { checkPath, checkText } from "../src/engine.js";
 import { allPacks } from "../src/packs/registry.js";
 
 describe("config", () => {
@@ -417,5 +417,37 @@ describe("config", () => {
     expect(() => loadConfig(file)).toThrow(
       /see docs\/configuration\.md.*Path pattern anchor/,
     );
+  });
+
+  it("default ignores name the pnpm and bun lockfiles", () => {
+    expect(defaultConfig().ignorePaths).toContain("**/pnpm-lock.yaml");
+    expect(defaultConfig().ignorePaths).toContain("**/bun.lockb");
+  });
+
+  it("a directory scan skips pnpm-lock.yaml and bun.lockb but reports the same slop in another YAML file", () => {
+    // The fixture carries two default-pack tells: an escaped em-dash
+    // (prose-slop/em-dash: a `.lockb` name has no entry in the extension
+    // tables, so an unignored `bun.lockb` would be scanned as prose and
+    // flagged) and a `</result>` tag (agent-tics/stray-result-tag applies
+    // to every text kind, so the `.yaml` code kind of `pnpm-lock.yaml`
+    // would flag it too). `other.yaml` is the positive control: the same
+    // text in a non-ignored name must still be reported, proving the two
+    // lockfile names are skipped by the ignore, not by file-kind routing.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-lockfile-"));
+    const flagged = "# lockfile \\u2014 seamless </result>\n";
+    for (const name of ["pnpm-lock.yaml", "bun.lockb", "other.yaml"]) {
+      fs.writeFileSync(path.join(tmp, name), flagged);
+    }
+    try {
+      const summary = checkPath(tmp, {
+        packs: allPacks,
+        config: defaultConfig(),
+      });
+      expect(summary.filesScanned).toBe(1);
+      expect(summary.violations).toHaveLength(1);
+      expect(summary.violations[0].path).toContain("other.yaml");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
