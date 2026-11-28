@@ -1,8 +1,9 @@
 /**
  * The git reads of the approval check that no other module has: the digest
  * of a spec as a commit holds it, whether the spec directory of the work
- * tree is the one a commit holds, every merge base of two commits, and the
- * parents of a commit.
+ * tree is the one a commit holds, and the parents of a commit. Every merge
+ * base of two commits and whether the history is shallow are the lint's
+ * reads, re-exported here.
  *
  * Every git call goes through `runGit` of the lint or through the digest's
  * own readers, so the hardening of `canonical/git-hardening.ts` applies:
@@ -36,6 +37,10 @@ import {
   readBlobBytes,
   repoPathOf,
 } from "../state/git.js";
+
+// The lint measures from the same merge bases and refuses the same shallow
+// histories; it does not import the approval check, so the reads live there.
+export { isShallow, mergeBases } from "../lint/git/index.js";
 
 /** A git read failed, or a file of the commit is not what the format asks for. */
 function isReadError(err: unknown): boolean {
@@ -180,40 +185,6 @@ export function specCommandsAt(
 }
 
 /**
- * Every merge base of the commits `a` and `b`: each common ancestor that no
- * other common ancestor descends from, as full commit ids in the order git
- * lists them. No entry when the two share no history. Histories that
- * crossed (each side merged a commit of the other that the other reached on
- * its own) have more than one, and git's plain `merge-base` then prints one
- * of them; a caller that needs one commit to measure a change from must
- * know that there are several.
- */
-export function mergeBases(repo: string, a: string, b: string): string[] {
-  if (!COMMIT_RE.test(a) || !COMMIT_RE.test(b)) {
-    throw new LintGitError(
-      "not-a-commit",
-      "a value is not a full commit id (40 or 64 lower-case hex digits)",
-    );
-  }
-  const run = runGit(repo, ["merge-base", "--all", "--end-of-options", a, b]);
-  // Exit 1 with no output is git's answer for two histories without a
-  // common commit.
-  if (run.status === 1 && run.stdout.length === 0) return [];
-  const ids = run.stdout
-    .toString("utf8")
-    .split("\n")
-    .filter((line) => line !== "");
-  if (
-    run.status !== 0 ||
-    ids.length === 0 ||
-    ids.some((id) => !COMMIT_RE.test(id))
-  ) {
-    throw new LintGitError("git-failed", "git could not find the merge bases");
-  }
-  return ids;
-}
-
-/**
  * The parents of `commit` as full commit ids, the first parent first; no
  * entry for a commit without one. The first parent of a commit on a branch
  * is what the branch held before that commit.
@@ -322,23 +293,6 @@ export function commitsBetween(
     throw new LintGitError("git-failed", "git could not count commits");
   }
   return Number(text);
-}
-
-/**
- * Whether the repository is shallow: its history ends at a boundary below
- * which git holds no commits. There a commit shows no parents, and a merge
- * base can be an older commit than the one the full history has.
- */
-export function isShallow(repo: string): boolean {
-  const run = runGit(repo, ["rev-parse", "--is-shallow-repository"]);
-  const text = run.stdout.toString("utf8");
-  if (run.status !== 0 || (text !== "true\n" && text !== "false\n")) {
-    throw new LintGitError(
-      "git-failed",
-      "git could not say whether the repository is shallow",
-    );
-  }
-  return text === "true\n";
 }
 
 /** The modes of a regular file in a git tree. */

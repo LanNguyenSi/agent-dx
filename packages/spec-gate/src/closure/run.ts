@@ -235,10 +235,13 @@ function judge(specDir: string, request: ClosureRequest): ClosureReport {
     loadedEvidence?.state === "ok" ? loadedEvidence.value : {};
 
   // The repository and the default branch, resolved as lint resolves them.
-  const resolved = resolveGitInputs(specDir, {
-    repo: request.repo,
-    defaultRef: request.defaultRef,
-  });
+  // Only the repository, the default commit and the head are read here; the
+  // closing check measures no range from a merge base.
+  const resolved = resolveGitInputs(
+    specDir,
+    { repo: request.repo, defaultRef: request.defaultRef },
+    { callerMeasures: true },
+  );
   if (!resolved.ok) refuse("git-input-invalid", resolved.message);
   const repo = resolved.git!.repo;
   const defaultCommit = resolved.git!.reference;

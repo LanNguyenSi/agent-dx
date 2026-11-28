@@ -192,6 +192,8 @@ describe("spec-gate propose", { timeout: 60_000 }, () => {
       bad.repo.spec,
       "--repo",
       bad.repo.dir,
+      "--default-ref",
+      REMOTE_MAIN,
       "--base",
       await bad.repo.sh("rev-parse", REMOTE_MAIN),
     ]);
