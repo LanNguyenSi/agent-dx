@@ -3,9 +3,9 @@ import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
 import {
-  MAX_GLOB_DOUBLE_STARS,
+  MAX_GLOB_WILDCARDS,
   MAX_REGEX_LENGTH,
-  countDoubleStars,
+  countWildcards,
   findRegexSafetyProblem,
 } from "./util/regex-safety.js";
 import type {
@@ -107,16 +107,16 @@ function regexPatternSchema(field: string) {
     });
 }
 
-// Every config glob compiles through `globToRegex`, which turns each `**`
-// into `.*` or `(?:.*/)?`. Runs of `**/` collapse there, but separated `**`
-// segments still multiply the ways a failed match can backtrack, so a glob
-// carries at most `MAX_GLOB_DOUBLE_STARS` of them.
+// Every config glob compiles through `globToRegex`, which turns each `*` into
+// `[^/]*` and each `**` into `.*` or `(?:.*/)?`. Runs of `**/` collapse
+// there, but separated wildcards still multiply the ways a failed match can
+// backtrack, so a glob carries at most `MAX_GLOB_WILDCARDS` of them.
 function globSegmentCap(field: string) {
   return (glob: string, ctx: z.RefinementCtx) => {
-    if (countDoubleStars(glob) > MAX_GLOB_DOUBLE_STARS) {
+    if (countWildcards(glob) > MAX_GLOB_WILDCARDS) {
       ctx.addIssue({
         code: "custom",
-        message: `${field} pattern has more than ${MAX_GLOB_DOUBLE_STARS} "**" segments: "${glob}"`,
+        message: `${field} pattern has more than ${MAX_GLOB_WILDCARDS} wildcards ("*" or "**"): "${glob}"`,
       });
     }
   };

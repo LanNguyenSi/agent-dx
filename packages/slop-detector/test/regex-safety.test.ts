@@ -1,14 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import {
-  MAX_BOUNDED_REPEAT,
-  MAX_GLOB_DOUBLE_STARS,
+  MAX_GLOB_WILDCARDS,
+  MAX_OUTER_REPEAT,
   MAX_REGEX_LENGTH,
-  countDoubleStars,
+  countWildcards,
   findRegexSafetyProblem,
 } from "../src/util/regex-safety.js";
 import { globToRegex } from "../src/util/file-kind.js";
@@ -19,6 +19,19 @@ import { allPacks } from "../src/packs/registry.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(here, "..");
 const repoRoot = path.resolve(packageRoot, "..", "..");
+
+// Every scratch directory a test creates is removed again by its own path.
+const scratchDirs: string[] = [];
+function scratchDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  scratchDirs.push(dir);
+  return dir;
+}
+afterEach(() => {
+  for (const dir of scratchDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe("findRegexSafetyProblem", () => {
   describe("refuses nested quantifiers", () => {
@@ -34,8 +47,19 @@ describe("findRegexSafetyProblem", () => {
       ["an alternation branch with a repeat", "(a+|b)+"],
       ["a lazy inner repeat", "(a+?)+"],
       ["a lazy outer repeat", "(a+)+?"],
-      ["a brace range above the bound", `(a{1,${MAX_BOUNDED_REPEAT + 1}})+`],
-      ["a brace range above the bound on the outer group", "(a+){1,17}"],
+      ["a bounded variable range under a plus", "(a{1,16})+x"],
+      ["a bounded variable range on a dot under a plus", "(.{1,16})+x"],
+      ["a two-way range under a plus", "(a{1,2})+x"],
+      ["a variable range under a star", "(a{0,3})*x"],
+      [
+        "an open repeat under a count above the outer bound",
+        `(a+){${MAX_OUTER_REPEAT + 1}}x`,
+      ],
+      ["an open repeat under a large count", "(a+){16}x"],
+      [
+        "an open repeat under a range above the outer bound",
+        `(a+){1,${MAX_OUTER_REPEAT + 1}}`,
+      ],
       ["a repeat after an escaped bracket in a class", "([\\]a]+)+"],
       ["a repeat reached through a closed sibling group", "(x(a+)y)*"],
     ];
@@ -48,6 +72,12 @@ describe("findRegexSafetyProblem", () => {
 
   it("refuses a numbered backreference", () => {
     expect(findRegexSafetyProblem("(a)\\1")).toEqual({ kind: "backreference" });
+  });
+
+  it("refuses the highest numbered backreference, \\9", () => {
+    expect(findRegexSafetyProblem("(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9")).toEqual({
+      kind: "backreference",
+    });
   });
 
   it("refuses a named backreference", () => {
@@ -69,16 +99,26 @@ describe("findRegexSafetyProblem", () => {
       ["a repeated plain group", "(ab)+"],
       ["a plus inside a character class", "[a+]+"],
       ["an escaped class bracket inside a class", "[\\]a+]+"],
+      ["an escaped bracket in a class inside a repeated group", "([\\]+])+"],
       ["a class holding repeat characters inside a repeated group", "([a+*])+"],
       ["a class holding a plus inside a repeated group", "([+])+"],
       ["a class holding parentheses", "[(]a+[)]"],
       ["escaped parentheses", "\\(a+\\)+"],
       ["a repeated alternation of literals", "(a|b)*"],
       ["a small bounded group repeat", "(a){1,3}"],
-      ["a small bounded repeat around an open one", "(a+){1,3}"],
+      [
+        "an open repeat under a range up to the outer bound",
+        `(a+){1,${MAX_OUTER_REPEAT}}`,
+      ],
       ["a zero-or-one group around a plus", "(a+)?"],
-      ["an exact count around a plus", "(a+){2}"],
-      ["a dotted-quad shape", "(\\d{1,3}\\.){3}"],
+      [
+        "an open repeat under a count at the outer bound",
+        `(a+){${MAX_OUTER_REPEAT}}`,
+      ],
+      ["a fixed count under a plus", "(?:a{2})+"],
+      ["a fixed count under a fixed count", "(a{2}){3}"],
+      ["a fixed-width dotted-quad shape", "(\\d{3}\\.){3}"],
+      ["an optional atom under a plus", "(a?b)+"],
       ["an escaped plus then a plus", "\\++"],
       ["a literal brace that is not a quantifier", "(a+){x}"],
       ["a repeat after the group closed", "(a+)b+"],
@@ -166,20 +206,35 @@ describe("globs", () => {
     expect(globToRegex("a/**/b/**/c").test("a/x/b/y/z/c")).toBe(true);
   });
 
-  it("counts `**` segments the way globToRegex reads them", () => {
-    expect(countDoubleStars("src/*.ts")).toBe(0);
-    expect(countDoubleStars("**/a/**/b/**")).toBe(3);
-    expect(countDoubleStars("****")).toBe(2);
-    expect(countDoubleStars("***")).toBe(1);
+  it("counts wildcards the way globToRegex reads them", () => {
+    expect(countWildcards("src/foo.ts")).toBe(0);
+    expect(countWildcards("src/*.ts")).toBe(1);
+    expect(countWildcards("**/a/**/b/**")).toBe(3);
+    expect(countWildcards("****")).toBe(2);
+    expect(countWildcards("***")).toBe(2);
+    expect(countWildcards("*a*a*")).toBe(3);
   });
 
-  const tooMany = Array.from(
-    { length: MAX_GLOB_DOUBLE_STARS + 1 },
-    () => "**",
-  ).join("/a/");
-  const atCap = Array.from({ length: MAX_GLOB_DOUBLE_STARS }, () => "**").join(
-    "/a/",
-  );
+  const stacked = (n: number, wildcard: string) =>
+    Array.from({ length: n }, () => wildcard).join("a");
+  // Each case is [label, a glob over the cap, a glob at the cap].
+  const capCases: Array<[string, string, string]> = [
+    [
+      "double stars",
+      stacked(MAX_GLOB_WILDCARDS + 1, "**"),
+      stacked(MAX_GLOB_WILDCARDS, "**"),
+    ],
+    [
+      "single stars",
+      stacked(MAX_GLOB_WILDCARDS + 1, "*"),
+      stacked(MAX_GLOB_WILDCARDS, "*"),
+    ],
+    [
+      "mixed stars",
+      `${stacked(MAX_GLOB_WILDCARDS / 2, "*")}a${stacked(MAX_GLOB_WILDCARDS / 2 + 1, "**")}`,
+      `${stacked(MAX_GLOB_WILDCARDS / 2, "*")}a${stacked(MAX_GLOB_WILDCARDS / 2, "**")}`,
+    ],
+  ];
 
   const fields: Array<[string, (glob: string) => string]> = [
     ["entrypointGlobs", (g) => `entrypointGlobs:\n  - "${g}"\n`],
@@ -194,26 +249,25 @@ describe("globs", () => {
   ];
 
   function load(yaml: string) {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-glob-"));
+    const tmp = scratchDir("slop-glob-");
     const file = path.join(tmp, "slop.config.yml");
     fs.writeFileSync(file, yaml);
     return () => loadConfig(file);
   }
 
-  it.each(fields)(
-    "%s refuses a glob with too many `**` segments",
-    (field, make) => {
-      const run = load(make(tooMany));
+  describe.each(fields)("%s", (field, make) => {
+    it.each(capCases)("refuses too many wildcards: %s", (_label, over) => {
+      const run = load(make(over));
       // The zod issue list is JSON, so the quoted text appears escaped.
       const named = JSON.stringify(
-        `${field} pattern has more than ${MAX_GLOB_DOUBLE_STARS} "**" segments: "${tooMany}"`,
+        `${field} pattern has more than ${MAX_GLOB_WILDCARDS} wildcards ("*" or "**"): "${over}"`,
       ).slice(1, -1);
       expect(run).toThrow(named);
-    },
-  );
+    });
 
-  it.each(fields)("%s accepts a glob at the cap", (_field, make) => {
-    expect(load(make(atCap))).not.toThrow();
+    it.each(capCases)("accepts a glob at the cap: %s", (_label, _over, at) => {
+      expect(load(make(at))).not.toThrow();
+    });
   });
 });
 
@@ -225,6 +279,9 @@ describe("regex patterns at config load", () => {
     "(\\w+\\s?)+$",
     "((ab)+)+",
     "(?:a{2,})+",
+    "(.{1,16})+x",
+    "(a{1,2})+x",
+    "(a+){16}x",
   ];
   const fields: Array<[string, (p: string) => string]> = [
     [
@@ -239,7 +296,7 @@ describe("regex patterns at config load", () => {
   ];
 
   function load(yaml: string) {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-rx-"));
+    const tmp = scratchDir("slop-rx-");
     const file = path.join(tmp, "slop.config.yml");
     fs.writeFileSync(file, yaml);
     return () => loadConfig(file);
@@ -322,65 +379,62 @@ describe("regex patterns at config load", () => {
   });
 });
 
-describe(
-  "accepted shapes stay fast on a long adversarial line",
-  { timeout: 60_000 },
-  () => {
-    // The structural check cannot rule out every slow shape (see the module
-    // header), so this pins what an accepted worst case costs through the real
-    // packs. The accepted alternation repeat is quadratic on this line: about
-    // 0.15 s for one pass, up to a second where the pack runs it once per
-    // rule. An exponential shape would not finish at all, and those are
-    // refused at load before any pack runs them, so the budget only has to
-    // sit far above the quadratic cost to stay stable on a loaded machine.
-    const BUDGET_MS = 10_000;
-    const line = "ab".repeat(5000);
-    const shape = "(a|b)*c";
+describe("an accepted shape stays fast on a long adversarial line", () => {
+  // The structural check cannot rule out every slow shape (see the module
+  // header), so this pins that an accepted nested-safe pattern runs through
+  // each pack on a 10,000-character line without blowing up. The pattern is
+  // anchored, so a failed match costs one linear pass per pack run (a few
+  // milliseconds in total) and the ceiling sits far above any loaded
+  // machine. An unanchored alternation repeat would be quadratic here, and
+  // an exponential shape would not finish at all; those are refused at load
+  // before any pack runs them, which the last test pins.
+  const CEILING_MS = 5000;
+  const line = "ab".repeat(5000);
+  const shape = "^(a|b)+c";
 
-    it("placement.markers", () => {
-      const config = mergeConfig({ placement: { markers: [shape] } });
-      const t0 = performance.now();
-      const v = checkText(line, "x/AGENTS.md", {
-        packs: allPacks,
-        config,
-        packFilter: ["placement-slop"],
-      });
-      expect(performance.now() - t0).toBeLessThan(BUDGET_MS);
-      expect(v).toHaveLength(0);
+  it("placement.markers", () => {
+    const config = mergeConfig({ placement: { markers: [shape] } });
+    const t0 = performance.now();
+    const v = checkText(line, "x/AGENTS.md", {
+      packs: allPacks,
+      config,
+      packFilter: ["placement-slop"],
     });
+    expect(performance.now() - t0).toBeLessThan(CEILING_MS);
+    expect(v).toHaveLength(0);
+  });
 
-    it("placement.allow", () => {
-      const config = mergeConfig({
-        placement: { markers: ["ab"], allow: [shape] },
-      });
-      const t0 = performance.now();
-      checkText(line, "x/AGENTS.md", {
-        packs: allPacks,
-        config,
-        packFilter: ["placement-slop"],
-      });
-      expect(performance.now() - t0).toBeLessThan(BUDGET_MS);
+  it("placement.allow", () => {
+    const config = mergeConfig({
+      placement: { markers: ["ab"], allow: [shape] },
     });
+    const t0 = performance.now();
+    checkText(line, "x/AGENTS.md", {
+      packs: allPacks,
+      config,
+      packFilter: ["placement-slop"],
+    });
+    expect(performance.now() - t0).toBeLessThan(CEILING_MS);
+  });
 
-    it("review.allow", () => {
-      const config = mergeConfig({ review: { allow: [shape] } });
-      const t0 = performance.now();
-      checkText(`${line} F1`, "docs/NOTES.md", {
-        packs: allPacks,
-        config,
-        packFilter: ["review-slop"],
-      });
-      expect(performance.now() - t0).toBeLessThan(BUDGET_MS);
+  it("review.allow", () => {
+    const config = mergeConfig({ review: { allow: [shape] } });
+    const t0 = performance.now();
+    checkText(`${line} F1`, "docs/NOTES.md", {
+      packs: allPacks,
+      config,
+      packFilter: ["review-slop"],
     });
+    expect(performance.now() - t0).toBeLessThan(CEILING_MS);
+  });
 
-    it("a refused pattern never reaches a pack: loadConfig fails first", () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-rx-"));
-      const file = path.join(tmp, "slop.config.yml");
-      fs.writeFileSync(
-        file,
-        `placement:\n  markers:\n    - "(a|b+)*c"\n  allow:\n    - "(.*)*x"\n`,
-      );
-      expect(() => loadConfig(file)).toThrow(/nested quantifier/);
-    });
-  },
-);
+  it("a refused pattern never reaches a pack: loadConfig fails first", () => {
+    const tmp = scratchDir("slop-rx-");
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `placement:\n  markers:\n    - "(a|b+)*c"\n  allow:\n    - "(.*)*x"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/nested quantifier/);
+  });
+});

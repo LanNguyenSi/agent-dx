@@ -101,15 +101,15 @@ The `workflow` block only matters once `workflow-slop` is enabled (see [`workflo
 
 ### Regex and glob bounds
 
-The engine and every rule run synchronously, so a pattern that backtracks without bound stalls the whole scan (CLI, MCP server and action alike), and a config can sit inside the tree being scanned. `placement.markers`, `placement.allow` and `review.allow` are therefore checked structurally when the config loads, and `loadConfig` throws, naming the field and the pattern, for:
+The engine and every rule run synchronously, so a pattern that backtracks without bound stalls the whole scan (CLI, MCP server and action alike), and a config can sit inside the tree being scanned. `placement.markers`, `placement.allow` and `review.allow` are therefore checked structurally when the config loads, and `loadConfig` throws, naming the field and the pattern, for the common shapes that cause it:
 
-- a nested quantifier: a repeated group whose body already holds an unbounded repeat (`(a+)+`, `(a*)*`, `(.*)+x`, `(\w+\s?)+$`, `((ab)+)+`, `(?:a{2,})+`). `*`, `+`, `{n,}` and a `{n,m}` with `m` above 16 count as unbounded; a repeat inside a character class (`[a+]+`) or an escaped parenthesis (`\(a+\)+`) is a literal and does not count;
+- a nested quantifier: a group repeated more than twice whose body holds a repeat with a variable count (`(a+)+`, `(a*)*`, `(.*)+x`, `(\w+\s?)+$`, `((ab)+)+`, `(?:a{2,})+`, `(a{1,16})+x`, `(a+){3}x`). A repeat has a variable count when its upper count exceeds its lower count and is at least 2: `*`, `+`, `{n,}` and `{n,m}` with `m` above `n`. A fixed count (`{n}`) and `?` do not count, so `(?:a{2})+` and `(a+){2}` load; a repeat inside a character class (`[a+]+`) or an escaped parenthesis (`\(a+\)+`) is a literal and does not count. This also refuses delimited repeats such as `(\w+/)+`, `(\d+\.)+` and `(\w+,\s*)+`, which are safe in practice but cannot be told apart structurally; rewrite them as one class (`[\w/]+`) or with a small outer count (`(?:\w+/){1,2}`);
 - a backreference (`\1`, `\k<name>`);
 - a pattern longer than 512 characters.
 
-Every glob field (`ignorePaths`, `treatAsProse`, `treatAsCode`, `entrypointGlobs`, `placement.instructionGlobs`, `review.allowPaths`) may carry at most 8 `**` segments; a run such as `**/**/**/x` is collapsed to one `**/` when the glob is compiled, but separated segments still count.
+Every glob field (`ignorePaths`, `treatAsProse`, `treatAsCode`, `entrypointGlobs`, `placement.instructionGlobs`, `review.allowPaths`) may carry at most 8 wildcards (`*` or `**`) per pattern; a run such as `**/**/**/x` is collapsed to one `**/` when the glob is compiled, but separated wildcards still count. Eight wildcards can still be slow against a very long file name.
 
-This is a structural check, not a proof that a pattern is fast. It does not detect overlapping alternation under one repeat (`(a|a)*`, `(a|ab)*`), a bounded range under an unbounded repeat (`(a{1,5})+`), or adjacent overlapping repeats (`a*a*a*b`, polynomial rather than exponential), so a hostile config can still make a scan slow, though not unbounded through the shapes above. Treat a config that comes from the scanned tree as code you chose to run.
+This is a structural check, not a proof that a pattern is fast, and it does not stop every stall. A pattern it accepts can still stall a scan on long lines: overlapping alternation under one repeat (`(a|a)*`, `(a|ab)*`) and adjacent overlapping repeats (`a*a*a*b`, `a+a+x`) take seconds to minutes on a few hundred to a few thousand characters. Treat a config from the scanned tree as code you chose to run.
 
 ## Cross-file rules (experimental)
 
