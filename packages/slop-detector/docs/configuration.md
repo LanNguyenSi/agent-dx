@@ -109,7 +109,7 @@ The engine and every rule run synchronously, so a pattern that backtracks withou
 
 Every glob field (`ignorePaths`, `treatAsProse`, `treatAsCode`, `entrypointGlobs`, `placement.instructionGlobs`, `review.allowPaths`) may carry at most 8 wildcards (`*` or `**`) per pattern; a run such as `**/**/**/x` is collapsed to one `**/` when the glob is compiled, but separated wildcards still count.
 
-What the check does not stop: a pattern it accepts can still stall a scan on long lines, and so can a glob. Named residuals are overlapping alternation under one repeat (`(a|a)*`, `(a|ab)*`), an alternation with an empty branch, which spells `a?` as `(a|)` (`((a|)(a|))+x`), adjacent overlapping repeats (`a*a*a*b`, `a+a+x`), nested fixed counts (`((a+){2}){2}`), and a glob at the 8-wildcard cap (`*a*a*a*a*a*a*a*b` stalls on file names of a few dozen characters). A real bound would run the matching with a time limit, which this check does not do. Treat a config from the scanned tree as code you chose to run.
+What the check does not stop: a pattern it accepts can still stall a scan on long lines, and so can a glob. Named residuals are overlapping alternation under one repeat (`(a|a)*`, `(a|ab)*`), an alternation with a branch that can match the empty string (`(a|)`, `(a|b{0})`, `((?=a)|a)`; for example `((a|)(a|))+x`), adjacent overlapping repeats (`a*a*a*b`, `a+a+x`), nested fixed counts (`((a+){2}){2}`), and a glob at the 8-wildcard cap (`*a*a*a*a*a*a*a*b` stalls on file names of a few dozen characters). A real bound would run the matching with a time limit, which this check does not do. Treat a config from the scanned tree as code you chose to run.
 
 ## Cross-file rules (experimental)
 
