@@ -9,6 +9,10 @@ import fs from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import {
+  SLOP_CHECK_PACKS_DESCRIPTION,
+  SLOP_CHECK_TOOL_DESCRIPTION,
+} from "./mcp-descriptions.js";
 import { renderSummary, runSlopCheck } from "./mcp-check.js";
 import { classifyStdoutError } from "./stdout-error.js";
 
@@ -38,8 +42,7 @@ server.registerTool(
   "slop_check",
   {
     title: "Slop check",
-    description:
-      "Scan text or a file/directory for AI-slop tells: em-dashes in prose, hedging openers, leaked MCP serialization artefacts (</result> tags), doubled '## Summary' headings, empty marketing adjectives, and (with the code-slop / comment-slop / placement-slop / workflow-slop packs) defensive try/catch and JSDoc on trivial getters, org-/machine-/date-bound evidence leaking into instruction files, and GitHub Actions `run:` expression injection. Pass `text` to scan an in-memory string such as a commit message or PR body, or `path` to scan a file or directory tree. Returns each violation as `SEVERITY line:col rule message` plus a one-line tally.",
+    description: SLOP_CHECK_TOOL_DESCRIPTION,
     inputSchema: {
       text: z
         .string()
@@ -62,9 +65,7 @@ server.registerTool(
       packs: z
         .array(z.string())
         .optional()
-        .describe(
-          'Restrict to these rule packs (e.g. ["prose-slop"], ["code-slop"]). The off-by-default packs (comment-slop, code-slop, ui-slop, placement-slop, workflow-slop) only run when named here. Default: every default-on pack.',
-        ),
+        .describe(SLOP_CHECK_PACKS_DESCRIPTION),
       configPath: z
         .string()
         .optional()
