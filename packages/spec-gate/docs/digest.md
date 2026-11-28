@@ -162,7 +162,7 @@ an unknown option) is reported by the option parser and exits non-zero too.
 
 | Code                        | Meaning                                                                                                                                                           |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `spec-dir-invalid`          | `<spec-dir>` is not a directory                                                                                                                                   |
+| `spec-dir-invalid`          | `<spec-dir>` is not a directory, or is a symlink                                                                                                                  |
 | `input-missing`             | `spec.md` or `testplan.yaml` does not exist                                                                                                                       |
 | `input-not-regular`         | one of them is a link, a directory or another non-file                                                                                                            |
 | `input-too-large`           | one of them is over 4 MiB                                                                                                                                         |

@@ -36,6 +36,49 @@ async function checkRun(name: string, extraArgs: string[] = []) {
   ]);
 }
 
+describe("spec-gate export --check and the spec directory path", () => {
+  it("refuses a spec directory that is a symlink before reading spec.md", async () => {
+    const real = checkDir();
+    const link = path.join(scratch(), "spec-link");
+    fs.symlinkSync(real, link);
+    for (const suffix of ["", "/", "/."]) {
+      const run = await runCli([
+        "export",
+        `${link}${suffix}`,
+        "--check",
+        path.join(CHECK_FIXTURES, "return-ok.yaml"),
+      ]);
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("spec-dir-invalid");
+      expect(run.stderr).toContain(
+        `${link}${suffix} is a symlink, refusing to read it`,
+      );
+    }
+  });
+
+  it("keeps the outcome for a missing spec directory and a regular file", async () => {
+    const holder = scratch();
+    const ret = path.join(CHECK_FIXTURES, "return-ok.yaml");
+    const missing = path.join(holder, "nope");
+    const run = await runCli(["export", missing, "--check", ret]);
+    expect(run.code).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("input-missing");
+    const file = path.join(holder, "file");
+    fs.writeFileSync(file, "x");
+    const second = await runCli(["export", file, "--check", ret]);
+    expect(second.code).toBe(2);
+    expect(second.stdout).toBe("");
+    expect(second.stderr).toContain("input-missing");
+  });
+
+  it("keeps the outcome for a real spec directory", async () => {
+    const run = await checkRun("return-ok.yaml");
+    expect(run.code).toBe(0);
+  });
+});
+
 describe("spec-gate export --check", () => {
   it("exits 0 when every qualified id appears in a task", async () => {
     const run = await checkRun("return-ok.yaml");

@@ -34,8 +34,9 @@ spec-gate bind <spec-dir> <tp-id> --status <new|existing> [--selector <s>] [--fi
 | the file given to `--config` | no | repo-wide settings in `.spec-gate/config.yaml` format; it sits outside the spec directory and is only read for `--config`, which cannot be combined with git inputs |
 | `.spec-gate/config.yaml` at the reference commit | no | the same settings, read from git instead of a path when git inputs are given; see "Git inputs" |
 
-Every read refuses a symlink and anything that is not a regular file (a file
-below a directory that is a link counts), refuses a file over 4 MiB, and
+The spec directory itself must not be a symlink: `lint` refuses it with exit 2
+before reading anything. Every read refuses a symlink and anything that is not
+a regular file (a file below a directory that is a link counts), refuses a file over 4 MiB, and
 decodes UTF-8 strictly. Each problem is an error finding, never an
 exception and never exit 2:
 

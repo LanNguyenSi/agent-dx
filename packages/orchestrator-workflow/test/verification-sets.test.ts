@@ -66,7 +66,7 @@ describe("documented verification sets", () => {
       name: "knowledge-bundle",
       phase: "after_preflight",
       cwd: "packages/example",
-      argv: ["npx", "okf-kit", "check", "docs/okf"],
+      argv: ["npx", "-y", "okf-kit@<pinned-version>", "check", "docs/okf"],
     });
   });
 

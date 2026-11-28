@@ -9,6 +9,7 @@ import type { ParseResult, Spec, TestPlan } from "../formats/index.js";
 import { parseSpec, parseTestPlan } from "../formats/index.js";
 import type { DigestParts } from "./digest.js";
 import { computeDigest, referencedCommandNames } from "./digest.js";
+import { specDirState } from "../lint/files.js";
 import { DigestError } from "./errors.js";
 import type { DigestErrorCode } from "./errors.js";
 import {
@@ -107,6 +108,12 @@ export function loadDigestParts(
   options: DigestOptions = {},
 ): DigestParts {
   const dir = path.resolve(specDir);
+  if (specDirState(dir) === "symlink") {
+    throw new DigestError(
+      "spec-dir-invalid",
+      `${specDir} is a symlink, refusing to read it`,
+    );
+  }
   let isDir = false;
   try {
     isDir = fs.statSync(dir).isDirectory();

@@ -4,6 +4,7 @@ import process from "node:process";
 import { Command, CommanderError, Option } from "commander";
 import { intakeFile } from "./adapters/file.js";
 import { runApproveCheck } from "./approve/index.js";
+import { maskOptionValues } from "./cli-output.js";
 import {
   DigestError,
   computeSpecDigest,
@@ -47,6 +48,11 @@ program
   .version(readVersion())
   .helpOption("-h, --help", "display help for spec-gate")
   .showHelpAfterError()
+  // No error line of the parser, here or in a verb created below (they
+  // inherit this), repeats the value of an option. Set before the verbs.
+  .configureOutput({
+    outputError: (text, write) => write(maskOptionValues(text)),
+  })
   .allowExcessArguments(false);
 
 function collectPath(value: string, previous: string[]): string[] {

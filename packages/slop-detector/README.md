@@ -36,22 +36,28 @@ Without the alias, invoke the built CLI directly: `node packages/slop-detector/d
 # scan a path (file or directory)
 slop-detector check packages/
 
-# scan stdin (use in pre-commit pipes)
-git diff --cached --name-only | xargs cat | slop-detector check --stdin-path PR_BODY.md
+# pre-commit: scan each staged file under its own path; -z and -0 keep
+# names with spaces intact, --diff-filter=ACMR drops deleted files, and
+# xargs -r does nothing when nothing is staged
+git diff --cached --name-only -z --diff-filter=ACMR | xargs -0 -r slop-detector check
+
+# stdin is exactly one document, for example the last commit message or a
+# PR body file; --stdin-path gives that document a name for path-scoped rules
+git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG.md
 
 # only run a specific pack, and see why a rule fires
 slop-detector check . --pack agent-tics --explain
 ```
 
-Run `slop-detector list-rules` for the full rule catalogue with severities and rationales. See [What a run looks like](docs/integration.md#what-a-run-looks-like) for sample output.
+Run `slop-detector list-rules` for the full rule catalogue with severities and rationales. See [What a run looks like](docs/integration.md#what-a-run-looks-like) for sample output. To run the scanner from a commit hook (Husky or lint-staged), see the [pre-commit recipe](docs/integration.md#pre-commit-recipe-husky).
 
 ## GitHub Action
 
-A composite action builds this package from the checkout at the action's ref and runs the CLI, so the ref you pin is the exact CLI source you run:
+A composite action builds this package from the checkout at the action's ref and runs the CLI, so the ref you pin is the exact CLI source you run. The action builds and runs that code inside your job with your job's permissions, so pin a full commit SHA of a release commit, not a tag (a tag can move); the reusable workflow already enforces the same rule:
 
 ```yaml
-- uses: actions/checkout@v5
-- uses: LanNguyenSi/agent-dx/packages/slop-detector/action@v1
+- uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+- uses: LanNguyenSi/agent-dx/packages/slop-detector/action@<commit-sha> # <version>
   with:
     path: .
     pack: placement-slop
@@ -59,7 +65,7 @@ A composite action builds this package from the checkout at the action's ref and
     severity-threshold: block
 ```
 
-`v1` is the action's first tag and points at the slop-detector 0.9.0 release commit. For an immutable pin, use that commit's SHA instead of the tag. The action does not install from the npm registry because the bare `slop-detector` name there belongs to an unrelated package. To run the `workflow-slop` pack in another repository as a separate, minimally permissioned job, call the reusable workflow instead; see [Use from another repo](docs/workflow-slop.md#use-from-another-repo).
+`v1` points at the slop-detector 0.9.0 release commit. The fixes listed under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) (symlink and MCP path containment, terminal escaping, pinned action dependencies) are in no tag yet, so choose the release commit whose CHANGELOG section contains the fixes you need. The action does not install from the npm registry because the bare `slop-detector` name there belongs to an unrelated package. To run the `workflow-slop` pack in another repository as a separate, minimally permissioned job, call the reusable workflow instead; see [Use from another repo](docs/workflow-slop.md#use-from-another-repo).
 
 | Input | Default | Meaning |
 | --- | --- | --- |
